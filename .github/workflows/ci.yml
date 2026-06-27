@@ -40,5 +40,8 @@ jobs:
       - name: Generate fixtures
         run: npm run generate:fixtures
 
+      - name: Validate generated fixtures
+        run: npm run validate:fixtures
+
       - name: Validate npm package
         run: npm run pack:dry-run

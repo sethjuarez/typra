@@ -67,7 +67,6 @@ export interface Coercion {
  * We use `any` because TypeSpec does not export `Node`, `SyntaxKind`,
  * or `TypeSpecScriptNode` from its public API surface.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getNodeFilePath(node: any): string {
   let current = node;
   while (current) {

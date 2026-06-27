@@ -1196,15 +1196,17 @@ function emitMethodTrait(type: TypeDecl, lines: string[]): void {
     if (method.description) {
       emitDocComment(method.description, "    ", lines);
     }
-    lines.push(`    fn ${toSnakeCase(method.name)}(&self) -> ${methodReturnType(method)};`);
+    const params = Object.entries(method.params)
+      .map(([pName, pType]) => `${toSnakeCase(pName)}: &${protocolRustType(pType)}`)
+      .join(", ");
+    const signatureParams = params ? `, ${params}` : "";
+    lines.push(`    fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> ${methodReturnType(method)};`);
   }
   lines.push("}");
 }
 
 function methodReturnType(method: MethodStubDecl): string {
-  if (method.returns === "void") return "()";
-  if (method.returns === "string") return "String";
-  return RUST_TYPE_MAP[method.returns] || method.returns;
+  return protocolRustType(method.returns);
 }
 
 // ============================================================================
