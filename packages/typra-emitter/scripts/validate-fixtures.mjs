@@ -32,6 +32,25 @@ function assertIncludes(relativePath, ...needles) {
   }
 }
 
+function assertArrayIncludes(label, actual, ...expected) {
+  for (const value of expected) {
+    if (!actual.includes(value)) {
+      fail(`${label} does not include expected value: ${value}`);
+    }
+  }
+}
+
+function readJson(relativePath) {
+  const content = read(relativePath);
+  if (!content) return undefined;
+  try {
+    return JSON.parse(content);
+  } catch (error) {
+    fail(`${relativePath} is not valid JSON: ${error.message}`);
+    return undefined;
+  }
+}
+
 function walkFiles(dir, predicate = () => true) {
   if (!existsSync(dir)) return [];
   const entries = readdirSync(dir, { withFileTypes: true });
@@ -180,6 +199,138 @@ function assertStaticFixtureCoverage() {
   );
 }
 
+function assertExportSurfaceSnapshot() {
+  const snapshot = readJson(path.join("generated", "fixtures", ".typra-generated", "export-surfaces.json"));
+  if (!snapshot) return;
+
+  if (snapshot.emitter !== "typra-emitter" || snapshot.version !== 1) {
+    fail("Export surface snapshot has an unexpected emitter/version.");
+  }
+  if (snapshot.root?.object !== "Typra.Fixtures.FixtureRoot") {
+    fail("Export surface snapshot does not record the fixture root object.");
+  }
+
+  const targets = new Map((snapshot.targets ?? []).map(target => [target.target, target]));
+  for (const target of ["typescript", "python", "go", "csharp", "rust", "markdown"]) {
+    if (!targets.has(target)) {
+      fail(`Export surface snapshot is missing target: ${target}`);
+    }
+  }
+
+  assertArrayIncludes(
+    "TypeScript root exports",
+    targets.get("typescript")?.rootExports ?? [],
+    "FixtureRoot",
+    "FixtureContent",
+    "TextContent",
+    "ImageContent",
+    "EventSink",
+    "CheckpointStore",
+  );
+  assertArrayIncludes(
+    "Python root exports",
+    targets.get("python")?.rootExports ?? [],
+    "FixtureRoot",
+    "FixtureContent",
+    "TextContent",
+    "ImageContent",
+    "EventSink",
+    "CheckpointStore",
+  );
+  assertArrayIncludes(
+    "Rust root modules",
+    targets.get("rust")?.modules ?? [],
+    "context",
+    "events",
+    "pipeline",
+  );
+  assertArrayIncludes(
+    "TypeScript pipeline modules",
+    targets.get("typescript")?.groups?.find(group => group.name === "pipeline")?.modules ?? [],
+    "event-sink",
+    "checkpoint-store",
+  );
+  assertArrayIncludes(
+    "Python pipeline modules",
+    targets.get("python")?.groups?.find(group => group.name === "pipeline")?.modules ?? [],
+    "_EventSink",
+    "_CheckpointStore",
+  );
+  assertArrayIncludes(
+    "C# grouped sources",
+    (targets.get("csharp")?.exports ?? []).map(entry => entry.source),
+    "events/Checkpoint.cs",
+    "pipeline/EventSink.cs",
+    "pipeline/CheckpointStore.cs",
+  );
+
+  if (targets.get("go")?.packageName !== "fixtures") {
+    fail(`Go export surface package name drifted: ${targets.get("go")?.packageName}`);
+  }
+
+  const typeScriptProtocols = targets.get("typescript")?.protocols ?? [];
+  const eventSink = typeScriptProtocols.find(protocol => protocol.name === "EventSink");
+  if (!eventSink) {
+    fail("Export surface snapshot is missing EventSink protocol.");
+  } else {
+    const emit = eventSink.methods.find(method => method.name === "emit");
+    if (emit?.returns !== "void") {
+      fail("EventSink.emit return shape drifted from void.");
+    }
+  }
+}
+
+function assertActualGeneratedSurface() {
+  assertIncludes(
+    path.join("generated", "fixtures", "typescript", "index.ts"),
+    'export { FixtureRoot } from "./fixture-root";',
+    "FixtureContent,",
+    "TextContent,",
+    "ImageContent,",
+    '} from "./fixture-content";',
+    'export type { EventSink } from "./pipeline/event-sink";',
+    'export type { CheckpointStore } from "./pipeline/checkpoint-store";',
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "python", "__init__.py"),
+    "from .pipeline import (",
+    "    EventSink,",
+    "    CheckpointStore,",
+    '    "EventSink",',
+    '    "CheckpointStore",',
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust", "mod.rs"),
+    "pub mod events;\npub use events::*;",
+    "pub mod pipeline;\npub use pipeline::*;",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust", "pipeline", "mod.rs"),
+    "pub mod event_sink;\npub use event_sink::*;",
+    "pub mod checkpoint_store;\npub use checkpoint_store::*;",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "go", "fixture_root.go"),
+    "package fixtures",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "go", "event_sink.go"),
+    "package fixtures",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "typescript", "pipeline", "event-sink.ts"),
+    "emit(event: unknown): void;",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "python", "pipeline", "_EventSink.py"),
+    "def emit(self, event: Any) -> None:",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust", "pipeline", "event_sink.rs"),
+    "fn emit(&self, event: &serde_json::Value) -> ();",
+  );
+}
+
 function assertNoEmptyTargetDirs() {
   for (const target of ["typescript", "python", "go", "csharp", "rust", "markdown"]) {
     const dir = path.join(generatedRoot, target);
@@ -192,6 +343,8 @@ function assertNoEmptyTargetDirs() {
 assertGeneratedTargets();
 assertNoEmptyTargetDirs();
 assertStaticFixtureCoverage();
+assertExportSurfaceSnapshot();
+assertActualGeneratedSurface();
 runTypeScriptCompile();
 
 if (failures.length > 0) {

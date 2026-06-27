@@ -5,6 +5,7 @@ import { Model } from "@typespec/compiler";
 import { inferRootNamespace } from "../src/emitter.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { TypeNode } from "../src/ir/ast.js";
+import { buildExportSurfaceSnapshot } from "../src/contract-surface.js";
 import { lowerFile } from "../src/ir/lower.js";
 import { goPackageNameFromNamespace } from "../src/languages/go/driver.js";
 import { emitPythonInit } from "../src/languages/python/scaffolding.js";
@@ -22,6 +23,10 @@ function makeType(
   node.typeName = { namespace: "Prompty", name };
   node.group = group;
   node.childTypes = childTypes;
+  for (const child of childTypes) {
+    child.base = node.typeName;
+    child.group = group;
+  }
   node.isProtocol = isProtocol;
   node.methods = methods;
   return node;
@@ -93,5 +98,66 @@ describe("export surface scaffolding", () => {
     const file = lowerFile(eventSink, registry);
 
     assert.deepEqual(file.imports, []);
+  });
+
+  it("builds deterministic target export surface snapshots", () => {
+    const snapshot = buildExportSurfaceSnapshot(
+      "Prompty.Prompty",
+      "Prompty",
+      "Prompty",
+      [
+        { type: "TypeScript", "output-dir": "generated/typescript" },
+        { type: "Python", "output-dir": "generated/python" },
+        { type: "Rust", "output-dir": "generated/rust" },
+        { type: "Go", "output-dir": "generated/go", "package-name": "promptyruntime" },
+      ],
+      allTypes,
+    );
+
+    const targets = new Map(snapshot.targets.map((target) => [target.target, target]));
+
+    assert.deepEqual(targets.get("go")?.packageName, "promptyruntime");
+    assert.deepEqual(targets.get("typescript")?.rootExports, [
+      "AudioPart",
+      "Checkpoint",
+      "CheckpointStore",
+      "ContentPart",
+      "EventSink",
+      "HostToolRequest",
+      "TextPart",
+    ]);
+    assert.deepEqual(targets.get("python")?.groups.find((group) => group.name === "pipeline")?.exports, [
+      "CheckpointStore",
+      "EventSink",
+    ]);
+    assert.deepEqual(targets.get("typescript")?.groups.find((group) => group.name === "pipeline")?.modules, [
+      "checkpoint-store",
+      "event-sink",
+    ]);
+    assert.deepEqual(targets.get("python")?.groups.find((group) => group.name === "pipeline")?.modules, [
+      "_CheckpointStore",
+      "_EventSink",
+    ]);
+    assert.deepEqual(targets.get("rust")?.modules, ["context", "conversation", "events", "pipeline"]);
+    assert.deepEqual(targets.get("typescript")?.protocols, [
+      {
+        name: "CheckpointStore",
+        group: "pipeline",
+        methods: [],
+      },
+      {
+        name: "EventSink",
+        group: "pipeline",
+        methods: [
+          {
+            name: "emit",
+            returns: "void",
+            params: { event: "unknown" },
+            optional: false,
+            sync: true,
+          },
+        ],
+      },
+    ]);
   });
 });
