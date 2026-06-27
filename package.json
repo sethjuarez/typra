@@ -1,0 +1,14 @@
+{
+  "name": "typra",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @typra/emitter",
+    "test": "npm run test --workspace @typra/emitter",
+    "generate:fixtures": "npm run generate:fixtures --workspace @typra/emitter"
+  },
+  "packageManager": "npm@11.5.1"
+}
