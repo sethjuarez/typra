@@ -1,31 +1,93 @@
 # Typra
 
-Typra is a generic TypeSpec emitter for generating multi-runtime model,
-protocol, test, JSON AST, and documentation surfaces from TypeSpec. The npm
-package is `@typra/emitter`; its CLI entry point is `typra-generate`.
+Typra turns TypeSpec models into runtime model surfaces. It is intended for
+projects that want one TypeSpec source of truth and generated SDK-style model
+code, protocol helpers, JSON AST output, generated tests, and reference docs
+across multiple runtimes.
 
-## Ownership boundary
+The first package in this repository is [`@typra/emitter`](packages/typra-emitter),
+a TypeSpec emitter and CLI extracted from Prompty's generic emitter work.
 
-Typra is emitter-only for this first slice. It owns generic emitter behavior:
+## What Typra owns
 
+Typra owns generic emitter behavior that is not tied to any one product domain:
+
+- Type graph discovery, lowering, and expression expansion.
 - TypeSpec decorators such as `@sample`, `@abstract`, `@coerce`,
-  `@@factory`, `@@method`, `@@knownAs`, `@@defaultFor`, and `@@protocol`
-- Type graph resolution, lowering, expression expansion, and per-language
-  emitters
-- Synthetic fixtures that exercise generic emitter shapes
-- Generated-file marker and manifest recording infrastructure
+  `@@factory`, `@@method`, `@@knownAs`, `@@defaultFor`, and `@@protocol`.
+- Language emitters for TypeScript, Python, C#, Go, Rust, Markdown, and JSON
+  AST output.
+- Synthetic TypeSpec fixtures that exercise supported model shapes.
+- Generated-file marker and manifest recording infrastructure.
 
-Prompty keeps its domain TypeSpec and runtime implementation code. Do not copy
-Prompty `schema\model` files wholesale into Typra, and do not let Typra cleanup
-own or delete hand-authored runtime adapters.
+Product-specific TypeSpec contracts and hand-authored runtime adapters should
+stay in the consuming product repository. For example, Prompty owns its
+conversation, model, event, pipeline, and harness contracts, while Typra owns
+the reusable emitter machinery.
 
-## First fixture slice
+## Install
 
-The initial fixture emits TypeScript and JSON AST only from
-`packages\typra-emitter\fixtures\shapes\main.tsp`. It covers scalars,
-optional fields, arrays, dictionaries, nested models, and discriminated unions.
+```powershell
+npm install --save-dev @typra/emitter @typespec/compiler
+```
 
-## Local validation
+## TypeSpec configuration
+
+Add `@typra/emitter` to your TypeSpec config:
+
+```yaml
+emit:
+  - "@typra/emitter"
+
+options:
+  "@typra/emitter":
+    emitter-output-dir: "{cwd}/generated"
+    root-object: "MyProject.ApiRoot"
+    root-namespace: "MyProject"
+    emit-targets:
+      - type: TypeScript
+        output-dir: "generated/typescript"
+        test-dir: "generated/typescript/tests"
+        import-path: "../index"
+```
+
+Then import the emitter library from TypeSpec:
+
+```typespec
+import "@typra/emitter";
+
+namespace MyProject;
+```
+
+Compile with TypeSpec:
+
+```powershell
+npx tsp compile ./path/to/main.tsp --config ./tspconfig.yaml
+```
+
+## CLI
+
+The package also includes a convenience CLI:
+
+```powershell
+npx typra-generate --help
+```
+
+## Repository layout
+
+```text
+packages\typra-emitter\        TypeSpec emitter package
+packages\typra-emitter\src\    Emitter source
+packages\typra-emitter\test\   Unit tests
+packages\typra-emitter\fixtures\shapes\
+                               Synthetic TypeSpec fixture coverage
+```
+
+The current fixture emits TypeScript and JSON AST from
+`packages\typra-emitter\fixtures\shapes\main.tsp`. It covers scalars, optional
+fields, arrays, dictionaries, nested models, and discriminated unions.
+
+## Development
 
 Run the same checks that CI runs:
 
@@ -37,32 +99,16 @@ npm run generate:fixtures
 npm run pack:dry-run
 ```
 
-After build, the CLI can be checked locally with:
+After building, check the local CLI with:
 
 ```powershell
 node packages\typra-emitter\dist\src\cli.js --help
 ```
 
-Consumers use it through npm as:
-
-```powershell
-npx typra-generate --help
-```
-
 ## Publishing
 
-Typra publishes `@typra/emitter` from GitHub Actions with npm Trusted
-Publishing/OIDC. The npm trusted publisher must match:
-
-| Field | Value |
-| --- | --- |
-| Publisher | GitHub Actions |
-| Repository owner | `sethjuarez` |
-| Repository name | `typra` |
-| Workflow filename | `publish.yml` |
-| Environment name | `npm` |
-
-Release checklist:
+`@typra/emitter` is published from the GitHub Actions `Publish` workflow using
+npm trusted publishing. Release checklist:
 
 1. Update `packages\typra-emitter\package.json` to a version that has not been
    published.
@@ -70,8 +116,5 @@ Release checklist:
    `npm run pack:dry-run`.
 3. Confirm `npm pack --workspace @typra/emitter --dry-run --json` includes the
    package README, the `typra-generate` bin, and only intended package files.
-4. Commit and push the version/package changes.
-5. Run the `Publish` workflow in GitHub Actions. It installs, builds, tests,
-   generates fixtures, validates the tarball, and publishes with OIDC.
-
-Do not add an `NPM_TOKEN` secret for the trusted-publishing path.
+4. Commit, push, and merge the change to `main`.
+5. Run the `Publish` workflow in GitHub Actions.
