@@ -341,6 +341,7 @@ function protocolType(typeStr: string): string {
   // Handle Record/dict types
   if (typeStr === "Record<unknown>" || typeStr === "dictionary") return "dict[str, Any]";
   if (typeStr === "unknown" || typeStr === "any") return "Any";
+  if (typeStr === "void") return "None";
   // Scalar types
   const mapped = TYPE_MAP[typeStr];
   if (mapped) return mapped;

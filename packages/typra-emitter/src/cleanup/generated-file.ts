@@ -3,6 +3,7 @@ import { dirname, relative, resolve } from "path";
 import { TypraEmitterOptions } from "../lib.js";
 
 interface GeneratedManifestEntry {
+  outputRoot: string;
   path: string;
   marker: boolean;
 }
@@ -20,11 +21,11 @@ export async function emitGeneratedFile(
   context: EmitContext<TypraEmitterOptions>,
   filePath: string,
   content: string,
-  options: { marker?: boolean } = {},
+  options: { marker?: boolean; outputRoot?: string } = {},
 ): Promise<void> {
   const marker = options.marker ?? shouldMark(filePath);
   const finalContent = marker ? addMarker(filePath, content) : content;
-  recordGeneratedFile(context.program, filePath, marker);
+  recordGeneratedFile(context.program, filePath, marker, options.outputRoot);
 
   await emitFile(context.program, {
     path: filePath,
@@ -48,13 +49,14 @@ export async function emitGeneratedManifest(context: EmitContext<TypraEmitterOpt
   });
 }
 
-function recordGeneratedFile(program: Program, filePath: string, marker: boolean): void {
+function recordGeneratedFile(program: Program, filePath: string, marker: boolean, outputRoot?: string): void {
   let entries = generatedFilesByProgram.get(program);
   if (!entries) {
     entries = new Map<string, GeneratedManifestEntry>();
     generatedFilesByProgram.set(program, entries);
   }
   entries.set(normalizePath(filePath), {
+    outputRoot: normalizePath(outputRoot || dirname(filePath)),
     path: normalizePath(filePath),
     marker,
   });
@@ -80,9 +82,5 @@ function markerFor(filePath: string): string {
 }
 
 function normalizePath(filePath: string): string {
-  const absolute = resolve(filePath);
-  const base = dirname(absolute);
-  return relative(base, absolute).startsWith("..")
-    ? absolute.replace(/\\/g, "/")
-    : filePath.replace(/\\/g, "/");
+  return relative(process.cwd(), resolve(filePath)).replace(/\\/g, "/");
 }

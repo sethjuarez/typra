@@ -1202,6 +1202,7 @@ function emitMethodTrait(type: TypeDecl, lines: string[]): void {
 }
 
 function methodReturnType(method: MethodStubDecl): string {
+  if (method.returns === "void") return "()";
   if (method.returns === "string") return "String";
   return RUST_TYPE_MAP[method.returns] || method.returns;
 }
@@ -1224,6 +1225,7 @@ function protocolRustType(typeStr: string): string {
   }
   if (typeStr === "Record<unknown>" || typeStr === "dictionary") return "serde_json::Value";
   if (typeStr === "unknown" || typeStr === "any") return "serde_json::Value";
+  if (typeStr === "void") return "()";
   if (typeStr === "string") return "String";
   return RUST_TYPE_MAP[typeStr] || typeStr;
 }
@@ -1255,7 +1257,7 @@ function emitProtocolTrait(type: TypeDecl, lines: string[]): void {
       if (method.optional) {
         // Return type already includes nullability from ? suffix — don't double-wrap
         lines.push(`    fn ${toSnakeCase(method.name)}(&self, ${params}) -> ${ret} {`);
-        lines.push("        None");
+        lines.push(ret === "()" ? "        ()" : "        None");
         lines.push("    }");
       } else {
         lines.push(`    fn ${toSnakeCase(method.name)}(&self, ${params}) -> ${ret};`);

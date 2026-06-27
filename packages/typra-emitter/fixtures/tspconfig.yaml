@@ -4,10 +4,25 @@ options:
   "@typra/emitter":
     emitter-output-dir: "{cwd}/generated/fixtures"
     root-object: "Typra.Fixtures.FixtureRoot"
-    root-namespace: "Typra.Fixtures"
     emit-targets:
       - type: TypeScript
         output-dir: "generated/fixtures/typescript"
         test-dir: "generated/fixtures/typescript/tests"
         import-path: "../index"
+        format: false
+      - type: Python
+        output-dir: "generated/fixtures/python"
+        test-dir: "generated/fixtures/python/tests"
+        import-path: "fixtures"
+        format: false
+      - type: Go
+        output-dir: "generated/fixtures/go"
+        test-dir: "generated/fixtures/go/tests"
+        import-path: "fixtures"
+        package-name: "fixtures"
+        format: false
+      - type: Rust
+        output-dir: "generated/fixtures/rust"
+        test-dir: "generated/fixtures/rust/tests"
+        import-path: "fixtures::model"
         format: false

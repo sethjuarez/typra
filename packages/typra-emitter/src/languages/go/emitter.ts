@@ -1035,13 +1035,15 @@ function emitMethodStubs(typeName: string, methods: MethodStubDecl[], lines: str
     if (method.description) {
       lines.push(`\t// ${toPascalCase(method.name)} — ${method.description}`);
     }
-    lines.push(`\t${toPascalCase(method.name)}() ${goMethodReturnType(method.returns)}`);
+    const ret = goMethodReturnType(method.returns);
+    lines.push(`\t${toPascalCase(method.name)}()${ret ? ` ${ret}` : ""}`);
   }
   lines.push("}");
   lines.push("");
 }
 
 function goMethodReturnType(returns: string): string {
+  if (returns === "void") return "";
   return GO_TYPE_MAP[returns] || returns;
 }
 
@@ -1063,7 +1065,19 @@ function protocolGoType(typeStr: string): string {
   }
   if (typeStr === "Record<unknown>" || typeStr === "dictionary") return "map[string]interface{}";
   if (typeStr === "unknown" || typeStr === "any") return "interface{}";
+  if (typeStr === "void") return "";
   return GO_TYPE_MAP[typeStr] || typeStr;
+}
+
+function goProtocolReturn(method: MethodStubDecl): string {
+  const ret = protocolGoType(method.returns);
+  if (method.sync && method.optional) {
+    return ret ? ` ${ret}` : "";
+  }
+  if (method.sync) {
+    return ret ? ` (${ret}, error)` : " error";
+  }
+  return ret ? ` (${ret}, error)` : " error";
 }
 
 /**
@@ -1084,18 +1098,7 @@ function emitProtocolInterface(type: TypeDecl, lines: string[]): void {
     const params = Object.entries(method.params)
       .map(([pName, pType]) => `${pName} ${protocolGoType(pType)}`)
       .join(", ");
-    const ret = protocolGoType(method.returns);
-
-    if (method.sync) {
-      // Sync method — return type without error for optional
-      if (method.optional) {
-        lines.push(`\t${toPascalCase(method.name)}(${params}) ${ret}`);
-      } else {
-        lines.push(`\t${toPascalCase(method.name)}(${params}) (${ret}, error)`);
-      }
-    } else {
-      lines.push(`\t${toPascalCase(method.name)}(${params}) (${ret}, error)`);
-    }
+    lines.push(`\t${toPascalCase(method.name)}(${params})${goProtocolReturn(method)}`);
   }
 
   lines.push("}");

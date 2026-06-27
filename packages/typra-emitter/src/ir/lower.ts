@@ -580,7 +580,21 @@ function resolveImports(
  * Handles formats like "Prompty", "Message[]", "Record<unknown>", "string", "unknown".
  */
 function extractMethodTypeRefs(method: MethodStubDecl): string[] {
-  const SCALARS = new Set(["string", "int32", "float32", "float64", "boolean", "unknown"]);
+  const SCALARS = new Set([
+    "void",
+    "string",
+    "number",
+    "integer",
+    "int32",
+    "int64",
+    "float",
+    "float32",
+    "float64",
+    "numeric",
+    "boolean",
+    "unknown",
+    "any",
+  ]);
   const refs: string[] = [];
 
   const extract = (typeStr: string) => {
