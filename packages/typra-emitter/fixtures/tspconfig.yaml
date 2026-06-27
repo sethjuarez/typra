@@ -21,8 +21,16 @@ options:
         import-path: "fixtures"
         package-name: "fixtures"
         format: false
+      - type: CSharp
+        output-dir: "generated/fixtures/csharp"
+        test-dir: "generated/fixtures/csharp/tests"
+        namespace: "Typra.Fixtures"
+        format: false
       - type: Rust
         output-dir: "generated/fixtures/rust"
         test-dir: "generated/fixtures/rust/tests"
         import-path: "fixtures::model"
+        format: false
+      - type: Markdown
+        output-dir: "generated/fixtures/markdown"
         format: false
