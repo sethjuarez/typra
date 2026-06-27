@@ -1,18 +1,19 @@
 {
   "name": "@typra/emitter",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Generic TypeSpec emitter for generating multi-runtime model surfaces",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sethjuarez/typra"
+    "url": "git+https://github.com/sethjuarez/typra.git",
+    "directory": "packages/typra-emitter"
   },
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "tspMain": "src/lib/main.tsp",
   "bin": {
-    "typra-generate": "./dist/src/cli.js"
+    "typra-generate": "dist/src/cli.js"
   },
   "exports": {
     ".": {
@@ -43,7 +44,6 @@
   },
   "devDependencies": {
     "@types/node": "^24.7.0",
-
     "@typescript-eslint/eslint-plugin": "^8.15.0",
     "@typescript-eslint/parser": "^8.15.0",
     "@typespec/compiler": "latest",
@@ -69,7 +69,6 @@
   },
   "packageManager": "npm@11.5.1+sha512.232e6f5d9e799bcb486920b3e9ba907fdf96e576cf7e8c9446c8162e33a416096a1d37a9e910d9a918f6b1f606791c99bc6bb61ee2569b496ec74af13d0dbd95",
   "dependencies": {
-
     "xml-formatter": "^3.6.7",
     "yaml": "^2.8.1"
   }
