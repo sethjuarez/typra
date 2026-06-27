@@ -1,0 +1,13 @@
+emit:
+  - "@typra/emitter"
+options:
+  "@typra/emitter":
+    emitter-output-dir: "{cwd}/generated/fixtures"
+    root-object: "Typra.Fixtures.FixtureRoot"
+    root-namespace: "Typra.Fixtures"
+    emit-targets:
+      - type: TypeScript
+        output-dir: "generated/fixtures/typescript"
+        test-dir: "generated/fixtures/typescript/tests"
+        import-path: "../index"
+        format: false
