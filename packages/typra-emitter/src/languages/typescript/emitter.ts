@@ -103,6 +103,7 @@ function returnType(typeStr: string): string {
     return `${returnType(inner)} | null`;
   }
   if (typeStr === "Record<unknown>") return "Record<string, unknown>";
+  if (typeStr === "void") return "void";
   return TYPE_MAP[typeStr] || typeStr;
 }
 

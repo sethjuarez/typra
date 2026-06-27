@@ -85,14 +85,14 @@ export const generateTypeScript = async (
     const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
     const code = emitTypeScriptFileDecl(fileDecl, visitor, tsNamespace, group);
     const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
-    await emitTypeScriptFile(context, `${toKebabCase(n.typeName.name)}.ts`, code, outDir);
+    await emitTypeScriptFile(context, `${toKebabCase(n.typeName.name)}.ts`, code, outDir, emitTarget["output-dir"]);
   }
 
   // Emit group index.ts files
   for (const [group, groupNodes] of groupMap) {
     if (!group) continue;
     const groupIndexCode = emitTypeScriptGroupIndex(group, groupNodes);
-    await emitTypeScriptFile(context, "index.ts", groupIndexCode, `${emitTarget["output-dir"]}/${group}`);
+    await emitTypeScriptFile(context, "index.ts", groupIndexCode, `${emitTarget["output-dir"]}/${group}`, emitTarget["output-dir"]);
   }
 
   // Emit test files for all types (skip protocols — they have no data to test)
@@ -110,7 +110,7 @@ export const generateTypeScript = async (
         importPath: testImportPath,
         namespace: tsNamespace,
       });
-      await emitTypeScriptFile(context, `${toKebabCase(n.typeName.name)}.test.ts`, testCode, testDir);
+      await emitTypeScriptFile(context, `${toKebabCase(n.typeName.name)}.test.ts`, testCode, testDir, emitTarget["test-dir"]);
     }
   }
 
@@ -238,10 +238,11 @@ async function emitTypeScriptFile(
   context: EmitContext<TypraEmitterOptions>,
   filename: string,
   content: string,
-  outputDir?: string
+  outputDir?: string,
+  outputRoot?: string,
 ): Promise<void> {
   outputDir = outputDir || `${context.emitterOutputDir}/typescript`;
   const filePath = resolvePath(outputDir, filename);
 
-  await emitGeneratedFile(context, filePath, content);
+  await emitGeneratedFile(context, filePath, content, { outputRoot: outputRoot || outputDir });
 }

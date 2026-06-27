@@ -57,8 +57,7 @@ export const generateGo = async (
   const registry = TypeRegistry.fromTypeGraph(allTypes);
   const visitor = new GoExprVisitor(registry);
 
-  // Determine package name from root node namespace (e.g., "Typra" -> "typra")
-  const packageName = node.typeName.namespace.toLowerCase().replace(/\./g, '');
+  const packageName = emitTarget["package-name"] || goPackageNameFromNamespace(node.typeName.namespace);
 
   // Collect all polymorphic type names across all nodes
   const polymorphicTypeNames = new Set<string>();
@@ -81,7 +80,7 @@ export const generateGo = async (
       // Go stays flat: pass group as a header comment only, no subfolder emission
       const fileContent = emitGoFileContent(fileDecl.types, packageName, visitor, polymorphicTypeNames, fileDecl.enums, n.group || "");
       const fileName = toSnakeCase(n.typeName.name) + '.go';
-      await emitGoFile(context, fileName, fileContent, emitTarget["output-dir"]);
+      await emitGoFile(context, fileName, fileContent, emitTarget["output-dir"], emitTarget["output-dir"]);
     }
 
     // Emit test file for each type (skip protocols — they have no data to test)
@@ -90,7 +89,7 @@ export const generateGo = async (
       const testContext = { ...buildTestContext(n, packageName), importPath };
       const testContent = emitGoTest(testContext);
       const testFileName = toSnakeCase(n.typeName.name) + '_test.go';
-      await emitGoFile(context, testFileName, testContent, emitTarget["test-dir"]);
+      await emitGoFile(context, testFileName, testContent, emitTarget["test-dir"], emitTarget["test-dir"]);
     }
   }
 
@@ -143,6 +142,10 @@ function buildTestContext(node: TypeNode, packageName: string): BaseTestContext 
   return buildBaseTestContext(node, packageName, goTestOptions);
 }
 
+export function goPackageNameFromNamespace(namespace: string): string {
+  return namespace.toLowerCase().replace(/\./g, "");
+}
+
 /**
  * Write generated Go content to file.
  */
@@ -150,10 +153,11 @@ async function emitGoFile(
   context: EmitContext<TypraEmitterOptions>,
   filename: string,
   content: string,
-  outputDir?: string
+  outputDir?: string,
+  outputRoot?: string,
 ): Promise<void> {
   outputDir = outputDir || `${context.emitterOutputDir}/go`;
   const filePath = resolvePath(outputDir, filename);
 
-  await emitGeneratedFile(context, filePath, content);
+  await emitGeneratedFile(context, filePath, content, { outputRoot: outputRoot || outputDir });
 }

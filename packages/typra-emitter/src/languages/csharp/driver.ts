@@ -89,7 +89,7 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
         const csEnumName = field.enumName.charAt(0).toUpperCase() + field.enumName.slice(1);
         const grp = enumGroup.get(field.enumName) || "";
         const enumOutDir = grp ? `${emitTarget["output-dir"]}/${grp}` : emitTarget["output-dir"];
-        await emitCsharpFile(context, nodes[0], enumCode, `${csEnumName}.cs`, enumOutDir);
+        await emitCsharpFile(context, nodes[0], enumCode, `${csEnumName}.cs`, enumOutDir, emitTarget["output-dir"]);
       }
     }
   }
@@ -99,10 +99,10 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
     const classCode = emitCSharpClass(typeDecl, csharpNamespace, visitor, allTypeDecls, findTypeDecl);
     // Emit into group subfolder (C# uses namespaces, no re-export files needed)
     const outDir = n.group ? `${emitTarget["output-dir"]}/${n.group}` : emitTarget["output-dir"];
-    await emitCsharpFile(context, n, classCode, `${n.typeName.name}.cs`, outDir);
+    await emitCsharpFile(context, n, classCode, `${n.typeName.name}.cs`, outDir, emitTarget["output-dir"]);
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const testDir = n.group ? `${emitTarget["test-dir"]}/${n.group}` : emitTarget["test-dir"];
-      await emitCsharpFile(context, n, renderTests(n, csharpNamespace), `${n.typeName.name}ConversionTests.cs`, testDir);
+      await emitCsharpFile(context, n, renderTests(n, csharpNamespace), `${n.typeName.name}ConversionTests.cs`, testDir, emitTarget["test-dir"]);
     }
   }
 
@@ -280,14 +280,14 @@ const renderCsharpFactoryTestValue = (typeStr: string): string => {
 };
 
 
-const emitCsharpFile = async (context: EmitContext<TypraEmitterOptions>, type: TypeNode, python: string, filename: string, outputDir?: string) => {
+const emitCsharpFile = async (context: EmitContext<TypraEmitterOptions>, type: TypeNode, python: string, filename: string, outputDir?: string, outputRoot?: string) => {
   outputDir = outputDir || `${context.emitterOutputDir}/CSharp`;
   const typePath = type.typeName.namespace.split(".");
 
   // replace typename with file
   typePath.push(filename);
   const path = resolvePath(outputDir, filename);
-  await emitGeneratedFile(context, path, python);
+  await emitGeneratedFile(context, path, python, { outputRoot: outputRoot || outputDir });
 }
 
 /**

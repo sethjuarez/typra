@@ -1,4 +1,4 @@
-import { EmitContext, resolvePath, Namespace } from "@typespec/compiler";
+import { EmitContext, resolvePath, Namespace, Model } from "@typespec/compiler";
 import { resolveModel, TypeNode, enumerateTypes } from "./ir/ast.js";
 import { TypraEmitterOptions, EmitTarget } from "./lib.js";
 import { generateMarkdown } from "./languages/markdown/driver.js";
@@ -34,6 +34,7 @@ export function filterNodes(nodes: TypeNode[], options?: GeneratorOptions): Type
           nodes.push(subNode);
           visited.add(fullName);
         }
+
       }
     }
   }
@@ -45,6 +46,36 @@ export function filterNodes(nodes: TypeNode[], options?: GeneratorOptions): Type
     const fullName = `${node.typeName.namespace}.${name}`;
     return !omitModels.includes(name) && !omitModels.includes(fullName);
   });
+}
+
+export function inferRootNamespace(rootObject: string): string {
+  const lastDot = rootObject.lastIndexOf(".");
+  return lastDot > 0 ? rootObject.slice(0, lastDot) : "Typra";
+}
+
+function inferRootAlias(rootNamespace: string): string {
+  return rootNamespace.split(".").filter(Boolean).at(-1) || rootNamespace || "Typra";
+}
+
+function isUninstantiatedTemplate(model: Model): boolean {
+  return !!(
+    model.node &&
+    "templateParameters" in model.node &&
+    model.node.templateParameters.length > 0 &&
+    !model.templateMapper
+  );
+}
+
+function collectNamespaceModels(namespace: Namespace, models: Model[] = []): Model[] {
+  for (const [, model] of namespace.models) {
+    models.push(model);
+  }
+
+  for (const [, childNamespace] of namespace.namespaces) {
+    collectNamespaceModels(childNamespace, models);
+  }
+
+  return models;
 }
 
 // Generator function type for code emitters
@@ -84,7 +115,10 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     );
   }
 
-  const model = resolveModel(context.program, m[0], new Set(), options["root-namespace"] || "Typra", options["root-alias"] || "Typra");
+  const rootNamespace = options["root-namespace"] || inferRootNamespace(rootObject);
+  const rootAlias = options["root-alias"] || inferRootAlias(rootNamespace);
+
+  const model = resolveModel(context.program, m[0], new Set(), rootNamespace, rootAlias);
   if (options["root-alias"]) {
     model.typeName = {
       namespace: model.typeName.namespace,
@@ -95,7 +129,6 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   // Discover additional models not reachable from the root.
   // If root-namespace is specified, resolve all models in that namespace
   // so new types are automatically emitted without manual additional-roots.
-  const rootNamespace = options["root-namespace"] || "Typra";
   const additionalModels: TypeNode[] = [];
   const visited = new Set<string>();
 
@@ -120,20 +153,19 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   const nsRef = context.program.resolveTypeReference(rootNamespace);
   if (nsRef[0] && nsRef[0].kind === "Namespace") {
     const ns = nsRef[0] as Namespace;
-    for (const [, nsModel] of ns.models) {
+    for (const nsModel of collectNamespaceModels(ns)) {
       const fullName = `${rootNamespace}.${nsModel.name}`;
       if (visited.has(fullName)) continue;
 
       // Skip uninstantiated template declarations (e.g., Named<T>, Id<T>)
-      if (nsModel.node && 'templateParameters' in nsModel.node &&
-          nsModel.node.templateParameters.length > 0 && !nsModel.templateMapper) {
+      if (isUninstantiatedTemplate(nsModel)) {
         continue;
       }
 
       const additionalNode = resolveModel(
         context.program, nsModel, new Set(),
         rootNamespace,
-        options["root-alias"] || "Typra"
+        rootAlias
       );
       additionalModels.push(additionalNode);
       visited.add(fullName);
@@ -152,7 +184,7 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     const additionalNode = resolveModel(
       context.program, ref[0], new Set(),
       rootNamespace,
-      options["root-alias"] || "Typra"
+      rootAlias
     );
     additionalModels.push(additionalNode);
     visited.add(rootName);

@@ -184,6 +184,7 @@ function protocolCSharpType(typeStr: string): string {
   }
   if (typeStr === "Record<unknown>" || typeStr === "dictionary") return "Dictionary<string, object?>";
   if (typeStr === "unknown" || typeStr === "any") return "object";
+  if (typeStr === "void") return "void";
   // Handle nullable types (e.g., "string?")
   if (typeStr.endsWith("?")) {
     const inner = typeStr.slice(0, -1);
@@ -226,16 +227,24 @@ function emitCSharpInterface(type: TypeDecl, namespace: string, lines: string[])
       // Synchronous method
       if (method.optional) {
         // Return type already includes nullability — provide default body
-        lines.push(`        ${ret} ${toPascalCase(method.name)}(${params}) => default!;`);
+        lines.push(ret === "void"
+          ? `        void ${toPascalCase(method.name)}(${params}) { }`
+          : `        ${ret} ${toPascalCase(method.name)}(${params}) => default!;`);
       } else {
         lines.push(`        ${ret} ${toPascalCase(method.name)}(${params});`);
       }
     } else {
       // Async method
       if (method.optional) {
-        lines.push(`        Task<${ret}> ${toPascalCase(method.name)}Async(${params}) => Task.FromResult<${ret}>(default!);`);
+        if (ret === "void") {
+          lines.push(`        Task ${toPascalCase(method.name)}Async(${params}) => Task.CompletedTask;`);
+        } else {
+          lines.push(`        Task<${ret}> ${toPascalCase(method.name)}Async(${params}) => Task.FromResult<${ret}>(default!);`);
+        }
       } else {
-        lines.push(`        Task<${ret}> ${toPascalCase(method.name)}Async(${params});`);
+        lines.push(ret === "void"
+          ? `        Task ${toPascalCase(method.name)}Async(${params});`
+          : `        Task<${ret}> ${toPascalCase(method.name)}Async(${params});`);
       }
     }
   }

@@ -128,7 +128,7 @@ export const generatePython = async (
       const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
       const fileContent = emitPythonFileDecl(fileDecl, visitor, group);
       const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
-      await emitPythonFile(context, `_${n.typeName.name}.py`, fileContent, outDir);
+      await emitPythonFile(context, `_${n.typeName.name}.py`, fileContent, outDir, emitTarget["output-dir"]);
     }
 
     // Render test file for each type (skip protocols — they have no data to test)
@@ -136,7 +136,7 @@ export const generatePython = async (
       const testDir = n.group ? `${emitTarget["test-dir"]}/${n.group}` : emitTarget["test-dir"];
       const testContext = buildTestContext(n, importPath);
       const testContent = emitPythonTest(testContext);
-      await emitPythonFile(context, `test_${toSnakeCase(n.typeName.name)}.py`, testContent, testDir);
+      await emitPythonFile(context, `test_${toSnakeCase(n.typeName.name)}.py`, testContent, testDir, emitTarget["test-dir"]);
     }
   }
 
@@ -144,7 +144,7 @@ export const generatePython = async (
   for (const [group, groupNodes] of groupMap) {
     if (!group) continue; // Root-level types (if any) are covered by the root __init__.py
     const groupInitContent = emitPythonGroupInit(group, groupNodes);
-    await emitPythonFile(context, '__init__.py', groupInitContent, `${emitTarget["output-dir"]}/${group}`);
+    await emitPythonFile(context, '__init__.py', groupInitContent, `${emitTarget["output-dir"]}/${group}`, emitTarget["output-dir"]);
   }
 
   // Format emitted files if format option is enabled (default: true)
@@ -435,10 +435,11 @@ async function emitPythonFile(
   context: EmitContext<TypraEmitterOptions>,
   filename: string,
   content: string,
-  outputDir?: string
+  outputDir?: string,
+  outputRoot?: string,
 ): Promise<void> {
   outputDir = outputDir || `${context.emitterOutputDir}/python`;
   const filePath = resolvePath(outputDir, filename);
 
-  await emitGeneratedFile(context, filePath, content);
+  await emitGeneratedFile(context, filePath, content, { outputRoot: outputRoot || outputDir });
 }

@@ -461,5 +461,5 @@ export const generateCoercions = (node: TypeNode): { title: string; description:
 
 const emitMarkdownFile = async (context: EmitContext<TypraEmitterOptions>, name: string, markdown: string, outputDir?: string) => {
   const dir = outputDir || `${context.emitterOutputDir}/markdown`;
-  await emitGeneratedFile(context, resolvePath(dir, `${name}.md`), markdown);
+  await emitGeneratedFile(context, resolvePath(dir, `${name}.md`), markdown, { outputRoot: dir });
 }

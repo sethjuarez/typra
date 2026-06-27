@@ -8,6 +8,7 @@ export interface EmitTarget {
   "format"?: boolean;
   "namespace"?: string;
   "import-path"?: string;
+  "package-name"?: string;
 }
 export interface TypraEmitterOptions {
   "root-object": string;
@@ -59,6 +60,11 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             type: "string",
             nullable: true,
             description: "Import path for generated code in tests. Defaults vary by language."
+          },
+          "package-name": {
+            type: "string",
+            nullable: true,
+            description: "Language package/module name override. Currently used by Go; defaults to the emitted root namespace."
           }
         },
         required: ["type"]
