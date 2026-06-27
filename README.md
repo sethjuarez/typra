@@ -69,7 +69,7 @@ Release checklist:
 2. Run `npm ci`, `npm run build`, `npm test`, `npm run generate:fixtures`, and
    `npm run pack:dry-run`.
 3. Confirm `npm pack --workspace @typra/emitter --dry-run --json` includes the
-   `typra-generate` bin and only intended package files.
+   package README, the `typra-generate` bin, and only intended package files.
 4. Commit and push the version/package changes.
 5. Run the `Publish` workflow in GitHub Actions. It installs, builds, tests,
    generates fixtures, validates the tarball, and publishes with OIDC.
