@@ -8,6 +8,7 @@ import { generateTypeScript } from "./languages/typescript/driver.js";
 import { generateGo } from "./languages/go/driver.js";
 import { generateRust } from "./languages/rust/driver.js";
 import { emitGeneratedFile, emitGeneratedManifest } from "./cleanup/generated-file.js";
+import { buildExportSurfaceSnapshot, emitExportSurfaceSnapshot } from "./contract-surface.js";
 
 // Generator options passed to each generator
 export interface GeneratorOptions {
@@ -195,6 +196,10 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     omitModels: options["omit-models"] || [],
     additionalModels: additionalModels,
   };
+  const exportSurfaceNodes = filterNodes(Array.from(enumerateTypes(model)), {
+    omitModels: generatorOptions.omitModels,
+    additionalModels: [...additionalModels],
+  });
 
   // Dispatch to registered generators
   for (const target of targets) {
@@ -210,6 +215,11 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     resolvePath(context.emitterOutputDir, "json-ast", "model.json"),
     JSON.stringify(model.getSanitizedObject(), null, 2),
     { marker: false },
+  );
+
+  await emitExportSurfaceSnapshot(
+    context,
+    buildExportSurfaceSnapshot(rootObject, rootNamespace, rootAlias, targets, exportSurfaceNodes),
   );
 
   await emitGeneratedManifest(context);
