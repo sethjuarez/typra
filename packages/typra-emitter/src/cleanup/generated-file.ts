@@ -68,7 +68,23 @@ function shouldMark(filePath: string): boolean {
 
 function addMarker(filePath: string, content: string): string {
   const marker = markerFor(filePath);
+  if (filePath.endsWith(".md") && content.startsWith("---\n")) {
+    return addMarkdownMarkerAfterFrontmatter(content, marker);
+  }
   return content.startsWith(marker) ? content : `${marker}\n${content}`;
+}
+
+function addMarkdownMarkerAfterFrontmatter(content: string, marker: string): string {
+  const closingDelimiter = "\n---\n";
+  const closingIndex = content.indexOf(closingDelimiter, 4);
+  if (closingIndex < 0) {
+    return content.startsWith(marker) ? content : `${marker}\n${content}`;
+  }
+
+  const markerIndex = closingIndex + closingDelimiter.length;
+  const beforeMarker = content.slice(0, markerIndex);
+  const afterMarker = content.slice(markerIndex);
+  return afterMarker.startsWith(marker) ? content : `${beforeMarker}${marker}\n${afterMarker}`;
 }
 
 function markerFor(filePath: string): string {
