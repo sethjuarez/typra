@@ -698,7 +698,9 @@ function emitCoercionBranch(
       }
       return `${discSnake}: ${enumName}::default()`;
     }
-    return `${snake}: "${a.literalValue}".to_string()`;
+    const targetField = type.fields.find(f => f.name === a.fieldName);
+    const literalExpr = `"${a.literalValue}".to_string()`;
+    return targetField?.isOptional ? `${snake}: Some(${literalExpr})` : `${snake}: ${literalExpr}`;
   });
 
   lines.push(`            return ${typeName} { ${fieldAssignments.join(", ")}, ..Default::default() };`);

@@ -82,9 +82,10 @@ Typra includes emitters for:
 - Markdown documentation
 - JSON AST
 
-The first Typra fixture slice validates TypeScript and JSON AST generation from
-synthetic TypeSpec shapes. Additional fixture coverage will expand as the
-extracted emitter hardens.
+The Typra fixture slice validates TypeScript, Python, C#, Go, Rust, Markdown,
+and JSON AST generation from synthetic TypeSpec shapes. Fixture validation also
+exercises generated metadata, verifier CLI output, consumer smoke wiring, and
+cross-language generated-code compile/test surfaces.
 
 ## Generated files
 
