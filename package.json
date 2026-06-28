@@ -5,6 +5,14 @@
   "workspaces": [
     "packages/*"
   ],
+  "devDependencies": {
+    "@typespec/compiler": "1.10.0",
+    "@typespec/json-schema": "1.10.0"
+  },
+  "overrides": {
+    "@typespec/compiler": "1.10.0",
+    "@typespec/json-schema": "1.10.0"
+  },
   "scripts": {
     "build": "npm run build --workspace @typra/emitter",
     "test": "npm run test --workspace @typra/emitter",

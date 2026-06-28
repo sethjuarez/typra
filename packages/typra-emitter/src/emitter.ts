@@ -9,6 +9,7 @@ import { generateGo } from "./languages/go/driver.js";
 import { generateRust } from "./languages/rust/driver.js";
 import { emitGeneratedFile, emitGeneratedManifest } from "./cleanup/generated-file.js";
 import { buildExportSurfaceSnapshot, emitExportSurfaceSnapshot } from "./contract-surface.js";
+import { reportTypeSpecCompatibility, shouldBlockUnsupportedTypeSpecToolchain } from "./compatibility.js";
 
 // Generator options passed to each generator
 export interface GeneratorOptions {
@@ -99,6 +100,10 @@ const generators: Record<string, GeneratorFn> = {
 
 
 export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
+  const toolchain = reportTypeSpecCompatibility(context);
+  if (shouldBlockUnsupportedTypeSpecToolchain(context.options, toolchain)) {
+    return;
+  }
 
   const options = {
     emitterOutputDir: context.emitterOutputDir,
@@ -219,7 +224,7 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
 
   await emitExportSurfaceSnapshot(
     context,
-    buildExportSurfaceSnapshot(rootObject, rootNamespace, rootAlias, targets, exportSurfaceNodes),
+    buildExportSurfaceSnapshot(rootObject, rootNamespace, rootAlias, targets, exportSurfaceNodes, toolchain),
   );
 
   await emitGeneratedManifest(context);

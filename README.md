@@ -28,8 +28,13 @@ the reusable emitter machinery.
 ## Install
 
 ```powershell
-npm install --save-dev @typra/emitter @typespec/compiler
+npm install --save-dev @typra/emitter @typespec/compiler@1.10.0 @typespec/json-schema@1.10.0
 ```
+
+Typra currently validates its emitter against TypeSpec compiler and JSON schema
+emitter `1.10.0`. Running with an unvalidated TypeSpec toolchain reports a
+clear diagnostic; set `allow-unsupported-typespec-version: true` only when you
+intentionally accept that generated output may churn.
 
 ## TypeSpec configuration
 
@@ -96,8 +101,13 @@ npm ci
 npm run build
 npm test
 npm run generate:fixtures
+npm run validate:fixtures
 npm run pack:dry-run
 ```
+
+CI also runs a TypeSpec compatibility matrix for each explicitly supported
+`@typespec/compiler` and `@typespec/json-schema` version pair. Add a matrix row
+before widening the package peer range.
 
 After building, check the local CLI with:
 
@@ -112,8 +122,8 @@ npm trusted publishing. Release checklist:
 
 1. Update `packages\typra-emitter\package.json` to a version that has not been
    published.
-2. Run `npm ci`, `npm run build`, `npm test`, `npm run generate:fixtures`, and
-   `npm run pack:dry-run`.
+2. Run `npm ci`, `npm run build`, `npm test`, `npm run generate:fixtures`,
+   `npm run validate:fixtures`, and `npm run pack:dry-run`.
 3. Confirm `npm pack --workspace @typra/emitter --dry-run --json` includes the
    package README, the `typra-generate` bin, and only intended package files.
 4. Commit, push, and merge the change to `main`.

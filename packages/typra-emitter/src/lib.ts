@@ -18,6 +18,7 @@ export interface TypraEmitterOptions {
   "omit-models"?: string[];
   "schema-output-dir"?: string;
   "additional-roots"?: string[];
+  "allow-unsupported-typespec-version"?: boolean;
 }
 
 const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
@@ -103,6 +104,12 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
       items: { type: "string" },
       nullable: true,
       description: "Additional root types to resolve and generate alongside the main root object. These types need not be referenced from the main root. Specified as fully-qualified names (e.g., 'Typra.Message')."
+    },
+    "allow-unsupported-typespec-version": {
+      type: "boolean",
+      nullable: true,
+      default: false,
+      description: "Allow generation with an unvalidated TypeSpec compiler/json-schema version. Unsupported versions report a warning instead of an error."
     }
   },
   required: ["root-object"],

@@ -40,15 +40,15 @@
     "fixtures/tspconfig.yaml"
   ],
   "peerDependencies": {
-    "@typespec/compiler": "latest",
-    "@typespec/json-schema": "latest"
+    "@typespec/compiler": "1.10.0",
+    "@typespec/json-schema": "1.10.0"
   },
   "devDependencies": {
     "@types/node": "^24.7.0",
     "@typescript-eslint/eslint-plugin": "^8.15.0",
     "@typescript-eslint/parser": "^8.15.0",
-    "@typespec/compiler": "latest",
-    "@typespec/json-schema": "^1.8.0",
+    "@typespec/compiler": "1.10.0",
+    "@typespec/json-schema": "1.10.0",
     "eslint": "^9.15.0",
     "markdownlint-cli": "^0.48.0",
     "prettier": "^3.3.3",
