@@ -300,7 +300,11 @@ function emitJsonHelpers(typeName: string, lines: string[]): void {
   lines.push("  }");
   lines.push("");
   lines.push(`  public static ${typeName} fromJson(String json) {`);
-  lines.push("    throw new UnsupportedOperationException(\"Java JSON parsing is not emitted yet; use load(Map, LoadContext).\");");
+  lines.push(`    return fromJson(json, new LoadContext());`);
+  lines.push("  }");
+  lines.push("");
+  lines.push(`  public static ${typeName} fromJson(String json, LoadContext context) {`);
+  lines.push(`    return load(TypraJson.parse(json), context);`);
   lines.push("  }");
   lines.push("");
 }

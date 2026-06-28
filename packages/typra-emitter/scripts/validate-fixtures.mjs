@@ -523,6 +523,30 @@ function runJavaBuild() {
   }
 }
 
+function runJavaGeneratedTests() {
+  const sourceDir = path.join(generatedRoot, "java");
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".java"));
+  const classesDir = path.join(sourceDir, ".classes");
+  if (sourceFiles.length === 0) {
+    fail("No generated Java files found to test.");
+    return;
+  }
+
+  rmSync(classesDir, { recursive: true, force: true });
+  mkdirSync(classesDir, { recursive: true });
+  try {
+    const initialFailureCount = failures.length;
+    runCommand("Generated Java tests build", "javac", ["-d", classesDir, ...sourceFiles], { cwd: sourceDir });
+    if (failures.length > initialFailureCount) return;
+    execFileSync("java", ["-cp", classesDir, "typra.fixtures.TypraGeneratedTests"], { cwd: sourceDir, stdio: "pipe" });
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated Java tests failed:\n${output || error.message}`);
+  } finally {
+    rmSync(classesDir, { recursive: true, force: true });
+  }
+}
+
 function buildCSharpValidationStubs(sourceDir) {
   const members = [];
   for (const file of walkFiles(sourceDir, file => file.endsWith(".cs") && !file.includes(`${path.sep}tests${path.sep}`))) {
@@ -960,10 +984,10 @@ function runJavaExecutableConformance() {
     "    Map<String, Object> wireData = new LinkedHashMap<>();",
     '    wireData.put("maxOutputTokens", 256);',
     '    wireData.put("temperature", 0.7);',
-    "    FixtureRoot root = FixtureRoot.load(rootData, new LoadContext());",
-    "    FixtureContent imageContent = FixtureContent.load(imageContentData, new LoadContext());",
+    "    FixtureRoot root = FixtureRoot.fromJson(TypraJson.stringify(rootData));",
+    "    FixtureContent imageContent = FixtureContent.fromJson(TypraJson.stringify(imageContentData));",
     "    WireOptions wire = WireOptions.load(wireData, new LoadContext());",
-    '    FixtureReference reference = FixtureReference.load("ref-coerced", new LoadContext());',
+    '    FixtureReference reference = FixtureReference.fromJson("\\"ref-coerced\\"");',
     "    Map<String, Object> output = new LinkedHashMap<>();",
     '    output.put("root", root.save(new SaveContext()));',
     '    output.put("imageContent", imageContent.save(new SaveContext()));',
@@ -1083,8 +1107,19 @@ function assertStaticFixtureCoverage() {
   assertIncludes(
     path.join("generated", "fixtures", "java", "FixtureRoot.java"),
     "fromValue(String value)",
+    "return fromJson(json, new LoadContext());",
     "result.status = FixtureStatus.fromValue",
     "result.put(\"status\", obj.status.value)",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "java", "TypraJson.java"),
+    "public static Object parse(String json)",
+    "private static final class Parser",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "java", "tests", "FixtureRootGeneratedTest.java"),
+    "FixtureRoot.fromJson(jsonData1)",
+    "assertThrows(() -> FixtureRoot.fromJson(\"{\")",
   );
   assertIncludes(
     path.join("generated", "fixtures", "csharp", "FixtureReference.cs"),
@@ -1299,6 +1334,7 @@ runGoTests();
 runRustTests();
 runCSharpBuild();
 runJavaBuild();
+runJavaGeneratedTests();
 runExecutableConformance();
 
 if (failures.length > 0) {

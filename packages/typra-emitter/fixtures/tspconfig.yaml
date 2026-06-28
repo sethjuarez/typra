@@ -23,6 +23,7 @@ options:
         format: true
       - type: Java
         output-dir: "generated/fixtures/java"
+        test-dir: "generated/fixtures/java/tests"
         package-name: "typra.fixtures"
         format: false
       - type: CSharp
