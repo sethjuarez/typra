@@ -163,11 +163,15 @@ describe("export surface scaffolding", () => {
       {
         name: "CheckpointStore",
         group: "pipeline",
+        symbol: "CheckpointStore",
+        source: "./pipeline/checkpoint-store",
         methods: [],
       },
       {
         name: "EventSink",
         group: "pipeline",
+        symbol: "EventSink",
+        source: "./pipeline/event-sink",
         methods: [
           {
             name: "emit",

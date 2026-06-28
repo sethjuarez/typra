@@ -15,6 +15,8 @@ export interface ExportSurfaceMethod {
 export interface ExportSurfaceProtocol {
   name: string;
   group: string;
+  symbol: string;
+  source: string;
   methods: ExportSurfaceMethod[];
 }
 
@@ -101,6 +103,8 @@ function buildTargetSurface(rootNamespace: string, target: EmitTarget, nodes: Ty
     .map((node) => ({
       name: node.typeName.name,
       group: node.group || "",
+      symbol: node.typeName.name,
+      source: sourceFor(targetName, node, node.group || ""),
       methods: node.methods
         .map((method) => ({
           name: method.name,

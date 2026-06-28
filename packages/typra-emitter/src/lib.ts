@@ -19,6 +19,8 @@ export interface TypraEmitterOptions {
   "schema-output-dir"?: string;
   "additional-roots"?: string[];
   "allow-unsupported-typespec-version"?: boolean;
+  "protected-paths"?: string[];
+  "hydration-zones"?: string[];
 }
 
 const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
@@ -110,6 +112,18 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
       nullable: true,
       default: false,
       description: "Allow generation with an unvalidated TypeSpec compiler/json-schema version. Unsupported versions report a warning instead of an error."
+    },
+    "protected-paths": {
+      type: "array",
+      items: { type: "string" },
+      nullable: true,
+      description: "Hand-authored paths Typra must not own. Recorded for verifier boundary checks; generation still does not delete files."
+    },
+    "hydration-zones": {
+      type: "array",
+      items: { type: "string" },
+      nullable: true,
+      description: "Hand-authored extension zones adjacent to generated output. Recorded as verifier boundary metadata; Typra does not generate runtime behavior."
     }
   },
   required: ["root-object"],

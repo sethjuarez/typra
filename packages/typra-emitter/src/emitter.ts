@@ -10,6 +10,7 @@ import { generateRust } from "./languages/rust/driver.js";
 import { emitGeneratedFile, emitGeneratedManifest } from "./cleanup/generated-file.js";
 import { buildExportSurfaceSnapshot, emitExportSurfaceSnapshot } from "./contract-surface.js";
 import { reportTypeSpecCompatibility, shouldBlockUnsupportedTypeSpecToolchain } from "./compatibility.js";
+import { buildHydrationBoundarySnapshot, emitHydrationBoundarySnapshot } from "./hydration-seams.js";
 
 // Generator options passed to each generator
 export interface GeneratorOptions {
@@ -222,9 +223,12 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     { marker: false },
   );
 
-  await emitExportSurfaceSnapshot(
+  const exportSurfaceSnapshot = buildExportSurfaceSnapshot(rootObject, rootNamespace, rootAlias, targets, exportSurfaceNodes, toolchain);
+  await emitExportSurfaceSnapshot(context, exportSurfaceSnapshot);
+
+  await emitHydrationBoundarySnapshot(
     context,
-    buildExportSurfaceSnapshot(rootObject, rootNamespace, rootAlias, targets, exportSurfaceNodes, toolchain),
+    buildHydrationBoundarySnapshot(exportSurfaceSnapshot, options),
   );
 
   await emitGeneratedManifest(context);

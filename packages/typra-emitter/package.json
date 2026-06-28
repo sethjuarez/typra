@@ -1,6 +1,6 @@
 {
   "name": "@typra/emitter",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Generic TypeSpec emitter for generating multi-runtime model surfaces",
   "license": "MIT",
   "repository": {
@@ -13,7 +13,9 @@
   "types": "dist/src/index.d.ts",
   "tspMain": "src/lib/main.tsp",
   "bin": {
-    "typra-generate": "dist/src/cli.js"
+    "typra-generate": "dist/src/cli.js",
+    "typra-verify": "dist/src/verify-cli.js",
+    "typra-consumer-smoke": "dist/src/consumer-smoke.js"
   },
   "exports": {
     ".": {
@@ -23,6 +25,10 @@
     "./generate": {
       "types": "./dist/src/generate.d.ts",
       "default": "./dist/src/generate.js"
+    },
+    "./verify": {
+      "types": "./dist/src/verify/index.d.ts",
+      "default": "./dist/src/verify/index.js"
     },
     "./testing": {
       "types": "./dist/src/testing/index.d.ts",
