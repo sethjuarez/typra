@@ -59,16 +59,25 @@ function goStringLiteral(value: string): string {
   return JSON.stringify(value);
 }
 
+function reflectiveHelperName(typeName: string): string {
+  return `assert${typeName}StringField`;
+}
+
 function isPolymorphicProperty(prop: PropertyNode): boolean {
   return !prop.isScalar && !prop.isCollection && !prop.isDict && (prop.type?.childTypes.length ?? 0) > 0;
 }
 
 function findSampleChildType(prop: PropertyNode, sample: Record<string, any>): TypeNode | undefined {
   const discriminator = prop.type?.discriminator;
-  if (!discriminator) return undefined;
-  const discriminatorValue = sample[discriminator];
+  const discriminatorValue = discriminator ? sample[discriminator] : undefined;
+  if (discriminator && discriminatorValue !== undefined) {
+    return prop.type?.childTypes.find(child =>
+      child.properties.some(childProp => childProp.name === discriminator && childProp.defaultValue === discriminatorValue)
+    );
+  }
+
   return prop.type?.childTypes.find(child =>
-    child.properties.some(childProp => childProp.name === discriminator && childProp.defaultValue === discriminatorValue)
+    child.properties.some(childProp => childProp.defaultValue !== null && sample[childProp.name] === childProp.defaultValue)
   );
 }
 
@@ -90,6 +99,7 @@ function emitStructuredValidations(
   node: TypeNode,
   pkg: string,
   includeScalars = false,
+  reflectiveHelper = reflectiveHelperName(node.typeName.name),
 ): void {
   for (const prop of node.properties) {
     if (!(prop.name in sample)) continue;
@@ -102,8 +112,13 @@ function emitStructuredValidations(
       continue;
     }
 
+    if (!prop.isScalar && prop.type && typeof value === "string") {
+      emitShorthandObjectValidation(lines, expr, fieldName, value, prop.type);
+      continue;
+    }
+
     if (prop.isCollection && Array.isArray(value)) {
-      emitCollectionValidation(lines, expr, fieldName, value, prop, pkg);
+      emitCollectionValidation(lines, expr, fieldName, value, prop, pkg, reflectiveHelper);
       continue;
     }
 
@@ -113,7 +128,7 @@ function emitStructuredValidations(
     }
 
     if (isPolymorphicProperty(prop) && value && typeof value === "object" && !Array.isArray(value)) {
-      emitPolymorphicValidation(lines, expr, fieldName, value, prop, pkg);
+      emitPolymorphicValidation(lines, expr, fieldName, value, prop, pkg, reflectiveHelper);
       continue;
     }
 
@@ -123,6 +138,20 @@ function emitStructuredValidations(
   }
 }
 
+function emitShorthandObjectValidation(
+  lines: string[],
+  expr: string,
+  fieldName: string,
+  expected: string,
+  node: TypeNode,
+): void {
+  const shorthandField = findStringCoercionField(node);
+  if (!shorthandField) return;
+
+  const targetProp = node.properties.find(candidate => candidate.name === shorthandField);
+  emitScalarSampleValidation(lines, `${expr}.${goFieldName(shorthandField)}`, `${fieldName}.${goFieldName(shorthandField)}`, expected, targetProp?.isOptional ?? false);
+}
+
 function emitCollectionValidation(
   lines: string[],
   expr: string,
@@ -130,6 +159,7 @@ function emitCollectionValidation(
   values: any[],
   prop: PropertyNode,
   pkg: string,
+  reflectiveHelper: string,
 ): void {
   lines.push(`if len(${expr}) != ${values.length} {`);
   lines.push(`t.Fatalf("Expected ${fieldName} length to be ${values.length}, got %d", len(${expr}))`);
@@ -149,9 +179,35 @@ function emitCollectionValidation(
   if (prop.type) {
     values.forEach((item, index) => {
       if (item && typeof item === "object" && !Array.isArray(item)) {
-        emitStructuredValidations(lines, `${expr}[${index}]`, item, prop.type as TypeNode, pkg, true);
+        const itemExpr = `${expr}[${index}]`;
+        const childType = findSampleChildType(prop, item);
+        if (childType) {
+          const localName = `${fieldName.charAt(0).toLowerCase()}${fieldName.slice(1)}${index}Value`;
+          lines.push(`${localName}, ok := ${itemExpr}.(${pkg}.${childType.typeName.name})`);
+          lines.push("if !ok {");
+          lines.push(`t.Fatalf("Expected ${fieldName}[${index}] to be ${pkg}.${childType.typeName.name}, got %T", ${itemExpr})`);
+          lines.push("}");
+          emitStructuredValidations(lines, localName, item, childType, pkg, true, reflectiveHelper);
+          return;
+        }
+
+        emitReflectiveObjectValidation(lines, itemExpr, `${fieldName}[${index}]`, item, reflectiveHelper);
       }
     });
+  }
+}
+
+function emitReflectiveObjectValidation(
+  lines: string[],
+  expr: string,
+  displayName: string,
+  sample: Record<string, any>,
+  reflectiveHelper: string,
+): void {
+  for (const [key, expected] of Object.entries(sample)) {
+    if (typeof expected === "string") {
+      lines.push(`${reflectiveHelper}(t, ${expr}, ${goStringLiteral(goFieldName(key))}, ${goStringLiteral(expected)}, ${goStringLiteral(`${displayName}.${goFieldName(key)}`)})`);
+    }
   }
 }
 
@@ -201,6 +257,7 @@ function emitPolymorphicValidation(
   value: Record<string, any>,
   prop: PropertyNode,
   pkg: string,
+  reflectiveHelper: string,
 ): void {
   const childType = findSampleChildType(prop, value);
   if (!childType) return;
@@ -210,7 +267,7 @@ function emitPolymorphicValidation(
   lines.push("if !ok {");
   lines.push(`t.Fatalf("Expected ${fieldName} to be ${pkg}.${childType.typeName.name}, got %T", ${expr})`);
   lines.push("}");
-  emitStructuredValidations(lines, localName, value, childType, pkg, true);
+  emitStructuredValidations(lines, localName, value, childType, pkg, true, reflectiveHelper);
 }
 
 function emitNestedObjectValidation(
@@ -227,6 +284,15 @@ function emitNestedObjectValidation(
     const nestedExpr = `${expr}.${nestedField}`;
 
     if (typeof expected === "string") {
+      if (!prop.isScalar && prop.type) {
+        const shorthandField = findStringCoercionField(prop.type);
+        if (shorthandField) {
+          const targetProp = prop.type.properties.find(candidate => candidate.name === shorthandField);
+          emitScalarSampleValidation(lines, `${nestedExpr}.${goFieldName(shorthandField)}`, `${fieldName}.${nestedField}.${goFieldName(shorthandField)}`, expected, targetProp?.isOptional ?? false);
+        }
+        continue;
+      }
+
       if (prop.isOptional) {
         lines.push(`if ${nestedExpr} == nil || *${nestedExpr} != ${goStringLiteral(expected)} {`);
         lines.push(`t.Errorf(\`Expected ${fieldName}.${nestedField} to be ${goStringLiteral(expected)}, got %v\`, ${nestedExpr})`);
@@ -238,6 +304,18 @@ function emitNestedObjectValidation(
       }
     }
   }
+
+}
+
+function findStringCoercionField(node: TypeNode): string | undefined {
+  const coercion = node.coercions.find(entry => entry.scalar === "string");
+  if (!coercion) return undefined;
+
+  for (const [key, value] of Object.entries(coercion.expansion)) {
+    if (value === "{value}") return key;
+  }
+
+  return node.properties.find(prop => prop.name === "kind")?.name;
 }
 
 function emitWireValidationTest(
@@ -283,6 +361,55 @@ function emitWireValidationTest(
   lines.push("}");
 }
 
+function needsReflectiveCollectionValidation(node: TypeNode, examples: TestExample[]): boolean {
+  return examples.some(example => node.properties.some(prop => {
+    const value = example.sample[prop.name];
+    if (!prop.isCollection || prop.isScalar || !prop.type || !Array.isArray(value)) return false;
+    return value.some(item =>
+      item && typeof item === "object" && !Array.isArray(item) && !findSampleChildType(prop, item)
+    );
+  }));
+}
+
+function emitReflectiveFieldHelpers(lines: string[], helperName: string): void {
+  lines.push("");
+  lines.push(`func ${helperName}(t *testing.T, value interface{}, fieldName string, expected string, displayName string) {`);
+  lines.push("t.Helper()");
+  lines.push("field := reflect.ValueOf(value)");
+  lines.push("if field.Kind() == reflect.Pointer {");
+  lines.push("if field.IsNil() {");
+  lines.push("t.Fatalf(\"Expected %s to be populated\", displayName)");
+  lines.push("}");
+  lines.push("field = field.Elem()");
+  lines.push("}");
+  lines.push("if field.Kind() != reflect.Struct {");
+  lines.push("t.Fatalf(\"Expected %s receiver to be a struct, got %T\", displayName, value)");
+  lines.push("}");
+  lines.push("member := field.FieldByName(fieldName)");
+  lines.push("if !member.IsValid() {");
+  lines.push("t.Fatalf(\"Expected %s to have field %s, got %T\", displayName, fieldName, value)");
+  lines.push("}");
+  lines.push("if member.Kind() == reflect.Pointer {");
+  lines.push("if member.IsNil() {");
+  lines.push("t.Fatalf(\"Expected %s to be populated\", displayName)");
+  lines.push("}");
+  lines.push("member = member.Elem()");
+  lines.push("}");
+  lines.push("if member.Kind() == reflect.Interface {");
+  lines.push("if member.IsNil() {");
+  lines.push("t.Fatalf(\"Expected %s to be populated\", displayName)");
+  lines.push("}");
+  lines.push("member = member.Elem()");
+  lines.push("}");
+  lines.push("if member.Kind() != reflect.String {");
+  lines.push("t.Fatalf(\"Expected %s to be a string field, got %s\", displayName, member.Kind())");
+  lines.push("}");
+  lines.push("if got := member.String(); got != expected {");
+  lines.push("t.Errorf(\"Expected %s to be %q, got %q\", displayName, expected, got)");
+  lines.push("}");
+  lines.push("}");
+}
+
 // ============================================================================
 // Main entry point
 // ============================================================================
@@ -298,6 +425,7 @@ export function emitGoTest(ctx: BaseTestContext & { importPath: string }): strin
   const typeName = ctx.node.typeName.name;
   const pkg = ctx.package ?? "";
   const isAbstract = ctx.isAbstract;
+  const needsReflect = needsReflectiveCollectionValidation(ctx.node, ctx.examples);
 
   // File header (template lines 14-16)
   lines.push("// Code generated by Typra emitter; DO NOT EDIT.");
@@ -309,6 +437,9 @@ export function emitGoTest(ctx: BaseTestContext & { importPath: string }): strin
     lines.push(""); // {% if true %}\n — blank line between package and import
     lines.push(`import (`);
     lines.push(`"encoding/json"`);
+    if (needsReflect) {
+      lines.push(`"reflect"`);
+    }
     lines.push(`"testing"`);
     lines.push(``);
     lines.push(`"gopkg.in/yaml.v3"`);
@@ -368,6 +499,10 @@ export function emitGoTest(ctx: BaseTestContext & { importPath: string }): strin
     lines.push(""); // {% endif %}\n (line 271)
   } else {
     lines.push(""); // {% if false %}...{% endif %}\n — 1 \n
+  }
+
+  if (needsReflect) {
+    emitReflectiveFieldHelpers(lines, reflectiveHelperName(typeName));
   }
 
   return lines.join("\n") + "\n";

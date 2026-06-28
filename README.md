@@ -15,8 +15,8 @@ Typra owns generic emitter behavior that is not tied to any one product domain:
 - Type graph discovery, lowering, and expression expansion.
 - TypeSpec decorators such as `@sample`, `@abstract`, `@coerce`,
   `@@factory`, `@@method`, `@@knownAs`, `@@defaultFor`, and `@@protocol`.
-- Language emitters for TypeScript, Python, C#, Go, Rust, Markdown, and JSON
-  AST output.
+- Language emitters for TypeScript, Python, C#, Go, Java, Rust, Markdown, and
+  JSON AST output.
 - Synthetic TypeSpec fixtures that exercise supported model shapes.
 - Generated-file marker and manifest recording infrastructure.
 
@@ -35,6 +35,20 @@ Typra currently validates its emitter against TypeSpec compiler and JSON schema
 emitter `1.10.0`. Running with an unvalidated TypeSpec toolchain reports a
 clear diagnostic; set `allow-unsupported-typespec-version: true` only when you
 intentionally accept that generated output may churn.
+
+## 0.3.0 release highlights
+
+`0.3.0` adds Java as a generated runtime target and raises emitter confidence
+across the supported languages:
+
+- Java model emission with `load`, `save`, `fromJson`, `toJson`, provider wire
+  mapping, scalar coercion, enum handling, and polymorphic dispatch support.
+- Generated Java fixture tests that compile and run during fixture validation.
+- Stronger Go fixture tests and runtime behavior for scalar slices, JSON
+  round-trips, polymorphic values, and malformed JSON handling.
+- Executable cross-language fixture conformance across TypeScript, Python, C#,
+  Go, Java, and Rust.
+- CI setup for Go and Java toolchains.
 
 ## TypeSpec configuration
 
@@ -88,10 +102,10 @@ packages\typra-emitter\fixtures\shapes\
                                Synthetic TypeSpec fixture coverage
 ```
 
-The current fixture emits TypeScript, Python, C#, Go, Rust, Markdown, and JSON
-AST from `packages\typra-emitter\fixtures\shapes\main.tsp`. Fixture validation
-checks generated metadata, verifier CLI output, consumer smoke wiring, and
-cross-language generated-code compile/test surfaces.
+The current fixture emits TypeScript, Python, C#, Go, Java, Rust, Markdown, and
+JSON AST from `packages\typra-emitter\fixtures\shapes\main.tsp`. Fixture
+validation checks generated metadata, verifier CLI output, consumer smoke
+wiring, and cross-language generated-code compile/test surfaces.
 
 ## Development
 

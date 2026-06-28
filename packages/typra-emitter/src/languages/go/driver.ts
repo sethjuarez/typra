@@ -61,10 +61,14 @@ export const generateGo = async (
 
   // Collect all polymorphic type names across all nodes
   const polymorphicTypeNames = new Set<string>();
+  const scalarCoercibleTypeNames = new Set<string>();
   for (const n of nodes) {
     const polyTypes = n.retrievePolymorphicTypes();
     if (polyTypes) {
       polymorphicTypeNames.add(n.typeName.name);
+    }
+    if (n.coercions.length > 0) {
+      scalarCoercibleTypeNames.add(n.typeName.name);
     }
   }
 
@@ -78,7 +82,7 @@ export const generateGo = async (
     if (!n.base) {
       const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
       // Go stays flat: pass group as a header comment only, no subfolder emission
-      const fileContent = emitGoFileContent(fileDecl.types, packageName, visitor, polymorphicTypeNames, fileDecl.enums, n.group || "");
+      const fileContent = emitGoFileContent(fileDecl.types, packageName, visitor, polymorphicTypeNames, fileDecl.enums, n.group || "", scalarCoercibleTypeNames);
       const fileName = toSnakeCase(n.typeName.name) + '.go';
       await emitGoFile(context, fileName, fileContent, emitTarget["output-dir"], emitTarget["output-dir"]);
     }

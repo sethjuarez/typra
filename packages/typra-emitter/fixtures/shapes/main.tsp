@@ -29,6 +29,10 @@ model FixtureRoot {
   @doc("Discriminated union field")
   content: FixtureContent;
 
+  @sample(#{ contentItems: #[#{ kind: "text", text: "hello from a polymorphic collection" }] })
+  @doc("Array of discriminated union values")
+  contentItems: FixtureContent[];
+
   @sample(#{ status: "ready" })
   @doc("Closed string union field")
   status: FixtureStatus;
@@ -90,6 +94,29 @@ model FixtureTool {
 model FixtureToolbox {
   @sample(#{ tools: #[#{ name: "search", command: "search --query" }] })
   tools: FixtureTool[];
+}
+
+model FixtureShortcut {
+  @sample(#{ reference: "ref-shortcut" })
+  reference: FixtureReference;
+}
+
+model FixtureInput {
+  @sample(#{ name: "input" })
+  name: string;
+
+  @sample(#{ defaultValue: "fallback" })
+  defaultValue?: unknown;
+}
+
+model FixtureInputSet {
+  @sample(#{ inputs: #[#{ name: "input", defaultValue: "fallback" }] })
+  inputs: FixtureInput[];
+}
+
+model FixtureStopOptions {
+  @sample(#{ stopSequences: #["\n"] })
+  stopSequences: string[];
 }
 
 @@knownAs(WireOptions.maxOutputTokens, "openai", "max_completion_tokens");

@@ -140,7 +140,10 @@ function buildValidations(
   options: TestContextOptions
 ): PropertyValidation[] {
   return Object.keys(sample)
-    .filter(key => typeof sample[key] !== 'object')
+    .filter(key => {
+      const prop = node.properties.find(p => p.name === key);
+      return typeof sample[key] !== 'object' && (prop?.isScalar || prop?.enumName);
+    })
     .map(key => {
       const prop = node.properties.find(p => p.name === key);
       const rawValue = sample[key];
