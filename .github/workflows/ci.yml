@@ -28,6 +28,17 @@ jobs:
       - name: Setup npm
         run: npm install -g npm@11
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.x
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - name: Install dependencies
         run: npm ci
 
@@ -68,6 +79,17 @@ jobs:
 
       - name: Setup npm
         run: npm install -g npm@11
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.x
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
 
       - name: Configure matrix toolchain
         env:

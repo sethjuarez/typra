@@ -123,6 +123,7 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
     }
 
     return {
+      sample,
       json: jsonStr.split('\n'),
       yaml: yamlStr.split('\n'),
       validations: buildValidations(sample, node, options),

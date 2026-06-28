@@ -20,6 +20,10 @@ options:
         test-dir: "generated/fixtures/go/tests"
         import-path: "fixtures"
         package-name: "fixtures"
+        format: true
+      - type: Java
+        output-dir: "generated/fixtures/java"
+        package-name: "typra.fixtures"
         format: false
       - type: CSharp
         output-dir: "generated/fixtures/csharp"

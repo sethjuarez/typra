@@ -1,13 +1,91 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const packageRoot = process.cwd();
 const generatedRoot = path.join(packageRoot, "generated", "fixtures");
 const failures = [];
+const fixtureRootSample = {
+  name: "fixture-root",
+  description: "A generated fixture with broad emitter coverage.",
+  tags: ["typespec", "emitter", "validation"],
+  metadata: {
+    source: "fixture",
+    version: 1,
+  },
+  owner: {
+    id: "owner-1",
+    displayName: "Fixture Owner",
+  },
+  content: {
+    kind: "text",
+    text: "hello from a polymorphic sample",
+  },
+  status: "ready",
+  mode: "batch",
+};
+const wireOptionsSample = {
+  maxOutputTokens: 256,
+  temperature: 0.7,
+};
+const imageContentSample = {
+  kind: "image",
+  url: "https://example.com/fixture.png",
+};
+const conformanceExpected = normalizeConformanceValue({
+  root: fixtureRootSample,
+  imageContent: imageContentSample,
+  openai: {
+    max_completion_tokens: 256,
+    temperature: 0.7,
+  },
+  anthropic: {
+    max_tokens: 256,
+  },
+  reference: {
+    id: "ref-coerced",
+    label: "coerced reference",
+  },
+});
 
 function fail(message) {
   failures.push(message);
+}
+
+function normalizeConformanceValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeConformanceValue(item));
+  }
+  if (value && typeof value === "object") {
+    const normalized = {};
+    for (const key of Object.keys(value).sort((left, right) => left.localeCompare(right))) {
+      normalized[key] = normalizeConformanceValue(value[key]);
+    }
+    return normalized;
+  }
+  if (typeof value === "number") {
+    return Math.round(value * 1_000_000) / 1_000_000;
+  }
+  return value;
+}
+
+function assertConformanceResult(target, rawOutput) {
+  let actual;
+  try {
+    actual = normalizeConformanceValue(JSON.parse(rawOutput));
+  } catch (error) {
+    const lastLine = rawOutput.split(/\r?\n/).map(line => line.trim()).filter(Boolean).at(-1);
+    try {
+      actual = normalizeConformanceValue(JSON.parse(lastLine ?? ""));
+    } catch {
+      fail(`Executable conformance for ${target} did not emit valid JSON: ${error.message}\n${rawOutput}`);
+      return;
+    }
+  }
+
+  if (JSON.stringify(actual) !== JSON.stringify(conformanceExpected)) {
+    fail(`Executable conformance for ${target} did not match canonical output.\nExpected: ${JSON.stringify(conformanceExpected)}\nActual: ${JSON.stringify(actual)}`);
+  }
 }
 
 function requirePath(relativePath) {
@@ -36,6 +114,50 @@ function assertArrayIncludes(label, actual, ...expected) {
   for (const value of expected) {
     if (!actual.includes(value)) {
       fail(`${label} does not include expected value: ${value}`);
+    }
+  }
+}
+
+function assertConformanceMatrix() {
+  const matrix = readJson(path.join("fixtures", "conformance-matrix.json"));
+  if (!matrix) return;
+
+  if (matrix.version !== 1) {
+    fail("Conformance matrix has an unexpected version.");
+  }
+  if (!Array.isArray(matrix.targets) || matrix.targets.length === 0) {
+    fail("Conformance matrix must declare at least one target.");
+    return;
+  }
+  if (!Array.isArray(matrix.cases) || matrix.cases.length === 0) {
+    fail("Conformance matrix must declare at least one case.");
+    return;
+  }
+
+  for (const conformanceCase of matrix.cases) {
+    if (!conformanceCase.id) {
+      fail("Conformance matrix contains a case without an id.");
+      continue;
+    }
+
+    for (const target of matrix.targets) {
+      const evidence = conformanceCase.evidence?.[target];
+      if (!Array.isArray(evidence) || evidence.length === 0) {
+        fail(`Conformance case ${conformanceCase.id} is missing evidence for target ${target}.`);
+        continue;
+      }
+
+      for (const item of evidence) {
+        if (!item.path) {
+          fail(`Conformance case ${conformanceCase.id}/${target} contains evidence without a path.`);
+          continue;
+        }
+        if (!Array.isArray(item.snippets) || item.snippets.length === 0) {
+          fail(`Conformance case ${conformanceCase.id}/${target}/${item.path} has no snippets.`);
+          continue;
+        }
+        assertIncludes(item.path, ...item.snippets);
+      }
     }
   }
 }
@@ -239,6 +361,22 @@ function runCommand(label, command, args, options = {}) {
   }
 }
 
+function runGoFormatCheck(sourceDir) {
+  if (!commandExists("gofmt")) {
+    fail("Generated Go formatting validation cannot run because gofmt is not available.");
+    return;
+  }
+  try {
+    const output = execFileSync("gofmt", ["-l", "."], { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    if (output) {
+      fail(`Generated Go files are not gofmt-formatted:\n${output}`);
+    }
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated Go formatting validation failed:\n${output || error.message}`);
+  }
+}
+
 function runPythonCompile() {
   const sourceDir = path.join(generatedRoot, "python");
   const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".py"));
@@ -268,7 +406,9 @@ function runGoTests() {
     "",
   ].join("\n"));
   try {
+    runGoFormatCheck(sourceDir);
     runCommand("Generated Go module dependency resolution", "go", ["mod", "tidy"], { cwd: sourceDir });
+    runCommand("Generated Go vet", "go", ["vet", "./..."], { cwd: sourceDir });
     runCommand("Generated Go source and tests", "go", ["test", "./..."], { cwd: sourceDir });
   } finally {
     for (const tempPath of [modPath, sumPath]) {
@@ -365,6 +505,24 @@ function runCSharpBuild() {
   }
 }
 
+function runJavaBuild() {
+  const sourceDir = path.join(generatedRoot, "java");
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".java"));
+  if (sourceFiles.length === 0) {
+    fail("No generated Java files found to build.");
+    return;
+  }
+
+  const classesDir = path.join(sourceDir, ".classes");
+  rmSync(classesDir, { recursive: true, force: true });
+  mkdirSync(classesDir, { recursive: true });
+  try {
+    runCommand("Generated Java source build", "javac", ["-d", classesDir, ...sourceFiles], { cwd: sourceDir });
+  } finally {
+    rmSync(classesDir, { recursive: true, force: true });
+  }
+}
+
 function buildCSharpValidationStubs(sourceDir) {
   const members = [];
   for (const file of walkFiles(sourceDir, file => file.endsWith(".cs") && !file.includes(`${path.sep}tests${path.sep}`))) {
@@ -401,8 +559,459 @@ function buildCSharpValidationStubs(sourceDir) {
   ].join("\n");
 }
 
+function runTypeScriptExecutableConformance() {
+  const sourceDir = path.join(generatedRoot, "typescript");
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".ts") && !file.includes(`${path.sep}.typra-conformance${path.sep}`) && !file.includes(`${path.sep}tests${path.sep}`));
+  if (sourceFiles.length === 0) {
+    fail("No generated TypeScript files found for executable conformance.");
+    return;
+  }
+
+  const runnerPath = path.join(sourceDir, "conformance.validate.ts");
+  const configPath = path.join(sourceDir, "tsconfig.conformance.json");
+  const outDir = path.join(sourceDir, ".typra-conformance");
+  writeFileSync(runnerPath, [
+    'import { FixtureContent, FixtureReference, FixtureRoot, WireOptions } from "./index";',
+    "",
+    `const root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)});`,
+    `const imageContent = FixtureContent.load(${JSON.stringify(imageContentSample)});`,
+    `const wire = WireOptions.load(${JSON.stringify(wireOptionsSample)});`,
+    'const reference = FixtureReference.load("ref-coerced" as any);',
+    "console.log(JSON.stringify({",
+    "  root: root.save(),",
+    "  imageContent: imageContent.save(),",
+    '  openai: wire.toWire("openai"),',
+    '  anthropic: wire.toWire("anthropic"),',
+    "  reference: reference.save(),",
+    "}));",
+    "",
+  ].join("\n"));
+  writeFileSync(configPath, JSON.stringify({
+    compilerOptions: {
+      target: "ES2022",
+      module: "commonjs",
+      moduleResolution: "node",
+      esModuleInterop: true,
+      skipLibCheck: true,
+      types: ["node"],
+      lib: ["ES2022"],
+      outDir,
+      rootDir: sourceDir,
+    },
+    files: [...sourceFiles, runnerPath],
+  }, null, 2));
+
+  const tscCli = findTypeScriptCli(packageRoot);
+  if (!tscCli) return;
+
+  try {
+    execFileSync(process.execPath, [tscCli, "-p", configPath], { cwd: packageRoot, stdio: "pipe" });
+    writeFileSync(path.join(outDir, "package.json"), JSON.stringify({ type: "commonjs" }, null, 2));
+    const output = execFileSync(process.execPath, [path.join(outDir, "conformance.validate.js")], { cwd: outDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    assertConformanceResult("typescript", output);
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated TypeScript executable conformance failed:\n${output || error.message}`);
+  } finally {
+    for (const tempPath of [runnerPath, configPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    }
+    if (existsSync(outDir)) {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  }
+}
+
+function runPythonExecutableConformance() {
+  const sourceDir = path.join(generatedRoot, "python");
+  const runner = [
+    "import json",
+    "import sys",
+    `sys.path.insert(0, ${JSON.stringify(generatedRoot)})`,
+    "from python import FixtureContent, FixtureReference, FixtureRoot, WireOptions",
+    `root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)})`,
+    `image_content = FixtureContent.load(${JSON.stringify(imageContentSample)})`,
+    `wire = WireOptions.load(${JSON.stringify(wireOptionsSample)})`,
+    'reference = FixtureReference.load("ref-coerced")',
+    "print(json.dumps({",
+    '    "root": root.save(),',
+    '    "imageContent": image_content.save(),',
+    '    "openai": wire.to_wire("openai"),',
+    '    "anthropic": wire.to_wire("anthropic"),',
+    '    "reference": reference.save(),',
+    "}, sort_keys=True))",
+    "",
+  ].join("\n");
+
+  if (!existsSync(sourceDir)) {
+    fail("No generated Python directory found for executable conformance.");
+    return;
+  }
+  if (!commandExists("python")) {
+    fail("Generated Python executable conformance cannot run because python is not available.");
+    return;
+  }
+
+  try {
+    const output = execFileSync("python", ["-c", runner], { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    assertConformanceResult("python", output);
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated Python executable conformance failed:\n${output || error.message}`);
+  }
+}
+
+function runGoExecutableConformance() {
+  const sourceDir = path.join(generatedRoot, "go");
+  const modPath = path.join(sourceDir, "go.mod");
+  const sumPath = path.join(sourceDir, "go.sum");
+  const cmdDir = path.join(sourceDir, "cmd", "conformance");
+  const runnerPath = path.join(cmdDir, "main.go");
+  if (!existsSync(sourceDir)) {
+    fail("No generated Go directory found for executable conformance.");
+    return;
+  }
+
+  writeFileSync(modPath, [
+    "module fixtures",
+    "",
+    "go 1.22",
+    "",
+    "require gopkg.in/yaml.v3 v3.0.1",
+    "",
+  ].join("\n"));
+  rmSync(cmdDir, { recursive: true, force: true });
+  mkdirp(cmdDir);
+  writeFileSync(runnerPath, [
+    "package main",
+    "",
+    "import (",
+    '\t"encoding/json"',
+    '\t"fmt"',
+    "",
+    '\t"fixtures"',
+    ")",
+    "",
+    "func main() {",
+    "\tloadCtx := fixtures.NewLoadContext()",
+    "\tsaveCtx := fixtures.NewSaveContext()",
+    "\troot, err := fixtures.LoadFixtureRoot(map[string]interface{}{",
+    '\t\t"name": "fixture-root",',
+    '\t\t"description": "A generated fixture with broad emitter coverage.",',
+    '\t\t"tags": []interface{}{"typespec", "emitter", "validation"},',
+    '\t\t"metadata": map[string]interface{}{"source": "fixture", "version": 1},',
+    '\t\t"owner": map[string]interface{}{"id": "owner-1", "displayName": "Fixture Owner"},',
+    '\t\t"content": map[string]interface{}{"kind": "text", "text": "hello from a polymorphic sample"},',
+    '\t\t"status": "ready",',
+    '\t\t"mode": "batch",',
+    "\t}, loadCtx)",
+    "\tif err != nil {",
+    "\t\tpanic(err)",
+    "\t}",
+    '\twire, err := fixtures.LoadWireOptions(map[string]interface{}{"maxOutputTokens": 256, "temperature": 0.7}, loadCtx)',
+    "\tif err != nil {",
+    "\t\tpanic(err)",
+    "\t}",
+    '\treference, err := fixtures.LoadFixtureReference("ref-coerced", loadCtx)',
+    "\tif err != nil {",
+    "\t\tpanic(err)",
+    "\t}",
+    '\timageContent, err := fixtures.LoadFixtureContent(map[string]interface{}{"kind": "image", "url": "https://example.com/fixture.png"}, loadCtx)',
+    "\tif err != nil {",
+    "\t\tpanic(err)",
+    "\t}",
+    "\timageContentSaved := imageContent.(interface {",
+    "\t\tSave(*fixtures.SaveContext) map[string]interface{}",
+    "\t}).Save(saveCtx)",
+    "\tencoded, err := json.Marshal(map[string]interface{}{",
+    '\t\t"root": root.Save(saveCtx),',
+    '\t\t"imageContent": imageContentSaved,',
+    '\t\t"openai": wire.ToWire("openai"),',
+    '\t\t"anthropic": wire.ToWire("anthropic"),',
+    '\t\t"reference": reference.Save(saveCtx),',
+    "\t})",
+    "\tif err != nil {",
+    "\t\tpanic(err)",
+    "\t}",
+    "\tfmt.Println(string(encoded))",
+    "}",
+    "",
+  ].join("\n"));
+
+  try {
+    const initialFailureCount = failures.length;
+    runCommand("Generated Go conformance module dependency resolution", "go", ["mod", "tidy"], { cwd: sourceDir });
+    if (failures.length > initialFailureCount) return;
+    const output = execFileSync("go", ["run", "./cmd/conformance"], { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    assertConformanceResult("go", output);
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated Go executable conformance failed:\n${output || error.message}`);
+  } finally {
+    for (const tempPath of [modPath, sumPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    }
+    rmSync(path.join(sourceDir, "cmd"), { recursive: true, force: true });
+  }
+}
+
+function runRustExecutableConformance() {
+  const sourceDir = path.join(generatedRoot, "rust");
+  const cargoPath = path.join(sourceDir, "Cargo.toml");
+  const lockPath = path.join(sourceDir, "Cargo.lock");
+  const libPath = path.join(sourceDir, "lib.rs");
+  const runnerPath = path.join(sourceDir, "conformance_validate.rs");
+  const targetDir = path.join(sourceDir, "target");
+  if (!existsSync(sourceDir)) {
+    fail("No generated Rust directory found for executable conformance.");
+    return;
+  }
+
+  writeFileSync(cargoPath, [
+    "[package]",
+    'name = "fixtures"',
+    'version = "0.0.0"',
+    'edition = "2021"',
+    "",
+    "[dependencies]",
+    'async-trait = "0.1"',
+    'serde = { version = "1", features = ["derive"] }',
+    'serde_json = "1"',
+    'serde_yaml = "0.9"',
+    "",
+    "[lib]",
+    'path = "lib.rs"',
+    "",
+    "[[bin]]",
+    'name = "conformance_validate"',
+    'path = "conformance_validate.rs"',
+    "",
+  ].join("\n"));
+  writeFileSync(libPath, '#[path = "mod.rs"] pub mod model;\n');
+  writeFileSync(runnerPath, [
+    "use fixtures::model::*;",
+    "use serde_json::json;",
+    "",
+    "fn main() {",
+    "    let load_ctx = LoadContext::new();",
+    "    let save_ctx = SaveContext::new();",
+    "    let root = FixtureRoot::load_from_value(&json!({",
+    '        "name": "fixture-root",',
+    '        "description": "A generated fixture with broad emitter coverage.",',
+    '        "tags": ["typespec", "emitter", "validation"],',
+    '        "metadata": {"source": "fixture", "version": 1},',
+    '        "owner": {"id": "owner-1", "displayName": "Fixture Owner"},',
+    '        "content": {"kind": "text", "text": "hello from a polymorphic sample"},',
+    '        "status": "ready",',
+    '        "mode": "batch"',
+    "    }), &load_ctx);",
+    '    let image_content = FixtureContent::load_from_value(&json!({"kind": "image", "url": "https://example.com/fixture.png"}), &load_ctx);',
+    '    let wire = WireOptions::load_from_value(&json!({"maxOutputTokens": 256, "temperature": 0.7}), &load_ctx);',
+    '    let reference = FixtureReference::load_from_value(&json!("ref-coerced"), &load_ctx);',
+    "    println!(\"{}\", json!({",
+    '        "root": root.to_value(&save_ctx),',
+    '        "imageContent": image_content.to_value(&save_ctx),',
+    '        "openai": wire.to_wire("openai"),',
+    '        "anthropic": wire.to_wire("anthropic"),',
+    '        "reference": reference.to_value(&save_ctx)',
+    "    }));",
+    "}",
+    "",
+  ].join("\n"));
+
+  try {
+    const output = execFileSync("cargo", ["run", "--quiet", "--bin", "conformance_validate"], { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    assertConformanceResult("rust", output);
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated Rust executable conformance failed:\n${output || error.message}`);
+  } finally {
+    for (const tempPath of [cargoPath, lockPath, libPath, runnerPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    }
+    if (existsSync(targetDir)) {
+      rmSync(targetDir, { recursive: true, force: true });
+    }
+  }
+}
+
+function runCSharpExecutableConformance() {
+  const sourceDir = path.join(generatedRoot, "csharp");
+  const projectPath = path.join(sourceDir, "TypraFixtureConformance.csproj");
+  const stubsPath = path.join(sourceDir, "TypraFixtureConformance.Stubs.cs");
+  const programPath = path.join(sourceDir, "TypraFixtureConformance.Program.cs");
+  const binDir = path.join(sourceDir, "bin");
+  const objDir = path.join(sourceDir, "obj");
+  if (!existsSync(sourceDir)) {
+    fail("No generated C# directory found for executable conformance.");
+    return;
+  }
+
+  writeFileSync(projectPath, [
+    '<Project Sdk="Microsoft.NET.Sdk">',
+    "  <PropertyGroup>",
+    "    <OutputType>Exe</OutputType>",
+    "    <TargetFramework>net8.0</TargetFramework>",
+    "    <Nullable>enable</Nullable>",
+    "    <ImplicitUsings>enable</ImplicitUsings>",
+    "  </PropertyGroup>",
+    "  <ItemGroup>",
+    '    <Compile Remove="tests/**/*.cs" />',
+    '    <PackageReference Include="YamlDotNet" Version="16.3.0" />',
+    "  </ItemGroup>",
+    "</Project>",
+    "",
+  ].join("\n"));
+  writeFileSync(stubsPath, buildCSharpValidationStubs(sourceDir));
+  writeFileSync(programPath, [
+    "using System.Text.Json;",
+    "using Typra.Fixtures;",
+    "",
+    "var root = FixtureRoot.Load(new Dictionary<string, object?>",
+    "{",
+    '    ["name"] = "fixture-root",',
+    '    ["description"] = "A generated fixture with broad emitter coverage.",',
+    '    ["tags"] = new List<object?> { "typespec", "emitter", "validation" },',
+    '    ["metadata"] = new Dictionary<string, object?> { ["source"] = "fixture", ["version"] = 1 },',
+    '    ["owner"] = new Dictionary<string, object?> { ["id"] = "owner-1", ["displayName"] = "Fixture Owner" },',
+    '    ["content"] = new Dictionary<string, object?> { ["kind"] = "text", ["text"] = "hello from a polymorphic sample" },',
+    '    ["status"] = "ready",',
+    '    ["mode"] = "batch",',
+    "});",
+    'var wire = WireOptions.Load(new Dictionary<string, object?> { ["maxOutputTokens"] = 256, ["temperature"] = 0.7 });',
+    'var imageContent = FixtureContent.Load(new Dictionary<string, object?> { ["kind"] = "image", ["url"] = "https://example.com/fixture.png" });',
+    'var reference = FixtureReference.FromJson("\\"ref-coerced\\"");',
+    "Console.WriteLine(JsonSerializer.Serialize(new Dictionary<string, object?>",
+    "{",
+    '    ["root"] = root.Save(),',
+    '    ["imageContent"] = imageContent.Save(),',
+    '    ["openai"] = wire.ToWire("openai"),',
+    '    ["anthropic"] = wire.ToWire("anthropic"),',
+    '    ["reference"] = reference.Save(),',
+    "}));",
+    "",
+  ].join("\n"));
+
+  try {
+    const output = execFileSync("dotnet", ["run", "--project", projectPath, "--verbosity", "quiet"], { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    assertConformanceResult("csharp", output);
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated C# executable conformance failed:\n${output || error.message}`);
+  } finally {
+    for (const tempPath of [projectPath, stubsPath, programPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    }
+    for (const tempDir of [binDir, objDir]) {
+      if (existsSync(tempDir)) {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    }
+  }
+}
+
+function runJavaExecutableConformance() {
+  const sourceDir = path.join(generatedRoot, "java");
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".java"));
+  const runnerPath = path.join(sourceDir, "ConformanceValidate.java");
+  const classesDir = path.join(sourceDir, ".classes");
+  if (sourceFiles.length === 0) {
+    fail("No generated Java files found for executable conformance.");
+    return;
+  }
+
+  writeFileSync(runnerPath, [
+    "package typra.fixtures;",
+    "",
+    "import java.util.LinkedHashMap;",
+    "import java.util.Map;",
+    "",
+    "public final class ConformanceValidate {",
+    "  public static void main(String[] args) {",
+    "    Map<String, Object> owner = new LinkedHashMap<>();",
+    '    owner.put("id", "owner-1");',
+    '    owner.put("displayName", "Fixture Owner");',
+    "    Map<String, Object> metadata = new LinkedHashMap<>();",
+    '    metadata.put("source", "fixture");',
+    '    metadata.put("version", 1);',
+    "    Map<String, Object> content = new LinkedHashMap<>();",
+    '    content.put("kind", "text");',
+    '    content.put("text", "hello from a polymorphic sample");',
+    "    Map<String, Object> imageContentData = new LinkedHashMap<>();",
+    '    imageContentData.put("kind", "image");',
+    '    imageContentData.put("url", "https://example.com/fixture.png");',
+    "    Map<String, Object> rootData = new LinkedHashMap<>();",
+    '    rootData.put("name", "fixture-root");',
+    '    rootData.put("description", "A generated fixture with broad emitter coverage.");',
+    '    rootData.put("tags", java.util.List.of("typespec", "emitter", "validation"));',
+    '    rootData.put("metadata", metadata);',
+    '    rootData.put("owner", owner);',
+    '    rootData.put("content", content);',
+    '    rootData.put("status", "ready");',
+    '    rootData.put("mode", "batch");',
+    "    Map<String, Object> wireData = new LinkedHashMap<>();",
+    '    wireData.put("maxOutputTokens", 256);',
+    '    wireData.put("temperature", 0.7);',
+    "    FixtureRoot root = FixtureRoot.load(rootData, new LoadContext());",
+    "    FixtureContent imageContent = FixtureContent.load(imageContentData, new LoadContext());",
+    "    WireOptions wire = WireOptions.load(wireData, new LoadContext());",
+    '    FixtureReference reference = FixtureReference.load("ref-coerced", new LoadContext());',
+    "    Map<String, Object> output = new LinkedHashMap<>();",
+    '    output.put("root", root.save(new SaveContext()));',
+    '    output.put("imageContent", imageContent.save(new SaveContext()));',
+    '    output.put("openai", wire.toWire("openai"));',
+    '    output.put("anthropic", wire.toWire("anthropic"));',
+    '    output.put("reference", reference.save(new SaveContext()));',
+    "    System.out.println(TypraJson.stringify(output));",
+    "  }",
+    "}",
+    "",
+  ].join("\n"));
+
+  rmSync(classesDir, { recursive: true, force: true });
+  mkdirSync(classesDir, { recursive: true });
+  try {
+    const initialFailureCount = failures.length;
+    runCommand("Generated Java executable conformance build", "javac", ["-d", classesDir, ...sourceFiles, runnerPath], { cwd: sourceDir });
+    if (failures.length > initialFailureCount) return;
+    const output = execFileSync("java", ["-cp", classesDir, "typra.fixtures.ConformanceValidate"], { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    assertConformanceResult("java", output);
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated Java executable conformance failed:\n${output || error.message}`);
+  } finally {
+    if (existsSync(runnerPath)) {
+      unlinkSync(runnerPath);
+    }
+    rmSync(classesDir, { recursive: true, force: true });
+  }
+}
+
+function mkdirp(dir) {
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+}
+
+function runExecutableConformance() {
+  runTypeScriptExecutableConformance();
+  runPythonExecutableConformance();
+  runGoExecutableConformance();
+  runRustExecutableConformance();
+  runCSharpExecutableConformance();
+  runJavaExecutableConformance();
+}
+
 function assertGeneratedTargets() {
-  for (const target of ["typescript", "python", "go", "csharp", "rust", "markdown", "json-ast"]) {
+  for (const target of ["typescript", "python", "go", "java", "csharp", "rust", "markdown", "json-ast"]) {
     requirePath(path.join("generated", "fixtures", target));
   }
 }
@@ -453,6 +1062,31 @@ function assertStaticFixtureCoverage() {
     "max_completion_tokens",
   );
   assertIncludes(
+    path.join("generated", "fixtures", "go", "tests", "fixture_root_test.go"),
+    "Expected Tags length to be 3",
+    "Expected Content to be fixtures.TextContent",
+    "Expected Owner.DisplayName",
+    "TestFixtureRootFromJSONInvalid",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "go", "tests", "wire_options_test.go"),
+    "TestWireOptionsToWire",
+    "max_completion_tokens",
+    "max_tokens",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "java", "WireOptions.java"),
+    "public Map<String, Object> toWire(String provider)",
+    "max_completion_tokens",
+    "max_tokens",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "java", "FixtureRoot.java"),
+    "fromValue(String value)",
+    "result.status = FixtureStatus.fromValue",
+    "result.put(\"status\", obj.status.value)",
+  );
+  assertIncludes(
     path.join("generated", "fixtures", "csharp", "FixtureReference.cs"),
     "public static FixtureReference Named(",
     "Display(",
@@ -498,7 +1132,7 @@ function assertExportSurfaceSnapshot() {
   }
 
   const targets = new Map((snapshot.targets ?? []).map(target => [target.target, target]));
-  for (const target of ["typescript", "python", "go", "csharp", "rust", "markdown"]) {
+  for (const target of ["typescript", "python", "go", "java", "csharp", "rust", "markdown"]) {
     if (!targets.has(target)) {
       fail(`Export surface snapshot is missing target: ${target}`);
     }
@@ -553,6 +1187,9 @@ function assertExportSurfaceSnapshot() {
 
   if (targets.get("go")?.packageName !== "fixtures") {
     fail(`Go export surface package name drifted: ${targets.get("go")?.packageName}`);
+  }
+  if (targets.get("java")?.packageName !== "typra.fixtures") {
+    fail(`Java export surface package name drifted: ${targets.get("java")?.packageName}`);
   }
 
   const typeScriptProtocols = targets.get("typescript")?.protocols ?? [];
@@ -617,6 +1254,10 @@ function assertActualGeneratedSurface() {
     "package fixtures",
   );
   assertIncludes(
+    path.join("generated", "fixtures", "java", "FixtureRoot.java"),
+    "package typra.fixtures;",
+  );
+  assertIncludes(
     path.join("generated", "fixtures", "go", "event_sink.go"),
     "package fixtures",
   );
@@ -635,7 +1276,7 @@ function assertActualGeneratedSurface() {
 }
 
 function assertNoEmptyTargetDirs() {
-  for (const target of ["typescript", "python", "go", "csharp", "rust", "markdown"]) {
+  for (const target of ["typescript", "python", "go", "java", "csharp", "rust", "markdown"]) {
     const dir = path.join(generatedRoot, target);
     if (existsSync(dir) && statSync(dir).isDirectory() && walkFiles(dir).length === 0) {
       fail(`Generated target directory is empty: ${target}`);
@@ -646,6 +1287,7 @@ function assertNoEmptyTargetDirs() {
 assertGeneratedTargets();
 assertNoEmptyTargetDirs();
 assertStaticFixtureCoverage();
+assertConformanceMatrix();
 assertExportSurfaceSnapshot();
 assertHydrationBoundarySnapshot();
 assertActualGeneratedSurface();
@@ -656,6 +1298,8 @@ runPythonCompile();
 runGoTests();
 runRustTests();
 runCSharpBuild();
+runJavaBuild();
+runExecutableConformance();
 
 if (failures.length > 0) {
   console.error("Fixture validation failed:");

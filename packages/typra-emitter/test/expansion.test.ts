@@ -25,6 +25,7 @@ import { TypeScriptExprVisitor } from "../src/languages/typescript/visitor.js";
 import { PythonExprVisitor } from "../src/languages/python/visitor.js";
 import { CSharpExprVisitor } from "../src/languages/csharp/visitor.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
+import { JavaExprVisitor } from "../src/languages/java/visitor.js";
 import { ExprVisitor } from "../src/ir/visitor.js";
 import { TypeNode, PropertyNode, TypeName } from "../src/ir/ast.js";
 
@@ -35,6 +36,7 @@ const visitors: Record<string, (registry?: TypeRegistry) => ExprVisitor> = {
   python: (r) => new PythonExprVisitor(r),
   csharp: (r) => new CSharpExprVisitor(r),
   go: (r) => new GoExprVisitor(r),
+  java: (r) => new JavaExprVisitor(r),
 };
 function getVisitor(lang: string, registry?: TypeRegistry): ExprVisitor {
   const factory = visitors[lang];
@@ -744,7 +746,7 @@ describe("GoExprVisitor", () => {
 
 describe("getVisitor", () => {
   it("returns visitors for all supported languages", () => {
-    for (const lang of ["rust", "typescript", "python", "csharp", "go"]) {
+    for (const lang of ["rust", "typescript", "python", "csharp", "go", "java"]) {
       const visitor = getVisitor(lang);
       assert.ok(visitor, `No visitor for ${lang}`);
       // Smoke test — every visitor can render a string literal
@@ -754,8 +756,8 @@ describe("getVisitor", () => {
 
   it("throws for unknown language", () => {
     assert.throws(
-      () => getVisitor("java"),
-      /No ExprVisitor for language 'java'/,
+      () => getVisitor("ruby"),
+      /No ExprVisitor for language 'ruby'/,
     );
   });
 });
@@ -909,7 +911,7 @@ describe("Integration: coercion — Model from string", () => {
 describe("Integration: Message.user(text) nested factory", () => {
   const registry = buildTestRegistry();
 
-  it("user(text) → all 5 languages", () => {
+  it("user(text) → all 6 languages", () => {
     const expr = resolveFactoryExpr(
       { role: "user", parts: [{ kind: "text", value: "{text}" }] },
       { text: "string" },
@@ -932,6 +934,7 @@ describe("Integration: Message.user(text) nested factory", () => {
       python: 'Message(role="user", parts=[TextPart(value=text)])',
       csharp: 'new Message { Role = "user", Parts = new List<ContentPart> { new TextPart { Value = text } } }',
       go: 'Message{ Role: "user", Parts: []interface{}{TextPart{ Kind: "text", Value: text }} }',
+      java: 'new Message() {{ this.role = "user"; this.parts = new java.util.ArrayList<>(java.util.Arrays.asList(new TextPart() {{ this.value = text; }})); }}',
     };
 
     for (const [lang, expectedCode] of Object.entries(expected)) {
@@ -979,6 +982,11 @@ describe("FieldRead visitor output", () => {
     assert.equal(code, "opts.MaxOutputTokens");
   });
 
+  it("Java → direct field access", () => {
+    const code = new JavaExprVisitor().visitExpr(fieldRead);
+    assert.equal(code, "opts.maxOutputTokens");
+  });
+
   it("simple non-camelCase field", () => {
     const simple: Expr = {
       kind: "field_read",
@@ -992,6 +1000,7 @@ describe("FieldRead visitor output", () => {
     assert.equal(new PythonExprVisitor().visitExpr(simple), "model.id");
     assert.equal(new CSharpExprVisitor().visitExpr(simple), "model.Id");
     assert.equal(new GoExprVisitor().visitExpr(simple), "model.Id");
+    assert.equal(new JavaExprVisitor().visitExpr(simple), "model.id");
   });
 });
 

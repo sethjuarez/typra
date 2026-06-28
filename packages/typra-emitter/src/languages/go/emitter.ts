@@ -556,17 +556,19 @@ function emitLoadCollectionScalar(
   const goType = GO_TYPE_MAP[scalarType] || "interface{}";
 
   lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
-  lines.push("\t\t\tif arr, ok := val.([]interface{}); ok {");
+  lines.push("\t\t\tswitch arr := val.(type) {");
 
   if (goType === "interface{}") {
-    // any/unknown — assign entire array directly
+    lines.push("\t\t\tcase []interface{}:");
     lines.push(`\t\t\t\tresult.${fieldName} = arr`);
   } else {
-    // Typed elements — per-element cast
+    lines.push("\t\t\tcase []interface{}:");
     lines.push(`\t\t\t\tresult.${fieldName} = make([]${goType}, len(arr))`);
     lines.push("\t\t\t\tfor i, v := range arr {");
     lines.push(`\t\t\t\t\tresult.${fieldName}[i] = v.(${goType})`);
     lines.push("\t\t\t\t}");
+    lines.push(`\t\t\tcase []${goType}:`);
+    lines.push(`\t\t\t\tresult.${fieldName} = arr`);
   }
 
   lines.push("\t\t\t}");
@@ -627,7 +629,7 @@ function emitSaveMethod(
   const typeName = type.typeName.name;
 
   lines.push(`// Save serializes ${typeName} to map[string]interface{}`);
-  lines.push(`func (obj *${typeName}) Save(ctx *SaveContext) map[string]interface{} {`);
+  lines.push(`func (obj ${typeName}) Save(ctx *SaveContext) map[string]interface{} {`);
   lines.push("\tresult := make(map[string]interface{})");
 
   for (const assign of type.save.assignments) {
