@@ -798,6 +798,8 @@ export interface PropertyValidation {
  * A single test example generated from @sample decorators.
  */
 export interface TestExample {
+  /** Raw sample object used for target-specific semantic assertions */
+  sample: Record<string, any>;
   /** JSON representation as lines */
   json: string[];
   /** YAML representation as lines */

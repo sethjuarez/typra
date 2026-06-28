@@ -188,6 +188,12 @@ function targetMetadata(rootNamespace: string, targetName: string, target: EmitT
     };
   }
 
+  if (targetName === "java") {
+    return {
+      packageName: target["package-name"] || rootNamespace.toLowerCase(),
+    };
+  }
+
   if (targetName === "typescript") {
     return {
       namespace: target.namespace || rootNamespace.replace(/\.Core$/, ""),
@@ -216,6 +222,8 @@ function sourceFor(targetName: string, node: TypeNode, group: string): string {
       return `${toSnakeCase(name)}.go`;
     case "csharp":
       return group ? `${group}/${name}.cs` : `${name}.cs`;
+    case "java":
+      return `${name}.java`;
     default:
       return name;
   }
@@ -233,6 +241,8 @@ function groupModuleName(targetName: string, node: TypeNode): string {
       return `_${node.typeName.name}`;
     case "csharp":
       return `${node.typeName.name}.cs`;
+    case "java":
+      return `${node.typeName.name}.java`;
     default:
       return moduleName(node);
   }

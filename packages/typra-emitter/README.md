@@ -19,6 +19,20 @@ Typra currently validates against TypeSpec compiler and JSON schema emitter
 set `allow-unsupported-typespec-version: true` only when you intentionally accept
 possible generated output churn.
 
+## 0.3.0 release highlights
+
+`0.3.0` adds Java as a generated runtime target and expands executable fixture
+confidence across the supported languages:
+
+- Java model emission with `load`, `save`, `fromJson`, `toJson`, provider wire
+  mapping, scalar coercion, enum handling, and polymorphic dispatch support.
+- Generated Java fixture tests that compile and run during fixture validation.
+- Stronger Go fixture tests and runtime behavior for scalar slices, JSON
+  round-trips, polymorphic values, and malformed JSON handling.
+- Executable cross-language fixture conformance across TypeScript, Python, C#,
+  Go, Java, and Rust.
+- CI setup for Go and Java toolchains.
+
 ## Configure TypeSpec
 
 Add the emitter to `tspconfig.yaml`:
@@ -78,14 +92,15 @@ Typra includes emitters for:
 - Python
 - C#
 - Go
+- Java
 - Rust
 - Markdown documentation
 - JSON AST
 
-The Typra fixture slice validates TypeScript, Python, C#, Go, Rust, Markdown,
-and JSON AST generation from synthetic TypeSpec shapes. Fixture validation also
-exercises generated metadata, verifier CLI output, consumer smoke wiring, and
-cross-language generated-code compile/test surfaces.
+The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust,
+Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture
+validation also exercises generated metadata, verifier CLI output, consumer
+smoke wiring, and cross-language generated-code compile/test surfaces.
 
 ## Generated files
 

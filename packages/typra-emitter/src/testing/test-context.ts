@@ -57,7 +57,7 @@ export interface TestContextOptions {
    * If provided and returns non-null, overrides default string/bool/number rendering.
    * The returned value+delimiter replace the default.
    */
-  renderEnumValue?: (enumName: string, rawValue: string, fieldName: string) => { value: string; delimiter: string } | null;
+  renderEnumValue?: (enumName: string, rawValue: string, fieldName: string, isOpenEnum?: boolean) => { value: string; delimiter: string } | null;
 }
 
 /**
@@ -123,6 +123,7 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
     }
 
     return {
+      sample,
       json: jsonStr.split('\n'),
       yaml: yamlStr.split('\n'),
       validations: buildValidations(sample, node, options),
@@ -139,7 +140,10 @@ function buildValidations(
   options: TestContextOptions
 ): PropertyValidation[] {
   return Object.keys(sample)
-    .filter(key => typeof sample[key] !== 'object')
+    .filter(key => {
+      const prop = node.properties.find(p => p.name === key);
+      return typeof sample[key] !== 'object' && (prop?.isScalar || prop?.enumName);
+    })
     .map(key => {
       const prop = node.properties.find(p => p.name === key);
       const rawValue = sample[key];
@@ -147,7 +151,7 @@ function buildValidations(
       // Check for enum field (skip discriminator fields)
       const isDiscriminator = node.discriminator === key;
       if (prop && prop.enumName && !isDiscriminator && typeof rawValue === 'string' && options.renderEnumValue) {
-        const enumResult = options.renderEnumValue(prop.enumName, rawValue, key);
+        const enumResult = options.renderEnumValue(prop.enumName, rawValue, key, prop.isOpenEnum);
         if (enumResult) {
           return {
             key: options.renderKey(key),
@@ -207,7 +211,7 @@ function buildCoercions(node: TypeNode, options: TestContextOptions): CoercionTe
         if (prop && prop.enumName && !isDiscriminator && options.renderEnumValue) {
           // Extract the raw string value (strip quotes if present from example substitution)
           const strValue = typeof value === 'string' ? value.replace(/^"|"$/g, '') : String(value);
-          const enumResult = options.renderEnumValue(prop.enumName, strValue, key);
+          const enumResult = options.renderEnumValue(prop.enumName, strValue, key, prop.isOpenEnum);
           if (enumResult) {
             return {
               key: options.renderKey(key),

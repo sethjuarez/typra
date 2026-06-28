@@ -1,0 +1,358 @@
+{
+  "version": 1,
+  "targets": ["typescript", "python", "csharp", "go", "java", "rust"],
+  "cases": [
+    {
+      "id": "fixture-root-sample-shape",
+      "description": "FixtureRoot preserves the same nested object, scalar array, dictionary, enum, open enum, and polymorphic sample shape across targets.",
+      "evidence": {
+        "json-ast": [
+          {
+            "path": "generated/fixtures/json-ast/model.json",
+            "snippets": [
+              "\"name\": \"tags\"",
+              "\"name\": \"metadata\"",
+              "\"name\": \"owner\"",
+              "\"name\": \"content\"",
+              "\"text\": \"hello from a polymorphic sample\""
+            ]
+          }
+        ],
+        "typescript": [
+          {
+            "path": "generated/fixtures/typescript/fixture-root.ts",
+            "snippets": [
+              "instance.tags = (data[\"tags\"] as unknown[]).map",
+              "instance.metadata = data[\"metadata\"] as Record<string, unknown>;",
+              "instance.owner = FixtureOwner.load",
+              "instance.content = FixtureContent.load",
+              "result[\"content\"] = obj.content.save(context);"
+            ]
+          }
+        ],
+        "python": [
+          {
+            "path": "generated/fixtures/python/_FixtureRoot.py",
+            "snippets": [
+              "instance.tags = data[\"tags\"]",
+              "instance.metadata = data[\"metadata\"]",
+              "instance.owner = FixtureOwner.load",
+              "instance.content = FixtureContent.load",
+              "result[\"content\"] = obj.content.save(context)"
+            ]
+          }
+        ],
+        "csharp": [
+          {
+            "path": "generated/fixtures/csharp/FixtureRoot.cs",
+            "snippets": [
+              "instance.Tags = (tagsValue as IEnumerable<object>)?.Select",
+              "instance.Metadata = metadataValue.GetDictionary()!;",
+              "instance.Owner = FixtureOwner.Load",
+              "instance.Content = FixtureContent.Load",
+              "result[\"content\"] = obj.Content?.Save(context);"
+            ]
+          }
+        ],
+        "go": [
+          {
+            "path": "generated/fixtures/go/fixture_root.go",
+            "snippets": [
+              "case []string:",
+              "loaded, _ := LoadFixtureOwner",
+              "loaded, _ := LoadFixtureContent",
+              "result[\"content\"] = v.Save(ctx)"
+            ]
+          },
+          {
+            "path": "generated/fixtures/go/tests/fixture_root_test.go",
+            "snippets": [
+              "Expected Tags length to be 3",
+              "Expected Metadata[\"source\"]",
+              "Expected Owner.DisplayName",
+              "Expected Content to be fixtures.TextContent"
+            ]
+          }
+        ],
+        "java": [
+          {
+            "path": "generated/fixtures/java/FixtureRoot.java",
+            "snippets": [
+              "result.tags = new ArrayList<>();",
+              "result.metadata = copyMap(dict);",
+              "result.owner = FixtureOwner.load",
+              "result.content = FixtureContent.load",
+              "result.put(\"content\", obj.content.save(ctx))"
+            ]
+          }
+        ],
+        "rust": [
+          {
+            "path": "generated/fixtures/rust/fixture_root.rs",
+            "snippets": [
+              "tags: value.get(\"tags\")",
+              "metadata: value.get(\"metadata\").cloned",
+              "owner: value.get(\"owner\")",
+              "content: value.get(\"content\").cloned",
+              "result.insert(\"content\".to_string(), self.content.clone())"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "polymorphic-content-dispatch",
+      "description": "FixtureContent dispatches the text/image discriminator consistently and serializes discriminator-specific data.",
+      "evidence": {
+        "json-ast": [
+          {
+            "path": "generated/fixtures/json-ast/model.json",
+            "snippets": [
+              "\"discriminator\": \"kind\"",
+              "\"name\": \"TextContent\"",
+              "\"name\": \"ImageContent\""
+            ]
+          }
+        ],
+        "typescript": [
+          {
+            "path": "generated/fixtures/typescript/fixture-content.ts",
+            "snippets": [
+              "case \"text\":",
+              "return TextContent.load(data, context);",
+              "case \"image\":",
+              "result[\"text\"] = obj.text;"
+            ]
+          }
+        ],
+        "python": [
+          {
+            "path": "generated/fixtures/python/_FixtureContent.py",
+            "snippets": [
+              "if discriminator_value == \"text\":",
+              "return TextContent.load(data, context)",
+              "elif discriminator_value == \"image\":",
+              "result[\"text\"] = obj.text"
+            ]
+          }
+        ],
+        "csharp": [
+          {
+            "path": "generated/fixtures/csharp/FixtureContent.cs",
+            "snippets": [
+              "\"text\" => TextContent.Load(data, context),",
+              "\"image\" => ImageContent.Load(data, context),"
+            ]
+          },
+          {
+            "path": "generated/fixtures/csharp/TextContent.cs",
+            "snippets": [
+              "public override Dictionary<string, object?> Save",
+              "result[\"text\"] = obj.Text;"
+            ]
+          }
+        ],
+        "go": [
+          {
+            "path": "generated/fixtures/go/fixture_content.go",
+            "snippets": [
+              "case \"text\":",
+              "return LoadTextContent(data, ctx)",
+              "case \"image\":",
+              "result[\"text\"] = obj.Text"
+            ]
+          }
+        ],
+        "java": [
+          {
+            "path": "generated/fixtures/java/FixtureContent.java",
+            "snippets": [
+              "case \"text\":",
+              "return TextContent.load(data, ctx);",
+              "case \"image\":"
+            ]
+          },
+          {
+            "path": "generated/fixtures/java/TextContent.java",
+            "snippets": [
+              "extends FixtureContent",
+              "result.put(\"text\", serializeScalar(obj.text));"
+            ]
+          }
+        ],
+        "rust": [
+          {
+            "path": "generated/fixtures/rust/fixture_content.rs",
+            "snippets": [
+              "FixtureContentKind::TextContent",
+              "\"text\" => FixtureContentKind::TextContent",
+              "result.insert(\"kind\".to_string()",
+              "result.insert(\"text\".to_string()"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "provider-wire-mapping",
+      "description": "WireOptions maps semantic fields to provider-specific wire names for OpenAI and Anthropic.",
+      "evidence": {
+        "json-ast": [
+          {
+            "path": "generated/fixtures/json-ast/model.json",
+            "snippets": [
+              "\"provider\": \"openai\"",
+              "\"name\": \"max_completion_tokens\"",
+              "\"provider\": \"anthropic\"",
+              "\"name\": \"max_tokens\""
+            ]
+          }
+        ],
+        "typescript": [
+          {
+            "path": "generated/fixtures/typescript/wire-options.ts",
+            "snippets": [
+              "toWire(provider: string)",
+              "\"maxOutputTokens\": { \"openai\": \"max_completion_tokens\", \"anthropic\": \"max_tokens\" }",
+              "result[mapping[provider]] = value"
+            ]
+          }
+        ],
+        "python": [
+          {
+            "path": "generated/fixtures/python/_WireOptions.py",
+            "snippets": [
+              "def to_wire(self, provider: str) -> dict[str, Any]:",
+              "\"maxOutputTokens\": {\"openai\": \"max_completion_tokens\", \"anthropic\": \"max_tokens\"}",
+              "result[mapping[provider]] = value"
+            ]
+          }
+        ],
+        "csharp": [
+          {
+            "path": "generated/fixtures/csharp/WireOptions.cs",
+            "snippets": [
+              "public Dictionary<string, object?> ToWire(string provider)",
+              "[\"maxOutputTokens\"] = new Dictionary<string, string> { [\"openai\"] = \"max_completion_tokens\", [\"anthropic\"] = \"max_tokens\" }",
+              "result[wireName] = value;"
+            ]
+          }
+        ],
+        "go": [
+          {
+            "path": "generated/fixtures/go/wire_options.go",
+            "snippets": [
+              "func (obj *WireOptions) ToWire(provider string) map[string]interface{}",
+              "\"maxOutputTokens\": {\"openai\": \"max_completion_tokens\", \"anthropic\": \"max_tokens\"}",
+              "result[wireName] = value"
+            ]
+          },
+          {
+            "path": "generated/fixtures/go/tests/wire_options_test.go",
+            "snippets": [
+              "openaiWire := instance.ToWire(\"openai\")",
+              "openaiWire[\"max_completion_tokens\"]",
+              "anthropicWire := instance.ToWire(\"anthropic\")",
+              "anthropicWire[\"max_tokens\"]"
+            ]
+          }
+        ],
+        "java": [
+          {
+            "path": "generated/fixtures/java/WireOptions.java",
+            "snippets": [
+              "public Map<String, Object> toWire(String provider)",
+              "if (target.equals(\"openai\")) { wireName = \"max_completion_tokens\"; include = true; }",
+              "if (target.equals(\"anthropic\")) { wireName = \"max_tokens\"; include = true; }"
+            ]
+          }
+        ],
+        "rust": [
+          {
+            "path": "generated/fixtures/rust/wire_options.rs",
+            "snippets": [
+              "pub fn to_wire(&self, provider: &str) -> serde_json::Value",
+              "(\"maxOutputTokens\", std::collections::HashMap::from([(\"openai\", \"max_completion_tokens\"), (\"anthropic\", \"max_tokens\")]))",
+              "result.insert(wire_name.to_string(), value)"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "scalar-coercion",
+      "description": "FixtureReference supports the string shorthand sample and expands it into id plus a stable label.",
+      "evidence": {
+        "json-ast": [
+          {
+            "path": "generated/fixtures/json-ast/model.json",
+            "snippets": [
+              "\"scalar\": \"string\"",
+              "\"label\": \"coerced reference\"",
+              "\"example\": \"ref-coerced\""
+            ]
+          }
+        ],
+        "typescript": [
+          {
+            "path": "generated/fixtures/typescript/fixture-reference.ts",
+            "snippets": [
+              "if (typeof data === \"string\")",
+              "instance.id = data as string;",
+              "instance.label = \"coerced reference\";"
+            ]
+          }
+        ],
+        "python": [
+          {
+            "path": "generated/fixtures/python/_FixtureReference.py",
+            "snippets": [
+              "if isinstance(data, str):",
+              "instance.id = data",
+              "instance.label = \"coerced reference\""
+            ]
+          }
+        ],
+        "csharp": [
+          {
+            "path": "generated/fixtures/csharp/FixtureReference.cs",
+            "snippets": [
+              "if (doc.RootElement.ValueKind != JsonValueKind.Object)",
+              "string stringValue => new Dictionary<string, object?>",
+              "[\"label\"] = \"coerced reference\""
+            ]
+          }
+        ],
+        "go": [
+          {
+            "path": "generated/fixtures/go/fixture_reference.go",
+            "snippets": [
+              "case string:",
+              "expansion := map[string]interface{}{\"id\": v, \"label\": \"coerced reference\"}",
+              "return LoadFixtureReference(expansion, ctx)"
+            ]
+          }
+        ],
+        "java": [
+          {
+            "path": "generated/fixtures/java/FixtureReference.java",
+            "snippets": [
+              "if (data instanceof String) {",
+              "result.id = String.valueOf(data);",
+              "result.label = \"coerced reference\";"
+            ]
+          }
+        ],
+        "rust": [
+          {
+            "path": "generated/fixtures/rust/fixture_reference.rs",
+            "snippets": [
+              "if let Some(s) = value.as_str()",
+              "label: Some(\"coerced reference\".to_string())"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

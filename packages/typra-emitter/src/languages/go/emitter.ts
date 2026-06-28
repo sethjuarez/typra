@@ -82,6 +82,7 @@ export function emitGoFileContent(
   polymorphicTypeNames: Set<string>,
   enums: EnumDef[] = [],
   group: string = "",
+  scalarCoercibleTypeNames: Set<string> = new Set(types.filter(t => t.load.coercions.length > 0).map(t => t.typeName.name)),
 ): string {
   const lines: string[] = [];
 
@@ -100,7 +101,7 @@ export function emitGoFileContent(
 
   // Emit each type in the hierarchy
   for (const type of types) {
-    emitTypeBlock(type, lines, visitor, polymorphicTypeNames);
+    emitTypeBlock(type, lines, visitor, polymorphicTypeNames, scalarCoercibleTypeNames);
   }
 
   return lines.join("\n");
@@ -161,6 +162,7 @@ function emitTypeBlock(
   lines: string[],
   visitor: ExprVisitor,
   polymorphicTypeNames: Set<string>,
+  scalarCoercibleTypeNames: Set<string>,
 ): void {
   const typeName = type.typeName.name;
 
@@ -179,7 +181,7 @@ function emitTypeBlock(
   emitStruct(type, lines, polymorphicTypeNames);
 
   // Load function
-  emitLoadFunction(type, lines, polymorphicTypeNames);
+  emitLoadFunction(type, lines, polymorphicTypeNames, scalarCoercibleTypeNames);
 
   // Save method
   emitSaveMethod(type, lines, polymorphicTypeNames);
@@ -274,6 +276,7 @@ function emitLoadFunction(
   type: TypeDecl,
   lines: string[],
   polymorphicTypeNames: Set<string>,
+  scalarCoercibleTypeNames: Set<string>,
 ): void {
   const typeName = type.typeName.name;
   const isPolymorphicBase = type.polymorphicDispatch !== null;
@@ -306,7 +309,7 @@ function emitLoadFunction(
   lines.push("\tif m, ok := data.(map[string]interface{}); ok {");
 
   for (const assign of type.load.assignments) {
-    emitLoadAssignment(assign, polymorphicTypeNames, lines);
+    emitLoadAssignment(assign, polymorphicTypeNames, scalarCoercibleTypeNames, lines);
   }
 
   lines.push("\t}");
@@ -379,6 +382,7 @@ function emitCoercions(coercions: CoercionDecl[], typeName: string, lines: strin
 function emitLoadAssignment(
   assign: LoadAssignment,
   polymorphicTypeNames: Set<string>,
+  scalarCoercibleTypeNames: Set<string>,
   lines: string[],
 ): void {
   const fieldName = toPascalCase(assign.fieldName);
@@ -389,7 +393,7 @@ function emitLoadAssignment(
       emitLoadScalar(assign, fieldName, cat.scalarType, lines);
       break;
     case "complex":
-      emitLoadComplex(assign, fieldName, cat.typeName, polymorphicTypeNames, lines);
+      emitLoadComplex(assign, fieldName, cat.typeName, polymorphicTypeNames, scalarCoercibleTypeNames, lines);
       break;
     case "collection_scalar":
       emitLoadCollectionScalar(assign, fieldName, cat.scalarType, lines);
@@ -520,9 +524,11 @@ function emitLoadComplex(
   fieldName: string,
   typeName: string,
   polymorphicTypeNames: Set<string>,
+  scalarCoercibleTypeNames: Set<string>,
   lines: string[],
 ): void {
   const isPolymorphic = polymorphicTypeNames.has(typeName);
+  const acceptsScalarCoercion = scalarCoercibleTypeNames.has(typeName);
 
   lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
   lines.push(`\t\t\tif m, ok := val.(map[string]interface{}); ok {`);
@@ -543,6 +549,15 @@ function emitLoadComplex(
     }
   }
 
+  if (acceptsScalarCoercion) {
+    lines.push("\t\t\t} else {");
+    lines.push(`\t\t\t\tloaded, _ := Load${typeName}(val, ctx)`);
+    if (assign.isOptional && !isPolymorphic) {
+      lines.push(`\t\t\t\tresult.${fieldName} = &loaded`);
+    } else {
+      lines.push(`\t\t\t\tresult.${fieldName} = loaded`);
+    }
+  }
   lines.push("\t\t\t}");
   lines.push("\t\t}");
 }
@@ -556,17 +571,19 @@ function emitLoadCollectionScalar(
   const goType = GO_TYPE_MAP[scalarType] || "interface{}";
 
   lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
-  lines.push("\t\t\tif arr, ok := val.([]interface{}); ok {");
+  lines.push("\t\t\tswitch arr := val.(type) {");
 
   if (goType === "interface{}") {
-    // any/unknown — assign entire array directly
+    lines.push("\t\t\tcase []interface{}:");
     lines.push(`\t\t\t\tresult.${fieldName} = arr`);
   } else {
-    // Typed elements — per-element cast
+    lines.push("\t\t\tcase []interface{}:");
     lines.push(`\t\t\t\tresult.${fieldName} = make([]${goType}, len(arr))`);
     lines.push("\t\t\t\tfor i, v := range arr {");
     lines.push(`\t\t\t\t\tresult.${fieldName}[i] = v.(${goType})`);
     lines.push("\t\t\t\t}");
+    lines.push(`\t\t\tcase []${goType}:`);
+    lines.push(`\t\t\t\tresult.${fieldName} = arr`);
   }
 
   lines.push("\t\t\t}");
@@ -627,7 +644,7 @@ function emitSaveMethod(
   const typeName = type.typeName.name;
 
   lines.push(`// Save serializes ${typeName} to map[string]interface{}`);
-  lines.push(`func (obj *${typeName}) Save(ctx *SaveContext) map[string]interface{} {`);
+  lines.push(`func (obj ${typeName}) Save(ctx *SaveContext) map[string]interface{} {`);
   lines.push("\tresult := make(map[string]interface{})");
 
   for (const assign of type.save.assignments) {
@@ -859,11 +876,7 @@ function emitToYAML(typeName: string, lines: string[]): void {
   lines.push(`func (obj *${typeName}) ToYAML() (string, error) {`);
   lines.push("\tctx := NewSaveContext()");
   lines.push("\tdata := obj.Save(ctx)");
-  lines.push("\tbytes, err := yaml.Marshal(data)");
-  lines.push("\tif err != nil {");
-  lines.push('\t\treturn "", err');
-  lines.push("\t}");
-  lines.push("\treturn string(bytes), nil");
+  lines.push("\treturn marshalYAMLDocument(data)");
   lines.push("}");
   lines.push("");
 }

@@ -6,6 +6,7 @@ import { generatePython } from "./languages/python/driver.js";
 import { generateCsharp } from "./languages/csharp/driver.js";
 import { generateTypeScript } from "./languages/typescript/driver.js";
 import { generateGo } from "./languages/go/driver.js";
+import { generateJava } from "./languages/java/driver.js";
 import { generateRust } from "./languages/rust/driver.js";
 import { emitGeneratedFile, emitGeneratedManifest } from "./cleanup/generated-file.js";
 import { buildExportSurfaceSnapshot, emitExportSurfaceSnapshot } from "./contract-surface.js";
@@ -96,6 +97,7 @@ const generators: Record<string, GeneratorFn> = {
   csharp: generateCsharp,
   typescript: generateTypeScript,
   go: generateGo,
+  java: generateJava,
   rust: generateRust,
 };
 
