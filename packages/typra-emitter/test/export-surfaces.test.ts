@@ -11,6 +11,14 @@ import { goPackageNameFromNamespace } from "../src/languages/go/driver.js";
 import { emitPythonInit } from "../src/languages/python/scaffolding.js";
 import { emitRustGroupMod, emitRustLib } from "../src/languages/rust/driver.js";
 import { emitTypeScriptIndex } from "../src/languages/typescript/scaffolding.js";
+import {
+  buildToolchainMetadata,
+  formatUnsupportedTypeSpecVersionMessage,
+  getToolchainMetadata,
+  getUnsupportedTypeSpecPackages,
+  reportToolchainCompatibility,
+  shouldBlockUnsupportedTypeSpecToolchain,
+} from "../src/compatibility.js";
 
 function makeType(
   name: string,
@@ -101,6 +109,11 @@ describe("export surface scaffolding", () => {
   });
 
   it("builds deterministic target export surface snapshots", () => {
+    const toolchain = buildToolchainMetadata([
+      { name: "@typra/emitter", version: "0.2.5", supportedRange: "0.2.5" },
+      { name: "@typespec/json-schema", version: "1.10.0", supportedRange: "1.10.0" },
+      { name: "@typespec/compiler", version: "1.10.0", supportedRange: "1.10.0" },
+    ]);
     const snapshot = buildExportSurfaceSnapshot(
       "Prompty.Prompty",
       "Prompty",
@@ -112,10 +125,17 @@ describe("export surface scaffolding", () => {
         { type: "Go", "output-dir": "generated/go", "package-name": "promptyruntime" },
       ],
       allTypes,
+      toolchain,
     );
 
     const targets = new Map(snapshot.targets.map((target) => [target.target, target]));
 
+    assert.deepEqual(snapshot.toolchain.packages.map((entry) => entry.name), [
+      "@typespec/compiler",
+      "@typespec/json-schema",
+      "@typra/emitter",
+    ]);
+    assert.deepEqual(snapshot.toolchain.packages.map((entry) => entry.version), ["1.10.0", "1.10.0", "0.2.5"]);
     assert.deepEqual(targets.get("go")?.packageName, "promptyruntime");
     assert.deepEqual(targets.get("typescript")?.rootExports, [
       "AudioPart",
@@ -159,5 +179,92 @@ describe("export surface scaffolding", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("TypeSpec compatibility guard", () => {
+  it("accepts the validated TypeSpec toolchain versions", () => {
+    const toolchain = buildToolchainMetadata([
+      { name: "@typespec/compiler", version: "1.10.0", supportedRange: "1.10.0" },
+      { name: "@typespec/json-schema", version: "1.10.0", supportedRange: "1.10.0" },
+      { name: "@typra/emitter", version: "0.2.5", supportedRange: "0.2.5" },
+    ]);
+
+    assert.deepEqual(getUnsupportedTypeSpecPackages(toolchain), []);
+  });
+
+  it("resolves the installed validated TypeSpec toolchain versions", () => {
+    const toolchain = getToolchainMetadata();
+
+    assert.deepEqual(toolchain.packages.map((entry) => entry.name), [
+      "@typespec/compiler",
+      "@typespec/json-schema",
+      "@typra/emitter",
+    ]);
+    assert.equal(toolchain.packages.find((entry) => entry.name === "@typespec/compiler")?.version, "1.10.0");
+    assert.equal(toolchain.packages.find((entry) => entry.name === "@typespec/json-schema")?.version, "1.10.0");
+    assert.equal(getUnsupportedTypeSpecPackages(toolchain).length, 0);
+  });
+
+  it("formats a clear diagnostic for unvalidated TypeSpec toolchain versions", () => {
+    const toolchain = buildToolchainMetadata([
+      { name: "@typespec/compiler", version: "1.13.0", supportedRange: "1.10.0" },
+      { name: "@typespec/json-schema", version: "1.13.0", supportedRange: "1.10.0" },
+      { name: "@typra/emitter", version: "0.2.5", supportedRange: "0.2.5" },
+    ]);
+    const unsupported = getUnsupportedTypeSpecPackages(toolchain);
+
+    assert.deepEqual(unsupported.map((entry) => entry.name), ["@typespec/compiler", "@typespec/json-schema"]);
+    assert.match(
+      formatUnsupportedTypeSpecVersionMessage(unsupported, false),
+      /validated with @typespec\/compiler@1\.10\.0, @typespec\/json-schema@1\.10\.0; found @typespec\/compiler@1\.13\.0, @typespec\/json-schema@1\.13\.0/,
+    );
+  });
+
+  it("reports unvalidated TypeSpec versions as errors by default", () => {
+    const diagnostics: Array<{ severity: string; message: string }> = [];
+    const context = {
+      options: {},
+      program: {
+        reportDiagnostic: (diagnostic: { severity: string; message: string }) => diagnostics.push(diagnostic),
+      },
+    };
+
+    reportToolchainCompatibility(
+      context,
+      buildToolchainMetadata([
+        { name: "@typespec/compiler", version: "1.13.0", supportedRange: "1.10.0" },
+        { name: "@typespec/json-schema", version: "1.10.0", supportedRange: "1.10.0" },
+      ]),
+    );
+
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].severity, "error");
+    assert.match(diagnostics[0].message, /Pin the TypeSpec toolchain to the supported versions/);
+    assert.equal(shouldBlockUnsupportedTypeSpecToolchain(context.options, buildToolchainMetadata([
+      { name: "@typespec/compiler", version: "1.13.0", supportedRange: "1.10.0" },
+    ])), true);
+  });
+
+  it("can downgrade unvalidated TypeSpec versions to warnings by explicit option", () => {
+    const diagnostics: Array<{ severity: string; message: string }> = [];
+    const context = {
+      options: { "allow-unsupported-typespec-version": true },
+      program: {
+        reportDiagnostic: (diagnostic: { severity: string; message: string }) => diagnostics.push(diagnostic),
+      },
+    };
+
+    reportToolchainCompatibility(
+      context,
+      buildToolchainMetadata([{ name: "@typespec/compiler", version: "1.13.0", supportedRange: "1.10.0" }]),
+    );
+
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].severity, "warning");
+    assert.match(diagnostics[0].message, /allow-unsupported-typespec-version is enabled/);
+    assert.equal(shouldBlockUnsupportedTypeSpecToolchain(context.options, buildToolchainMetadata([
+      { name: "@typespec/compiler", version: "1.13.0", supportedRange: "1.10.0" },
+    ])), false);
   });
 });

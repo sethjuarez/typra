@@ -206,6 +206,18 @@ function assertExportSurfaceSnapshot() {
   if (snapshot.emitter !== "typra-emitter" || snapshot.version !== 1) {
     fail("Export surface snapshot has an unexpected emitter/version.");
   }
+  const toolchainPackages = snapshot.toolchain?.packages ?? [];
+  const toolchainNames = toolchainPackages.map(entry => entry.name);
+  const sortedToolchainNames = [...toolchainNames].sort((left, right) => left.localeCompare(right));
+  if (JSON.stringify(toolchainNames) !== JSON.stringify(sortedToolchainNames)) {
+    fail("Export surface snapshot toolchain metadata is not sorted by package name.");
+  }
+  for (const packageName of ["@typespec/compiler", "@typespec/json-schema", "@typra/emitter"]) {
+    const entry = toolchainPackages.find(item => item.name === packageName);
+    if (!entry?.version || !entry?.supportedRange || typeof entry.supported !== "boolean") {
+      fail(`Export surface snapshot is missing complete toolchain metadata for ${packageName}.`);
+    }
+  }
   if (snapshot.root?.object !== "Typra.Fixtures.FixtureRoot") {
     fail("Export surface snapshot does not record the fixture root object.");
   }

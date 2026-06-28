@@ -2,6 +2,7 @@ import { EmitContext, emitFile, resolvePath } from "@typespec/compiler";
 import { EmitTarget, TypraEmitterOptions } from "./lib.js";
 import { TypeNode } from "./ir/ast.js";
 import { toKebabCase, toSnakeCase } from "./ir/utilities.js";
+import { getToolchainMetadata, ToolchainMetadata } from "./compatibility.js";
 
 export interface ExportSurfaceMethod {
   name: string;
@@ -46,6 +47,7 @@ export interface TargetExportSurface {
 export interface ExportSurfaceSnapshot {
   emitter: "typra-emitter";
   version: 1;
+  toolchain: ToolchainMetadata;
   root: {
     object: string;
     namespace: string;
@@ -60,10 +62,12 @@ export function buildExportSurfaceSnapshot(
   rootAlias: string,
   targets: EmitTarget[],
   nodes: TypeNode[],
+  toolchain: ToolchainMetadata = getToolchainMetadata(),
 ): ExportSurfaceSnapshot {
   return {
     emitter: "typra-emitter",
     version: 1,
+    toolchain,
     root: {
       object: rootObject,
       namespace: rootNamespace,

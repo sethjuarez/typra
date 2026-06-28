@@ -45,3 +45,59 @@ jobs:
 
       - name: Validate npm package
         run: npm run pack:dry-run
+
+  typespec-compatibility:
+    name: TypeSpec ${{ matrix.compiler }} / json-schema ${{ matrix.json_schema }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: "1.10.0"
+            json_schema: "1.10.0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Setup npm
+        run: npm install -g npm@11
+
+      - name: Configure matrix toolchain
+        env:
+          TYPESPEC_COMPILER_VERSION: ${{ matrix.compiler }}
+          TYPESPEC_JSON_SCHEMA_VERSION: ${{ matrix.json_schema }}
+        run: |
+          npm pkg set "devDependencies.@typespec/compiler=$TYPESPEC_COMPILER_VERSION"
+          npm pkg set "devDependencies.@typespec/json-schema=$TYPESPEC_JSON_SCHEMA_VERSION"
+          npm pkg set "overrides.@typespec/compiler=$TYPESPEC_COMPILER_VERSION"
+          npm pkg set "overrides.@typespec/json-schema=$TYPESPEC_JSON_SCHEMA_VERSION"
+          npm pkg set --workspace @typra/emitter "peerDependencies.@typespec/compiler=$TYPESPEC_COMPILER_VERSION"
+          npm pkg set --workspace @typra/emitter "peerDependencies.@typespec/json-schema=$TYPESPEC_JSON_SCHEMA_VERSION"
+          npm pkg set --workspace @typra/emitter "devDependencies.@typespec/compiler=$TYPESPEC_COMPILER_VERSION"
+          npm pkg set --workspace @typra/emitter "devDependencies.@typespec/json-schema=$TYPESPEC_JSON_SCHEMA_VERSION"
+
+      - name: Install dependencies
+        run: npm install --package-lock=false
+
+      - name: Verify matrix toolchain
+        env:
+          EXPECTED_COMPILER: ${{ matrix.compiler }}
+          EXPECTED_JSON_SCHEMA: ${{ matrix.json_schema }}
+        run: |
+          node -e 'const compiler = require("./node_modules/@typespec/compiler/package.json").version; const schema = require("./node_modules/@typespec/json-schema/package.json").version; if (compiler !== process.env.EXPECTED_COMPILER || schema !== process.env.EXPECTED_JSON_SCHEMA) { console.error(`Expected TypeSpec ${process.env.EXPECTED_COMPILER} / json-schema ${process.env.EXPECTED_JSON_SCHEMA}, got ${compiler} / ${schema}`); process.exit(1); }'
+
+      - name: Build
+        run: npm run build
+
+      - name: Generate fixtures
+        run: npm run generate:fixtures
+
+      - name: Validate generated fixtures
+        run: npm run validate:fixtures
