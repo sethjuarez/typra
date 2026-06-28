@@ -1,0 +1,45 @@
+---
+title: Concepts
+description: Core Typra concepts for generated model surfaces and verifier metadata.
+draft: false
+---
+
+Typra is emitter-only: it generates model and protocol surfaces, but it does not ship runtime service implementations or product-specific contracts.
+
+## Emitter boundary
+
+Typra owns reusable emitter behavior:
+
+- Type graph discovery and lowering.
+- Scalar coercion and factory expansion.
+- Polymorphic dispatch.
+- Provider-specific wire names.
+- Generated-file markers and manifest metadata.
+- Generated tests and reference docs.
+
+Product-specific TypeSpec contracts and hand-authored runtime adapters stay in the consuming product repository.
+
+## Decorators
+
+Typra includes decorators such as `@sample`, `@abstract`, `@coerce`, `@@factory`, `@@method`, `@@knownAs`, `@@defaultFor`, and `@@protocol`.
+
+```typespec
+@sample(#{ kind: "text", text: "hello" })
+model TextContent extends FixtureContent {
+  kind: "text";
+  text: string;
+}
+```
+
+## Generated files
+
+Generated files include Typra markers, and the emitter records a generated-file manifest for each output root. Consumers can declare protected hand-authored boundaries in verifier config:
+
+```json
+{
+  "protectedPaths": ["src/adapters/**"],
+  "hydrationZones": ["src/extensions/**"]
+}
+```
+
+The emitter records hydration seam metadata for generated protocol adapters, while runtime behavior remains hand-authored by the consuming project.

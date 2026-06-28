@@ -8,6 +8,8 @@ across multiple runtimes.
 The first package in this repository is [`@typra/emitter`](packages/typra-emitter),
 a TypeSpec emitter and CLI extracted from Prompty's generic emitter work.
 
+User-facing docs are available at <https://typra.dev>.
+
 ## What Typra owns
 
 Typra owns generic emitter behavior that is not tied to any one product domain:
