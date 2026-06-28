@@ -55,11 +55,20 @@ npx tsp compile ./path/to/main.tsp --config ./tspconfig.yaml
 
 ## CLI
 
-The package includes the `typra-generate` command:
+The package includes `typra-generate`, `typra-verify`, and a generic
+`typra-consumer-smoke` harness:
 
 ```powershell
 npx typra-generate --help
+npx typra-verify --baseline ./baseline --current ./generated
+npx typra-consumer-smoke --config ./typra-smoke.json
 ```
+
+`typra-verify` compares committed `.typra-generated` metadata against current
+generated metadata and prints deterministic review summaries for exports,
+protocols, files, package/module identity, toolchain, protected paths, schema
+evolution, stale cleanup dry-runs, hydration seams, and breaking-change
+classification. It never deletes files.
 
 ## Supported output
 
@@ -82,6 +91,18 @@ extracted emitter hardens.
 Generated source files include Typra markers, and the emitter records a
 generated-file manifest for each output root. Stale-file deletion is not enabled
 yet, so Typra will not remove hand-authored runtime files.
+
+Consumers can declare hand-authored boundaries in verifier config:
+
+```json
+{
+  "protectedPaths": ["src/adapters/**"],
+  "hydrationZones": ["src/extensions/**"]
+}
+```
+
+The emitter records hydration seam metadata for generated protocol adapters, but
+runtime behavior remains hand-authored by the consuming project.
 
 ## Links
 

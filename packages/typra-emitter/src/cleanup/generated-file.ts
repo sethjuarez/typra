@@ -2,13 +2,13 @@ import { EmitContext, Program, emitFile, resolvePath } from "@typespec/compiler"
 import { dirname, relative, resolve } from "path";
 import { TypraEmitterOptions } from "../lib.js";
 
-interface GeneratedManifestEntry {
+export interface GeneratedManifestEntry {
   outputRoot: string;
   path: string;
   marker: boolean;
 }
 
-interface GeneratedManifest {
+export interface GeneratedManifest {
   emitter: "typra-emitter";
   version: 1;
   generatedAt: string;

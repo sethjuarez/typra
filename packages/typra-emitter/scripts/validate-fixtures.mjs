@@ -126,6 +126,36 @@ function runTypeScriptCompile() {
   }
 }
 
+function runTypraVerify() {
+  const cliPath = path.join(packageRoot, "dist", "src", "verify-cli.js");
+  if (!existsSync(cliPath)) {
+    fail("Unable to locate built typra-verify CLI for generated fixture validation.");
+    return;
+  }
+
+  try {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, "--baseline", generatedRoot, "--current", generatedRoot],
+      { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    for (const expected of [
+      "Typra verify: passed",
+      "exports: +0 / -0 / changed 0",
+      "protocols: +0 / -0 / changed 0",
+      "files: +0 / deleted 0 / ownership changed 0",
+      "package names changed: 0",
+    ]) {
+      if (!output.includes(expected)) {
+        fail(`typra-verify fixture output does not include expected summary: ${expected}`);
+      }
+    }
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`typra-verify failed against generated fixtures:\n${output || error.message}`);
+  }
+}
+
 function assertGeneratedTargets() {
   for (const target of ["typescript", "python", "go", "csharp", "rust", "markdown", "json-ast"]) {
     requirePath(path.join("generated", "fixtures", target));
@@ -292,6 +322,22 @@ function assertExportSurfaceSnapshot() {
   }
 }
 
+function assertHydrationBoundarySnapshot() {
+  const snapshot = readJson(path.join("generated", "fixtures", ".typra-generated", "hydration-seams.json"));
+  if (!snapshot) return;
+
+  if (snapshot.emitter !== "typra-emitter" || snapshot.version !== 1) {
+    fail("Hydration boundary snapshot has an unexpected emitter/version.");
+  }
+  const seams = snapshot.seams ?? [];
+  const eventSink = seams.find(seam => seam.contract === "EventSink" && seam.target === "typescript");
+  if (!eventSink) {
+    fail("Hydration boundary snapshot is missing the TypeScript EventSink protocol seam.");
+  } else if (eventSink.generatedSource !== "./pipeline/event-sink" || eventSink.seamKind !== "protocol-adapter") {
+    fail("Hydration boundary snapshot EventSink seam drifted.");
+  }
+}
+
 function assertActualGeneratedSurface() {
   assertIncludes(
     path.join("generated", "fixtures", "typescript", "index.ts"),
@@ -356,7 +402,9 @@ assertGeneratedTargets();
 assertNoEmptyTargetDirs();
 assertStaticFixtureCoverage();
 assertExportSurfaceSnapshot();
+assertHydrationBoundarySnapshot();
 assertActualGeneratedSurface();
+runTypraVerify();
 runTypeScriptCompile();
 
 if (failures.length > 0) {
