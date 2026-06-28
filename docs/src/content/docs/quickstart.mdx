@@ -1,0 +1,57 @@
+---
+title: Quickstart
+description: Install and configure Typra for a TypeSpec project.
+draft: false
+---
+
+Install the emitter with the TypeSpec versions Typra currently validates:
+
+```powershell
+npm install --save-dev @typra/emitter `
+  @typespec/compiler@1.10.0 `
+  @typespec/json-schema@1.10.0
+```
+
+Add Typra to `tspconfig.yaml`:
+
+```yaml
+emit:
+  - "@typra/emitter"
+
+options:
+  "@typra/emitter":
+    emitter-output-dir: "{cwd}/generated"
+    root-object: "MyProject.ApiRoot"
+    root-namespace: "MyProject"
+    emit-targets:
+      - type: TypeScript
+        output-dir: "generated/typescript"
+        test-dir: "generated/typescript/tests"
+        import-path: "../index"
+      - type: Go
+        output-dir: "generated/go"
+        test-dir: "generated/go/tests"
+        package-name: "myproject"
+```
+
+Import the emitter library from your TypeSpec entry point:
+
+```typespec
+import "@typra/emitter";
+
+namespace MyProject;
+```
+
+Compile:
+
+```powershell
+npx tsp compile ./path/to/main.tsp --config ./tspconfig.yaml
+```
+
+Verify generated metadata:
+
+```powershell
+npx typra-verify --baseline ./baseline --current ./generated
+```
+
+`typra-verify` compares committed `.typra-generated` metadata against current generated metadata and prints deterministic review summaries for exports, protocols, files, package identity, toolchain, protected paths, schema evolution, stale cleanup dry-runs, hydration seams, and breaking-change classification.

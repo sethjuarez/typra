@@ -1,0 +1,16 @@
+{
+  "name": "typra-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --host 127.0.0.1",
+    "build": "astro check && astro build",
+    "preview": "astro preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@astrojs/starlight": "^0.36.0",
+    "astro": "^5.15.8",
+    "typescript": "^5.9.3"
+  }
+}

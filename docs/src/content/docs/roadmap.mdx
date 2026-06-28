@@ -1,0 +1,39 @@
+---
+title: Roadmap
+description: Best-in-class roadmap for Typra emitter confidence and runtime generation.
+draft: false
+---
+
+Typra is in a strong shipped state. The next investments move confidence from known fixtures to systematic coverage across the TypeSpec input space.
+
+## Executable conformance specification
+
+Define a language-neutral semantic contract and make every target prove it with executable tests. Cover `load`, `save`, JSON helpers, provider wire mappings, scalar coercions, enums, optionals, nulls, polymorphic dispatch, and error behavior.
+
+## Fixture and shape fuzzing
+
+Generate TypeSpec fixture shapes programmatically by combining nested models, collections, dictionaries, unions, enums, optional fields, aliases, provider mappings, and reserved-word names.
+
+## Golden API snapshots
+
+Snapshot generated API shape for each target so accidental breaking changes are visible in class names, field names, methods, enum values, package layout, and exported symbols.
+
+## Runtime semantics contract
+
+Write down shared emitted-runtime behavior for unknown fields, missing required fields, nulls, coercion failures, enum failures, provider mappings, and discriminator dispatch.
+
+## Production-grade diagnostics
+
+Emit actionable messages with source locations when TypeSpec shapes cannot be represented cleanly or portably. Distinguish warnings, portability risks, and hard errors.
+
+## Consumer smoke projects
+
+Add tiny downstream projects that consume generated output as real packages or modules for TypeScript, Python, Go, Rust, C#, and Java.
+
+## Language polish
+
+Make each target feel idiomatic without losing cross-language semantic parity: Java package layout and builders, Go richer validation, Rust typed errors, C# nullable annotations, and stricter Python/TypeScript validation options.
+
+## Release and compatibility gate
+
+Gate releases on TypeSpec compatibility, language toolchain versions, generated fixture validation, conformance matrix status, consumer smoke projects, and package dry-run validation.

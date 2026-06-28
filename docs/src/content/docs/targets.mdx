@@ -1,0 +1,23 @@
+---
+title: Targets
+description: Supported Typra output targets.
+draft: false
+---
+
+Typra emits generated model surfaces, tests, metadata, and documentation from the same TypeSpec source.
+
+## Runtime targets
+
+- **TypeScript** - generated model classes and runtime helpers.
+- **Python** - generated models and loader/saver helpers.
+- **C#** - generated model types and JSON-oriented helpers.
+- **Go** - generated structs, load/save helpers, JSON/YAML helpers, and tests.
+- **Java** - generated models with load, save, fromJson, toJson, scalar coercion, enums, and polymorphic dispatch.
+- **Rust** - generated model structures and serde-oriented surfaces.
+
+## Reference targets
+
+- **Markdown** - generated reference documentation from the TypeSpec model graph.
+- **JSON AST** - generated schema metadata for tooling, verification, and review.
+
+The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust, Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture validation also exercises generated metadata, verifier CLI output, consumer smoke wiring, and cross-language generated-code compile/test surfaces.
