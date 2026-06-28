@@ -36,6 +36,7 @@ import {
   MethodStubDecl,
 } from "../../ir/declarations.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
+import { csharpIdentifier } from "./identifiers.js";
 
 // ============================================================================
 // Type maps
@@ -219,7 +220,7 @@ function emitCSharpInterface(type: TypeDecl, namespace: string, lines: string[])
       emitXmlDocComment(method.description, "        ", lines);
     }
     const params = Object.entries(method.params)
-      .map(([pName, pType]) => `${protocolCSharpType(pType)} ${pName}`)
+      .map(([pName, pType]) => `${protocolCSharpType(pType)} ${csharpIdentifier(pName)}`)
       .join(", ");
     const ret = protocolCSharpType(method.returns);
 
@@ -1218,7 +1219,7 @@ function emitFactoryRegion(type: TypeDecl, visitor: ExprVisitor, lines: string[]
 function emitFactoryMethod(factory: FactoryDecl, type: TypeDecl, visitor: ExprVisitor, lines: string[]): void {
   const methodName = getCSharpFactoryMethodName(factory.name, type);
   const params = Object.entries(factory.params).map(([name, typeStr]) =>
-    `${getCSharpFactoryParamType(typeStr)} ${name}`
+    `${getCSharpFactoryParamType(typeStr)} ${csharpIdentifier(name)}`
   ).join(", ");
   const body = visitor.visitExpr(factory.body);
 
@@ -1321,7 +1322,7 @@ function emitHelperInterface(type: TypeDecl, lines: string[]): void {
       lines.push(`    ${ret} ${pascalName} { get; }`);
     } else {
       const params = paramEntries
-        .map(([pName, pType]) => `${protocolCSharpType(pType)} ${pName}`)
+        .map(([pName, pType]) => `${protocolCSharpType(pType)} ${csharpIdentifier(pName)}`)
         .join(", ");
       lines.push(`    ${ret} ${pascalName}(${params});`);
     }

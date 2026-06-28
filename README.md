@@ -88,9 +88,10 @@ packages\typra-emitter\fixtures\shapes\
                                Synthetic TypeSpec fixture coverage
 ```
 
-The current fixture emits TypeScript and JSON AST from
-`packages\typra-emitter\fixtures\shapes\main.tsp`. It covers scalars, optional
-fields, arrays, dictionaries, nested models, and discriminated unions.
+The current fixture emits TypeScript, Python, C#, Go, Rust, Markdown, and JSON
+AST from `packages\typra-emitter\fixtures\shapes\main.tsp`. Fixture validation
+checks generated metadata, verifier CLI output, consumer smoke wiring, and
+cross-language generated-code compile/test surfaces.
 
 ## Development
 

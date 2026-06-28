@@ -4,6 +4,7 @@
 
 import { Expr, Construct, VariantConstruct, ArrayLiteral, TypeRegistry } from "../../ir/expansion.js";
 import { ExprVisitor, toPascalCase, assertNever } from "../../ir/visitor.js";
+import { csharpIdentifier } from "./identifiers.js";
 
 export class CSharpExprVisitor implements ExprVisitor {
   registry?: TypeRegistry;
@@ -23,7 +24,7 @@ export class CSharpExprVisitor implements ExprVisitor {
       case "null":
         return "null";
       case "param":
-        return expr.name;
+        return csharpIdentifier(expr.name);
       case "construct":
         return this.visitConstruct(expr);
       case "variant":

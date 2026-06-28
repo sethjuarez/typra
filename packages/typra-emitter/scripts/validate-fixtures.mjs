@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const packageRoot = process.cwd();
@@ -79,20 +79,28 @@ function findTypeScriptCli(startDir) {
   return undefined;
 }
 
-function runTypeScriptCompile() {
+function runGeneratedTypeScriptCompile() {
   const sourceDir = path.join(generatedRoot, "typescript");
-  const sourceFiles = walkFiles(sourceDir, file =>
-    file.endsWith(".ts") &&
-    !file.includes(`${path.sep}tests${path.sep}`) &&
-    !file.endsWith(`${path.sep}eslint.config.js`),
-  );
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".ts"));
 
   if (sourceFiles.length === 0) {
-    fail("No generated TypeScript source files found to compile.");
+    fail("No generated TypeScript files found to compile.");
     return;
   }
 
+  const ambientPath = path.join(sourceDir, "test-globals.validate.d.ts");
   const configPath = path.join(sourceDir, "tsconfig.validate.json");
+  writeFileSync(ambientPath, [
+    "declare function describe(name: string, fn: () => void): void;",
+    "declare function it(name: string, fn: () => void): void;",
+    "declare function expect(actual: unknown): {",
+    "  toBeDefined(): void;",
+    "  toBe(expected: unknown): void;",
+    "  toEqual(expected: unknown): void;",
+    "  toBeInstanceOf(expected: unknown): void;",
+    "};",
+    "",
+  ].join("\n"));
   writeFileSync(configPath, JSON.stringify({
     compilerOptions: {
       noEmit: true,
@@ -104,7 +112,7 @@ function runTypeScriptCompile() {
       types: ["node"],
       lib: ["ES2022"],
     },
-    files: sourceFiles,
+    files: [...sourceFiles, ambientPath],
   }, null, 2));
 
   const tscCli = findTypeScriptCli(packageRoot);
@@ -118,10 +126,12 @@ function runTypeScriptCompile() {
     );
   } catch (error) {
     const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
-    fail(`Generated TypeScript source does not compile:\n${output || error.message}`);
+    fail(`Generated TypeScript source and tests do not compile:\n${output || error.message}`);
   } finally {
-    if (existsSync(configPath)) {
-      unlinkSync(configPath);
+    for (const tempPath of [configPath, ambientPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
     }
   }
 }
@@ -150,10 +160,245 @@ function runTypraVerify() {
         fail(`typra-verify fixture output does not include expected summary: ${expected}`);
       }
     }
+
+    const jsonOutput = execFileSync(
+      process.execPath,
+      [cliPath, "--baseline", generatedRoot, "--current", generatedRoot, "--json"],
+      { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const result = JSON.parse(jsonOutput);
+    if (
+      result.ok !== true ||
+      result.breakingChange !== "patch" ||
+      result.summary?.exports?.added !== 0 ||
+      result.summary?.protocols?.changed !== 0 ||
+      result.summary?.files?.deleted !== 0
+    ) {
+      fail("typra-verify JSON fixture output does not describe a clean self-compare.");
+    }
   } catch (error) {
     const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
     fail(`typra-verify failed against generated fixtures:\n${output || error.message}`);
   }
+}
+
+function runTypraConsumerSmoke() {
+  const cliPath = path.join(packageRoot, "dist", "src", "consumer-smoke.js");
+  if (!existsSync(cliPath)) {
+    fail("Unable to locate built typra-consumer-smoke CLI for generated fixture validation.");
+    return;
+  }
+
+  const configPath = path.join(generatedRoot, "typra-smoke.validate.json");
+  writeFileSync(configPath, JSON.stringify({
+    verify: {
+      baseline: generatedRoot,
+      current: generatedRoot,
+    },
+  }, null, 2));
+
+  try {
+    execFileSync(
+      process.execPath,
+      [cliPath, "--config", configPath],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`typra-consumer-smoke failed against generated fixtures:\n${output || error.message}`);
+  } finally {
+    if (existsSync(configPath)) {
+      unlinkSync(configPath);
+    }
+  }
+}
+
+function commandExists(command) {
+  try {
+    if (process.platform === "win32") {
+      execFileSync("where", [command], { stdio: "ignore" });
+    } else {
+      execFileSync("sh", ["-c", `command -v ${command}`], { stdio: "ignore" });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runCommand(label, command, args, options = {}) {
+  if (!commandExists(command)) {
+    fail(`${label} cannot run because ${command} is not available.`);
+    return;
+  }
+  try {
+    execFileSync(command, args, { cwd: packageRoot, stdio: "pipe", ...options });
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`${label} failed:\n${output || error.message}`);
+  }
+}
+
+function runPythonCompile() {
+  const sourceDir = path.join(generatedRoot, "python");
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".py"));
+  if (sourceFiles.length === 0) {
+    fail("No generated Python files found to compile.");
+    return;
+  }
+  runCommand("Generated Python source syntax validation", "python", ["-m", "py_compile", ...sourceFiles]);
+}
+
+function runGoTests() {
+  const sourceDir = path.join(generatedRoot, "go");
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".go"));
+  if (sourceFiles.length === 0) {
+    fail("No generated Go files found to test.");
+    return;
+  }
+
+  const modPath = path.join(sourceDir, "go.mod");
+  const sumPath = path.join(sourceDir, "go.sum");
+  writeFileSync(modPath, [
+    "module fixtures",
+    "",
+    "go 1.22",
+    "",
+    "require gopkg.in/yaml.v3 v3.0.1",
+    "",
+  ].join("\n"));
+  try {
+    runCommand("Generated Go module dependency resolution", "go", ["mod", "tidy"], { cwd: sourceDir });
+    runCommand("Generated Go source and tests", "go", ["test", "./..."], { cwd: sourceDir });
+  } finally {
+    for (const tempPath of [modPath, sumPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    }
+  }
+}
+
+function runRustTests() {
+  const sourceDir = path.join(generatedRoot, "rust");
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".rs"));
+  if (sourceFiles.length === 0) {
+    fail("No generated Rust files found to test.");
+    return;
+  }
+
+  const cargoPath = path.join(sourceDir, "Cargo.toml");
+  const lockPath = path.join(sourceDir, "Cargo.lock");
+  const libPath = path.join(sourceDir, "lib.rs");
+  const targetDir = path.join(sourceDir, "target");
+  writeFileSync(cargoPath, [
+    "[package]",
+    'name = "fixtures"',
+    'version = "0.0.0"',
+    'edition = "2021"',
+    "",
+    "[dependencies]",
+    'async-trait = "0.1"',
+    'serde = { version = "1", features = ["derive"] }',
+    'serde_json = "1"',
+    'serde_yaml = "0.9"',
+    "",
+    "[lib]",
+    'path = "lib.rs"',
+    "",
+  ].join("\n"));
+  writeFileSync(libPath, '#[path = "mod.rs"] pub mod model;\n');
+  try {
+    runCommand("Generated Rust source and tests", "cargo", ["test", "--quiet"], { cwd: sourceDir });
+  } finally {
+    for (const tempPath of [cargoPath, lockPath, libPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    }
+    if (existsSync(targetDir)) {
+      rmSync(targetDir, { recursive: true, force: true });
+    }
+  }
+}
+
+function runCSharpBuild() {
+  const sourceDir = path.join(generatedRoot, "csharp");
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".cs") && !file.includes(`${path.sep}tests${path.sep}`));
+  if (sourceFiles.length === 0) {
+    fail("No generated C# files found to build.");
+    return;
+  }
+
+  const projectPath = path.join(sourceDir, "TypraFixtureValidation.csproj");
+  const stubsPath = path.join(sourceDir, "TypraFixtureValidation.Stubs.cs");
+  const binDir = path.join(sourceDir, "bin");
+  const objDir = path.join(sourceDir, "obj");
+  writeFileSync(projectPath, [
+    '<Project Sdk="Microsoft.NET.Sdk">',
+    "  <PropertyGroup>",
+    "    <TargetFramework>net8.0</TargetFramework>",
+    "    <Nullable>enable</Nullable>",
+    "    <ImplicitUsings>enable</ImplicitUsings>",
+    "  </PropertyGroup>",
+    "  <ItemGroup>",
+    '    <Compile Remove="tests/**/*.cs" />',
+    '    <PackageReference Include="YamlDotNet" Version="16.3.0" />',
+    "  </ItemGroup>",
+    "</Project>",
+    "",
+  ].join("\n"));
+  writeFileSync(stubsPath, buildCSharpValidationStubs(sourceDir));
+  try {
+    runCommand("Generated C# source build", "dotnet", ["build", projectPath, "--nologo", "--verbosity", "quiet"], { cwd: sourceDir });
+  } finally {
+    for (const tempPath of [projectPath, stubsPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    }
+    for (const tempDir of [binDir, objDir]) {
+      if (existsSync(tempDir)) {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    }
+  }
+}
+
+function buildCSharpValidationStubs(sourceDir) {
+  const members = [];
+  for (const file of walkFiles(sourceDir, file => file.endsWith(".cs") && !file.includes(`${path.sep}tests${path.sep}`))) {
+    const content = readFileSync(file, "utf8");
+    const interfaceMatch = content.match(/public\s+partial\s+interface\s+I(?<typeName>\w+)Helpers\s*\{(?<body>[\s\S]*?)\n\}/);
+    if (!interfaceMatch?.groups) continue;
+
+    const { typeName, body } = interfaceMatch.groups;
+    const implementations = [];
+    for (const line of body.split(/\r?\n/)) {
+      const method = line.trim().match(/^(?<returnType>[\w?<>,. ]+)\s+(?<name>\w+)\((?<params>[^)]*)\);$/);
+      if (method?.groups) {
+        const { returnType, name, params } = method.groups;
+        const bodyText = returnType.trim() === "void" ? " { }" : " => default!;";
+        implementations.push(`    public ${returnType.trim()} ${name}(${params})${bodyText}`);
+        continue;
+      }
+      const property = line.trim().match(/^(?<returnType>[\w?<>,. ]+)\s+(?<name>\w+)\s+\{\s+get;\s+\}$/);
+      if (property?.groups) {
+        implementations.push(`    public ${property.groups.returnType.trim()} ${property.groups.name} => default!;`);
+      }
+    }
+
+    if (implementations.length > 0) {
+      members.push(`public partial class ${typeName}\n{\n${implementations.join("\n")}\n}`);
+    }
+  }
+
+  return [
+    "namespace Typra.Fixtures;",
+    "",
+    ...members,
+    "",
+  ].join("\n");
 }
 
 function assertGeneratedTargets() {
@@ -405,7 +650,12 @@ assertExportSurfaceSnapshot();
 assertHydrationBoundarySnapshot();
 assertActualGeneratedSurface();
 runTypraVerify();
-runTypeScriptCompile();
+runTypraConsumerSmoke();
+runGeneratedTypeScriptCompile();
+runPythonCompile();
+runGoTests();
+runRustTests();
+runCSharpBuild();
 
 if (failures.length > 0) {
   console.error("Fixture validation failed:");
