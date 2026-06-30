@@ -142,5 +142,9 @@ export function emitGoContext(ctx: GoContextContext): string {
   lines.push("}");
   lines.push("");
 
-  return lines.join("\n");
+  return emitCleanGoLines(lines);
+}
+
+function emitCleanGoLines(lines: string[], suffix = ""): string {
+  return lines.map(line => line.trimEnd()).join("\n") + suffix;
 }

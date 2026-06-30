@@ -165,7 +165,11 @@ export function emitPythonFile(decl: FileDecl, visitor: ExprVisitor, group: stri
     emitType(type, lines, visitor);
   }
 
-  return lines.join("\n") + "\n";
+  return emitCleanPythonLines(lines, "\n");
+}
+
+function emitCleanPythonLines(lines: string[], suffix = ""): string {
+  return lines.map(line => line.trimEnd()).join("\n") + suffix;
 }
 
 // ============================================================================

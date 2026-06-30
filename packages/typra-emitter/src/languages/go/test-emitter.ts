@@ -505,7 +505,11 @@ export function emitGoTest(ctx: BaseTestContext & { importPath: string }): strin
     emitReflectiveFieldHelpers(lines, reflectiveHelperName(typeName));
   }
 
-  return lines.join("\n") + "\n";
+  return emitCleanGoLines(lines, "\n");
+}
+
+function emitCleanGoLines(lines: string[], suffix = ""): string {
+  return lines.map(line => line.trimEnd()).join("\n") + suffix;
 }
 
 // ============================================================================

@@ -214,6 +214,37 @@ function walkFiles(dir, predicate = () => true) {
   return files;
 }
 
+const GENERATED_TEXT_EXTENSIONS = new Set([
+  ".cs",
+  ".go",
+  ".java",
+  ".json",
+  ".md",
+  ".py",
+  ".rs",
+  ".toml",
+  ".ts",
+  ".yaml",
+  ".yml",
+]);
+
+function isGeneratedTextFile(file) {
+  return GENERATED_TEXT_EXTENSIONS.has(path.extname(file).toLowerCase());
+}
+
+function assertNoGeneratedTrailingWhitespace() {
+  for (const file of walkFiles(generatedRoot, isGeneratedTextFile)) {
+    const relativePath = path.relative(packageRoot, file);
+    const content = readFileSync(file, "utf8");
+    const lines = content.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index++) {
+      if (/[ \t]+$/.test(lines[index])) {
+        fail(`${relativePath}:${index + 1} has trailing whitespace.`);
+      }
+    }
+  }
+}
+
 function findTypeScriptCli(startDir) {
   let current = startDir;
   while (current !== path.dirname(current)) {
@@ -1356,6 +1387,7 @@ function assertNoEmptyTargetDirs() {
 
 assertGeneratedTargets();
 assertNoEmptyTargetDirs();
+assertNoGeneratedTrailingWhitespace();
 assertStaticFixtureCoverage();
 assertConformanceMatrix();
 assertExportSurfaceSnapshot();
