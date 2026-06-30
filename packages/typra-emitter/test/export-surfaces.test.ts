@@ -8,7 +8,9 @@ import { TypeNode } from "../src/ir/ast.js";
 import { buildExportSurfaceSnapshot } from "../src/contract-surface.js";
 import { lowerFile } from "../src/ir/lower.js";
 import { goPackageNameFromNamespace } from "../src/languages/go/driver.js";
+import { emitPythonFile } from "../src/languages/python/emitter.js";
 import { emitPythonInit } from "../src/languages/python/scaffolding.js";
+import { PythonExprVisitor } from "../src/languages/python/visitor.js";
 import { emitRustGroupMod, emitRustLib } from "../src/languages/rust/driver.js";
 import { emitTypeScriptIndex } from "../src/languages/typescript/scaffolding.js";
 import {
@@ -106,6 +108,19 @@ describe("export surface scaffolding", () => {
     const file = lowerFile(eventSink, registry);
 
     assert.deepEqual(file.imports, []);
+  });
+
+  it("emits Python protocol method stubs without no-effect statements", () => {
+    const registry = TypeRegistry.fromTypeGraph(baseTypes);
+    const file = lowerFile(eventSink, registry);
+    const source = emitPythonFile(file, new PythonExprVisitor(registry), "pipeline");
+
+    assert.match(
+      source,
+      /def emit\(self, event: Any\) -> None:\n        """Emit an event\."""\n        raise NotImplementedError/,
+    );
+    assert.doesNotMatch(source, /\n        \.\.\./);
+    assert.doesNotMatch(source, /def emit\(self, event: Any\) -> None: \.\.\./);
   });
 
   it("builds deterministic target export surface snapshots", () => {
