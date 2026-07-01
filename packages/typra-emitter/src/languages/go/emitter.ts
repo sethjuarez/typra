@@ -104,7 +104,11 @@ export function emitGoFileContent(
     emitTypeBlock(type, lines, visitor, polymorphicTypeNames, scalarCoercibleTypeNames);
   }
 
-  return lines.join("\n");
+  return emitCleanGoLines(lines);
+}
+
+function emitCleanGoLines(lines: string[], suffix = ""): string {
+  return lines.map(line => line.trimEnd()).join("\n") + suffix;
 }
 
 // ============================================================================

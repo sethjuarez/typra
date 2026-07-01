@@ -165,7 +165,11 @@ export function emitPythonFile(decl: FileDecl, visitor: ExprVisitor, group: stri
     emitType(type, lines, visitor);
   }
 
-  return lines.join("\n") + "\n";
+  return emitCleanPythonLines(lines, "\n");
+}
+
+function emitCleanPythonLines(lines: string[], suffix = ""): string {
+  return lines.map(line => line.trimEnd()).join("\n") + suffix;
 }
 
 // ============================================================================
@@ -292,7 +296,7 @@ function emitMethodHelpersProtocol(type: TypeDecl, lines: string[]): void {
     if (m.description) {
       lines.push(`        """${m.description}"""`);
     }
-    lines.push("        ...");
+    emitRequiredProtocolMethodBody(lines);
   }
 }
 
@@ -369,7 +373,7 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
   }
 
   if (type.methods.length === 0) {
-    lines.push("    ...");
+    lines.push("    pass");
     return;
   }
 
@@ -387,14 +391,15 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
       if (method.optional) {
         lines.push("        return None");
       } else {
-        lines.push("        ...");
+        emitRequiredProtocolMethodBody(lines);
       }
     } else {
       if (method.optional) {
         lines.push(`    def ${toSnakeCase(method.name)}(self, ${params}) -> ${ret}:`);
         lines.push("        return None");
       } else {
-        lines.push(`    def ${toSnakeCase(method.name)}(self, ${params}) -> ${ret}: ...`);
+        lines.push(`    def ${toSnakeCase(method.name)}(self, ${params}) -> ${ret}:`);
+        emitRequiredProtocolMethodBody(lines);
       }
     }
 
@@ -407,20 +412,25 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
         if (method.optional) {
           lines.push("        return None");
         } else {
-          lines.push("        ...");
+          emitRequiredProtocolMethodBody(lines);
         }
       } else {
         if (method.optional) {
           lines.push(`    async def ${toSnakeCase(method.name)}_async(self, ${params}) -> ${ret}:`);
           lines.push("        return None");
         } else {
-          lines.push(`    async def ${toSnakeCase(method.name)}_async(self, ${params}) -> ${ret}: ...`);
+          lines.push(`    async def ${toSnakeCase(method.name)}_async(self, ${params}) -> ${ret}:`);
+          emitRequiredProtocolMethodBody(lines);
         }
       }
     }
   }
 
   lines.push("");
+}
+
+function emitRequiredProtocolMethodBody(lines: string[]): void {
+  lines.push("        raise NotImplementedError");
 }
 
 // ============================================================================
