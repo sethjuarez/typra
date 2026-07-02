@@ -37,3 +37,23 @@ Make each target feel idiomatic without losing cross-language semantic parity: J
 ## Release and compatibility gate
 
 Gate releases on TypeSpec compatibility, language toolchain versions, generated fixture validation, conformance matrix status, consumer smoke projects, and package dry-run validation.
+
+## Documentation standard
+
+Keep public docs concise and source-aligned:
+
+- Explain the emitter boundary before target details.
+- Prefer runnable configuration over abstract prose.
+- Document verifier and metadata behavior wherever generated output is committed.
+- Treat fixtures as evidence, not marketing.
+- Avoid promising runtime behavior that belongs in consuming products.
+
+## Review criteria
+
+Every public docs change should answer:
+
+1. Does it help users decide whether Typra is the right tool?
+2. Does it show the shortest safe path to a working generation?
+3. Does it make review gates and generated-code limits explicit?
+4. Does it cite behavior that exists in source, fixtures, or package metadata?
+5. Does it stay concise enough to scan before copying a command?

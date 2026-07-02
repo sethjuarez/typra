@@ -4,9 +4,9 @@ description: TypeSpec models to runtime model surfaces.
 draft: false
 template: splash
 hero:
-  tagline: TypeSpec in. Runtime models out. Full docs are coming soon.
+  tagline: TypeSpec in. Runtime models out.
   actions:
-    - text: Read the docs
+    - text: Start with Quickstart
       link: /quickstart/
       icon: right-arrow
     - text: View on GitHub
@@ -14,12 +14,33 @@ hero:
       icon: external
 ---
 
-Typra is getting a public home at typra.dev.
+Typra turns TypeSpec model contracts into runtime model surfaces, generated tests, generated documentation, and reviewable metadata.
 
-The documentation site is wired up and building end-to-end through Astro, Starlight, and GitHub Pages. The full docs are coming soon while we finish the shape of the public site.
+Use it when TypeSpec is the source of truth for shared data shapes and multiple runtimes need to agree on loading, saving, provider wire names, polymorphism, and generated API shape.
 
-## Coming soon
+Typra is deliberately emitter-only. It generates model and protocol surfaces, but product-specific TypeSpec contracts, service behavior, and hand-authored adapters stay in the consuming product.
 
-- Guides for generating models from TypeSpec.
-- Target docs for TypeScript, Python, C#, Go, Java, Rust, and Markdown.
-- Release notes and compatibility guidance for `@typra/emitter`.
+## What Typra gives you
+
+- Runtime model code for TypeScript, Python, C#, Go, Java, and Rust.
+- JSON/YAML load and save helpers where supported by the target.
+- Generated tests and optional compile-only protocol scaffolds.
+- Markdown reference output and a JSON contract AST.
+- Deterministic `.typra-generated` metadata for CI review.
+
+## When to use Typra
+
+| Use Typra when... | Keep hand-authored code when... |
+| --- | --- |
+| TypeSpec is the durable source of truth for shared model shapes. | Behavior depends on product-specific runtime decisions. |
+| Multiple runtimes need consistent serialization and wire names. | A one-off integration does not need generated parity. |
+| Generated output will be reviewed in CI. | The shape is still exploratory and changing daily. |
+| Tests and metadata help teams trust code generation. | Custom adapters or service implementations are the actual product logic. |
+
+## Current compatibility
+
+`@typra/emitter` currently validates against `@typespec/compiler` and `@typespec/json-schema` `1.10.0`. Unsupported TypeSpec versions report an emitter diagnostic unless `allow-unsupported-typespec-version: true` is set intentionally.
+
+## Design principle
+
+Generated code should be useful, reviewable, and replaceable. Typra owns reusable generation behavior; consuming products own domain contracts, runtime orchestration, and adapter logic.

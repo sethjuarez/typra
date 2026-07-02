@@ -4,7 +4,17 @@ description: Install and configure Typra for a TypeSpec project.
 draft: false
 ---
 
-Install the emitter with the TypeSpec versions Typra currently validates:
+## Before you start
+
+| Requirement | Why it matters |
+| --- | --- |
+| `@typespec/compiler` `1.10.0` | Typra validates emitted behavior against this compiler version. |
+| `@typespec/json-schema` `1.10.0` | JSON AST and verifier metadata depend on the validated schema emitter. |
+| A clear `root-object` | Generation starts from one fully qualified model. |
+| A deliberate `root-namespace` | When set, Typra can include additional models from that namespace, not only shapes reachable from the root. |
+| A review baseline | `typra-verify` compares committed metadata with current output. |
+
+Install Typra with the TypeSpec versions it currently validates:
 
 ```powershell
 npm install --save-dev @typra/emitter `
@@ -21,17 +31,25 @@ emit:
 options:
   "@typra/emitter":
     emitter-output-dir: "{cwd}/generated"
-    root-object: "MyProject.ApiRoot"
-    root-namespace: "MyProject"
+    root-object: "Todo.Contracts.TodoList"
+    root-namespace: "Todo.Contracts"
+    deterministic-output: true
     emit-targets:
       - type: TypeScript
         output-dir: "generated/typescript"
         test-dir: "generated/typescript/tests"
         import-path: "../index"
+      - type: Python
+        output-dir: "generated/python"
+        test-dir: "generated/python/tests"
+        import-path: "todo_contracts"
       - type: Go
         output-dir: "generated/go"
         test-dir: "generated/go/tests"
-        package-name: "myproject"
+        import-path: "todo"
+        package-name: "todo"
+      - type: Markdown
+        output-dir: "generated/markdown"
 ```
 
 Import the emitter library from your TypeSpec entry point:
@@ -39,7 +57,24 @@ Import the emitter library from your TypeSpec entry point:
 ```typespec
 import "@typra/emitter";
 
-namespace MyProject;
+namespace Todo.Contracts;
+
+model TodoList {
+  name: string;
+  items: TodoItem[];
+}
+
+model TodoItem {
+  id: string;
+  title: string;
+  state: TodoState;
+}
+
+union TodoState {
+  open: "open";
+  done: "done";
+  archived: "archived";
+}
 ```
 
 Compile:
@@ -48,10 +83,35 @@ Compile:
 npx tsp compile ./path/to/main.tsp --config ./tspconfig.yaml
 ```
 
+Typra writes each requested target under its `output-dir`, writes generated tests when `test-dir` is set, and writes generated metadata under the configured emitter output root.
+
+Scope note: `root-object` anchors generation, while `root-namespace` helps Typra resolve and include namespace-level models. If you need a tighter surface, review emitted metadata and use `omit-models` deliberately.
+
+## What success looks like
+
+After compile, the generated root should contain target output plus Typra metadata:
+
+```text
+generated\
+  typescript\
+  python\
+  go\
+  markdown\
+  json-ast\model.json
+  .typra-generated\manifest.json
+  .typra-generated\report.json
+```
+
 Verify generated metadata:
 
 ```powershell
 npx typra-verify --baseline ./baseline --current ./generated
 ```
 
-`typra-verify` compares committed `.typra-generated` metadata against current generated metadata and prints deterministic review summaries for exports, protocols, files, package identity, toolchain, protected paths, schema evolution, stale cleanup dry-runs, hydration seams, and breaking-change classification.
+`typra-verify` compares committed `.typra-generated` metadata against current generated metadata. It reports drift in exports, protocols, generated files, package identity, toolchain metadata, protected paths, schema evolution, stale cleanup candidates, hydration seams, and breaking-change classification. It does not delete files.
+
+## Recommended CI gate
+
+For committed generated output, set `deterministic-output: true`, compile with TypeSpec, then run `typra-verify` against the committed baseline before accepting generated changes.
+
+If verification fails, treat the output as a review signal rather than a formatting problem. Check whether the drift is expected, whether protected paths were touched, and whether the breaking-change classification matches the intended release.
