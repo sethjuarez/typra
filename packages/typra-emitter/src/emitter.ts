@@ -8,7 +8,7 @@ import { generateTypeScript } from "./languages/typescript/driver.js";
 import { generateGo } from "./languages/go/driver.js";
 import { generateJava } from "./languages/java/driver.js";
 import { generateRust } from "./languages/rust/driver.js";
-import { emitGeneratedFile, emitGeneratedManifest } from "./cleanup/generated-file.js";
+import { emitGeneratedFile, emitGeneratedManifest, emitGeneratedOutputReport } from "./cleanup/generated-file.js";
 import { buildExportSurfaceSnapshot, emitExportSurfaceSnapshot } from "./contract-surface.js";
 import { reportTypeSpecCompatibility, shouldBlockUnsupportedTypeSpecToolchain } from "./compatibility.js";
 import { buildHydrationBoundarySnapshot, emitHydrationBoundarySnapshot } from "./hydration-seams.js";
@@ -233,5 +233,6 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     buildHydrationBoundarySnapshot(exportSurfaceSnapshot, options),
   );
 
-  await emitGeneratedManifest(context);
+  const manifest = await emitGeneratedManifest(context);
+  await emitGeneratedOutputReport(context, manifest);
 }

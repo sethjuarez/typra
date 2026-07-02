@@ -1344,6 +1344,42 @@ function assertHydrationBoundarySnapshot() {
   }
 }
 
+function assertGeneratedOutputReport() {
+  const report = readJson(path.join("generated", "fixtures", ".typra-generated", "report.json"));
+  if (!report) {
+    fail("Generated output report is missing.");
+    return;
+  }
+
+  if (report.emitter !== "typra-emitter" || report.version !== 1) {
+    fail("Generated output report has an unexpected emitter/version.");
+  }
+  if (report.generatedAt !== "1970-01-01T00:00:00.000Z") {
+    fail("Generated output report must use deterministic generatedAt in fixture mode.");
+  }
+  if (!Array.isArray(report.emittedFiles) || report.emittedFiles.length === 0) {
+    fail("Generated output report must list emitted files.");
+  }
+  if (!report.emittedFiles.some(entry => entry.path.endsWith("generated/fixtures/python/_FixtureRoot.py"))) {
+    fail("Generated output report is missing a representative Python emitted file.");
+  }
+  if (!Array.isArray(report.skippedFiles)) {
+    fail("Generated output report must list skipped files.");
+  }
+  if (!Array.isArray(report.staleMarkerOwnedRemovals) || !Array.isArray(report.preservedUnmarkedSkippedFiles)) {
+    fail("Generated output report must list cleanup action summaries.");
+  }
+  if (report.hygiene?.lineEndings !== "lf" || report.hygiene?.finalNewline !== true || report.hygiene?.trailingWhitespace !== "trimmed") {
+    fail("Generated output report hygiene policy drifted.");
+  }
+  if (report.protectedPathTouches?.status !== "requires-verifier-baseline") {
+    fail("Generated output report must mark protected path touches as verifier-baseline scoped.");
+  }
+  if (report.formatter?.status !== "not-recorded") {
+    fail("Generated output report must not claim per-file formatter status.");
+  }
+}
+
 function assertActualGeneratedSurface() {
   assertIncludes(
     path.join("generated", "fixtures", "typescript", "index.ts"),
@@ -1422,6 +1458,7 @@ assertStaticFixtureCoverage();
 assertConformanceMatrix();
 assertExportSurfaceSnapshot();
 assertHydrationBoundarySnapshot();
+assertGeneratedOutputReport();
 assertActualGeneratedSurface();
 runTypraVerify();
 runTypraConsumerSmoke();
