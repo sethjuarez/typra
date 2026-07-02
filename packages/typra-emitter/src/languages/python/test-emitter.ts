@@ -262,6 +262,10 @@ class TestSaveContext:
  */
 export function emitPythonTest(ctx: BaseTestContext & { classCtx: PythonClassContext }): string {
   const { node, examples, coercions, factories, classCtx } = ctx;
+  if (examples.length === 0 && coercions.length === 0 && factories.length === 0) {
+    return "";
+  }
+
   const packageName = ctx.package || '';
   const typeName = node.typeName.name;
   const typeNameLower = typeName.toLowerCase();

@@ -83,7 +83,7 @@ export const generatePython = async (
   cleanupFlatTypeFiles(emitTarget["test-dir"], name => /^test_.+\.py$/.test(name) && name !== "test_context.py");
 
   // Emit py.typed marker for PEP 561 compliance
-  await emitPythonFile(context, 'py.typed', '', emitTarget["output-dir"]);
+  await emitPythonFile(context, 'py.typed', '', emitTarget["output-dir"], emitTarget["output-dir"], { allowEmpty: true });
 
   // Render LoadContext file
   const contextContext = buildLoadContextContext();
@@ -437,9 +437,10 @@ async function emitPythonFile(
   content: string,
   outputDir?: string,
   outputRoot?: string,
+  options: { allowEmpty?: boolean } = {},
 ): Promise<void> {
   outputDir = outputDir || `${context.emitterOutputDir}/python`;
   const filePath = resolvePath(outputDir, filename);
 
-  await emitGeneratedFile(context, filePath, content, { outputRoot: outputRoot || outputDir });
+  await emitGeneratedFile(context, filePath, content, { outputRoot: outputRoot || outputDir, allowEmpty: options.allowEmpty });
 }

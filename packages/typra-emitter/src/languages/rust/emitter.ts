@@ -52,6 +52,10 @@ import {
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 
+export interface RustEmitterOptions {
+  enumParsing?: "case-sensitive" | "case-insensitive";
+}
+
 /**
  * Emit a description as a single-line `///` doc comment.
  * Multi-line descriptions are collapsed to a single line.
@@ -94,7 +98,7 @@ function rustFieldName(name: string): string {
  * Emit a Rust enum for a named string-literal type.
  * Uses serde rename for string ↔ enum round-tripping.
  */
-function emitStringEnum(enumDef: EnumDef, lines: string[]): void {
+function emitStringEnum(enumDef: EnumDef, lines: string[], options: RustEmitterOptions): void {
   const firstVariant = toPascalCase(enumDef.values[0]);
   if (enumDef.isOpen) {
     // Open enums carry String data in Other variant — no Copy
@@ -140,16 +144,35 @@ function emitStringEnum(enumDef: EnumDef, lines: string[]): void {
   // impl From<&str>
   lines.push(`impl ${enumDef.name} {`);
   lines.push("    pub fn from_str_opt(s: &str) -> Option<Self> {");
-  lines.push("        match s {");
+  if (options.enumParsing === "case-insensitive") {
+    lines.push("        Self::from_str_ignore_case_opt(s)");
+    lines.push("    }");
+    lines.push("");
+  } else {
+    lines.push("        match s {");
+    for (const value of enumDef.values) {
+      lines.push(`            "${value}" => Some(Self::${toPascalCase(value)}),`);
+    }
+    if (enumDef.isOpen) {
+      lines.push("            other => Some(Self::Other(other.to_string())),");
+    } else {
+      lines.push("            _ => None,");
+    }
+    lines.push("        }");
+    lines.push("    }");
+    lines.push("");
+  }
+  lines.push("    pub fn from_str_ignore_case_opt(s: &str) -> Option<Self> {");
   for (const value of enumDef.values) {
-    lines.push(`            "${value}" => Some(Self::${toPascalCase(value)}),`);
+    lines.push(`        if s.eq_ignore_ascii_case("${value}") {`);
+    lines.push(`            return Some(Self::${toPascalCase(value)});`);
+    lines.push("        }");
   }
   if (enumDef.isOpen) {
-    lines.push("            other => Some(Self::Other(other.to_string())),");
+    lines.push("        Some(Self::Other(s.to_string()))");
   } else {
-    lines.push("            _ => None,");
+    lines.push("        None");
   }
-  lines.push("        }");
   lines.push("    }");
   lines.push("");
   lines.push("    pub fn as_str(&self) -> &str {");
@@ -200,6 +223,7 @@ export function emitRustFile(
   visitor: ExprVisitor,
   polymorphicTypeNames: Set<string>,
   childToParent: Map<string, string> = new Map(),
+  options: RustEmitterOptions = {},
 ): string {
   const lines: string[] = [];
   const hasNonProtocol = file.types.some(t => !t.isProtocol);
@@ -263,7 +287,7 @@ export function emitRustFile(
 
   // String-literal enum types
   for (const enumDef of file.enums) {
-    emitStringEnum(enumDef, lines);
+    emitStringEnum(enumDef, lines, options);
   }
 
   // Find the base type (the one that owns the polymorphic dispatch)
