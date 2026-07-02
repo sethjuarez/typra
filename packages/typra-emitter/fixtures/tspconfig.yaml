@@ -36,6 +36,7 @@ options:
         test-dir: "generated/fixtures/csharp/tests"
         namespace: "Typra.Fixtures"
         format: false
+        protocol-scaffolds: "compile-only"
       - type: Rust
         output-dir: "generated/fixtures/rust"
         test-dir: "generated/fixtures/rust/tests"
