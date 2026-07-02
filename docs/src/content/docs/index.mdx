@@ -9,6 +9,9 @@ hero:
     - text: Start with Quickstart
       link: /quickstart/
       icon: right-arrow
+    - text: See TypeSpec Mappings
+      link: /mappings/
+      icon: document
     - text: View on GitHub
       link: https://github.com/sethjuarez/typra
       icon: external
@@ -20,13 +23,14 @@ Use it when TypeSpec is the source of truth for shared data shapes and multiple 
 
 Typra is deliberately emitter-only. It generates model and protocol surfaces, but product-specific TypeSpec contracts, service behavior, and hand-authored adapters stay in the consuming product.
 
-## What Typra gives you
+## Documentation map
 
-- Runtime model code for TypeScript, Python, C#, Go, Java, and Rust.
-- JSON/YAML load and save helpers where supported by the target.
-- Generated tests and optional compile-only protocol scaffolds.
-- Markdown reference output and a JSON contract AST.
-- Deterministic `.typra-generated` metadata for CI review.
+| Section | Use it for |
+| --- | --- |
+| [Concepts](/concepts/) | The mental model, a simple example, and the end-to-end generation flow. |
+| [TypeSpec Mappings](/mappings/) | How TypeSpec shapes lower into Typra concepts and generated runtime surfaces. |
+| [Targets](/targets/) | What each output target looks like and which options matter for that runtime. |
+| [Reference](/reference/) | Configuration, CLI commands, compatibility, verifier behavior, and roadmap details. |
 
 ## When to use Typra
 
@@ -40,6 +44,14 @@ Typra is deliberately emitter-only. It generates model and protocol surfaces, bu
 ## Current compatibility
 
 `@typra/emitter` currently validates against `@typespec/compiler` and `@typespec/json-schema` `1.10.0`. Unsupported TypeSpec versions report an emitter diagnostic unless `allow-unsupported-typespec-version: true` is set intentionally.
+
+## What Typra gives you
+
+- Runtime model code for TypeScript, Python, C#, Go, Java, and Rust.
+- JSON/YAML load and save helpers where supported by the target.
+- Generated tests and optional compile-only protocol scaffolds.
+- Markdown reference output and a JSON contract AST.
+- Deterministic `.typra-generated` metadata for CI review.
 
 ## Design principle
 

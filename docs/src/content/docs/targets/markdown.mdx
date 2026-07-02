@@ -1,0 +1,24 @@
+---
+title: Markdown target
+description: What Typra emits for generated reference documentation.
+draft: false
+---
+
+Use the Markdown target when you want generated contract reference output from the same TypeSpec graph as your runtime targets.
+
+```yaml
+emit-targets:
+  - type: Markdown
+    output-dir: "generated/markdown"
+```
+
+| Option | Why it matters |
+| --- | --- |
+| `output-dir` | Where generated Markdown reference files are written. |
+| `format` | Controls target formatting when supported by the target configuration. |
+
+Generated Markdown is reference material, not product narrative. Review it before publishing and link it from hand-authored docs when it helps users inspect the contract graph.
+
+## JSON AST companion
+
+Typra also emits `json-ast/model.json` for every generation. Use it for tooling, review, verification, and schema evolution; do not treat it as a runtime API.

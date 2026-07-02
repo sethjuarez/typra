@@ -1,0 +1,45 @@
+---
+title: Models and properties
+description: How Typra maps TypeSpec models, required fields, optional fields, and nested objects.
+draft: false
+---
+
+Models are Typra's primary unit of generation. A TypeSpec model becomes a target model surface; properties become target fields or properties.
+
+```typespec
+model FixtureRoot {
+  name: string;
+  description?: string;
+  owner: FixtureOwner;
+}
+
+model FixtureOwner {
+  id: string;
+  displayName?: string;
+}
+```
+
+| TypeSpec | Typra mapping |
+| --- | --- |
+| `name: string` | Required scalar field. |
+| `description?: string` | Optional scalar field. |
+| `owner: FixtureOwner` | Required nested object field. |
+| `displayName?: string` | Optional nested object field. |
+
+Targets choose idiomatic syntax for the same shape: TypeScript emits classes and optional properties, Python emits model surfaces with loader/saver helpers, C# emits `System.Text.Json`-oriented types, and Go emits structs with JSON/YAML helper behavior.
+
+## Samples
+
+Typra's `@sample` decorator supplies generated test and example data:
+
+```typespec
+model FixtureOwner {
+  @sample(#{ id: "owner-1" })
+  id: string;
+
+  @sample(#{ displayName: "Fixture Owner" })
+  displayName?: string;
+}
+```
+
+Samples are not runtime defaults. They are generation evidence for tests and examples.

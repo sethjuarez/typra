@@ -1,0 +1,66 @@
+---
+title: Decorators and wire names
+description: Typra decorators for samples, coercion, factories, protocols, and provider wire names.
+draft: false
+---
+
+Typra includes decorators for runtime concerns TypeSpec does not model by default.
+
+| Decorator | Purpose |
+| --- | --- |
+| `@sample` | Supplies generated test and example data. |
+| `@abstract` | Marks a model as not directly instantiated. |
+| `@@coerce` | Expands scalar input into an object during load. |
+| `@@factory` | Generates factory constructors for a model. |
+| `@@method` | Generates method or protocol signatures. |
+| `@@knownAs` | Maps a property to provider-specific wire names. |
+| `@@defaultFor` | Records provider-specific required defaults. |
+| `@parseAlias` | Accepts alternate input strings for a canonical union value. |
+| `@@protocol` | Marks a model as an emitted protocol/interface contract. |
+
+## Wire names
+
+```typespec
+@@knownAs(WireOptions.maxOutputTokens, "openai", "max_completion_tokens");
+@@knownAs(WireOptions.maxOutputTokens, "anthropic", "max_tokens");
+@@knownAs(WireOptions.temperature, "openai", "temperature");
+@@defaultFor(WireOptions.temperature, "openai", 0.2);
+
+model WireOptions {
+  maxOutputTokens?: int32;
+  temperature?: float32;
+}
+```
+
+Typra records provider-specific names so generated surfaces can load and save against external wire formats without changing the canonical TypeSpec property name.
+
+## Coercion and factories
+
+```typespec
+@@coerce(
+  FixtureReference,
+  string,
+  #{ id: "{value}", label: "coerced reference" },
+  "reference",
+  "Load a reference from an id string.",
+  "ref-coerced"
+);
+@@factory(FixtureReference, "named", #{ id: "{id}", label: "{label}" }, #{ id: "string", label: "string" });
+
+model FixtureReference {
+  id: string;
+  label?: string;
+}
+```
+
+`@@coerce` lets load paths expand a scalar input into an object. `@@factory` adds named construction helpers to generated target surfaces.
+
+## Protocols
+
+```typespec
+@@protocol(EventSink);
+@@method(EventSink, "emit", "void", "Emit an event.", #{ event: "unknown" }, false, true);
+model EventSink {}
+```
+
+`protocol-scaffolds: "compile-only"` emits test-only implementations that prove generated protocols compile. They intentionally throw or reject when called and are not runtime fakes.

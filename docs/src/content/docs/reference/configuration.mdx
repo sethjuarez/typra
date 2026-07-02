@@ -1,0 +1,51 @@
+---
+title: Configuration
+description: Typra emitter options and target configuration.
+draft: false
+---
+
+Typra is configured from the `@typra/emitter` options in `tspconfig.yaml`.
+
+```yaml
+emit:
+  - "@typra/emitter"
+
+options:
+  "@typra/emitter":
+    emitter-output-dir: "{cwd}/generated"
+    root-object: "Typra.Fixtures.FixtureRoot"
+    deterministic-output: true
+    emit-targets:
+      - type: TypeScript
+        output-dir: "generated/typescript"
+        test-dir: "generated/typescript/tests"
+        import-path: "../index"
+```
+
+## Emitter options
+
+| Option group | Options |
+| --- | --- |
+| Root selection | `root-object`, `root-namespace`, `root-alias`, `additional-roots`, `omit-models` |
+| Review and safety | `deterministic-output`, `protected-paths`, `hydration-zones`, `allow-unsupported-typespec-version` |
+| Output shape | `emit-targets`, `schema-output-dir` |
+
+`root-object` is the required anchor for generation. Use a fully qualified model name.
+
+## Target options
+
+Each `emit-targets` entry has a required `type` and can set target-specific options.
+
+| Option | Typical use |
+| --- | --- |
+| `output-dir` | Generated source output. |
+| `test-dir` | Generated target tests. |
+| `format` | Target formatting behavior when supported. |
+| `import-path` | Import path used by generated tests or target modules. |
+| `package-name` | Go or Java package naming. |
+| `namespace` | C# namespace naming. |
+| `alias` | Target aliasing when supported by the emitter. |
+| `enum-parsing` | Rust enum parsing mode. |
+| `protocol-scaffolds` | Compile-only protocol scaffold generation. |
+
+`protocol-scaffolds: "compile-only"` emits test-only implementations that prove generated protocols compile. They intentionally throw or reject when called and are not runtime fakes.

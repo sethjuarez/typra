@@ -1,0 +1,36 @@
+---
+title: Python target
+description: What Typra emits for Python consumers.
+draft: false
+---
+
+Use the Python target for services, data tooling, or scripts that need generated model surfaces with load/save helpers.
+
+```yaml
+emit-targets:
+  - type: Python
+    output-dir: "generated/python"
+    test-dir: "generated/python/tests"
+    import-path: "fixtures"
+    protocol-scaffolds: "compile-only"
+```
+
+| Option | Why it matters |
+| --- | --- |
+| `output-dir` | Where generated Python modules are written. |
+| `test-dir` | Where generated Python tests are written. |
+| `import-path` | Module path used by generated tests. |
+| `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+
+Generated Python surfaces include model surfaces, loader/saver helpers, JSON/YAML helpers, import-pruned output, and tests.
+
+## Typical usage shape
+
+```python
+from fixtures import FixtureRoot
+
+root = FixtureRoot.from_json(json_text)
+saved = root.to_json()
+```
+
+Review generated tests for the exact helper names emitted by your selected contract and target options.

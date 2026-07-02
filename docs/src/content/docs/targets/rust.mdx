@@ -1,0 +1,38 @@
+---
+title: Rust target
+description: What Typra emits for Rust consumers.
+draft: false
+---
+
+Use the Rust target for Rust consumers that want serde-oriented generated model structures.
+
+```yaml
+emit-targets:
+  - type: Rust
+    output-dir: "generated/rust"
+    test-dir: "generated/rust/tests"
+    import-path: "fixtures::model"
+    enum-parsing: "case-insensitive"
+    protocol-scaffolds: "compile-only"
+```
+
+| Option | Why it matters |
+| --- | --- |
+| `output-dir` | Where generated Rust source is written. |
+| `test-dir` | Where generated Rust tests are written. |
+| `import-path` | Import path used by generated tests. |
+| `enum-parsing` | Controls whether enum parsing is case-sensitive or case-insensitive. |
+| `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+
+Generated Rust surfaces include model structures with serde-oriented behavior and optional case-insensitive enum parsing.
+
+## Typical usage shape
+
+```rust
+use fixtures::model::FixtureRoot;
+
+let root = FixtureRoot::from_json(json_text)?;
+let saved = root.to_json()?;
+```
+
+Choose `enum-parsing` deliberately. Default behavior is case-sensitive unless configured otherwise.
