@@ -14,6 +14,15 @@ import { PythonExprVisitor } from "../src/languages/python/visitor.js";
 import { emitRustGroupMod, emitRustLib } from "../src/languages/rust/driver.js";
 import { emitTypeScriptIndex } from "../src/languages/typescript/scaffolding.js";
 import {
+  collectProtocolNodes,
+  emitGoProtocolScaffolds,
+  emitJavaProtocolScaffolds,
+  emitPythonProtocolScaffolds,
+  emitRustProtocolScaffolds,
+  emitTypeScriptProtocolScaffolds,
+  shouldEmitCompileOnlyProtocolScaffolds,
+} from "../src/protocol-scaffolds.js";
+import {
   buildToolchainMetadata,
   formatUnsupportedTypeSpecVersionMessage,
   getToolchainMetadata,
@@ -221,6 +230,99 @@ describe("export surface scaffolding", () => {
         ],
       },
     ]);
+  });
+
+  it("keeps protocol scaffold generation explicit and compile-only", () => {
+    assert.equal(shouldEmitCompileOnlyProtocolScaffolds({ type: "TypeScript" }), false);
+    assert.equal(shouldEmitCompileOnlyProtocolScaffolds({ type: "TypeScript", "protocol-scaffolds": "compile-only" }), true);
+
+    const protocols = collectProtocolNodes(baseTypes);
+    const typeScriptProbe = makeType("TypeScriptProbe", "pipeline", [], true, [
+      {
+        name: "measure",
+        returns: "integer",
+        description: "Measure a value.",
+        params: { count: "integer", at: "plainDate", payload: "Record<unknown>", bytes: "bytes" },
+        optional: false,
+        sync: true,
+      },
+    ]);
+    const goProbe = makeType("GoProbe", "pipeline", [], true, [
+      {
+        name: "measure",
+        returns: "integer",
+        description: "Measure a value.",
+        params: { count: "integer", payload: "Record<unknown>" },
+        optional: false,
+        sync: true,
+      },
+      {
+        name: "maybeCount",
+        returns: "integer",
+        description: "Optionally return a count.",
+        params: {},
+        optional: true,
+        sync: true,
+      },
+      {
+        name: "status",
+        returns: "Status",
+        description: "Return a named scalar or interface-like value.",
+        params: {},
+        optional: false,
+        sync: true,
+      },
+    ]);
+    const optionalOnlyGoProbe = makeType("OptionalOnlyGoProbe", "pipeline", [], true, [
+      {
+        name: "maybeCount",
+        returns: "integer",
+        description: "Optionally return a count.",
+        params: {},
+        optional: true,
+        sync: true,
+      },
+    ]);
+    const rustProbe = makeType("RustProbe", "pipeline", [], true, [
+      {
+        name: "observe",
+        returns: "void",
+        description: "Observe object and array payloads.",
+        params: { item: "object", items: "array" },
+        optional: false,
+        sync: false,
+      },
+    ]);
+    const typeScript = emitTypeScriptProtocolScaffolds([...protocols, typeScriptProbe], "../index");
+    assert.match(typeScript, /class CompileOnlyEventSink implements EventSink/);
+    assert.match(typeScript, /throw new Error\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
+    assert.match(typeScript, /measure\(count: number, at: Date, payload: Record<string, unknown>, bytes: Uint8Array\): number/);
+    assert.doesNotMatch(typeScript, /calls|recorded|recording/i);
+
+    const python = emitPythonProtocolScaffolds(protocols, "fixtures");
+    assert.match(python, /class CompileOnlyEventSink:/);
+    assert.match(python, /raise NotImplementedError\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
+
+    const go = emitGoProtocolScaffolds([...protocols, goProbe], "fixtures", "github.com/acme/fixtures");
+    assert.match(go, /typra "github\.com\/acme\/fixtures"/);
+    assert.match(go, /var _ typra\.EventSink = \(\*compileOnlyEventSink\)\(nil\)/);
+    assert.match(go, /return errors\.New\("compile-only protocol scaffold"\)/);
+    assert.match(go, /Measure\(count int, payload map\[string\]interface\{\}\) \(int, error\)/);
+    assert.match(go, /MaybeCount\(\) int \{\n\tpanic\("compile-only protocol scaffold"\)/);
+    assert.match(go, /Status\(\) \(typra\.Status, error\) \{\n\treturn \*new\(typra\.Status\), errors\.New\("compile-only protocol scaffold"\)/);
+
+    const optionalOnlyGo = emitGoProtocolScaffolds([optionalOnlyGoProbe], "fixtures", "github.com/acme/fixtures");
+    assert.doesNotMatch(optionalOnlyGo, /"errors"/);
+    assert.match(optionalOnlyGo, /MaybeCount\(\) int \{\n\tpanic\("compile-only protocol scaffold"\)/);
+
+    const java = emitJavaProtocolScaffolds(protocols, "typra.fixtures");
+    assert.match(java?.source ?? "", /final class ProtocolScaffoldsGeneratedTest/);
+    assert.match(java?.source ?? "", /throw new UnsupportedOperationException\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
+
+    const rust = emitRustProtocolScaffolds([...protocols, rustProbe], "fixtures::model");
+    assert.match(rust, /impl EventSink for CompileOnlyEventSink/);
+    assert.match(rust, /panic!\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
+    assert.match(rust, /async fn observe\(&self, item: &serde_json::Value, items: &Vec<serde_json::Value>\) -> Result<\(\), Box<dyn std::error::Error \+ Send \+ Sync>>/);
   });
 });
 

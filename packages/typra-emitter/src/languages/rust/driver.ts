@@ -16,6 +16,7 @@ import { toSnakeCase } from "../../ir/utilities.js";
 import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
 import { emitRustFile as emitRustFileDecl } from "./emitter.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
+import { collectProtocolNodes, emitRustProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
 
 /**
  * Type mapping from TypeSpec scalar types to Rust types.
@@ -153,6 +154,14 @@ export const generateRust = async (
       if (!testGroupModuleNames.has(testGroup)) testGroupModuleNames.set(testGroup, []);
       testGroupModuleNames.get(testGroup)!.push(toSnakeCase(n.typeName.name) + '_test');
     }
+  }
+
+  if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
+    const importPath = emitTarget["import-path"] || "crate";
+    const scaffoldContent = emitRustProtocolScaffolds(collectProtocolNodes(nodes), importPath);
+    await emitRustFile(context, "protocol_scaffolds_test.rs", scaffoldContent, emitTarget["test-dir"], emitTarget["test-dir"]);
+    if (!testGroupModuleNames.has("")) testGroupModuleNames.set("", []);
+    testGroupModuleNames.get("")!.push("protocol_scaffolds_test");
   }
 
   // Render per-group mod.rs files (source)

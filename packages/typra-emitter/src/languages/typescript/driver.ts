@@ -14,6 +14,7 @@ import { resolve, dirname } from "path";
 import { execFileSync } from "child_process";
 import { existsSync } from "fs";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
+import { collectProtocolNodes, emitTypeScriptProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
 
 /**
  * Stale-file deletion is intentionally disabled until manifest cleanup is enabled.
@@ -111,6 +112,11 @@ export const generateTypeScript = async (
         namespace: tsNamespace,
       });
       await emitTypeScriptFile(context, `${toKebabCase(n.typeName.name)}.test.ts`, testCode, testDir, emitTarget["test-dir"]);
+    }
+
+    if (shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
+      const scaffoldCode = emitTypeScriptProtocolScaffolds(collectProtocolNodes(nodes), importPath);
+      await emitTypeScriptFile(context, "protocol-scaffolds.test.ts", scaffoldCode, emitTarget["test-dir"], emitTarget["test-dir"]);
     }
   }
 

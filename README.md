@@ -73,6 +73,13 @@ options:
         import-path: "../index"
 ```
 
+Protocol test scaffolds are opt-in per target. Set
+`protocol-scaffolds: "compile-only"` to emit test-dir-only implementations that
+prove generated `@@protocol`/`@@method` contracts can be implemented by that
+language. These scaffolds intentionally throw or reject when called; they are
+not runtime fakes, are not exported from generated runtime barrels, and do not
+provide no-op or recording behavior.
+
 Then import the emitter library from TypeSpec:
 
 ```typespec

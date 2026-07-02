@@ -18,6 +18,7 @@ import { emitGoFileContent } from "./emitter.js";
 import { emitGoContext } from "./scaffolding.js";
 import { emitGoTest } from "./test-emitter.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
+import { collectProtocolNodes, emitGoProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
 
 
 /**
@@ -95,6 +96,12 @@ export const generateGo = async (
       const testFileName = toSnakeCase(n.typeName.name) + '_test.go';
       await emitGoFile(context, testFileName, testContent, emitTarget["test-dir"], emitTarget["test-dir"]);
     }
+  }
+
+  if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
+    const importPath = emitTarget["import-path"] || packageName;
+    const scaffoldContent = emitGoProtocolScaffolds(collectProtocolNodes(nodes), packageName, importPath);
+    await emitGoFile(context, "protocol_scaffolds_test.go", scaffoldContent, emitTarget["test-dir"], emitTarget["test-dir"]);
   }
 
   // Format emitted files if format option is enabled (default: true)

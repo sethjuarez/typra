@@ -11,22 +11,26 @@ options:
         test-dir: "generated/fixtures/typescript/tests"
         import-path: "../index"
         format: false
+        protocol-scaffolds: "compile-only"
       - type: Python
         output-dir: "generated/fixtures/python"
         test-dir: "generated/fixtures/python/tests"
         import-path: "fixtures"
         format: false
+        protocol-scaffolds: "compile-only"
       - type: Go
         output-dir: "generated/fixtures/go"
         test-dir: "generated/fixtures/go/tests"
         import-path: "fixtures"
         package-name: "fixtures"
         format: true
+        protocol-scaffolds: "compile-only"
       - type: Java
         output-dir: "generated/fixtures/java"
         test-dir: "generated/fixtures/java/tests"
         package-name: "typra.fixtures"
         format: false
+        protocol-scaffolds: "compile-only"
       - type: CSharp
         output-dir: "generated/fixtures/csharp"
         test-dir: "generated/fixtures/csharp/tests"
@@ -38,6 +42,7 @@ options:
         import-path: "fixtures::model"
         enum-parsing: "case-insensitive"
         format: false
+        protocol-scaffolds: "compile-only"
       - type: Markdown
         output-dir: "generated/fixtures/markdown"
         format: false
