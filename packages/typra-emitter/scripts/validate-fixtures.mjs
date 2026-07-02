@@ -1450,6 +1450,21 @@ function assertGeneratedOutputReport() {
   if (!Array.isArray(report.emittedFiles) || report.emittedFiles.length === 0) {
     fail("Generated output report must list emitted files.");
   }
+  if (report.summary?.emittedFiles !== report.emittedFiles.length) {
+    fail("Generated output report summary must count emitted files.");
+  }
+  if (report.summary?.skippedFiles !== report.skippedFiles?.length) {
+    fail("Generated output report summary must count skipped files.");
+  }
+  if (report.summary?.hygiene !== "clean") {
+    fail("Generated output report summary must report clean hygiene for fixtures.");
+  }
+  if (report.generation?.deterministicOutput !== true || report.generation?.rootObject !== "Typra.Fixtures.FixtureRoot") {
+    fail("Generated output report must record deterministic generation context.");
+  }
+  if (!report.generation?.emitTargets?.some(entry => entry.type === "TypeScript" && entry.outputDir?.endsWith("generated/fixtures/typescript"))) {
+    fail("Generated output report must record emit target context.");
+  }
   if (!report.emittedFiles.some(entry => entry.path.endsWith("generated/fixtures/python/_FixtureRoot.py"))) {
     fail("Generated output report is missing a representative Python emitted file.");
   }
@@ -1464,6 +1479,15 @@ function assertGeneratedOutputReport() {
   }
   if (report.protectedPathTouches?.status !== "requires-verifier-baseline") {
     fail("Generated output report must mark protected path touches as verifier-baseline scoped.");
+  }
+  if (!Array.isArray(report.protectedPathTouches?.matchedFiles)) {
+    fail("Generated output report must include protected path matched files.");
+  }
+  if (report.cleanup?.status !== "safe-noop") {
+    fail("Generated output report cleanup status must be stable for fixtures.");
+  }
+  if (!report.driftGuidance?.metadataToCompare?.includes(".typra-generated/export-surfaces.json")) {
+    fail("Generated output report must guide consumers to compare export surface metadata.");
   }
   if (report.formatter?.status !== "not-recorded") {
     fail("Generated output report must not claim per-file formatter status.");
