@@ -3,6 +3,7 @@ import path from "node:path";
 import { ExportSurfaceEntry, ExportSurfaceProtocol, ExportSurfaceSnapshot, TargetExportSurface } from "../contract-surface.js";
 import { GeneratedManifest, GeneratedManifestEntry } from "../cleanup/generated-file.js";
 import { HydrationBoundarySnapshot } from "../hydration-seams.js";
+import { globToRegExp } from "../path-patterns.js";
 
 export interface TypraMetadataSet {
   exportSurface: ExportSurfaceSnapshot;
@@ -263,7 +264,16 @@ export function formatVerifySummary(result: TypraVerifyResult): string {
     `stale cleanup dry-run candidates: ${result.summary.staleCleanupCandidates}`,
     `schema: types +${result.summary.schema.addedTypes} / -${result.summary.schema.removedTypes}, required fields +${result.summary.schema.addedRequiredProperties}, optional fields +${result.summary.schema.addedOptionalProperties}, requiredness changed ${result.summary.schema.requirednessChanged}, property types changed ${result.summary.schema.propertyTypesChanged}, wire names changed ${result.summary.schema.wireNamesChanged}, discriminators changed ${result.summary.schema.discriminatorsChanged}, enum values changed ${result.summary.schema.enumValuesChanged}`,
     `breaking change classification: ${result.breakingChange}`,
+    `next action: ${formatNextAction(result)}`,
   ];
+
+  const guidance = formatAdditionalGuidance(result);
+  if (guidance.length > 0) {
+    lines.push("guidance:");
+    for (const entry of guidance) {
+      lines.push(`- ${entry}`);
+    }
+  }
 
   const blocking = result.failures.filter((failure) => failure.blocking).sort(compareFailures);
   if (blocking.length > 0) {
@@ -274,6 +284,33 @@ export function formatVerifySummary(result: TypraVerifyResult): string {
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function formatNextAction(result: TypraVerifyResult): string {
+  if (!result.ok) {
+    return "fix blocking drift before accepting the generated baseline; if intentional, regenerate and review the metadata diff.";
+  }
+  if (result.breakingChange === "minor" || result.summary.staleCleanupCandidates > 0) {
+    return "review the additive/generated drift and accept the updated baseline if expected.";
+  }
+  return "no baseline update needed.";
+}
+
+function formatAdditionalGuidance(result: TypraVerifyResult): string[] {
+  const guidance: string[] = [];
+  if (result.summary.protectedPathTouches > 0) {
+    guidance.push("generated files matched protected paths; treat this as hand-authored boundary drift unless the protected-path config changed intentionally.");
+  }
+  if (result.summary.files.ownershipChanged > 0) {
+    guidance.push("generated ownership metadata changed; review marker/output-root changes before accepting the baseline.");
+  }
+  if (result.summary.toolchain.changed > 0 || result.summary.packageNamesChanged > 0 || result.summary.modulesChanged > 0) {
+    guidance.push("option or version drift is present; compare export-surfaces.json and report.json before accepting the baseline.");
+  }
+  if (result.summary.staleCleanupCandidates > 0) {
+    guidance.push("stale cleanup candidates are available in --json output; delete only entries marked safe after review.");
+  }
+  return guidance;
 }
 
 function compareSnapshotIdentity(
@@ -906,33 +943,6 @@ function enumSignature(property: SchemaProperty): { allowedValues: string[]; enu
 
 function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
-}
-
-function globToRegExp(pattern: string): RegExp {
-  let source = "^";
-  for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index];
-    const next = pattern[index + 1];
-    const afterNext = pattern[index + 2];
-    if (char === "*" && next === "*" && afterNext === "/") {
-      source += "(?:.*/)?";
-      index += 2;
-    } else if (char === "*" && next === "*") {
-      source += ".*";
-      index += 1;
-    } else if (char === "*") {
-      source += "[^/]*";
-    } else if (char === "?") {
-      source += "[^/]";
-    } else {
-      source += escapeRegExp(char);
-    }
-  }
-  return new RegExp(`${source}$`);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
 }
 
 function stableStringify(value: unknown): string {
