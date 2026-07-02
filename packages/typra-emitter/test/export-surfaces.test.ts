@@ -294,6 +294,8 @@ describe("export surface scaffolding", () => {
       },
     ]);
     const typeScript = emitTypeScriptProtocolScaffolds([...protocols, typeScriptProbe], "../index");
+    assert.match(typeScript, /describe\("protocol scaffolds", \(\) => \{/);
+    assert.match(typeScript, /it\("compiles compile-only protocol implementations", \(\) => \{/);
     assert.match(typeScript, /class CompileOnlyEventSink implements EventSink/);
     assert.match(typeScript, /throw new Error\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
     assert.match(typeScript, /measure\(count: number, at: Date, payload: Record<string, unknown>, bytes: Uint8Array\): number/);
