@@ -51,33 +51,40 @@ export function emitTypeScriptProtocolScaffolds(protocols: TypeNode[], importPat
     "",
     `import type { ${importedNames.join(", ")} } from "${importPath}";`,
     "",
+    `describe("protocol scaffolds", () => {`,
+    `  it("compiles compile-only protocol implementations", () => {`,
   ];
 
-  for (const protocol of protocols) {
+  for (const [index, protocol] of protocols.entries()) {
     const protocolName = protocol.typeName.name;
     const className = `CompileOnly${protocolName}`;
-    lines.push(`class ${className} implements ${protocolName} {`);
+    lines.push(`    class ${className} implements ${protocolName} {`);
     for (const method of protocol.methods) {
       const params = Object.entries(method.params)
         .map(([name, typeName]) => `${name}: ${typescriptType(typeName)}`)
         .join(", ");
       const ret = typescriptType(method.returns);
       if (method.sync) {
-        lines.push(`  ${method.name}(${params}): ${ret} {`);
-        lines.push(`    throw new Error("${protocolName}.${method.name} is a compile-only protocol scaffold.");`);
-        lines.push("  }");
+        lines.push(`      ${method.name}(${params}): ${ret} {`);
+        lines.push(`        throw new Error("${protocolName}.${method.name} is a compile-only protocol scaffold.");`);
+        lines.push("      }");
       } else {
-        lines.push(`  async ${method.name}(${params}): Promise<${ret}> {`);
-        lines.push(`    throw new Error("${protocolName}.${method.name} is a compile-only protocol scaffold.");`);
-        lines.push("  }");
+        lines.push(`      async ${method.name}(${params}): Promise<${ret}> {`);
+        lines.push(`        throw new Error("${protocolName}.${method.name} is a compile-only protocol scaffold.");`);
+        lines.push("      }");
       }
     }
-    lines.push("}");
+    lines.push("    }");
     lines.push("");
-    lines.push(`const ${lowerFirst(protocolName)}Scaffold: ${protocolName} = new ${className}();`);
-    lines.push(`void ${lowerFirst(protocolName)}Scaffold;`);
-    lines.push("");
+    lines.push(`    const ${lowerFirst(protocolName)}Scaffold: ${protocolName} = new ${className}();`);
+    lines.push(`    void ${lowerFirst(protocolName)}Scaffold;`);
+    if (index < protocols.length - 1) {
+      lines.push("");
+    }
   }
+  lines.push("  });");
+  lines.push("});");
+  lines.push("");
 
   return lines.join("\n");
 }

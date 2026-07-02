@@ -1168,6 +1168,8 @@ function assertStaticFixtureCoverage() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "typescript", "tests", "protocol-scaffolds.test.ts"),
+    "describe(\"protocol scaffolds\", () => {",
+    "it(\"compiles compile-only protocol implementations\", () => {",
     "class CompileOnlyEventSink implements EventSink",
     "throw new Error(\"EventSink.emit is a compile-only protocol scaffold.\")",
   );
