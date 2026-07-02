@@ -1,32 +1,34 @@
 # Typra
 
-Typra turns TypeSpec models into runtime model surfaces. It is intended for
-projects that want one TypeSpec source of truth and generated SDK-style model
-code, protocol helpers, JSON AST output, generated tests, and reference docs
-across multiple runtimes.
+Typra generates typed runtime contracts from TypeSpec. Use it when TypeSpec is
+the source of truth for shared model shapes and you need generated model code,
+serialization helpers, protocol interfaces, tests, documentation, and a JSON
+contract AST across multiple runtimes.
 
-The first package in this repository is [`@typra/emitter`](packages/typra-emitter),
-a TypeSpec emitter and CLI extracted from Prompty's generic emitter work.
+The first package in this repository is
+[`@typra/emitter`](packages/typra-emitter), a TypeSpec emitter and CLI extracted
+from Prompty's generic emitter work. Typra is emitter/tooling infrastructure; it
+does not own product-specific contracts or hand-authored runtime adapters. The
+published package is
+[`@typra/emitter` on npm](https://www.npmjs.com/package/@typra/emitter).
 
 User-facing docs are available at <https://typra.dev>.
 
-## What Typra owns
+## Why Typra exists
 
-Typra owns generic emitter behavior that is not tied to any one product domain:
+TypeSpec is good at declaring contracts. Typra turns those declarations into the
+runtime surfaces developers need to consume the contracts consistently:
 
-- Type graph discovery, lowering, and expression expansion.
-- TypeSpec decorators such as `@sample`, `@abstract`, `@coerce`,
-  `@@factory`, `@@method`, `@@knownAs`, `@@defaultFor`, `@@parseAlias`, and
-  `@@protocol`.
-- Language emitters for TypeScript, Python, C#, Go, Java, Rust, Markdown, and
-  JSON AST output.
-- Synthetic TypeSpec fixtures that exercise supported model shapes.
-- Generated-file marker and manifest recording infrastructure.
+- Generated types/classes/structs with JSON and YAML load/save helpers.
+- Polymorphic model loading from TypeSpec discriminators.
+- Provider wire-name metadata with `@@knownAs` and defaults with
+  `@@defaultFor`.
+- Parse-only aliases for named string unions with `@parseAlias`.
+- Generated protocol interfaces and optional compile-only test scaffolds.
+- Deterministic generated metadata and verifier reports for CI review.
 
-Product-specific TypeSpec contracts and hand-authored runtime adapters should
-stay in the consuming product repository. For example, Prompty owns its
-conversation, model, event, pipeline, and harness contracts, while Typra owns
-the reusable emitter machinery.
+Product repositories should keep their domain TypeSpec files, runtime behavior,
+and adapters. Typra keeps the reusable emitter behavior.
 
 ## Install
 
@@ -34,28 +36,14 @@ the reusable emitter machinery.
 npm install --save-dev @typra/emitter @typespec/compiler@1.10.0 @typespec/json-schema@1.10.0
 ```
 
-Typra currently validates its emitter against TypeSpec compiler and JSON schema
-emitter `1.10.0`. Running with an unvalidated TypeSpec toolchain reports a
-clear diagnostic; set `allow-unsupported-typespec-version: true` only when you
-intentionally accept that generated output may churn.
+Typra currently validates against `@typespec/compiler` and
+`@typespec/json-schema` `1.10.0`. Unsupported TypeSpec toolchains produce a
+diagnostic during emit; use `allow-unsupported-typespec-version: true` only when
+you intentionally accept possible generated output churn.
 
-## 0.3.0 release highlights
+## Quick start
 
-`0.3.0` adds Java as a generated runtime target and raises emitter confidence
-across the supported languages:
-
-- Java model emission with `load`, `save`, `fromJson`, `toJson`, provider wire
-  mapping, scalar coercion, enum handling, and polymorphic dispatch support.
-- Generated Java fixture tests that compile and run during fixture validation.
-- Stronger Go fixture tests and runtime behavior for scalar slices, JSON
-  round-trips, polymorphic values, and malformed JSON handling.
-- Executable cross-language fixture conformance across TypeScript, Python, C#,
-  Go, Java, and Rust.
-- CI setup for Go and Java toolchains.
-
-## TypeSpec configuration
-
-Add `@typra/emitter` to your TypeSpec config:
+Add the emitter to `tspconfig.yaml`:
 
 ```yaml
 emit:
@@ -64,49 +52,47 @@ emit:
 options:
   "@typra/emitter":
     emitter-output-dir: "{cwd}/generated"
-    root-object: "MyProject.ApiRoot"
-    root-namespace: "MyProject"
+    root-object: "Todo.Contracts.TodoList"
+    root-namespace: "Todo.Contracts"
+    deterministic-output: true
     emit-targets:
       - type: TypeScript
         output-dir: "generated/typescript"
         test-dir: "generated/typescript/tests"
         import-path: "../index"
+      - type: Python
+        output-dir: "generated/python"
+        test-dir: "generated/python/tests"
+        import-path: "todo_contracts"
+      - type: Markdown
+        output-dir: "generated/markdown"
 ```
 
-Protocol test scaffolds are opt-in per target. Set
-`protocol-scaffolds: "compile-only"` to emit test-dir-only implementations that
-prove generated `@@protocol`/`@@method` contracts can be implemented by that
-language. These scaffolds intentionally throw or reject when called; they are
-not runtime fakes, are not exported from generated runtime barrels, and do not
-provide no-op or recording behavior.
-
-Then import the emitter library from TypeSpec:
+Create a TypeSpec entry point:
 
 ```typespec
 import "@typra/emitter";
 
-namespace MyProject;
-```
+namespace Todo.Contracts;
 
-### Parse-only string-union aliases
+model TodoList {
+  name: string;
+  items: TodoItem[];
+}
 
-Named string unions can declare alternate input spellings that normalize to a
-canonical value while loading. Saving always emits the canonical TypeSpec value.
-Because TypeSpec cannot augment alias union expressions, declare aliases on a
-named union declaration:
+model TodoItem {
+  id: string;
+  title: string;
+  state: TodoState;
+}
 
-```typespec
-@parseAlias("ready", #["complete", "done"])
-union Status {
-  draft: "draft";
-  ready: "ready";
+@parseAlias("done", #["complete", "completed"])
+union TodoState {
+  open: "open";
+  done: "done";
   archived: "archived";
 }
 ```
-
-Aliases are attached to the union definition, not to individual properties or
-providers. Closed unions accept canonical values plus aliases; open unions apply
-aliases for known values first and preserve other strings.
 
 Compile with TypeSpec:
 
@@ -114,28 +100,142 @@ Compile with TypeSpec:
 npx tsp compile ./path/to/main.tsp --config ./tspconfig.yaml
 ```
 
+Typra emits each requested language under its configured `output-dir`, writes
+tests when `test-dir` is set, and always writes generated metadata under the
+configured emitter output root.
+
+## Generated output model
+
+Typra starts from `root-object`, resolves the reachable model graph, lowers it to
+an internal contract AST, then emits the configured targets. The generated output
+is intentionally split from hand-authored runtime code:
+
+- Generated files include Typra ownership markers.
+- `.typra-generated/manifest.json` records generated files and metadata.
+- `.typra-generated/report.json` records emitted files, skipped empty outputs,
+  hygiene policy, warnings, and stale generated-file cleanup decisions.
+- `json-ast/model.json` records the lowered contract surface for schema
+  evolution and verifier checks.
+
+Set `deterministic-output: true` for committed generated output. That stabilizes
+generated metadata, normalizes text artifacts to LF, trims trailing whitespace,
+and keeps final newlines stable for CI diffs.
+
+## Core TypeSpec concepts
+
+Typra adds decorators for runtime concerns that TypeSpec does not model by
+default:
+
+```typespec
+@@knownAs(WireOptions.maxOutputTokens, "openai", "max_completion_tokens");
+@@defaultFor(WireOptions.temperature, "openai", 0.2);
+
+model WireOptions {
+  maxOutputTokens?: int32;
+  temperature?: float32;
+}
+```
+
+Common decorators:
+
+| Decorator | Purpose |
+| --- | --- |
+| `@sample` | Supplies generated test/example data for a property. |
+| `@abstract` | Marks a model as not directly instantiated. |
+| `@@coerce` | Expands scalar input into an object during load. |
+| `@@factory` | Generates factory constructors for a model. |
+| `@@method` | Generates method signatures or protocol methods. |
+| `@@knownAs` | Maps a property to provider-specific wire names. |
+| `@@defaultFor` | Records provider-specific required defaults. |
+| `@parseAlias` | Accepts alternate input strings for a canonical union value. |
+| `@@protocol` | Marks a model as an emitted protocol/interface contract. |
+
+`@parseAlias` is parse-only: loading accepts aliases, but saving emits the
+canonical TypeSpec value.
+
+## Emitter options
+
+The root emitter options are:
+
+| Option | Purpose |
+| --- | --- |
+| `root-object` | Required fully qualified model to generate from. |
+| `root-namespace` | Namespace used to resolve and emit the model graph. |
+| `root-alias` | Alias for the generated root surface. |
+| `additional-roots` | Extra fully qualified roots to generate. |
+| `omit-models` | Model names to leave out of generation. |
+| `schema-output-dir` | Reserved schema directory for future cleanup flows. |
+| `deterministic-output` | Stable metadata and text hygiene for CI diffs. |
+| `protected-paths` | Hand-authored paths recorded for verifier boundaries. |
+| `hydration-zones` | Extension zones recorded for verifier checks. |
+| `allow-unsupported-typespec-version` | Warn on unvalidated TypeSpec versions. |
+| `emit-targets` | Language-specific output configuration. |
+
+Each `emit-targets` entry has a required `type` and can set `output-dir`,
+`test-dir`, `format`, `import-path`, `package-name`, `namespace`, `alias`,
+`enum-parsing`, and `protocol-scaffolds`.
+
+`protocol-scaffolds: "compile-only"` emits test-dir-only implementations that
+prove generated `@@protocol`/`@@method` contracts compile. They intentionally
+throw or reject when called and are not runtime fakes.
+
+Rust targets can opt into case-insensitive enum/string-union parsing:
+
+```yaml
+emit-targets:
+  - type: Rust
+    output-dir: "generated/rust"
+    enum-parsing: "case-insensitive"
+```
+
+## Language support
+
+`@typra/emitter` currently emits:
+
+- `TypeScript`: runtime model surfaces, JSON/YAML helpers, generated tests, and
+  Vitest-compatible protocol scaffold tests.
+- `Python`: dataclass-style model surfaces, JSON/YAML helpers, import-pruned
+  output, and generated tests.
+- `CSharp`: C# model surfaces, `System.Text.Json` helpers, and generated
+  tests/scaffolds.
+- `Go`: Go structs with JSON/YAML support and generated tests.
+- `Java`: Java model surfaces and generated fixture tests.
+- `Rust`: Rust model surfaces with optional case-insensitive enum parsing.
+- `Markdown`: reference documentation generated from the contract graph.
+- JSON AST: `json-ast/model.json` emitted for every TypeSpec generation.
+
+The fixture validation flow exercises TypeScript, Python, C#, Go, Java, Rust,
+Markdown, and JSON AST generation.
+
 ## CLI
 
-The package also includes a convenience CLI:
+The package includes convenience binaries:
 
 ```powershell
 npx typra-generate --help
+npx typra-verify --baseline ./baseline --current ./generated
+npx typra-consumer-smoke --config ./typra-smoke.json
 ```
 
-## Repository layout
+`typra-generate` wraps the TypeSpec emitter for quick local generation.
+`typra-verify` compares generated metadata and reports breaking changes,
+protected-path touches, stale output, schema evolution, and hydration seams. It
+does not delete files.
+
+## Examples and fixtures
+
+The synthetic fixture is the best compact reference for supported shapes:
 
 ```text
-packages\typra-emitter\        TypeSpec emitter package
-packages\typra-emitter\src\    Emitter source
-packages\typra-emitter\test\   Unit tests
-packages\typra-emitter\fixtures\shapes\
-                               Synthetic TypeSpec fixture coverage
+packages\typra-emitter\fixtures\tspconfig.yaml
+packages\typra-emitter\fixtures\shapes\main.tsp
+packages\typra-emitter\fixtures\shapes\model\events\session.tsp
+packages\typra-emitter\fixtures\shapes\model\pipeline\harness.tsp
 ```
 
-The current fixture emits TypeScript, Python, C#, Go, Java, Rust, Markdown, and
-JSON AST from `packages\typra-emitter\fixtures\shapes\main.tsp`. Fixture
-validation checks generated metadata, verifier CLI output, consumer smoke
-wiring, and cross-language generated-code compile/test surfaces.
+It covers scalars, arrays, records, nested models, discriminated polymorphism,
+closed and open string unions, parse aliases, scalar coercion, factories,
+methods, provider wire names, defaults, and protocols.
 
 ## Development
 
