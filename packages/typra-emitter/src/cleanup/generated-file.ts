@@ -2,6 +2,7 @@ import { EmitContext, Program, emitFile, resolvePath } from "@typespec/compiler"
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, relative, resolve } from "path";
 import { TypraEmitterOptions } from "../lib.js";
+import { globToRegExp } from "../path-patterns.js";
 
 export interface GeneratedManifestEntry {
   outputRoot: string;
@@ -20,12 +21,42 @@ export interface SkippedGeneratedFileEntry {
   path: string;
   reason: "empty";
   action: "none" | "removed-marker-owned" | "preserved-unmarked";
+  ownership: "not-present" | "marker-owned" | "unmarked-existing";
+  status: "skipped-empty" | "removed-stale-marker-owned" | "preserved-unmarked";
+  nextAction: string;
 }
 
 export interface GeneratedOutputReport {
   emitter: "typra-emitter";
   version: 1;
   generatedAt: string;
+  summary: {
+    emittedFiles: number;
+    skippedFiles: number;
+    staleMarkerOwnedRemovals: number;
+    preservedUnmarkedSkippedFiles: number;
+    warnings: number;
+    protectedPathTouches: number;
+    hygiene: "clean" | "warnings";
+  };
+  generation: {
+    deterministicOutput: boolean;
+    rootObject: string;
+    rootNamespace?: string;
+    rootAlias?: string;
+    emitTargets: Array<{
+      type: string;
+      outputDir?: string;
+      testDir?: string;
+      packageName?: string;
+      namespace?: string;
+      format?: boolean;
+      enumParsing?: "case-sensitive" | "case-insensitive";
+      protocolScaffolds?: "none" | "compile-only";
+    }>;
+    protectedPaths: string[];
+    hydrationZones: string[];
+  };
   emittedFiles: GeneratedManifestEntry[];
   skippedFiles: SkippedGeneratedFileEntry[];
   staleMarkerOwnedRemovals: string[];
@@ -41,10 +72,23 @@ export interface GeneratedOutputReport {
   protectedPathTouches: {
     status: "requires-verifier-baseline";
     configuredPatterns: string[];
+    matchedFiles: string[];
+    guidance: string;
   };
   formatter: {
     status: "not-recorded";
     note: string;
+  };
+  cleanup: {
+    status: "safe-noop" | "review-recommended";
+    suggestions: string[];
+  };
+  driftGuidance: {
+    updateBaselineWhen: string;
+    fixGenerationWhen: string;
+    metadataToCompare: string[];
+    optionDriftSignals: string[];
+    versionDriftSignals: string[];
   };
 }
 
@@ -116,19 +160,52 @@ export function buildGeneratedOutputReport(
   manifest: GeneratedManifest,
 ): GeneratedOutputReport {
   const skippedFiles = getSkippedFileEntries(context.program);
+  const warnings = getWarnings(context.program);
+  const staleMarkerOwnedRemovals = skippedFiles
+    .filter((entry) => entry.action === "removed-marker-owned")
+    .map((entry) => entry.path);
+  const preservedUnmarkedSkippedFiles = skippedFiles
+    .filter((entry) => entry.action === "preserved-unmarked")
+    .map((entry) => entry.path);
+  const protectedPathPatterns = [...(context.options["protected-paths"] ?? [])].sort((left, right) => left.localeCompare(right));
+  const protectedPathTouches = findProtectedPathTouches(manifest.files, protectedPathPatterns);
+  const cleanupSuggestions = buildCleanupSuggestions(staleMarkerOwnedRemovals, preservedUnmarkedSkippedFiles);
   return {
     emitter: "typra-emitter",
     version: 1,
     generatedAt: manifest.generatedAt,
+    summary: {
+      emittedFiles: manifest.files.length,
+      skippedFiles: skippedFiles.length,
+      staleMarkerOwnedRemovals: staleMarkerOwnedRemovals.length,
+      preservedUnmarkedSkippedFiles: preservedUnmarkedSkippedFiles.length,
+      warnings: warnings.length,
+      protectedPathTouches: protectedPathTouches.length,
+      hygiene: warnings.length === 0 ? "clean" : "warnings",
+    },
+    generation: {
+      deterministicOutput: context.options["deterministic-output"] === true,
+      rootObject: context.options["root-object"],
+      ...(context.options["root-namespace"] && { rootNamespace: context.options["root-namespace"] }),
+      ...(context.options["root-alias"] && { rootAlias: context.options["root-alias"] }),
+      emitTargets: (context.options["emit-targets"] ?? []).map((target) => ({
+        type: target.type,
+        ...(target["output-dir"] && { outputDir: normalizePath(target["output-dir"]) }),
+        ...(target["test-dir"] && { testDir: normalizePath(target["test-dir"]) }),
+        ...(target["package-name"] && { packageName: target["package-name"] }),
+        ...(target.namespace && { namespace: target.namespace }),
+        ...(target.format !== undefined && { format: target.format }),
+        ...(target["enum-parsing"] && { enumParsing: target["enum-parsing"] }),
+        ...(target["protocol-scaffolds"] && { protocolScaffolds: target["protocol-scaffolds"] }),
+      })).sort((left, right) => `${left.type}:${left.outputDir ?? ""}`.localeCompare(`${right.type}:${right.outputDir ?? ""}`)),
+      protectedPaths: protectedPathPatterns,
+      hydrationZones: [...(context.options["hydration-zones"] ?? [])].sort((left, right) => left.localeCompare(right)),
+    },
     emittedFiles: manifest.files,
     skippedFiles,
-    staleMarkerOwnedRemovals: skippedFiles
-      .filter((entry) => entry.action === "removed-marker-owned")
-      .map((entry) => entry.path),
-    preservedUnmarkedSkippedFiles: skippedFiles
-      .filter((entry) => entry.action === "preserved-unmarked")
-      .map((entry) => entry.path),
-    warnings: getWarnings(context.program),
+    staleMarkerOwnedRemovals,
+    preservedUnmarkedSkippedFiles,
+    warnings,
     hygiene: {
       lineEndings: "lf",
       finalNewline: true,
@@ -138,11 +215,44 @@ export function buildGeneratedOutputReport(
     },
     protectedPathTouches: {
       status: "requires-verifier-baseline",
-      configuredPatterns: [...(context.options["protected-paths"] ?? [])].sort((left, right) => left.localeCompare(right)),
+      configuredPatterns: protectedPathPatterns,
+      matchedFiles: protectedPathTouches,
+      guidance: protectedPathTouches.length === 0
+        ? "No emitted files matched configured protected paths in this generation."
+        : "Generated output matched configured protected paths; run typra-verify against the committed baseline before accepting these changes.",
     },
     formatter: {
       status: "not-recorded",
       note: "Target formatters run in language drivers; per-file formatter status is not recorded in generated metadata yet.",
+    },
+    cleanup: {
+      status: cleanupSuggestions.length === 0 ? "safe-noop" : "review-recommended",
+      suggestions: cleanupSuggestions,
+    },
+    driftGuidance: {
+      updateBaselineWhen: "Generated runtime output and metadata drift are expected and reviewed.",
+      fixGenerationWhen: "Verifier reports blocking failures, protected-path touches are unexpected, or preserved unmarked skipped files should remain hand-authored.",
+      metadataToCompare: [
+        ".typra-generated/manifest.json",
+        ".typra-generated/export-surfaces.json",
+        ".typra-generated/hydration-seams.json",
+        ".typra-generated/report.json",
+        "json-ast/model.json",
+      ],
+      optionDriftSignals: [
+        "root-object",
+        "root-namespace",
+        "root-alias",
+        "emit-targets",
+        "protected-paths",
+        "hydration-zones",
+        "deterministic-output",
+      ],
+      versionDriftSignals: [
+        "@typra/emitter",
+        "@typespec/compiler",
+        "@typespec/json-schema",
+      ],
     },
   };
 }
@@ -170,6 +280,7 @@ function recordSkippedFile(program: Program, filePath: string, action: SkippedGe
     path: normalizePath(filePath),
     reason: "empty",
     action,
+    ...skippedFileGuidance(action),
   });
 }
 
@@ -267,4 +378,48 @@ function removeSkippedGeneratedFile(filePath: string): { action: SkippedGenerate
 
   unlinkSync(absolutePath);
   return { action: "removed-marker-owned" };
+}
+
+function skippedFileGuidance(action: SkippedGeneratedFileEntry["action"]): Omit<SkippedGeneratedFileEntry, "path" | "reason" | "action"> {
+  if (action === "removed-marker-owned") {
+    return {
+      ownership: "marker-owned",
+      status: "removed-stale-marker-owned",
+      nextAction: "Review the deletion; accept the baseline when this empty generated artifact is expected to disappear.",
+    };
+  }
+  if (action === "preserved-unmarked") {
+    return {
+      ownership: "unmarked-existing",
+      status: "preserved-unmarked",
+      nextAction: "Review the file manually; Typra skipped empty output but preserved the unmarked existing file.",
+    };
+  }
+  return {
+    ownership: "not-present",
+    status: "skipped-empty",
+    nextAction: "No action needed unless this empty artifact should be emitted with allowEmpty.",
+  };
+}
+
+function findProtectedPathTouches(files: GeneratedManifestEntry[], patterns: string[]): string[] {
+  const matchers = patterns.map((pattern) => globToRegExp(normalizePath(pattern)));
+  if (matchers.length === 0) {
+    return [];
+  }
+  return files
+    .map((entry) => entry.path)
+    .filter((filePath) => matchers.some((matcher) => matcher.test(filePath)))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function buildCleanupSuggestions(staleMarkerOwnedRemovals: string[], preservedUnmarkedSkippedFiles: string[]): string[] {
+  const suggestions: string[] = [];
+  if (staleMarkerOwnedRemovals.length > 0) {
+    suggestions.push("Review removed marker-owned files and accept the generated baseline if the removal is expected.");
+  }
+  if (preservedUnmarkedSkippedFiles.length > 0) {
+    suggestions.push("Inspect preserved unmarked files before accepting drift; Typra will not delete files it does not own.");
+  }
+  return suggestions;
 }
