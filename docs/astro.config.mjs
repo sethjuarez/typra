@@ -34,17 +34,48 @@ export default defineConfig({
       ],
       sidebar: [
         {
-          label: "Start here",
+          label: "Concepts",
           items: [
             { label: "Overview", link: "/" },
             { label: "Quickstart", link: "/quickstart/" },
-            { label: "Concepts", link: "/concepts/" },
-            { label: "Targets", link: "/targets/" },
+            { label: "Mental model", link: "/concepts/" },
+            { label: "Simple example", link: "/concepts/simple-example/" },
+            { label: "End-to-end usage", link: "/concepts/end-to-end/" },
+            { label: "Generated output", link: "/concepts/generated-output/" },
           ],
         },
         {
-          label: "Project",
-          items: [{ label: "Roadmap", link: "/roadmap/" }],
+          label: "TypeSpec Mappings",
+          items: [
+            { label: "Overview", link: "/mappings/" },
+            { label: "Models and properties", link: "/mappings/models/" },
+            { label: "Collections and records", link: "/mappings/collections/" },
+            { label: "Unions and polymorphism", link: "/mappings/unions-polymorphism/" },
+            { label: "Decorators and wire names", link: "/mappings/decorators/" },
+          ],
+        },
+        {
+          label: "Targets",
+          items: [
+            { label: "Overview", link: "/targets/" },
+            { label: "TypeScript", link: "/targets/typescript/" },
+            { label: "Python", link: "/targets/python/" },
+            { label: "C#", link: "/targets/csharp/" },
+            { label: "Go", link: "/targets/go/" },
+            { label: "Java", link: "/targets/java/" },
+            { label: "Rust", link: "/targets/rust/" },
+            { label: "Markdown", link: "/targets/markdown/" },
+          ],
+        },
+        {
+          label: "Reference",
+          items: [
+            { label: "Overview", link: "/reference/" },
+            { label: "Configuration", link: "/reference/configuration/" },
+            { label: "CLI and verification", link: "/reference/cli-verification/" },
+            { label: "Compatibility", link: "/reference/compatibility/" },
+            { label: "Roadmap", link: "/roadmap/" },
+          ],
         },
       ],
     }),

@@ -1,0 +1,45 @@
+---
+title: Generated output
+description: The files Typra writes and how to review them.
+draft: false
+---
+
+Typra writes target output and review metadata under the configured emitter output root.
+
+```text
+generated\
+  typescript\
+  python\
+  go\
+  markdown\
+  json-ast\model.json
+  .typra-generated\manifest.json
+  .typra-generated\report.json
+```
+
+## Target output
+
+Each `emit-targets` entry can write runtime source under `output-dir`. When `test-dir` is set, Typra also writes generated target tests. Target-specific pages show the expected shape for each runtime.
+
+## JSON AST
+
+`json-ast/model.json` is emitted for every generation. It is for tooling, verification, review, and schema evolution. Do not treat it as a runtime API.
+
+## Generated metadata
+
+`.typra-generated/manifest.json` records generated-file ownership. `.typra-generated/report.json` records emitted files, skipped empty outputs, hygiene policy, warnings, and cleanup decisions.
+
+Use `deterministic-output: true` when generated output is committed. It stabilizes metadata timestamps, normalizes text artifacts to LF, trims trailing whitespace, and keeps final newlines stable.
+
+## Protected paths and hydration zones
+
+Consumers can declare hand-authored boundaries for verifier review:
+
+```json
+{
+  "protectedPaths": ["src/adapters/**"],
+  "hydrationZones": ["src/extensions/**"]
+}
+```
+
+Typra records hydration seam metadata for generated protocol adapters, but runtime behavior remains hand-authored by the consuming project.

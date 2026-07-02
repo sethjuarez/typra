@@ -1,0 +1,27 @@
+---
+title: Collections and records
+description: How Typra maps arrays, repeated models, and record-shaped data.
+draft: false
+---
+
+Typra preserves the collection shape from TypeSpec and lets each target choose the idiomatic runtime type.
+
+```typespec
+model FixtureRoot {
+  tags: string[];
+  metadata?: Record<unknown>;
+  contentItems: FixtureContent[];
+}
+```
+
+| TypeSpec | Typra mapping |
+| --- | --- |
+| `string[]` | Array or list of scalar values. |
+| `FixtureContent[]` | Array or list of nested model values, including polymorphic dispatch when the item type is discriminated. |
+| `Record<unknown>` | Dictionary-shaped metadata with unknown values. |
+
+Generated tests exercise scalar arrays, nested object arrays, dictionaries, and polymorphic collections from fixture samples.
+
+## Review note
+
+Collections are often where target-specific ergonomics differ. Review the generated target page for the runtime you intend to publish, especially around nullability, unknown values, and dictionary value types.

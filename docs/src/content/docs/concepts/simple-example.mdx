@@ -1,0 +1,74 @@
+---
+title: Simple example
+description: A compact TypeSpec contract and the Typra outputs it produces.
+draft: false
+---
+
+Start with a TypeSpec model that represents the runtime shape you want every target to agree on.
+
+```typespec
+import "@typra/emitter";
+
+namespace Todo.Contracts;
+
+model TodoList {
+  name: string;
+  items: TodoItem[];
+}
+
+model TodoItem {
+  id: string;
+  title: string;
+  state: TodoState;
+}
+
+union TodoState {
+  open: "open";
+  done: "done";
+  archived: "archived";
+}
+```
+
+Configure Typra with the root model and the targets you want to emit:
+
+```yaml
+emit:
+  - "@typra/emitter"
+
+options:
+  "@typra/emitter":
+    emitter-output-dir: "{cwd}/generated"
+    root-object: "Todo.Contracts.TodoList"
+    deterministic-output: true
+    emit-targets:
+      - type: TypeScript
+        output-dir: "generated/typescript"
+        test-dir: "generated/typescript/tests"
+        import-path: "../index"
+      - type: Python
+        output-dir: "generated/python"
+        test-dir: "generated/python/tests"
+        import-path: "todo_contracts"
+      - type: Markdown
+        output-dir: "generated/markdown"
+```
+
+Compile with TypeSpec:
+
+```powershell
+npx tsp compile ./main.tsp --config ./tspconfig.yaml
+```
+
+Typra emits target code, generated tests when `test-dir` is set, Markdown reference output when requested, and metadata that can be compared in CI.
+
+```text
+generated\
+  typescript\
+  python\
+  markdown\
+  json-ast\model.json
+  .typra-generated\manifest.json
+  .typra-generated\report.json
+```
+
+The important split is ownership: TypeSpec owns the durable contract, Typra owns repeatable generated surfaces, and your product owns any runtime behavior around those surfaces.

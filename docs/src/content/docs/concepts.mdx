@@ -1,10 +1,12 @@
 ---
-title: Concepts
-description: Core Typra concepts for generated model surfaces and verifier metadata.
+title: Mental model
+description: How Typra moves from TypeSpec contracts to generated runtime surfaces.
 draft: false
 ---
 
-Typra starts from a root TypeSpec model, resolves the contract graph, lowers it to an internal contract AST, then emits configured targets. When `root-namespace` is set, Typra can include additional models from that namespace, so review metadata before accepting a generated baseline.
+Typra starts from a root TypeSpec model, resolves the contract graph, lowers it to an internal contract AST, then emits configured targets.
+
+When `root-namespace` is set, Typra can include additional models from that namespace, so review metadata before accepting a generated baseline.
 
 ## Mental model
 
@@ -18,7 +20,7 @@ Think of Typra as a compiler extension with a review trail:
 
 ## Emitter boundary
 
-Typra owns reusable generation behavior:
+Typra owns reusable generation behavior. Product-specific TypeSpec contracts, service behavior, and hand-authored adapters stay in the consuming product.
 
 - Type graph discovery and lowering.
 - Scalar coercion and factory expansion.
@@ -27,73 +29,13 @@ Typra owns reusable generation behavior:
 - Generated-file markers and manifest metadata.
 - Generated tests, protocol scaffolds, reference docs, and JSON AST output.
 
-Product-specific TypeSpec contracts and hand-authored runtime adapters stay in the consuming product repository.
+## Generated output path
 
-## Generated output
+Each generation can include target source, target tests, JSON AST metadata, generated-file manifests, and verifier reports. See [Generated output](/concepts/generated-output/) for the file-level shape.
 
-Each generation can include:
+## Review boundary
 
-- Target source under each configured `output-dir`.
-- Target tests under each configured `test-dir`.
-- `json-ast/model.json` for tooling, verifier checks, and schema evolution.
-- `.typra-generated/manifest.json` with generated-file ownership metadata.
-- `.typra-generated/report.json` with emitted files, skipped empty outputs, hygiene policy, warnings, and cleanup decisions.
-
-Use `deterministic-output: true` when generated output is committed. It stabilizes metadata timestamps, normalizes text artifacts to LF, trims trailing whitespace, and keeps final newlines stable.
-
-## Decorators
-
-Typra includes decorators for runtime concerns TypeSpec does not model by default.
-
-```typespec
-model TextContent extends FixtureContent {
-  kind: "text";
-
-  @sample(#{ text: "hello" })
-  text: string;
-}
-```
-
-| Decorator | Purpose |
-| --- | --- |
-| `@sample` | Supplies generated test and example data. |
-| `@abstract` | Marks a model as not directly instantiated. |
-| `@@coerce` | Expands scalar input into an object during load. |
-| `@@factory` | Generates factory constructors for a model. |
-| `@@method` | Generates method or protocol signatures. |
-| `@@knownAs` | Maps a property to provider-specific wire names. |
-| `@@defaultFor` | Records provider-specific required defaults. |
-| `@parseAlias` | Accepts alternate input strings for a canonical union value. |
-| `@@protocol` | Marks a model as an emitted protocol/interface contract. |
-
-`@parseAlias` is parse-only: loading accepts aliases, but saving emits the canonical TypeSpec value.
-
-## Emitter options
-
-The root option is `root-object`, a fully qualified model name.
-
-| Option group | Options |
-| --- | --- |
-| Root selection | `root-object`, `root-namespace`, `root-alias`, `additional-roots`, `omit-models` |
-| Review and safety | `deterministic-output`, `protected-paths`, `hydration-zones`, `allow-unsupported-typespec-version` |
-| Output shape | `emit-targets`, `schema-output-dir` |
-
-Each `emit-targets` entry has a required `type` and can set `output-dir`, `test-dir`, `format`, `import-path`, `package-name`, `namespace`, `alias`, `enum-parsing`, and `protocol-scaffolds`.
-
-`protocol-scaffolds: "compile-only"` emits test-only implementations that prove generated protocols compile. They intentionally throw or reject when called and are not runtime fakes.
-
-## Verifier boundaries
-
-Generated files include Typra markers, and the emitter records generated ownership metadata. Consumers can declare hand-authored boundaries for verifier review:
-
-```json
-{
-  "protectedPaths": ["src/adapters/**"],
-  "hydrationZones": ["src/extensions/**"]
-}
-```
-
-Typra records hydration seam metadata for generated protocol adapters, but runtime behavior remains hand-authored by the consuming project.
+Generated files include Typra markers, and the emitter records generated ownership metadata. `typra-verify` compares a committed baseline with current generated output and reports drift. It does not replace product tests or review.
 
 ## Trust boundary
 

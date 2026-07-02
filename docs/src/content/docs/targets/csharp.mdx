@@ -1,0 +1,36 @@
+---
+title: C# target
+description: What Typra emits for .NET consumers.
+draft: false
+---
+
+Use the C# target for .NET product surfaces that need generated model types and JSON-oriented serialization helpers.
+
+```yaml
+emit-targets:
+  - type: CSharp
+    output-dir: "generated/csharp"
+    test-dir: "generated/csharp/tests"
+    namespace: "Typra.Fixtures"
+    protocol-scaffolds: "compile-only"
+```
+
+| Option | Why it matters |
+| --- | --- |
+| `output-dir` | Where generated C# source is written. |
+| `test-dir` | Where generated C# tests are written. |
+| `namespace` | Namespace for generated types. |
+| `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+
+Generated C# surfaces include model types, `System.Text.Json` helpers, tests, and protocol scaffolds.
+
+## Typical usage shape
+
+```csharp
+using Typra.Fixtures;
+
+var root = FixtureRoot.FromJson(jsonText);
+var saved = root.ToJson();
+```
+
+Confirm namespace conventions and nullable behavior before publishing generated C# output as a package.

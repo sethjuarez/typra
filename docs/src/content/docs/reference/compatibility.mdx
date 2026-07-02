@@ -1,0 +1,35 @@
+---
+title: Compatibility
+description: TypeSpec and target compatibility notes.
+draft: false
+---
+
+`@typra/emitter` currently supports `@typespec/compiler` and `@typespec/json-schema` `1.10.0`.
+
+Unsupported TypeSpec versions report an emitter diagnostic unless `allow-unsupported-typespec-version: true` is set intentionally.
+
+## Target confidence
+
+Target support is evidence-driven. The fixture suite validates generated compile/test surfaces across TypeScript, Python, C#, Go, Java, Rust, Markdown, and JSON AST generation.
+
+| Target | Current confidence note |
+| --- | --- |
+| TypeScript | Best fit when JSON/YAML helper behavior matters. |
+| Python | Best fit when JSON/YAML helper behavior matters. |
+| Go | Best fit when JSON/YAML helper behavior matters. |
+| C# | JSON-oriented model surfaces; confirm namespace conventions before publishing generated output. |
+| Java | JSON-oriented model surfaces; confirm package conventions before publishing generated output. |
+| Rust | Choose `enum-parsing` deliberately; default behavior is case-sensitive. |
+| Markdown | Generated reference output; review before publishing product docs. |
+| JSON AST | Tooling and review artifact, not a runtime API. |
+
+## Fixture evidence
+
+The fixture source is the compact reference for supported shapes:
+
+```text
+packages\typra-emitter\fixtures\tspconfig.yaml
+packages\typra-emitter\fixtures\shapes\main.tsp
+packages\typra-emitter\fixtures\shapes\model\events\session.tsp
+packages\typra-emitter\fixtures\shapes\model\pipeline\harness.tsp
+```

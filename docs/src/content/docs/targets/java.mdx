@@ -1,0 +1,36 @@
+---
+title: Java target
+description: What Typra emits for JVM consumers.
+draft: false
+---
+
+Use the Java target for JVM consumers that need generated model classes with JSON helper behavior.
+
+```yaml
+emit-targets:
+  - type: Java
+    output-dir: "generated/java"
+    test-dir: "generated/java/tests"
+    package-name: "typra.fixtures"
+    protocol-scaffolds: "compile-only"
+```
+
+| Option | Why it matters |
+| --- | --- |
+| `output-dir` | Where generated Java source is written. |
+| `test-dir` | Where generated Java tests are written. |
+| `package-name` | Java package for generated classes. |
+| `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+
+Generated Java surfaces include models with load, save, `fromJson`, `toJson`, scalar coercion, enum handling, polymorphic dispatch, and tests.
+
+## Typical usage shape
+
+```java
+import typra.fixtures.FixtureRoot;
+
+FixtureRoot root = FixtureRoot.fromJson(jsonText);
+String saved = root.toJson();
+```
+
+Confirm package layout and generated API shape before publishing Java output for downstream consumers.

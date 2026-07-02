@@ -1,0 +1,74 @@
+---
+title: End-to-end usage
+description: The high-level Typra workflow from TypeSpec source to generated review.
+draft: false
+---
+
+An end-to-end Typra workflow has four checkpoints: author the contract, compile generated output, run generated tests, and verify generated drift.
+
+## 1. Author the contract
+
+Import `@typra/emitter`, put runtime shapes in a namespace, and choose a root model that represents the generated surface.
+
+```typespec
+import "@typra/emitter";
+
+namespace Typra.Fixtures;
+
+model FixtureRoot {
+  name: string;
+  tags: string[];
+  owner: FixtureOwner;
+}
+
+model FixtureOwner {
+  id: string;
+  displayName?: string;
+}
+```
+
+## 2. Configure generation
+
+Use `root-object` to anchor the graph and `emit-targets` to choose runtime outputs.
+
+```yaml
+options:
+  "@typra/emitter":
+    emitter-output-dir: "{cwd}/generated"
+    root-object: "Typra.Fixtures.FixtureRoot"
+    deterministic-output: true
+    emit-targets:
+      - type: TypeScript
+        output-dir: "generated/typescript"
+        test-dir: "generated/typescript/tests"
+        import-path: "../index"
+      - type: Go
+        output-dir: "generated/go"
+        test-dir: "generated/go/tests"
+        import-path: "fixtures"
+        package-name: "fixtures"
+```
+
+## 3. Compile and test
+
+Compile with TypeSpec, then run the generated target tests with the target toolchains your repository supports.
+
+```powershell
+npx tsp compile ./main.tsp --config ./tspconfig.yaml
+```
+
+Typra's fixture suite validates TypeScript, Python, C#, Go, Java, Rust, Markdown, and JSON AST generation from the same TypeSpec source. Your consuming product should still run product integration tests around the generated surfaces.
+
+## 4. Verify generated drift
+
+For committed generated output, compare the previous generated baseline with the current output.
+
+```powershell
+npx typra-verify --baseline ./baseline --current ./generated
+```
+
+`typra-verify` reports generated-file ownership, protocol drift, package identity, schema evolution, protected path changes, hydration seams, cleanup candidates, and breaking-change classification. It does not delete files.
+
+## Review rule
+
+Treat generated output as code. Review the TypeSpec source, the generated diff, the target tests, and the verifier report together.

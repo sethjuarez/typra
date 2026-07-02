@@ -1,0 +1,54 @@
+---
+title: Unions and polymorphism
+description: How Typra maps string unions, parse aliases, and discriminated model hierarchies.
+draft: false
+---
+
+Typra supports closed string unions, open string unions, and discriminated model hierarchies.
+
+## Closed string unions
+
+```typespec
+@parseAlias("ready", #["complete"])
+union FixtureStatus {
+  draft: "draft";
+  ready: "ready";
+  archived: "archived";
+}
+```
+
+`@parseAlias` is parse-only. Loading accepts `complete`, but saving emits the canonical TypeSpec value `ready`.
+
+## Open string unions
+
+```typespec
+@parseAlias("batch", #["bulk"])
+union FixtureMode {
+  interactive: "interactive";
+  batch: "batch";
+  custom: string;
+}
+```
+
+Open unions preserve known values while allowing target-specific handling for custom strings.
+
+## Discriminated models
+
+```typespec
+@discriminator("kind")
+model FixtureContent {
+  kind: string;
+}
+
+model TextContent extends FixtureContent {
+  kind: "text";
+  text: string;
+}
+
+model ImageContent extends FixtureContent {
+  kind: "image";
+  url: string;
+}
+```
+
+Typra uses the discriminator field to load and save the right child shape. In the fixture contract, `FixtureRoot.content` and `FixtureRoot.contentItems` exercise both a single polymorphic value and a polymorphic collection.

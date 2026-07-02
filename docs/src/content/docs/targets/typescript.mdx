@@ -1,0 +1,36 @@
+---
+title: TypeScript target
+description: What Typra emits for TypeScript consumers.
+draft: false
+---
+
+Use the TypeScript target for browser, Node, or shared package consumers that need generated model classes and helper behavior.
+
+```yaml
+emit-targets:
+  - type: TypeScript
+    output-dir: "generated/typescript"
+    test-dir: "generated/typescript/tests"
+    import-path: "../index"
+    protocol-scaffolds: "compile-only"
+```
+
+| Option | Why it matters |
+| --- | --- |
+| `output-dir` | Where generated TypeScript source is written. |
+| `test-dir` | Where generated Node test files are written. |
+| `import-path` | Import path used by generated tests. |
+| `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+
+Generated TypeScript surfaces include model classes, runtime helpers, JSON/YAML helpers, tests, and protocol scaffold tests.
+
+## Typical usage shape
+
+```typescript
+import { FixtureRoot } from "./generated/typescript";
+
+const root = FixtureRoot.fromJson(jsonText);
+const saved = root.toJson();
+```
+
+Review generated tests for the exact helper names emitted by your selected contract and target options.

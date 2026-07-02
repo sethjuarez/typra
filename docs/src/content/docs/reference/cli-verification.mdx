@@ -1,0 +1,35 @@
+---
+title: CLI and verification
+description: Typra command-line surfaces and generated-output verification.
+draft: false
+---
+
+`@typra/emitter` publishes command-line tools for generation, verification, and consumer smoke checks.
+
+| Command | Purpose |
+| --- | --- |
+| `typra-generate` | Generation CLI entry point. |
+| `typra-verify` | Compares generated metadata between a baseline and current output. |
+| `typra-consumer-smoke` | Consumer smoke-check helper. |
+
+## Compile through TypeSpec
+
+Most projects generate by running TypeSpec with a Typra-enabled `tspconfig.yaml`:
+
+```powershell
+npx tsp compile ./main.tsp --config ./tspconfig.yaml
+```
+
+## Verify generated output
+
+Use `typra-verify` when generated output is committed and needs CI review.
+
+```powershell
+npx typra-verify --baseline ./baseline --current ./generated
+```
+
+`typra-verify` compares committed `.typra-generated` metadata against current generated metadata. It reports drift in exports, protocols, generated files, package identity, toolchain metadata, protected paths, schema evolution, stale cleanup candidates, hydration seams, and breaking-change classification. It does not delete files.
+
+## Recommended CI gate
+
+For committed generated output, set `deterministic-output: true`, compile with TypeSpec, run target tests, then run `typra-verify` against the committed baseline before accepting generated changes.

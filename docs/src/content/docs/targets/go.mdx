@@ -1,0 +1,40 @@
+---
+title: Go target
+description: What Typra emits for Go consumers.
+draft: false
+---
+
+Use the Go target for Go services and CLIs that need generated structs and JSON/YAML load/save helpers.
+
+```yaml
+emit-targets:
+  - type: Go
+    output-dir: "generated/go"
+    test-dir: "generated/go/tests"
+    import-path: "fixtures"
+    package-name: "fixtures"
+    protocol-scaffolds: "compile-only"
+```
+
+| Option | Why it matters |
+| --- | --- |
+| `output-dir` | Where generated Go source is written. |
+| `test-dir` | Where generated Go tests are written. |
+| `import-path` | Import path used by generated tests. |
+| `package-name` | Package name for generated Go files. |
+| `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+
+Generated Go surfaces include structs, load/save helpers, JSON/YAML helpers, and generated tests.
+
+## Typical usage shape
+
+```go
+root, err := fixtures.FromJSON([]byte(jsonText))
+if err != nil {
+    return err
+}
+
+saved, err := root.ToJSON()
+```
+
+Generated Go tests exercise load/save roundtrips, nested objects, scalar arrays, dictionaries, provider wire names, and polymorphic child resolution.
