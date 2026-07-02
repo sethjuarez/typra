@@ -153,6 +153,11 @@ function emitStringEnum(enumDef: EnumDef, lines: string[], options: RustEmitterO
     for (const value of enumDef.values) {
       lines.push(`            "${value}" => Some(Self::${toPascalCase(value)}),`);
     }
+    for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
+      for (const alias of aliases) {
+        lines.push(`            "${alias}" => Some(Self::${toPascalCase(canonical)}),`);
+      }
+    }
     if (enumDef.isOpen) {
       lines.push("            other => Some(Self::Other(other.to_string())),");
     } else {
@@ -167,6 +172,13 @@ function emitStringEnum(enumDef: EnumDef, lines: string[], options: RustEmitterO
     lines.push(`        if s.eq_ignore_ascii_case("${value}") {`);
     lines.push(`            return Some(Self::${toPascalCase(value)});`);
     lines.push("        }");
+  }
+  for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
+    for (const alias of aliases) {
+      lines.push(`        if s.eq_ignore_ascii_case("${alias}") {`);
+      lines.push(`            return Some(Self::${toPascalCase(canonical)});`);
+      lines.push("        }");
+    }
   }
   if (enumDef.isOpen) {
     lines.push("        Some(Self::Other(s.to_string()))");

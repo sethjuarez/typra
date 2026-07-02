@@ -66,6 +66,8 @@ export interface EnumDef {
   name: string;
   /** Known string values (e.g., ["system", "user", "assistant", "developer", "tool"]) */
   values: string[];
+  /** Parse-only aliases keyed by canonical string value */
+  parseAliases: Record<string, string[]>;
   /** True when the alias includes `| string` — accepts arbitrary strings beyond the known values */
   isOpen: boolean;
 }
@@ -166,6 +168,8 @@ export interface FieldDecl {
   defaultValue: string | number | boolean | null;
   /** Allowed string values (for enum-like constraints) */
   allowedValues: string[];
+  /** Parse-only aliases keyed by canonical enum/string-union value */
+  parseAliases: Record<string, string[]>;
   /** Named enum type for this field (e.g., "Role"), null if not an enum field */
   enumName: string | null;
   /** True when the enum includes a bare `string` variant (open — accepts any string) */
@@ -244,6 +248,8 @@ export interface LoadAssignment {
   enumName: string | null;
   /** Allowed values for enum fields */
   allowedValues: string[];
+  /** Parse-only aliases keyed by canonical enum/string-union value */
+  parseAliases: Record<string, string[]>;
   /** Default value (for fallback on missing/invalid data) */
   defaultValue: string | number | boolean | null;
   /** Whether the enum is open (accepts arbitrary string values) */

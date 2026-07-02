@@ -27,8 +27,8 @@ const fixtureRootSample = {
       text: "hello from a polymorphic collection",
     },
   ],
-  status: "ready",
-  mode: "batch",
+  status: "complete",
+  mode: "bulk",
 };
 const wireOptionsSample = {
   maxOutputTokens: 256,
@@ -38,8 +38,13 @@ const imageContentSample = {
   kind: "image",
   url: "https://example.com/fixture.png",
 };
+const fixtureRootExpected = {
+  ...fixtureRootSample,
+  status: "ready",
+  mode: "batch",
+};
 const conformanceExpected = normalizeConformanceValue({
-  root: fixtureRootSample,
+  root: fixtureRootExpected,
   imageContent: imageContentSample,
   openai: {
     max_completion_tokens: 256,
@@ -809,8 +814,8 @@ function runGoExecutableConformance() {
     '\t\t"owner": map[string]interface{}{"id": "owner-1", "displayName": "Fixture Owner"},',
     '\t\t"content": map[string]interface{}{"kind": "text", "text": "hello from a polymorphic sample"},',
     '\t\t"contentItems": []interface{}{map[string]interface{}{"kind": "text", "text": "hello from a polymorphic collection"}},',
-    '\t\t"status": "ready",',
-    '\t\t"mode": "batch",',
+    '\t\t"status": "complete",',
+    '\t\t"mode": "bulk",',
     "\t}, loadCtx)",
     "\tif err != nil {",
     "\t\tpanic(err)",
@@ -912,8 +917,8 @@ function runRustExecutableConformance() {
     '        "owner": {"id": "owner-1", "displayName": "Fixture Owner"},',
     '        "content": {"kind": "text", "text": "hello from a polymorphic sample"},',
     '        "contentItems": [{"kind": "text", "text": "hello from a polymorphic collection"}],',
-    '        "status": "ready",',
-    '        "mode": "batch"',
+    '        "status": "complete",',
+    '        "mode": "bulk"',
     "    }), &load_ctx);",
     '    let image_content = FixtureContent::load_from_value(&json!({"kind": "image", "url": "https://example.com/fixture.png"}), &load_ctx);',
     '    let wire = WireOptions::load_from_value(&json!({"maxOutputTokens": 256, "temperature": 0.7}), &load_ctx);',
@@ -988,8 +993,8 @@ function runCSharpExecutableConformance() {
     '    ["owner"] = new Dictionary<string, object?> { ["id"] = "owner-1", ["displayName"] = "Fixture Owner" },',
     '    ["content"] = new Dictionary<string, object?> { ["kind"] = "text", ["text"] = "hello from a polymorphic sample" },',
     '    ["contentItems"] = new List<object?> { new Dictionary<string, object?> { ["kind"] = "text", ["text"] = "hello from a polymorphic collection" } },',
-    '    ["status"] = "ready",',
-    '    ["mode"] = "batch",',
+    '    ["status"] = "complete",',
+    '    ["mode"] = "bulk",',
     "});",
     'var wire = WireOptions.Load(new Dictionary<string, object?> { ["maxOutputTokens"] = 256, ["temperature"] = 0.7 });',
     'var imageContent = FixtureContent.Load(new Dictionary<string, object?> { ["kind"] = "image", ["url"] = "https://example.com/fixture.png" });',
@@ -1066,8 +1071,8 @@ function runJavaExecutableConformance() {
     '    rootData.put("owner", owner);',
     '    rootData.put("content", content);',
     '    rootData.put("contentItems", java.util.List.of(contentItem));',
-    '    rootData.put("status", "ready");',
-    '    rootData.put("mode", "batch");',
+    '    rootData.put("status", "complete");',
+    '    rootData.put("mode", "bulk");',
     "    Map<String, Object> wireData = new LinkedHashMap<>();",
     '    wireData.put("maxOutputTokens", 256);',
     '    wireData.put("temperature", 0.7);',
@@ -1135,6 +1140,7 @@ function assertStaticFixtureCoverage() {
     "FixtureContent",
     "samples",
     "allowedValues",
+    "parseAliases",
   );
 
   assertIncludes(
@@ -1196,6 +1202,7 @@ function assertStaticFixtureCoverage() {
     "fromValue(String value)",
     "return fromJson(json, new LoadContext());",
     "result.status = FixtureStatus.fromValue",
+    "case \"complete\":",
     "result.put(\"status\", obj.status.value)",
   );
   assertIncludes(

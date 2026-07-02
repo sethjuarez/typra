@@ -69,8 +69,19 @@ model ImageContent extends FixtureContent {
   url: string;
 }
 
-alias FixtureStatus = "draft" | "ready" | "archived";
-alias FixtureMode = "interactive" | "batch" | string;
+@parseAlias("ready", #["complete"])
+union FixtureStatus {
+  draft: "draft";
+  ready: "ready";
+  archived: "archived";
+}
+
+@parseAlias("batch", #["bulk"])
+union FixtureMode {
+  interactive: "interactive";
+  batch: "batch";
+  custom: string;
+}
 
 @@coerce(FixtureReference, string, #{ id: "{value}", label: "coerced reference" }, "reference", "Load a reference from an id string.", "ref-coerced");
 @@factory(FixtureReference, "named", #{ id: "{id}", label: "{label}" }, #{ id: "string", label: "string" });

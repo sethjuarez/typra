@@ -164,6 +164,12 @@ export function emitTypeScriptFile(decl: FileDecl, visitor: ExprVisitor, namespa
   if (decl.enums.length > 0) {
     lines.push("");
   }
+  for (const enumDef of decl.enums) {
+    emitEnumParser(enumDef, lines);
+  }
+  if (decl.enums.some(hasParseAliases)) {
+    lines.push("");
+  }
 
   // 3. Emit each type
   for (const type of decl.types) {
@@ -172,6 +178,39 @@ export function emitTypeScriptFile(decl: FileDecl, visitor: ExprVisitor, namespa
   }
 
   return lines.join("\n") + "\n";
+}
+
+function hasParseAliases(enumDef: { parseAliases: Record<string, string[]> }): boolean {
+  return Object.values(enumDef.parseAliases).some(aliases => aliases.length > 0);
+}
+
+function enumParserName(enumName: string): string {
+  return `parse${enumName}`;
+}
+
+function emitEnumParser(enumDef: { name: string; values: string[]; parseAliases: Record<string, string[]>; isOpen: boolean }, lines: string[]): void {
+  if (!hasParseAliases(enumDef)) return;
+  lines.push(`function ${enumParserName(enumDef.name)}(value: unknown): ${enumDef.name} {`);
+  lines.push("  const text = String(value);");
+  lines.push("  switch (text) {");
+  for (const value of enumDef.values) {
+    lines.push(`    case ${JSON.stringify(value)}:`);
+    lines.push(`      return ${JSON.stringify(value)};`);
+  }
+  for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
+    for (const alias of aliases) {
+      lines.push(`    case ${JSON.stringify(alias)}:`);
+    }
+    lines.push(`      return ${JSON.stringify(canonical)};`);
+  }
+  lines.push("    default:");
+  if (enumDef.isOpen) {
+    lines.push(`      return text as ${enumDef.name};`);
+  } else {
+    lines.push(`      throw new Error(\`Invalid ${enumDef.name} value: \${text}\`);`);
+  }
+  lines.push("  }");
+  lines.push("}");
 }
 
 // ============================================================================
@@ -585,6 +624,9 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
 function emitLoadAssignment(a: LoadAssignment): string {
   // Named enum — cast string to enum type alias
   if (a.enumName && a.allowedValues.length > 0) {
+    if (Object.keys(a.parseAliases).length > 0) {
+      return `instance.${a.fieldName} = ${enumParserName(a.enumName)}(data["${a.sourceName}"]);`;
+    }
     return `instance.${a.fieldName} = String(data["${a.sourceName}"]) as ${a.enumName};`;
   }
   const cat = a.category;

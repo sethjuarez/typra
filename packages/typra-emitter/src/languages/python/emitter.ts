@@ -156,6 +156,9 @@ export function emitPythonFile(decl: FileDecl, visitor: ExprVisitor, group: stri
         lines.push(`${enumDef.name} = Literal[${values}]`);
       }
     }
+    for (const enumDef of decl.enums) {
+      emitEnumParser(enumDef, lines);
+    }
   }
 
   // 3. Emit each type
@@ -166,6 +169,38 @@ export function emitPythonFile(decl: FileDecl, visitor: ExprVisitor, group: stri
   }
 
   return pruneUnusedTypingImports(emitCleanPythonLines(lines, "\n"));
+}
+
+function hasParseAliases(enumDef: { parseAliases: Record<string, string[]> }): boolean {
+  return Object.values(enumDef.parseAliases).some(aliases => aliases.length > 0);
+}
+
+function enumParserName(enumName: string): string {
+  return `_parse_${toSnakeCase(enumName)}`;
+}
+
+function emitEnumParser(enumDef: { name: string; values: string[]; parseAliases: Record<string, string[]>; isOpen: boolean }, lines: string[]): void {
+  if (!hasParseAliases(enumDef)) return;
+  lines.push("");
+  lines.push(`def ${enumParserName(enumDef.name)}(value: Any) -> ${enumDef.name}:`);
+  lines.push("    text = str(value)");
+  lines.push("    aliases = {");
+  for (const value of enumDef.values) {
+    lines.push(`        ${JSON.stringify(value)}: ${JSON.stringify(value)},`);
+  }
+  for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
+    for (const alias of aliases) {
+      lines.push(`        ${JSON.stringify(alias)}: ${JSON.stringify(canonical)},`);
+    }
+  }
+  lines.push("    }");
+  if (enumDef.isOpen) {
+    lines.push("    return aliases.get(text, text)");
+  } else {
+    lines.push("    if text in aliases:");
+    lines.push("        return aliases[text]");
+    lines.push(`    raise ValueError(f"Invalid ${enumDef.name} value: {text}")`);
+  }
 }
 
 function emitCleanPythonLines(lines: string[], suffix = ""): string {
@@ -650,6 +685,9 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
 function emitLoadAssignment(a: LoadAssignment): string {
   const snake = toSnakeCase(a.fieldName);
   const cat = a.category;
+  if (a.enumName && a.allowedValues.length > 0 && Object.keys(a.parseAliases).length > 0) {
+    return `instance.${snake} = ${enumParserName(a.enumName)}(data["${a.sourceName}"])`;
+  }
   switch (cat.kind) {
     case "scalar":
     case "dict":

@@ -83,7 +83,7 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
       if (field.enumName && !field.isOpenEnum && field.allowedValues.length > 0 && !emittedEnums.has(field.enumName)) {
         emittedEnums.add(field.enumName);
         const enumCode = emitCSharpEnum(
-          { name: field.enumName, values: field.allowedValues, isOpen: field.isOpenEnum },
+          { name: field.enumName, values: field.allowedValues, parseAliases: field.parseAliases, isOpen: field.isOpenEnum },
           csharpNamespace,
         );
         const csEnumName = field.enumName.charAt(0).toUpperCase() + field.enumName.slice(1);

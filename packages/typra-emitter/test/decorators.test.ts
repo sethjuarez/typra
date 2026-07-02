@@ -9,6 +9,7 @@ import {
   $factory,
   $knownAs,
   $method,
+  $parseAlias,
   $protocol,
   $sample,
   appendStateValue,
@@ -164,5 +165,30 @@ describe("TypeSpec decorators", () => {
     assert.deepEqual(getStateValue(program, StateKeys.defaultFor, property), [
       { provider: "openai", defaultValue: 256 },
     ]);
+  });
+
+  it("records parse aliases for string unions and rejects conflicts", () => {
+    const { context, program, diagnostics } = createContext();
+    const readyVariant = { type: { kind: "String", value: "ready" } };
+    const archivedVariant = { type: { kind: "String", value: "archived" } };
+    const target = {
+      kind: "Union",
+      name: "FixtureStatus",
+      variants: new Map([
+        ["ready", readyVariant],
+        ["archived", archivedVariant],
+      ]),
+    } as unknown as Type;
+
+    $parseAlias(context, target as never, "ready", ["complete", "done"]);
+    $parseAlias(context, target as never, "ready", ["complete"]);
+    $parseAlias(context, target as never, "archived", ["done"]);
+
+    assert.deepEqual(getStateValue(program, StateKeys.parseAliases, target), [
+      { canonical: "ready", aliases: ["complete", "done"] },
+    ]);
+    assert.equal(diagnostics.length, 2);
+    assert.equal(diagnostics[0].code, "typra-emitter-parse-alias-duplicate");
+    assert.equal(diagnostics[1].code, "typra-emitter-parse-alias-conflict");
   });
 });

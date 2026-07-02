@@ -16,7 +16,8 @@ Typra owns generic emitter behavior that is not tied to any one product domain:
 
 - Type graph discovery, lowering, and expression expansion.
 - TypeSpec decorators such as `@sample`, `@abstract`, `@coerce`,
-  `@@factory`, `@@method`, `@@knownAs`, `@@defaultFor`, and `@@protocol`.
+  `@@factory`, `@@method`, `@@knownAs`, `@@defaultFor`, `@@parseAlias`, and
+  `@@protocol`.
 - Language emitters for TypeScript, Python, C#, Go, Java, Rust, Markdown, and
   JSON AST output.
 - Synthetic TypeSpec fixtures that exercise supported model shapes.
@@ -79,6 +80,26 @@ import "@typra/emitter";
 
 namespace MyProject;
 ```
+
+### Parse-only string-union aliases
+
+Named string unions can declare alternate input spellings that normalize to a
+canonical value while loading. Saving always emits the canonical TypeSpec value.
+Because TypeSpec cannot augment alias union expressions, declare aliases on a
+named union declaration:
+
+```typespec
+@parseAlias("ready", #["complete", "done"])
+union Status {
+  draft: "draft";
+  ready: "ready";
+  archived: "archived";
+}
+```
+
+Aliases are attached to the union definition, not to individual properties or
+providers. Closed unions accept canonical values plus aliases; open unions apply
+aliases for known values first and preserve other strings.
 
 Compile with TypeSpec:
 

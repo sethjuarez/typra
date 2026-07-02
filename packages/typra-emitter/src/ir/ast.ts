@@ -11,7 +11,7 @@ import {
   getNamespaceFullName,
   getDiscriminator,
 } from "@typespec/compiler";
-import { getStateScalar, getStateValue, SampleEntry, FactoryEntry, MethodEntry, KnownAsEntry, DefaultForEntry } from "../decorators.js";
+import { getStateScalar, getStateValue, SampleEntry, FactoryEntry, MethodEntry, KnownAsEntry, DefaultForEntry, ParseAliasEntry } from "../decorators.js";
 import { StateKeys } from "../lib.js";
 
 
@@ -182,6 +182,7 @@ export class PropertyNode {
 
   public defaultValue: string | number | boolean | null = null;
   public allowedValues: string[] = [];
+  public parseAliases: Record<string, string[]> = {};
   /** Name of the string-literal union alias (e.g., "Role"), null if unnamed or not an enum. */
   public enumName: string | null = null;
   /** True when the union includes a bare `string` variant (open enum — accepts any string). */
@@ -213,6 +214,7 @@ export class PropertyNode {
 
       defaultValue: this.defaultValue || "null",
       allowedValues: this.allowedValues,
+      parseAliases: this.parseAliases,
       enumName: this.enumName,
       isOpenEnum: this.isOpenEnum,
       type: this.type ? this.type.getSanitizedObject() : undefined,
@@ -619,6 +621,12 @@ export const resolveUnionProperty = (program: Program, property: ModelProperty, 
         prop.defaultValue = property.defaultValue?.value || null;
       }
       prop.allowedValues = variants.filter(v => v.kind === "String").map(v => v.value);
+      prop.parseAliases = normalizeParseAliases(
+        program,
+        union,
+        getStateValue<ParseAliasEntry>(program, StateKeys.parseAliases, union),
+        prop.allowedValues,
+      );
       // Resolve enum type name from union.name (named unions) or alias name (alias statements)
       let enumName: string | undefined = union.name;
       if (!enumName && union.node) {
@@ -649,6 +657,61 @@ export const resolveUnionProperty = (program: Program, property: ModelProperty, 
   }
   return prop;
 };
+
+function normalizeParseAliases(
+  program: Program,
+  union: Union,
+  entries: ParseAliasEntry[],
+  allowedValues: string[],
+): Record<string, string[]> {
+  const aliases: Record<string, string[]> = {};
+  const allowed = new Set(allowedValues);
+  const seen = new Map<string, string>();
+
+  for (const entry of entries) {
+    if (!allowed.has(entry.canonical)) {
+      program.reportDiagnostic({
+        code: "typra-emitter-parse-alias-canonical",
+        message: `parseAlias canonical value '${entry.canonical}' is not a string literal in union '${union.name || "anonymous"}'.`,
+        severity: "error",
+        target: union,
+      });
+      continue;
+    }
+
+    const canonicalAliases = aliases[entry.canonical] ?? [];
+    for (const alias of entry.aliases) {
+      const existingCanonical = seen.get(alias);
+      if (existingCanonical) {
+        program.reportDiagnostic({
+          code: existingCanonical === entry.canonical ? "typra-emitter-parse-alias-duplicate" : "typra-emitter-parse-alias-conflict",
+          message: existingCanonical === entry.canonical
+            ? `parseAlias alias '${alias}' is already declared for canonical value '${entry.canonical}'.`
+            : `parseAlias alias '${alias}' maps to both '${existingCanonical}' and '${entry.canonical}'.`,
+          severity: "error",
+          target: union,
+        });
+        continue;
+      }
+      if (allowed.has(alias)) {
+        program.reportDiagnostic({
+          code: "typra-emitter-parse-alias-conflict",
+          message: `parseAlias alias '${alias}' conflicts with a canonical union value.`,
+          severity: "error",
+          target: union,
+        });
+        continue;
+      }
+      if (!canonicalAliases.includes(alias)) {
+        canonicalAliases.push(alias);
+      }
+      seen.set(alias, entry.canonical);
+    }
+    aliases[entry.canonical] = canonicalAliases;
+  }
+
+  return Object.fromEntries(Object.entries(aliases).filter(([, value]) => value.length > 0));
+}
 
 const getTemplateModel = (type: Type | undefined): Model | undefined => {
   if (!type) return undefined;
