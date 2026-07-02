@@ -155,7 +155,8 @@ export const $lib = createTypeSpecLibrary({
     methods: { description: "Method stubs for model types" },
     knownAs: { description: "Wire field name mappings per target system" },
     defaultFor: { description: "Per-target required default values" },
-    protocols: { description: "Pipeline interface markers" }
+    protocols: { description: "Pipeline interface markers" },
+    parseAliases: { description: "Parse-only aliases for named string unions" }
   }
 });
 

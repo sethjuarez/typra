@@ -225,6 +225,7 @@ function lowerField(
     isOptional: prop.isOptional,
     defaultValue: prop.defaultValue,
     allowedValues: prop.allowedValues,
+    parseAliases: prop.parseAliases,
     enumName: prop.enumName,
     isOpenEnum: prop.isOpenEnum,
     description: prop.description,
@@ -284,6 +285,7 @@ function lowerLoad(
     parentTypeName: node.typeName.name,
     enumName: f.enumName,
     allowedValues: f.allowedValues,
+    parseAliases: f.parseAliases,
     defaultValue: f.defaultValue,
     isOpenEnum: f.isOpenEnum,
   }));
@@ -503,6 +505,7 @@ function collectEnums(types: TypeDecl[]): EnumDef[] {
         seen.set(field.enumName, {
           name: field.enumName,
           values: field.allowedValues,
+          parseAliases: field.parseAliases,
           isOpen: field.isOpenEnum,
         });
       }

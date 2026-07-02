@@ -66,6 +66,18 @@ function emitEnum(enumDef: EnumDef, lines: string[]): void {
   lines.push("  public final String value;");
   lines.push(`  ${enumDef.name}(String value) { this.value = value; }`);
   lines.push(`  public static ${enumDef.name} fromValue(String value) {`);
+  if (hasParseAliases(enumDef)) {
+    lines.push("    switch (value) {");
+    for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
+      for (const alias of aliases) {
+        lines.push(`      case "${escapeJava(alias)}":`);
+      }
+      lines.push(`        return ${toEnumMember(canonical)};`);
+    }
+    lines.push("      default:");
+    lines.push("        break;");
+    lines.push("    }");
+  }
   lines.push(`    for (${enumDef.name} item : values()) {`);
   lines.push("      if (item.value.equals(value)) return item;");
   lines.push("    }");
@@ -73,6 +85,36 @@ function emitEnum(enumDef: EnumDef, lines: string[]): void {
   lines.push("  }");
   lines.push("}");
   lines.push("");
+}
+
+function hasParseAliases(value: { parseAliases: Record<string, string[]> }): boolean {
+  return Object.values(value.parseAliases).some(aliases => aliases.length > 0);
+}
+
+function javaAliasParserName(enumName: string): string {
+  return `parse${enumName}`;
+}
+
+function emitOpenEnumAliasParsers(fields: FieldDecl[], lines: string[]): void {
+  const emitted = new Set<string>();
+  for (const field of fields) {
+    if (!field.enumName || !field.isOpenEnum || !hasParseAliases(field)) continue;
+    if (emitted.has(field.enumName)) continue;
+    emitted.add(field.enumName);
+    lines.push(`  private static String ${javaAliasParserName(field.enumName)}(String value) {`);
+    lines.push("    switch (value) {");
+    for (const [canonical, aliases] of Object.entries(field.parseAliases)) {
+      for (const alias of aliases) {
+        lines.push(`      case "${escapeJava(alias)}":`);
+      }
+      lines.push(`        return "${escapeJava(canonical)}";`);
+    }
+    lines.push("      default:");
+    lines.push("        return value;");
+    lines.push("    }");
+    lines.push("  }");
+    lines.push("");
+  }
 }
 
 function emitType(
@@ -100,11 +142,13 @@ function emitType(
   lines.push(`  public ${typeName}() { }`);
   lines.push("");
 
+  emitOpenEnumAliasParsers(type.fields, lines);
   emitLoad(type, lines, polymorphicTypeNames);
   emitSave(type, lines, polymorphicTypeNames);
   if (type.wire) {
     emitToWire(type.wire, lines);
   }
+
   emitJsonHelpers(typeName, lines);
   for (const factory of type.factories) {
     emitFactory(typeName, factory, visitor, lines);
@@ -188,7 +232,7 @@ function emitLoadField(field: FieldDecl, lines: string[], polymorphicTypeNames: 
   lines.push(`    if (map.containsKey("${name}") && map.get("${name}") != null) {`);
   switch (field.category.kind) {
     case "scalar":
-      lines.push(`      result.${name} = ${loadScalar(`map.get("${name}")`, field.category.scalarType, field.isOpenEnum ? null : field.enumName)};`);
+      lines.push(`      result.${name} = ${loadScalar(`map.get("${name}")`, field.category.scalarType, field.isOpenEnum ? null : field.enumName, openEnumAliasParser(field))};`);
       break;
     case "complex":
       lines.push(`      result.${name} = ${field.category.typeName}.load(map.get("${name}"), ctx);`);
@@ -197,7 +241,7 @@ function emitLoadField(field: FieldDecl, lines: string[], polymorphicTypeNames: 
       lines.push(`      result.${name} = new ArrayList<>();`);
       lines.push(`      if (map.get("${name}") instanceof Iterable<?> values) {`);
       lines.push("        for (Object item : values) {");
-      lines.push(`                result.${name}.add(${loadScalar("item", field.category.scalarType, field.isOpenEnum ? null : field.enumName)});`);
+      lines.push(`                      result.${name}.add(${loadScalar("item", field.category.scalarType, field.isOpenEnum ? null : field.enumName, openEnumAliasParser(field))});`);
       lines.push("        }");
       lines.push("      }");
       break;
@@ -381,9 +425,19 @@ function javaDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): strin
   void polymorphicTypeNames;
 }
 
-function loadScalar(valueExpr: string, scalarType: string, enumName: string | null): string {
+function openEnumAliasParser(field: FieldDecl): string | null {
+  if (field.enumName && field.isOpenEnum && hasParseAliases(field)) {
+    return javaAliasParserName(field.enumName);
+  }
+  return null;
+}
+
+function loadScalar(valueExpr: string, scalarType: string, enumName: string | null, parseAliasFunction: string | null = null): string {
   if (enumName) {
     return `${enumName}.fromValue(String.valueOf(${valueExpr}))`;
+  }
+  if (parseAliasFunction) {
+    return `${parseAliasFunction}(String.valueOf(${valueExpr}))`;
   }
   switch (scalarType) {
     case "string":

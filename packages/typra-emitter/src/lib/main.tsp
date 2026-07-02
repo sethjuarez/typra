@@ -103,6 +103,26 @@ extern dec knownAs(target: ModelProperty, provider: valueof string, name: valueo
 extern dec defaultFor(target: ModelProperty, provider: valueof string, defaultValue: valueof unknown);
 
 /**
+ * Declares parse-only aliases for a canonical named string-union value. Aliases
+ * are accepted while loading/deserializing values; saving always emits the
+ * canonical TypeSpec union value.
+ *
+ * @param canonical The canonical union value to produce after parsing an alias
+ * @param aliases Alternate input strings that should parse as the canonical value
+ *
+ * @example
+ * ```typespec
+ * @parseAlias("ready", #["complete", "done"])
+ * union FixtureStatus {
+ *   draft: "draft";
+ *   ready: "ready";
+ *   archived: "archived";
+ * }
+ * ```
+ */
+extern dec parseAlias(target: Union, canonical: valueof string, aliases: valueof unknown);
+
+/**
  * Marks the target model as a protocol interface. Protocol interfaces define
  * the pipeline stage contracts (renderer, parser, executor, processor). The
  * emitter generates language-appropriate interface/trait/protocol definitions.

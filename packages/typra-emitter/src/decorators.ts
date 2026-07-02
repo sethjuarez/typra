@@ -1,4 +1,4 @@
-import { type DecoratorContext, type Model, Program, Type, ModelProperty, ObjectValue, serializeValueAsJson, StringValue } from "@typespec/compiler";
+import { type DecoratorContext, type Model, Program, Type, ModelProperty, ObjectValue, serializeValueAsJson, StringValue, Union } from "@typespec/compiler";
 import { StateKeys } from "./lib.js";
 import { Coercion } from "./ir/ast.js";
 
@@ -215,6 +215,93 @@ export function $knownAs(context: DecoratorContext, target: ModelProperty, provi
 
   const entry: KnownAsEntry = { provider: providerValue, name: nameValue };
   appendStateValue<KnownAsEntry>(context, StateKeys.knownAs, target, entry);
+}
+
+export interface ParseAliasEntry {
+  /** Canonical string-union value emitted during serialization */
+  canonical: string;
+  /** Alternate input strings accepted during parsing/loading */
+  aliases: string[];
+}
+
+function readStringValue(value: unknown): string {
+  return typeof value === 'object' && value !== null && 'value' in value ? (value as StringValue).value : value as string;
+}
+
+function readStringArray(context: DecoratorContext, target: Type, value: ObjectValue | object | string[]): string[] | undefined {
+  let deserialized: unknown;
+  if (value && typeof value === 'object' && 'type' in value && (value as ObjectValue).type) {
+    deserialized = serializeValueAsJson(context.program, value as ObjectValue, (value as ObjectValue).type);
+  } else {
+    deserialized = value;
+  }
+
+  if (!Array.isArray(deserialized) || !deserialized.every(item => typeof item === "string")) {
+    context.program.reportDiagnostic({
+      code: "typra-emitter-parse-aliases",
+      message: `parseAlias aliases must be an array of strings.`,
+      severity: "error",
+      target,
+    });
+    return undefined;
+  }
+
+  return deserialized;
+}
+
+export function $parseAlias(context: DecoratorContext, target: Union, canonical: string, aliases: ObjectValue | object | string[]) {
+  const canonicalValue = readStringValue(canonical);
+  const aliasValues = readStringArray(context, target as Type, aliases);
+  if (!aliasValues) return;
+
+  const variants = Array.from(target.variants).map(([, v]) => v.type);
+  const allowedValues = new Set(variants.filter(v => v.kind === "String").map(v => v.value));
+  if (!allowedValues.has(canonicalValue)) {
+    context.program.reportDiagnostic({
+      code: "typra-emitter-parse-alias-canonical",
+      message: `parseAlias canonical value '${canonicalValue}' is not a string literal in union '${target.name || "anonymous"}'.`,
+      severity: "error",
+      target,
+    });
+    return;
+  }
+
+  const existing = getStateValue<ParseAliasEntry>(context.program, StateKeys.parseAliases, target as Type);
+  const seen = new Map<string, string>();
+  for (const entry of existing) {
+    for (const alias of entry.aliases) {
+      seen.set(alias, entry.canonical);
+    }
+  }
+  for (const alias of aliasValues) {
+    const existingCanonical = seen.get(alias);
+    if (existingCanonical) {
+      context.program.reportDiagnostic({
+        code: existingCanonical === canonicalValue ? "typra-emitter-parse-alias-duplicate" : "typra-emitter-parse-alias-conflict",
+        message: existingCanonical === canonicalValue
+          ? `parseAlias alias '${alias}' is already declared for canonical value '${canonicalValue}'.`
+          : `parseAlias alias '${alias}' already maps to canonical value '${existingCanonical}'.`,
+        severity: "error",
+        target,
+      });
+      return;
+    }
+    if (allowedValues.has(alias)) {
+      context.program.reportDiagnostic({
+        code: "typra-emitter-parse-alias-conflict",
+        message: `parseAlias alias '${alias}' conflicts with a canonical union value.`,
+        severity: "error",
+        target,
+      });
+      return;
+    }
+    seen.set(alias, canonicalValue);
+  }
+
+  appendStateValue<ParseAliasEntry>(context, StateKeys.parseAliases, target as Type, {
+    canonical: canonicalValue,
+    aliases: aliasValues,
+  });
 }
 
 export interface DefaultForEntry {
