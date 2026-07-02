@@ -17,6 +17,7 @@ Options:
   -n, --namespace <name>   Root namespace for generated code (default: Typra)
   --no-tests               Skip generating test files
   --no-format              Skip running formatters
+  --deterministic          Emit stable generated metadata for CI verification
   -h, --help               Show this help message
 
 Examples:
@@ -50,6 +51,7 @@ async function main() {
       namespace: { type: "string", short: "n" },
       "no-tests": { type: "boolean", default: false },
       "no-format": { type: "boolean", default: false },
+      deterministic: { type: "boolean", default: false },
       help: { type: "boolean", short: "h" },
     },
     allowPositionals: true,
@@ -101,6 +103,7 @@ async function main() {
     namespace: values.namespace,
     generateTests: !values["no-tests"],
     format: !values["no-format"],
+    deterministic: values.deterministic,
   });
 
   if (result.success) {

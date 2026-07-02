@@ -4,6 +4,7 @@ options:
   "@typra/emitter":
     emitter-output-dir: "{cwd}/generated/fixtures"
     root-object: "Typra.Fixtures.FixtureRoot"
+    deterministic-output: true
     emit-targets:
       - type: TypeScript
         output-dir: "generated/fixtures/typescript"
@@ -35,6 +36,7 @@ options:
         output-dir: "generated/fixtures/rust"
         test-dir: "generated/fixtures/rust/tests"
         import-path: "fixtures::model"
+        enum-parsing: "case-insensitive"
         format: false
       - type: Markdown
         output-dir: "generated/fixtures/markdown"

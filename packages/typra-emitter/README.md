@@ -74,6 +74,7 @@ The package includes `typra-generate`, `typra-verify`, and a generic
 
 ```powershell
 npx typra-generate --help
+npx typra-generate --deterministic -o ./generated
 npx typra-verify --baseline ./baseline --current ./generated
 npx typra-consumer-smoke --config ./typra-smoke.json
 ```
@@ -107,6 +108,34 @@ smoke wiring, and cross-language generated-code compile/test surfaces.
 Generated source files include Typra markers, and the emitter records a
 generated-file manifest for each output root. Stale-file deletion is not enabled
 yet, so Typra will not remove hand-authored runtime files.
+
+For CI or committed generated output, enable deterministic metadata with the
+TypeSpec emitter option:
+
+```yaml
+options:
+  "@typra/emitter":
+    deterministic-output: true
+```
+
+This keeps `.typra-generated/manifest.json` stable across equivalent
+generations by replacing wall-clock `generatedAt` values with a fixed timestamp.
+Generated text artifacts are also normalized to LF line endings, trimmed trailing
+whitespace, and final newlines. Blank generated artifacts are skipped unless the
+file format requires an empty sentinel such as Python `py.typed`.
+
+Rust targets can opt into case-insensitive string-union/enum parsing without
+changing the default case-sensitive behavior:
+
+```yaml
+emit-targets:
+  - type: Rust
+    output-dir: generated/rust
+    enum-parsing: case-insensitive
+```
+
+When enabled, generated Rust `from_str_opt` methods accept enum values with
+ASCII case differences while preserving the canonical serialized casing.
 
 Consumers can declare hand-authored boundaries in verifier config:
 

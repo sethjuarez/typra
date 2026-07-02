@@ -24,6 +24,8 @@ export interface TargetOptions {
   namespace?: string;
   /** Run formatters on emitted files (default: true) */
   format?: boolean;
+  /** Enum/string-union parsing policy for targets that support it */
+  enumParsing?: "case-sensitive" | "case-insensitive";
 }
 
 /**
@@ -76,6 +78,12 @@ export interface GenerateOptions {
    * @default true
    */
   format?: boolean;
+
+  /**
+   * Emit stable metadata for deterministic CI verification.
+   * @default false
+   */
+  deterministic?: boolean;
 }
 
 /**
@@ -113,6 +121,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     rootAlias,
     generateTests = true,
     format = true,
+    deterministic = false,
   } = options;
 
   // Resolve the model path (inside the package)
@@ -139,6 +148,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
         "root-namespace": namespace,
         ...(rootAlias && { "root-alias": rootAlias }),
         ...(omit.length > 0 && { "omit-models": omit }),
+        ...(deterministic && { "deterministic-output": true }),
         "emit-targets": emitTargets,
       },
     },
@@ -188,6 +198,7 @@ function buildEmitTargets(
   "test-dir"?: string;
   format?: boolean;
   namespace?: string;
+  "enum-parsing"?: "case-sensitive" | "case-insensitive";
 }> {
   if (Array.isArray(targets)) {
     // Simple array of target names - use default directories
@@ -205,6 +216,7 @@ function buildEmitTargets(
       "test-dir": opts.testDir,
       format: opts.format ?? format,
       namespace: opts.namespace,
+      "enum-parsing": opts.enumParsing,
     }));
   }
 }

@@ -125,7 +125,9 @@ export const generateRust = async (
     if (!n.base) {
       const group = n.group || "";
       const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
-      const fileContent = emitRustFileDecl(fileDecl, visitor, polymorphicTypeNames, childToParent);
+      const fileContent = emitRustFileDecl(fileDecl, visitor, polymorphicTypeNames, childToParent, {
+        enumParsing: emitTarget["enum-parsing"] ?? "case-sensitive",
+      });
       const fileName = toSnakeCase(n.typeName.name) + '.rs';
       const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
       await emitRustFile(context, fileName, fileContent, outDir, emitTarget["output-dir"]);

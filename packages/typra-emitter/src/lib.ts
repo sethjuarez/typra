@@ -9,6 +9,7 @@ export interface EmitTarget {
   "namespace"?: string;
   "import-path"?: string;
   "package-name"?: string;
+  "enum-parsing"?: "case-sensitive" | "case-insensitive";
 }
 export interface TypraEmitterOptions {
   "root-object": string;
@@ -21,6 +22,7 @@ export interface TypraEmitterOptions {
   "allow-unsupported-typespec-version"?: boolean;
   "protected-paths"?: string[];
   "hydration-zones"?: string[];
+  "deterministic-output"?: boolean;
 }
 
 const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
@@ -68,6 +70,12 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             type: "string",
             nullable: true,
             description: "Language package/module name override. Currently used by Go; defaults to the emitted root namespace."
+          },
+          "enum-parsing": {
+            type: "string",
+            enum: ["case-sensitive", "case-insensitive"],
+            nullable: true,
+            description: "Enum/string-union parsing policy. Currently used by Rust; defaults to case-sensitive for existing behavior."
           }
         },
         required: ["type"]
@@ -124,6 +132,12 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
       items: { type: "string" },
       nullable: true,
       description: "Hand-authored extension zones adjacent to generated output. Recorded as verifier boundary metadata; Typra does not generate runtime behavior."
+    },
+    "deterministic-output": {
+      type: "boolean",
+      nullable: true,
+      default: false,
+      description: "Emit stable metadata for CI verification. When enabled, generated manifest timestamps use a fixed value instead of wall-clock time."
     }
   },
   required: ["root-object"],
