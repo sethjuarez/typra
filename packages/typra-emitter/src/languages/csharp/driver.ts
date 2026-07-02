@@ -15,6 +15,7 @@ import { emitCSharpContext, emitCSharpUtils } from "./scaffolding.js";
 import { emitCSharpTest } from "./test-emitter.js";
 import { toPascalCase } from "../../ir/visitor.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
+import { collectProtocolNodes, emitCSharpProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
 
 /**
  * Stale-file deletion is intentionally disabled until manifest cleanup is enabled.
@@ -103,6 +104,13 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const testDir = n.group ? `${emitTarget["test-dir"]}/${n.group}` : emitTarget["test-dir"];
       await emitCsharpFile(context, n, renderTests(n, csharpNamespace), `${n.typeName.name}ConversionTests.cs`, testDir, emitTarget["test-dir"]);
+    }
+  }
+
+  if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
+    const scaffoldContent = emitCSharpProtocolScaffolds(collectProtocolNodes(nodes), csharpNamespace);
+    if (scaffoldContent) {
+      await emitCsharpFile(context, node, scaffoldContent, "ProtocolScaffolds.cs", emitTarget["test-dir"], emitTarget["test-dir"]);
     }
   }
 

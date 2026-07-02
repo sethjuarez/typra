@@ -17,6 +17,7 @@ import {
   collectProtocolNodes,
   emitGoProtocolScaffolds,
   emitJavaProtocolScaffolds,
+  emitCSharpProtocolScaffolds,
   emitPythonProtocolScaffolds,
   emitRustProtocolScaffolds,
   emitTypeScriptProtocolScaffolds,
@@ -79,7 +80,16 @@ describe("export surface scaffolding", () => {
       sync: true,
     },
   ]);
-  const checkpointStore = makeType("CheckpointStore", "pipeline", [], true);
+  const checkpointStore = makeType("CheckpointStore", "pipeline", [], true, [
+    {
+      name: "save",
+      returns: "void",
+      description: "Save a checkpoint.",
+      params: { checkpoint: "Checkpoint" },
+      optional: false,
+      sync: false,
+    },
+  ]);
   const baseTypes = [contentPart, checkpoint, hostToolRequest, eventSink, checkpointStore];
   const allTypes = [...baseTypes, textPart, audioPart];
 
@@ -212,7 +222,15 @@ describe("export surface scaffolding", () => {
         group: "pipeline",
         symbol: "CheckpointStore",
         source: "./pipeline/checkpoint-store",
-        methods: [],
+        methods: [
+          {
+            name: "save",
+            returns: "void",
+            params: { checkpoint: "Checkpoint" },
+            optional: false,
+            sync: false,
+          },
+        ],
       },
       {
         name: "EventSink",
@@ -293,6 +311,16 @@ describe("export surface scaffolding", () => {
         sync: false,
       },
     ]);
+    const csharpProbe = makeType("CSharpProbe", "pipeline", [], true, [
+      {
+        name: "save",
+        returns: "void",
+        description: "Save a checkpoint.",
+        params: { event: "unknown" },
+        optional: false,
+        sync: false,
+      },
+    ]);
     const typeScript = emitTypeScriptProtocolScaffolds([...protocols, typeScriptProbe], "../index");
     assert.match(typeScript, /describe\("protocol scaffolds", \(\) => \{/);
     assert.match(typeScript, /it\("compiles compile-only protocol implementations", \(\) => \{/);
@@ -302,8 +330,13 @@ describe("export surface scaffolding", () => {
     assert.doesNotMatch(typeScript, /calls|recorded|recording/i);
 
     const python = emitPythonProtocolScaffolds(protocols, "fixtures");
-    assert.match(python, /class CompileOnlyEventSink:/);
+    assert.match(python, /from __future__ import annotations/);
+    assert.match(python, /class CompileOnlyEventSink\(EventSink\):/);
+    assert.match(python, /del event/);
     assert.match(python, /raise NotImplementedError\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
+    assert.match(python, /class CompileOnlyCheckpointStore\(CheckpointStore\):/);
+    assert.match(python, /def save\(self, checkpoint: Checkpoint\) -> None:/);
+    assert.match(python, /async def save_async\(self, checkpoint: Checkpoint\) -> None:/);
 
     const go = emitGoProtocolScaffolds([...protocols, goProbe], "fixtures", "github.com/acme/fixtures");
     assert.match(go, /typra "github\.com\/acme\/fixtures"/);
@@ -320,6 +353,12 @@ describe("export surface scaffolding", () => {
     const java = emitJavaProtocolScaffolds(protocols, "typra.fixtures");
     assert.match(java?.source ?? "", /final class ProtocolScaffoldsGeneratedTest/);
     assert.match(java?.source ?? "", /throw new UnsupportedOperationException\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
+
+    const csharp = emitCSharpProtocolScaffolds([...protocols, csharpProbe], "Typra.Fixtures");
+    assert.match(csharp ?? "", /internal sealed class CompileOnlyEventSink : IEventSink/);
+    assert.match(csharp ?? "", /public void Emit\(object @event\)/);
+    assert.match(csharp ?? "", /throw new NotSupportedException\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
+    assert.match(csharp ?? "", /Task.FromException\(new NotSupportedException\("CSharpProbe\.save is a compile-only protocol scaffold\."\)\)/);
 
     const rust = emitRustProtocolScaffolds([...protocols, rustProbe], "fixtures::model");
     assert.match(rust, /impl EventSink for CompileOnlyEventSink/);

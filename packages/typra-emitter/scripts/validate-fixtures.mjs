@@ -590,6 +590,50 @@ function runCSharpBuild() {
   }
 }
 
+function runCSharpProtocolScaffoldBuild() {
+  const sourceDir = path.join(generatedRoot, "csharp");
+  const scaffoldPath = path.join(sourceDir, "tests", "ProtocolScaffolds.cs");
+  if (!existsSync(scaffoldPath)) {
+    fail("No generated C# protocol scaffold found to build.");
+    return;
+  }
+
+  const projectPath = path.join(sourceDir, "TypraFixtureScaffoldValidation.csproj");
+  const stubsPath = path.join(sourceDir, "TypraFixtureScaffoldValidation.Stubs.cs");
+  const binDir = path.join(sourceDir, "bin");
+  const objDir = path.join(sourceDir, "obj");
+  writeFileSync(projectPath, [
+    '<Project Sdk="Microsoft.NET.Sdk">',
+    "  <PropertyGroup>",
+    "    <TargetFramework>net8.0</TargetFramework>",
+    "    <Nullable>enable</Nullable>",
+    "    <ImplicitUsings>enable</ImplicitUsings>",
+    "  </PropertyGroup>",
+    "  <ItemGroup>",
+    '    <Compile Remove="tests/**/*.cs" />',
+    '    <Compile Include="tests/ProtocolScaffolds.cs" />',
+    '    <PackageReference Include="YamlDotNet" Version="16.3.0" />',
+    "  </ItemGroup>",
+    "</Project>",
+    "",
+  ].join("\n"));
+  writeFileSync(stubsPath, buildCSharpValidationStubs(sourceDir));
+  try {
+    runCommand("Generated C# protocol scaffold build", "dotnet", ["build", projectPath, "--nologo", "--verbosity", "quiet"], { cwd: sourceDir });
+  } finally {
+    for (const tempPath of [projectPath, stubsPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    }
+    for (const tempDir of [binDir, objDir]) {
+      if (existsSync(tempDir)) {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    }
+  }
+}
+
 function runJavaBuild() {
   const sourceDir = path.join(generatedRoot, "java");
   const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".java"));
@@ -1181,7 +1225,12 @@ function assertStaticFixtureCoverage() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "python", "tests", "test_protocol_scaffolds.py"),
-    "class CompileOnlyEventSink:",
+    "from __future__ import annotations",
+    "class CompileOnlyCheckpointStore(CheckpointStore):",
+    "def save(self, checkpoint: Checkpoint) -> None:",
+    "async def save_async(self, checkpoint: Checkpoint) -> None:",
+    "class CompileOnlyEventSink(EventSink):",
+    "del event",
     "raise NotImplementedError(\"EventSink.emit is a compile-only protocol scaffold.\")",
   );
   assertIncludes(
@@ -1242,6 +1291,12 @@ function assertStaticFixtureCoverage() {
     path.join("generated", "fixtures", "csharp", "FixtureReference.cs"),
     "public static FixtureReference Named(",
     "Display(",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "csharp", "tests", "ProtocolScaffolds.cs"),
+    "internal sealed class CompileOnlyEventSink : IEventSink",
+    "throw new NotSupportedException(\"EventSink.emit is a compile-only protocol scaffold.\")",
+    "Task.FromException(new NotSupportedException(\"CheckpointStore.save is a compile-only protocol scaffold.\"))",
   );
   assertIncludes(
     path.join("generated", "fixtures", "rust", "fixture_reference.rs"),
@@ -1502,6 +1557,7 @@ runPythonCompile();
 runGoTests();
 runRustTests();
 runCSharpBuild();
+runCSharpProtocolScaffoldBuild();
 runJavaBuild();
 runJavaGeneratedTests();
 runExecutableConformance();
