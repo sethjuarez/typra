@@ -8,6 +8,11 @@ export default defineConfig({
       title: "Typra",
       description: "TypeSpec models to runtime model surfaces.",
       favicon: "/favicon.svg?v=typra",
+      logo: {
+        light: "./src/assets/typra-logo-light.svg",
+        dark: "./src/assets/typra-logo-dark.svg",
+        alt: "Typra",
+      },
       customCss: ["./src/styles/custom.css"],
       head: [
         {
