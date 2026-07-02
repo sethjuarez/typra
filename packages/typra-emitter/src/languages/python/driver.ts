@@ -24,6 +24,7 @@ import { emitPythonFile as emitPythonFileDecl } from "./emitter.js";
 import { emitPythonContext, emitPythonInit, emitPythonGroupInit } from "./scaffolding.js";
 import { emitPythonTest, emitPythonTestContext } from "./test-emitter.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
+import { collectProtocolNodes, emitPythonProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
 
 /**
  * Type mapping from TypeSpec scalar types to Python types.
@@ -138,6 +139,11 @@ export const generatePython = async (
       const testContent = emitPythonTest(testContext);
       await emitPythonFile(context, `test_${toSnakeCase(n.typeName.name)}.py`, testContent, testDir, emitTarget["test-dir"]);
     }
+  }
+
+  if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
+    const scaffoldContent = emitPythonProtocolScaffolds(collectProtocolNodes(nodes), importPath);
+    await emitPythonFile(context, "test_protocol_scaffolds.py", scaffoldContent, emitTarget["test-dir"], emitTarget["test-dir"]);
   }
 
   // Emit group-level __init__.py for each group

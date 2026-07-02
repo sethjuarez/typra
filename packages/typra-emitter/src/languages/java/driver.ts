@@ -14,6 +14,7 @@ import { emitJavaFileContent } from "./emitter.js";
 import { emitJavaContext, emitJavaJson, emitJavaMaps, emitJavaSaveContext } from "./scaffolding.js";
 import { emitJavaTest, emitJavaTestRunner, javaTestClassName } from "./test-emitter.js";
 import { JavaExprVisitor } from "./visitor.js";
+import { collectProtocolNodes, emitJavaProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
 
 const javaTestOptions: TestContextOptions = {
   renderKey: (key: string) => key,
@@ -75,6 +76,14 @@ export const generateJava = async (
       testClassNames.push(testClass);
       const testContext = buildBaseTestContext(n, packageName, javaTestOptions);
       await emitJavaFile(context, `${testClass}.java`, emitJavaTest(testContext), emitTarget["test-dir"], emitTarget["test-dir"]);
+    }
+  }
+
+  if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
+    const scaffold = emitJavaProtocolScaffolds(collectProtocolNodes(nodes), packageName);
+    if (scaffold) {
+      testClassNames.push(scaffold.className);
+      await emitJavaFile(context, `${scaffold.className}.java`, scaffold.source, emitTarget["test-dir"], emitTarget["test-dir"]);
     }
   }
 

@@ -1166,11 +1166,21 @@ function assertStaticFixtureCoverage() {
     "describe(\"FixtureContent\"",
     "should save to dictionary",
   );
+  assertIncludes(
+    path.join("generated", "fixtures", "typescript", "tests", "protocol-scaffolds.test.ts"),
+    "class CompileOnlyEventSink implements EventSink",
+    "throw new Error(\"EventSink.emit is a compile-only protocol scaffold.\")",
+  );
 
   assertIncludes(
     path.join("generated", "fixtures", "python", "_FixtureReference.py"),
     "def named(",
     "def display(",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "python", "tests", "test_protocol_scaffolds.py"),
+    "class CompileOnlyEventSink:",
+    "raise NotImplementedError(\"EventSink.emit is a compile-only protocol scaffold.\")",
   );
   assertIncludes(
     path.join("generated", "fixtures", "go", "wire_options.go"),
@@ -1190,6 +1200,12 @@ function assertStaticFixtureCoverage() {
     "TestWireOptionsToWire",
     "max_completion_tokens",
     "max_tokens",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "go", "tests", "protocol_scaffolds_test.go"),
+    'typra "fixtures"',
+    "var _ typra.EventSink = (*compileOnlyEventSink)(nil)",
+    "return errors.New(\"compile-only protocol scaffold\")",
   );
   assertIncludes(
     path.join("generated", "fixtures", "java", "WireOptions.java"),
@@ -1216,6 +1232,11 @@ function assertStaticFixtureCoverage() {
     "assertThrows(() -> FixtureRoot.fromJson(\"{\")",
   );
   assertIncludes(
+    path.join("generated", "fixtures", "java", "tests", "ProtocolScaffoldsGeneratedTest.java"),
+    "final class ProtocolScaffoldsGeneratedTest",
+    "throw new UnsupportedOperationException(\"EventSink.emit is a compile-only protocol scaffold.\")",
+  );
+  assertIncludes(
     path.join("generated", "fixtures", "csharp", "FixtureReference.cs"),
     "public static FixtureReference Named(",
     "Display(",
@@ -1224,6 +1245,11 @@ function assertStaticFixtureCoverage() {
     path.join("generated", "fixtures", "rust", "fixture_reference.rs"),
     "pub fn named(",
     "fn display(&self, prefix: &String) -> String;",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust", "tests", "protocol_scaffolds_test.rs"),
+    "impl EventSink for CompileOnlyEventSink",
+    "panic!(\"EventSink.emit is a compile-only protocol scaffold.\")",
   );
   assertIncludes(
     path.join("generated", "fixtures", "markdown", "FixtureRoot.md"),

@@ -10,6 +10,7 @@ export interface EmitTarget {
   "import-path"?: string;
   "package-name"?: string;
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
+  "protocol-scaffolds"?: "none" | "compile-only";
 }
 export interface TypraEmitterOptions {
   "root-object": string;
@@ -76,6 +77,13 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             enum: ["case-sensitive", "case-insensitive"],
             nullable: true,
             description: "Enum/string-union parsing policy. Currently used by Rust; defaults to case-sensitive for existing behavior."
+          },
+          "protocol-scaffolds": {
+            type: "string",
+            enum: ["none", "compile-only"],
+            nullable: true,
+            default: "none",
+            description: "Opt-in generated test scaffolds for protocol conformance. 'compile-only' emits test-dir-only implementations that compile but do not provide runtime fake behavior."
           }
         },
         required: ["type"]
