@@ -115,12 +115,35 @@ describe("export surface scaffolding", () => {
     const file = lowerFile(eventSink, registry);
     const source = emitPythonFile(file, new PythonExprVisitor(registry), "pipeline");
 
+    assert.match(source, /from typing import Any, Protocol, runtime_checkable/);
     assert.match(
       source,
       /def emit\(self, event: Any\) -> None:\n        """Emit an event\."""\n        raise NotImplementedError/,
     );
     assert.doesNotMatch(source, /\n        \.\.\./);
     assert.doesNotMatch(source, /def emit\(self, event: Any\) -> None: \.\.\./);
+  });
+
+  it("prunes unused Python typing imports after rendering protocol-only files", () => {
+    const checkpointStoreWithSave = makeType("CheckpointStore", "pipeline", [], true, [
+      {
+        name: "save",
+        returns: "void",
+        description: "Save a checkpoint.",
+        params: { checkpoint: "Checkpoint" },
+        optional: false,
+        sync: false,
+      },
+    ]);
+    const registry = TypeRegistry.fromTypeGraph([checkpoint, checkpointStoreWithSave]);
+    const file = lowerFile(checkpointStoreWithSave, registry);
+    const source = emitPythonFile(file, new PythonExprVisitor(registry), "pipeline");
+
+    assert.match(source, /from typing import Protocol, runtime_checkable/);
+    assert.doesNotMatch(source, /from typing import .*Any/);
+    assert.match(source, /from \.\.events\._Checkpoint import Checkpoint/);
+    assert.match(source, /def save\(self, checkpoint: Checkpoint\) -> None:/);
+    assert.match(source, /async def save_async\(self, checkpoint: Checkpoint\) -> None:/);
   });
 
   it("builds deterministic target export surface snapshots", () => {

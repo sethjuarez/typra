@@ -124,6 +124,12 @@ Generated text artifacts are also normalized to LF line endings, trimmed trailin
 whitespace, and final newlines. Blank generated artifacts are skipped unless the
 file format requires an empty sentinel such as Python `py.typed`.
 
+Each generation also writes `.typra-generated/report.json`, a stable single-run
+report that lists emitted files, skipped empty outputs, marker-owned stale files
+removed during skipped-output cleanup, preserved unmarked skipped files, hygiene
+policy, and warnings. Baseline-aware checks such as protected-path touches remain
+in `typra-verify`, and per-file formatter status is not recorded yet.
+
 Rust targets can opt into case-insensitive string-union/enum parsing without
 changing the default case-sensitive behavior:
 

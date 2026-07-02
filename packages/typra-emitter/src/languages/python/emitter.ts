@@ -165,11 +165,32 @@ export function emitPythonFile(decl: FileDecl, visitor: ExprVisitor, group: stri
     emitType(type, lines, visitor);
   }
 
-  return emitCleanPythonLines(lines, "\n");
+  return pruneUnusedTypingImports(emitCleanPythonLines(lines, "\n"));
 }
 
 function emitCleanPythonLines(lines: string[], suffix = ""): string {
   return lines.map(line => line.trimEnd()).join("\n") + suffix;
+}
+
+function pruneUnusedTypingImports(source: string): string {
+  const match = /^from typing import (?<names>[A-Za-z_, ]+)$/m.exec(source);
+  if (!match?.groups) {
+    return source;
+  }
+
+  const names = match.groups.names.split(",").map(name => name.trim()).filter(Boolean);
+  const body = `${source.slice(0, match.index)}${source.slice(match.index + match[0].length)}`;
+  const usedNames = names.filter(name => new RegExp(`\\b${escapeRegExp(name)}\\b`).test(body));
+
+  if (usedNames.length === names.length) {
+    return source;
+  }
+
+  return `${source.slice(0, match.index)}${usedNames.length > 0 ? `from typing import ${usedNames.join(", ")}` : ""}${source.slice(match.index + match[0].length)}`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
 }
 
 // ============================================================================
