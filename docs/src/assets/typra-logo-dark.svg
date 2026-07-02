@@ -1,16 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Typra">
-  <style>
-    .mark {
-      color: #b11f4b;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .mark {
-        color: #ff9aae;
-      }
-    }
-  </style>
-  <g class="mark" fill="none" stroke="currentColor" stroke-linecap="round">
+  <g fill="none" stroke="#ff9aae" stroke-linecap="round">
     <circle cx="64" cy="64" r="48" stroke-width="8" />
     <path d="M37 42H91" stroke-width="10" />
     <path d="M64 42V90" stroke-width="10" />
