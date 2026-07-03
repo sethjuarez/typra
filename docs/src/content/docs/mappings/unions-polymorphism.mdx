@@ -4,6 +4,8 @@ description: How Typra maps string unions, parse aliases, and discriminated mode
 draft: false
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
 Typra supports closed string unions, open string unions, and discriminated model hierarchies.
 
 ## Closed string unions
@@ -52,3 +54,170 @@ model ImageContent extends FixtureContent {
 ```
 
 Typra uses the discriminator field to load and save the right child shape. In the fixture contract, `FixtureRoot.content` and `FixtureRoot.contentItems` exercise both a single polymorphic value and a polymorphic collection.
+
+## Generated shape
+
+<Tabs syncKey="typra-target">
+  <TabItem label="TypeScript">
+
+```ts
+export type FixtureMode = "interactive" | "batch" | (string & {});
+export type FixtureStatus = "draft" | "ready" | "archived";
+
+function parseFixtureStatus(value: unknown): FixtureStatus {
+  switch (String(value)) {
+    case "complete":
+      return "ready";
+    default:
+      throw new Error(`Invalid FixtureStatus value: ${value}`);
+  }
+}
+
+private static loadKind(data: Record<string, unknown>, context?: LoadContext): FixtureContent {
+  switch (String(data["kind"]).toLowerCase()) {
+    case "text":
+      return TextContent.load(data, context);
+    case "image":
+      return ImageContent.load(data, context);
+    default:
+      return new FixtureContent();
+  }
+}
+```
+
+  </TabItem>
+  <TabItem label="Python">
+
+```py
+FixtureMode = Literal["interactive", "batch"] | str
+FixtureStatus = Literal["draft", "ready", "archived"]
+
+def _parse_fixture_status(value: Any) -> FixtureStatus:
+    aliases = {"draft": "draft", "ready": "ready", "archived": "archived", "complete": "ready"}
+    if str(value) in aliases:
+        return aliases[str(value)]
+    raise ValueError(f"Invalid FixtureStatus value: {value}")
+
+class FixtureContent:
+    @staticmethod
+    def load(data: Any, context: LoadContext | None = None) -> "FixtureContent":
+        if data.get("kind") == "text":
+            return TextContent.load(data, context)
+        if data.get("kind") == "image":
+            return ImageContent.load(data, context)
+        return FixtureContent()
+```
+
+  </TabItem>
+  <TabItem label="C#">
+
+```csharp
+public enum FixtureStatus
+{
+    Draft,
+    Ready,
+    Archived
+}
+
+public static class FixtureStatusParser
+{
+    public static FixtureStatus Parse(string value) =>
+        value switch { "complete" => FixtureStatus.Ready, _ => Enum.Parse<FixtureStatus>(value, true) };
+}
+
+return discriminator switch
+{
+    "text" => TextContent.Load(data, context),
+    "image" => ImageContent.Load(data, context),
+    _ => new FixtureContent(),
+};
+```
+
+  </TabItem>
+  <TabItem label="Go">
+
+```go
+func ParseFixtureStatus(value string) (FixtureStatus, error) {
+	switch value {
+	case "ready", "complete":
+		return FixtureStatusReady, nil
+	default:
+		return "", fmt.Errorf("invalid FixtureStatus value: %s", value)
+	}
+}
+
+func LoadFixtureContent(data interface{}, ctx *LoadContext) (interface{}, error) {
+	if m, ok := data.(map[string]interface{}); ok {
+		switch m["kind"] {
+		case "text":
+			return LoadTextContent(data, ctx)
+		case "image":
+			return LoadImageContent(data, ctx)
+		}
+	}
+	return FixtureContent{}, nil
+}
+```
+
+  </TabItem>
+  <TabItem label="Java">
+
+```java
+enum FixtureStatus {
+  DRAFT("draft"), READY("ready"), ARCHIVED("archived");
+
+  public static FixtureStatus fromValue(String value) {
+    if (value.equals("complete")) return READY;
+    for (FixtureStatus item : values()) {
+      if (item.value.equals(value)) return item;
+    }
+    return valueOf(value.toUpperCase().replace("-", "_"));
+  }
+}
+
+if ("text".equals(map.get("kind"))) return TextContent.load(input, ctx);
+if ("image".equals(map.get("kind"))) return ImageContent.load(input, ctx);
+```
+
+  </TabItem>
+  <TabItem label="Rust">
+
+```rust
+pub enum FixtureMode {
+    Interactive,
+    Batch,
+    Other(String),
+}
+
+impl FixtureStatus {
+    pub fn from_str_ignore_case_opt(s: &str) -> Option<Self> {
+        if s.eq_ignore_ascii_case("complete") {
+            return Some(Self::Ready);
+        }
+        None
+    }
+}
+
+pub enum FixtureContent {
+    TextContent(TextContent),
+    ImageContent(ImageContent),
+}
+```
+
+  </TabItem>
+  <TabItem label="JSON AST">
+
+```json
+{
+  "unions": {
+    "FixtureStatus": { "values": ["draft", "ready", "archived"], "aliases": { "complete": "ready" } },
+    "FixtureMode": { "values": ["interactive", "batch"], "open": true, "aliases": { "bulk": "batch" } }
+  },
+  "discriminators": {
+    "FixtureContent": { "property": "kind", "children": { "text": "TextContent", "image": "ImageContent" } }
+  }
+}
+```
+
+  </TabItem>
+</Tabs>

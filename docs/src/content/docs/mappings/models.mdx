@@ -4,6 +4,8 @@ description: How Typra maps TypeSpec models, required fields, optional fields, a
 draft: false
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
 Models are Typra's primary unit of generation. A TypeSpec model becomes a target model surface; properties become target fields or properties.
 
 ```typespec
@@ -27,6 +29,176 @@ model FixtureOwner {
 | `displayName?: string` | Optional nested object field. |
 
 Targets choose idiomatic syntax for the same shape: TypeScript emits classes and optional properties, Python emits model surfaces with loader/saver helpers, C# emits `System.Text.Json`-oriented types, and Go emits structs with JSON/YAML helper behavior.
+
+## Generated shape
+
+These snippets are abridged from the generated fixture output so the same TypeSpec model can be compared across targets.
+
+<Tabs syncKey="typra-target">
+  <TabItem label="TypeScript">
+
+```ts
+export class FixtureRoot {
+  name: string = "";
+  description?: string | undefined;
+  tags: string[] = [];
+  metadata?: Record<string, unknown> | undefined;
+  owner!: FixtureOwner;
+
+  static load(data: Record<string, unknown>, context?: LoadContext): FixtureRoot {
+    const instance = new FixtureRoot();
+    instance.name = String(data["name"]);
+    instance.owner = FixtureOwner.load(data["owner"] as Record<string, unknown>, context);
+    return instance;
+  }
+
+  save(context?: SaveContext): Record<string, unknown> {
+    return {
+      name: this.name,
+      ...(this.description !== undefined ? { description: this.description } : {}),
+      tags: this.tags,
+      metadata: this.metadata,
+      owner: this.owner.save(context),
+    };
+  }
+}
+```
+
+  </TabItem>
+  <TabItem label="Python">
+
+```py
+@dataclass
+class FixtureRoot:
+    name: str = field(default="")
+    description: str | None = None
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] | None = None
+    owner: FixtureOwner = field(default_factory=FixtureOwner)
+
+    @staticmethod
+    def load(data: Any, context: LoadContext | None = None) -> "FixtureRoot":
+        instance = FixtureRoot()
+        instance.name = data["name"]
+        instance.owner = FixtureOwner.load(data["owner"], context)
+        return instance
+
+    def save(self, context: SaveContext | None = None) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "tags": self.tags,
+            "owner": self.owner.save(context),
+        }
+```
+
+  </TabItem>
+  <TabItem label="C#">
+
+```csharp
+public partial class FixtureRoot
+{
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public IList<string> Tags { get; set; } = [];
+    public IDictionary<string, object>? Metadata { get; set; }
+    public FixtureOwner Owner { get; set; }
+
+    public static FixtureRoot Load(Dictionary<string, object?> data, LoadContext? context = null)
+    {
+        var instance = new FixtureRoot();
+        instance.Name = data["name"]?.ToString()!;
+        instance.Owner = FixtureOwner.Load(data["owner"].GetDictionary(FixtureOwner.ShorthandProperty), context);
+        return instance;
+    }
+}
+```
+
+  </TabItem>
+  <TabItem label="Go">
+
+```go
+type FixtureRoot struct {
+	Name        string                 `json:"name" yaml:"name"`
+	Description *string                `json:"description,omitempty" yaml:"description,omitempty"`
+	Tags        []string               `json:"tags" yaml:"tags"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	Owner       FixtureOwner           `json:"owner" yaml:"owner"`
+}
+
+func LoadFixtureRoot(data interface{}, ctx *LoadContext) (FixtureRoot, error) {
+	result := FixtureRoot{}
+	if m, ok := data.(map[string]interface{}); ok {
+		result.Name = string(m["name"].(string))
+		result.Owner, _ = LoadFixtureOwner(m["owner"], ctx)
+	}
+	return result, nil
+}
+```
+
+  </TabItem>
+  <TabItem label="Java">
+
+```java
+public class FixtureRoot {
+  public String name = "";
+  public String description = null;
+  public List<String> tags = new ArrayList<>();
+  public Map<String, Object> metadata = null;
+  public FixtureOwner owner = null;
+
+  public static FixtureRoot load(Object input, LoadContext context) {
+    Map<?, ?> map = (Map<?, ?>) context.processInput(input);
+    FixtureRoot result = new FixtureRoot();
+    result.name = String.valueOf(map.get("name"));
+    result.owner = FixtureOwner.load(map.get("owner"), context);
+    return result;
+  }
+}
+```
+
+  </TabItem>
+  <TabItem label="Rust">
+
+```rust
+#[derive(Debug, Clone, Default)]
+pub struct FixtureRoot {
+    pub name: String,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub metadata: serde_json::Value,
+    pub owner: FixtureOwner,
+}
+
+impl FixtureRoot {
+    pub fn load_from_value(value: &serde_json::Value, ctx: &LoadContext) -> Self {
+        let value = ctx.process_input(value.clone());
+        Self {
+            name: value.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            owner: value.get("owner").map(|v| FixtureOwner::load_from_value(v, ctx)).unwrap_or_default(),
+            ..Default::default()
+        }
+    }
+}
+```
+
+  </TabItem>
+  <TabItem label="JSON AST">
+
+```json
+{
+  "name": "FixtureRoot",
+  "properties": {
+    "name": { "type": "string", "optional": false },
+    "description": { "type": "string", "optional": true },
+    "tags": { "type": "array", "items": "string" },
+    "metadata": { "type": "record", "optional": true },
+    "owner": { "type": "FixtureOwner", "optional": false }
+  }
+}
+```
+
+  </TabItem>
+</Tabs>
 
 ## Samples
 

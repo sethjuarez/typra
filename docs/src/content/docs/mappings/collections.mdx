@@ -4,6 +4,8 @@ description: How Typra maps arrays, repeated models, and record-shaped data.
 draft: false
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
 Typra preserves the collection shape from TypeSpec and lets each target choose the idiomatic runtime type.
 
 ```typespec
@@ -21,6 +23,131 @@ model FixtureRoot {
 | `Record<unknown>` | Dictionary-shaped metadata with unknown values. |
 
 Generated tests exercise scalar arrays, nested object arrays, dictionaries, and polymorphic collections from fixture samples.
+
+## Generated shape
+
+<Tabs syncKey="typra-target">
+  <TabItem label="TypeScript">
+
+```ts
+export class FixtureRoot {
+  tags: string[] = [];
+  metadata?: Record<string, unknown> | undefined;
+  contentItems: FixtureContent[] = [];
+
+  static loadContentItems(data: Record<string, unknown>[] | unknown[], context?: LoadContext): FixtureContent[] {
+    return data.map(item => FixtureContent.load(item as Record<string, unknown>, context));
+  }
+
+  static saveContentItems(items: FixtureContent[], context?: SaveContext): Record<string, unknown>[] {
+    return items.map(item => item.save(context));
+  }
+}
+```
+
+  </TabItem>
+  <TabItem label="Python">
+
+```py
+@dataclass
+class FixtureRoot:
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] | None = None
+    content_items: list[FixtureContent] = field(default_factory=list)
+
+    @staticmethod
+    def load_content_items(data: dict | list, context: LoadContext | None) -> list[FixtureContent]:
+        if isinstance(data, dict):
+            data = [{"name": k, **v} if isinstance(v, dict) else {"name": k, "kind": v} for k, v in data.items()]
+        return [FixtureContent.load(item, context) for item in data]
+```
+
+  </TabItem>
+  <TabItem label="C#">
+
+```csharp
+public partial class FixtureRoot
+{
+    public IList<string> Tags { get; set; } = [];
+    public IDictionary<string, object>? Metadata { get; set; }
+    public IList<FixtureContent> ContentItems { get; set; } = [];
+
+    public static IList<FixtureContent> LoadContentItems(object data, LoadContext? context)
+    {
+        var result = new List<FixtureContent>();
+        foreach (var item in (IEnumerable<object>)data)
+            result.Add(FixtureContent.Load(item.GetDictionary(FixtureContent.ShorthandProperty), context));
+        return result;
+    }
+}
+```
+
+  </TabItem>
+  <TabItem label="Go">
+
+```go
+type FixtureRoot struct {
+	Tags         []string               `json:"tags" yaml:"tags"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	ContentItems []interface{}          `json:"contentItems" yaml:"contentItems"`
+}
+
+for i, v := range arr {
+	if item, ok := v.(map[string]interface{}); ok {
+		loaded, _ := LoadFixtureContent(item, ctx)
+		result.ContentItems[i] = loaded
+	}
+}
+```
+
+  </TabItem>
+  <TabItem label="Java">
+
+```java
+public class FixtureRoot {
+  public List<String> tags = new ArrayList<>();
+  public Map<String, Object> metadata = null;
+  public List<FixtureContent> contentItems = new ArrayList<>();
+
+  if (map.get("contentItems") instanceof Iterable<?> values) {
+    for (Object item : values) {
+      result.contentItems.add(FixtureContent.load(item, ctx));
+    }
+  }
+}
+```
+
+  </TabItem>
+  <TabItem label="Rust">
+
+```rust
+pub struct FixtureRoot {
+    pub tags: Vec<String>,
+    pub metadata: serde_json::Value,
+    pub content_items: Vec<FixtureContent>,
+}
+
+content_items: value
+    .get("contentItems")
+    .map(|v| Self::load_content_items(v, ctx))
+    .unwrap_or_default(),
+```
+
+  </TabItem>
+  <TabItem label="JSON AST">
+
+```json
+{
+  "properties": {
+    "tags": { "type": "array", "items": "string" },
+    "metadata": { "type": "record", "value": "unknown", "optional": true },
+    "contentItems": { "type": "array", "items": "FixtureContent" }
+  }
+}
+```
+
+  </TabItem>
+</Tabs>
 
 ## Review note
 

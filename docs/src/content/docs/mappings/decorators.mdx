@@ -4,6 +4,8 @@ description: Typra decorators for samples, coercion, factories, protocols, and p
 draft: false
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
 Typra includes decorators for runtime concerns TypeSpec does not model by default.
 
 | Decorator | Purpose |
@@ -34,6 +36,138 @@ model WireOptions {
 
 Typra records provider-specific names so generated surfaces can load and save against external wire formats without changing the canonical TypeSpec property name.
 
+### Generated wire-name shape
+
+<Tabs syncKey="typra-target">
+  <TabItem label="TypeScript">
+
+```ts
+export class WireOptions {
+  maxOutputTokens?: number | undefined;
+  temperature?: number | undefined;
+
+  toWire(provider: string): Record<string, unknown> {
+    const wireMap = {
+      maxOutputTokens: { openai: "max_completion_tokens", anthropic: "max_tokens" },
+      temperature: { openai: "temperature" },
+    };
+    return Object.fromEntries(
+      Object.entries(this.save()).flatMap(([key, value]) =>
+        wireMap[key]?.[provider] ? [[wireMap[key][provider], value]] : []
+      )
+    );
+  }
+}
+```
+
+  </TabItem>
+  <TabItem label="Python">
+
+```py
+@dataclass
+class WireOptions:
+    max_output_tokens: int | None = None
+    temperature: float | None = None
+
+    def to_wire(self, provider: str) -> dict[str, Any]:
+        wire_map = {
+            "maxOutputTokens": {"openai": "max_completion_tokens", "anthropic": "max_tokens"},
+            "temperature": {"openai": "temperature"},
+        }
+        return {
+            wire_map[key][provider]: value
+            for key, value in self.save().items()
+            if provider in wire_map.get(key, {})
+        }
+```
+
+  </TabItem>
+  <TabItem label="C#">
+
+```csharp
+public Dictionary<string, object?> ToWire(string provider)
+{
+    var wireMap = new Dictionary<string, Dictionary<string, string>>
+    {
+        ["maxOutputTokens"] = new() { ["openai"] = "max_completion_tokens", ["anthropic"] = "max_tokens" },
+        ["temperature"] = new() { ["openai"] = "temperature" },
+    };
+    return Save()
+        .Where(item => wireMap.TryGetValue(item.Key, out var mapping) && mapping.ContainsKey(provider))
+        .ToDictionary(item => wireMap[item.Key][provider], item => item.Value);
+}
+```
+
+  </TabItem>
+  <TabItem label="Go">
+
+```go
+func (obj *WireOptions) ToWire(provider string) map[string]interface{} {
+	data := obj.Save(nil)
+	wireMap := map[string]map[string]string{
+		"maxOutputTokens": {"openai": "max_completion_tokens", "anthropic": "max_tokens"},
+		"temperature":     {"openai": "temperature"},
+	}
+	result := make(map[string]interface{})
+	for key, value := range data {
+		if wireName, ok := wireMap[key][provider]; ok {
+			result[wireName] = value
+		}
+	}
+	return result
+}
+```
+
+  </TabItem>
+  <TabItem label="Java">
+
+```java
+public Map<String, Object> toWire(String provider) {
+  Map<String, Object> result = new LinkedHashMap<>();
+  if ("openai".equals(provider) && this.maxOutputTokens != null) {
+    result.put("max_completion_tokens", this.maxOutputTokens);
+  }
+  if ("anthropic".equals(provider) && this.maxOutputTokens != null) {
+    result.put("max_tokens", this.maxOutputTokens);
+  }
+  if ("openai".equals(provider) && this.temperature != null) {
+    result.put("temperature", this.temperature);
+  }
+  return result;
+}
+```
+
+  </TabItem>
+  <TabItem label="Rust">
+
+```rust
+pub fn to_wire(&self, provider: &str) -> serde_json::Value {
+    let wire_map = HashMap::from([
+        ("maxOutputTokens", HashMap::from([("openai", "max_completion_tokens"), ("anthropic", "max_tokens")])),
+        ("temperature", HashMap::from([("openai", "temperature")])),
+    ]);
+    // Converts canonical fields to provider-specific names.
+    serde_json::Value::Object(result)
+}
+```
+
+  </TabItem>
+  <TabItem label="JSON AST">
+
+```json
+{
+  "knownAs": [
+    { "property": "maxOutputTokens", "provider": "openai", "name": "max_completion_tokens" },
+    { "property": "maxOutputTokens", "provider": "anthropic", "name": "max_tokens" },
+    { "property": "temperature", "provider": "openai", "name": "temperature" }
+  ],
+  "defaults": [{ "property": "temperature", "provider": "openai", "value": 0.2 }]
+}
+```
+
+  </TabItem>
+</Tabs>
+
 ## Coercion and factories
 
 ```typespec
@@ -54,6 +188,140 @@ model FixtureReference {
 ```
 
 `@@coerce` lets load paths expand a scalar input into an object. `@@factory` adds named construction helpers to generated target surfaces.
+
+### Generated coercion and factory shape
+
+<Tabs syncKey="typra-target">
+  <TabItem label="TypeScript">
+
+```ts
+export class FixtureReference {
+  static readonly shorthandProperty: string | undefined = "id";
+
+  static load(data: Record<string, unknown>, context?: LoadContext): FixtureReference {
+    if (typeof data === "string") {
+      return new FixtureReference({ id: data, label: "coerced reference" });
+    }
+    return new FixtureReference({ id: String(data["id"]), label: String(data["label"]) });
+  }
+
+  static named(id: string, label: string): FixtureReference {
+    return new FixtureReference({ id, label });
+  }
+}
+```
+
+  </TabItem>
+  <TabItem label="Python">
+
+```py
+@dataclass
+class FixtureReference:
+    _shorthand_property: ClassVar[str | None] = "id"
+    id: str = ""
+    label: str | None = None
+
+    @staticmethod
+    def load(data: Any, context: LoadContext | None = None) -> "FixtureReference":
+        if isinstance(data, str):
+            return FixtureReference(id=data, label="coerced reference")
+        return FixtureReference(id=data["id"], label=data.get("label"))
+
+    @staticmethod
+    def named(id: str, label: str) -> "FixtureReference":
+        return FixtureReference(id=id, label=label)
+```
+
+  </TabItem>
+  <TabItem label="C#">
+
+```csharp
+public partial class FixtureReference
+{
+    public static string? ShorthandProperty => "id";
+
+    public static FixtureReference Load(object data, LoadContext? context = null)
+    {
+        if (data is string value)
+            return new FixtureReference { Id = value, Label = "coerced reference" };
+        return Load(data.GetDictionary(ShorthandProperty), context);
+    }
+
+    public static FixtureReference Named(string id, string label) => new() { Id = id, Label = label };
+}
+```
+
+  </TabItem>
+  <TabItem label="Go">
+
+```go
+func LoadFixtureReference(data interface{}, ctx *LoadContext) (FixtureReference, error) {
+	if s, ok := data.(string); ok {
+		return FixtureReference{Id: s, Label: ptr("coerced reference")}, nil
+	}
+	// Load object shape when data is a map.
+	return result, nil
+}
+
+func NewFixtureReferenceNamed(id string, label string) FixtureReference {
+	return FixtureReference{Id: id, Label: &label}
+}
+```
+
+  </TabItem>
+  <TabItem label="Java">
+
+```java
+public class FixtureReference {
+  public static final String SHORTHAND_PROPERTY = "id";
+
+  public static FixtureReference load(Object input, LoadContext context) {
+    if (input instanceof String value) {
+      FixtureReference result = new FixtureReference();
+      result.id = value;
+      result.label = "coerced reference";
+      return result;
+    }
+    return loadObject(input, context);
+  }
+
+  public static FixtureReference named(String id, String label) { /* ... */ }
+}
+```
+
+  </TabItem>
+  <TabItem label="Rust">
+
+```rust
+impl FixtureReference {
+    pub fn load_from_value(value: &serde_json::Value, ctx: &LoadContext) -> Self {
+        if let Some(id) = value.as_str() {
+            return Self { id: id.to_string(), label: Some("coerced reference".to_string()) };
+        }
+        // Load object shape when value is an object.
+        Self::default()
+    }
+
+    pub fn named(id: String, label: String) -> Self {
+        Self { id, label: Some(label) }
+    }
+}
+```
+
+  </TabItem>
+  <TabItem label="JSON AST">
+
+```json
+{
+  "model": "FixtureReference",
+  "coercions": [{ "from": "string", "template": { "id": "{value}", "label": "coerced reference" } }],
+  "factories": [{ "name": "named", "parameters": { "id": "string", "label": "string" } }],
+  "methods": [{ "name": "display", "returnType": "string" }]
+}
+```
+
+  </TabItem>
+</Tabs>
 
 ## Protocols
 
