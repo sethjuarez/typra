@@ -28,7 +28,8 @@ confidence across the supported languages:
   mapping, scalar coercion, enum handling, and polymorphic dispatch support.
 - Generated Java fixture tests that compile and run during fixture validation.
 - Stronger Go fixture tests and runtime behavior for scalar slices, JSON
-  round-trips, polymorphic values, and malformed JSON handling.
+  round-trips, polymorphic values, scalar shorthand JSON/YAML helpers, child-load
+  error propagation, and malformed JSON handling.
 - Executable cross-language fixture conformance across TypeScript, Python, C#,
   Go, Java, and Rust.
 - CI setup for Go and Java toolchains.
@@ -106,6 +107,22 @@ The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust,
 Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture
 validation also exercises generated metadata, verifier CLI output, consumer
 smoke wiring, and cross-language generated-code compile/test surfaces.
+
+### Go parity and validation
+
+Generated Go models include `Load*`, `Save`, `ToJSON`, `ToYAML`,
+`*FromJSON`, and `*FromYAML` helpers. For models with scalar coercions,
+`*FromJSON` and `*FromYAML` pass the parsed scalar value through to `Load*` so
+JSON/YAML shorthand inputs behave the same way as direct `Load*` calls.
+
+Nested object and polymorphic collection loads return child load errors instead
+of discarding them. Abstract polymorphic dispatch reports unknown or missing
+discriminators as Go errors, while default variants continue to handle fallback
+cases.
+
+`npm run validate:fixtures` regenerates the fixture slice and verifies Go with
+`gofmt -l`, `go vet ./...`, `go test ./...`, generated coercion helper tests,
+and executable conformance alongside the other runtime targets.
 
 ## Generated files
 

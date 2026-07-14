@@ -203,14 +203,16 @@ emit-targets:
   output, and generated tests.
 - `CSharp`: C# model surfaces, `System.Text.Json` helpers, and generated
   tests/scaffolds.
-- `Go`: Go structs with JSON/YAML support and generated tests.
+- `Go`: Go structs with JSON/YAML support, scalar shorthand helpers,
+  propagated child-load errors, polymorphic dispatch, and generated tests.
 - `Java`: Java model surfaces and generated fixture tests.
 - `Rust`: Rust model surfaces with optional case-insensitive enum parsing.
 - `Markdown`: reference documentation generated from the contract graph.
 - JSON AST: `json-ast/model.json` emitted for every TypeSpec generation.
 
 The fixture validation flow exercises TypeScript, Python, C#, Go, Java, Rust,
-Markdown, and JSON AST generation.
+Markdown, and JSON AST generation. Go fixture validation includes formatting,
+vet, tests, scalar coercion helper coverage, and executable conformance.
 
 ## CLI
 

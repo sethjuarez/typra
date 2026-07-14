@@ -59,8 +59,8 @@
             "path": "generated/fixtures/go/fixture_root.go",
             "snippets": [
               "case []string:",
-              "loaded, _ := LoadFixtureOwner",
-              "loaded, _ := LoadFixtureContent",
+              "loaded, err := LoadFixtureOwner",
+              "loaded, err := LoadFixtureContent",
               "result[\"content\"] = v.Save(ctx)"
             ]
           },
