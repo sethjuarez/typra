@@ -84,6 +84,15 @@
               "result.content = FixtureContent.load",
               "result.put(\"content\", obj.content.save(ctx))"
             ]
+          },
+          {
+            "path": "generated/fixtures/java/tests/FixtureRootGeneratedTest.java",
+            "snippets": [
+              "Expected content to be TextContent",
+              "hello from a polymorphic sample",
+              "Expected contentItems[0] to be TextContent",
+              "hello from a polymorphic collection"
+            ]
           }
         ],
         "rust": [

@@ -19,7 +19,8 @@ User-facing docs are available at <https://typra.dev>.
 TypeSpec is good at declaring contracts. Typra turns those declarations into the
 runtime surfaces developers need to consume the contracts consistently:
 
-- Generated types/classes/structs with JSON and YAML load/save helpers.
+- Generated types/classes/structs with JSON/YAML helpers where supported by
+  the target.
 - Polymorphic model loading from TypeSpec discriminators.
 - Provider wire-name metadata with `@@knownAs` and defaults with
   `@@defaultFor`.
@@ -64,6 +65,10 @@ options:
         output-dir: "generated/python"
         test-dir: "generated/python/tests"
         import-path: "todo_contracts"
+      - type: Java
+        output-dir: "generated/java"
+        test-dir: "generated/java/tests"
+        package-name: "todo.contracts"
       - type: Markdown
         output-dir: "generated/markdown"
 ```
