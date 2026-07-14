@@ -24,12 +24,12 @@ emit-targets:
 | `package-name` | Package name for generated Go files. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
 
-Generated Go surfaces include structs, load/save helpers, JSON/YAML helpers, and generated tests.
+Generated Go surfaces include structs, load/save helpers, JSON/YAML helpers, provider wire mapping helpers when configured, compile-only protocol scaffolds, and generated tests.
 
 ## Typical usage shape
 
 ```go
-root, err := fixtures.FromJSON([]byte(jsonText))
+root, err := fixtures.FixtureRootFromJSON(jsonText)
 if err != nil {
     return err
 }
@@ -37,4 +37,30 @@ if err != nil {
 saved, err := root.ToJSON()
 ```
 
-Generated Go tests exercise load/save roundtrips, nested objects, scalar arrays, dictionaries, provider wire names, and polymorphic child resolution.
+For models with scalar coercions, the generated `TypeFromJSON` and `TypeFromYAML` helpers preserve scalar shorthand input instead of requiring callers to wrap values in objects:
+
+```go
+reference, err := fixtures.FixtureReferenceFromJSON(`"ref-coerced"`)
+if err != nil {
+    return err
+}
+```
+
+## Runtime behavior
+
+`LoadType` accepts parsed `map[string]interface{}` values for object-shaped input. When a model declares scalar coercions, the JSON/YAML helpers parse into `interface{}` and pass the parsed value through to `LoadType`, so direct loads and text helpers follow the same coercion path.
+
+Nested object loads and polymorphic collection loads propagate child load errors. Abstract polymorphic bases return Go errors for unknown or missing discriminator values, while non-abstract default variants continue to handle fallback cases.
+
+## Validation coverage
+
+Generated Go tests exercise load/save roundtrips, nested objects, scalar arrays, dictionaries, provider wire names, scalar coercion helpers, malformed JSON handling, and polymorphic child resolution.
+
+The fixture validation gate also runs Go formatting and runtime checks:
+
+```powershell
+npm run generate:fixtures --workspace @typra/emitter
+npm run validate:fixtures --workspace @typra/emitter
+```
+
+During fixture validation, Typra runs `gofmt -l`, `go vet ./...`, `go test ./...`, and an executable conformance check for the generated Go module.

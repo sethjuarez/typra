@@ -852,6 +852,34 @@ function emitCoercionTest(
   } else {
     emitConcreteExampleValidations(lines, "instance", alt.validations);
   }
+  lines.push("");
+  lines.push(`jsonBytes, err := json.Marshal(${alt.value})`);
+  lines.push("if err != nil {");
+  lines.push(`t.Fatalf("Failed to encode ${alt.scalarType} JSON: %v", err)`);
+  lines.push("}");
+  lines.push(`fromJSON, err := ${pkg}.${typeName}FromJSON(string(jsonBytes))`);
+  lines.push("if err != nil {");
+  lines.push(`t.Fatalf("Failed to load ${typeName} from ${alt.scalarType} JSON helper: %v", err)`);
+  lines.push("}");
+  if (isAbstract) {
+    lines.push("_ = fromJSON // Load succeeded, exact type depends on discriminator");
+  } else {
+    emitConcreteExampleValidations(lines, "fromJSON", alt.validations);
+  }
+  lines.push("");
+  lines.push(`yamlBytes, err := yaml.Marshal(${alt.value})`);
+  lines.push("if err != nil {");
+  lines.push(`t.Fatalf("Failed to encode ${alt.scalarType} YAML: %v", err)`);
+  lines.push("}");
+  lines.push(`fromYAML, err := ${pkg}.${typeName}FromYAML(string(yamlBytes))`);
+  lines.push("if err != nil {");
+  lines.push(`t.Fatalf("Failed to load ${typeName} from ${alt.scalarType} YAML helper: %v", err)`);
+  lines.push("}");
+  if (isAbstract) {
+    lines.push("_ = fromYAML // Load succeeded, exact type depends on discriminator");
+  } else {
+    emitConcreteExampleValidations(lines, "fromYAML", alt.validations);
+  }
 
   lines.push("}");
 }

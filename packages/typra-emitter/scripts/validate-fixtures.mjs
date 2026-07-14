@@ -868,9 +868,16 @@ function runGoExecutableConformance() {
     "\tif err != nil {",
     "\t\tpanic(err)",
     "\t}",
-    '\treference, err := fixtures.LoadFixtureReference("ref-coerced", loadCtx)',
+    '\treference, err := fixtures.FixtureReferenceFromJSON("\\"ref-coerced\\"")',
     "\tif err != nil {",
     "\t\tpanic(err)",
+    "\t}",
+    '\treferenceFromYAML, err := fixtures.FixtureReferenceFromYAML("ref-coerced\\n")',
+    "\tif err != nil {",
+    "\t\tpanic(err)",
+    "\t}",
+    '\tif referenceFromYAML.Id != "ref-coerced" {',
+    '\t\tpanic("FixtureReferenceFromYAML did not preserve scalar id")',
     "\t}",
     '\timageContent, err := fixtures.LoadFixtureContent(map[string]interface{}{"kind": "image", "url": "https://example.com/fixture.png"}, loadCtx)',
     "\tif err != nil {",
@@ -1245,6 +1252,11 @@ function assertStaticFixtureCoverage() {
     "Expected Content to be fixtures.TextContent",
     "Expected Owner.DisplayName",
     "TestFixtureRootFromJSONInvalid",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "go", "tests", "fixture_reference_test.go"),
+    "FixtureReferenceFromJSON(string(jsonBytes))",
+    "FixtureReferenceFromYAML(string(yamlBytes))",
   );
   assertIncludes(
     path.join("generated", "fixtures", "go", "tests", "wire_options_test.go"),
