@@ -51,6 +51,10 @@ options:
         output-dir: "generated/typescript"
         test-dir: "generated/typescript/tests"
         import-path: "../index"
+      - type: Java
+        output-dir: "generated/java"
+        test-dir: "generated/java/tests"
+        package-name: "myproject.api"
 ```
 
 Import the emitter library from your TypeSpec entry point:

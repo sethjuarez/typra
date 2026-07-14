@@ -135,19 +135,30 @@ function emitValidation(lines: string[], varName: string, validation: PropertyVa
   lines.push(`    assertEquals(${expected}, ${varName}.${validation.key}, "Expected ${validation.key}");`);
 }
 
-function emitStructuredValidations(lines: string[], varName: string, node: TypeNode, sample: Record<string, any>): void {
+function emitStructuredValidations(
+  lines: string[],
+  varName: string,
+  node: TypeNode,
+  sample: Record<string, any>,
+  includeScalars = false,
+): void {
   for (const prop of node.properties) {
     if (!(prop.name in sample)) continue;
     const value = sample[prop.name];
     const expr = `${varName}.${prop.name}`;
 
+    if (includeScalars && prop.isScalar && !prop.isCollection && !prop.isDict) {
+      emitScalarSampleValidation(lines, expr, prop.name, value);
+      continue;
+    }
+
+    if (!prop.isScalar && prop.type && typeof value === "string") {
+      emitShorthandObjectValidation(lines, expr, prop.name, value, prop.type);
+      continue;
+    }
+
     if (prop.isCollection && Array.isArray(value)) {
-      lines.push(`    assertEquals(${value.length}, ${expr}.size(), "Expected ${prop.name} size");`);
-      value.forEach((item, index) => {
-        if (typeof item === "string") {
-          lines.push(`    assertEquals(${javaString(item)}, ${expr}.get(${index}), "Expected ${prop.name}[${index}]");`);
-        }
-      });
+      emitCollectionValidation(lines, expr, prop.name, value, prop, node);
       continue;
     }
 
@@ -160,16 +171,13 @@ function emitStructuredValidations(lines: string[], varName: string, node: TypeN
       continue;
     }
 
+    if (isPolymorphicProperty(prop) && value && typeof value === "object" && !Array.isArray(value)) {
+      emitPolymorphicValidation(lines, expr, prop.name, value, prop, varName);
+      continue;
+    }
+
     if (!prop.isScalar && prop.type && value && typeof value === "object" && !Array.isArray(value)) {
-      const child = findSampleChildType(prop, value);
-      if (child) {
-        const local = `${varName}${capitalize(prop.name)}Value`;
-        lines.push(`    assertTrue(${expr} instanceof ${child.typeName.name}, "Expected ${prop.name} to be ${child.typeName.name}");`);
-        lines.push(`    ${child.typeName.name} ${local} = (${child.typeName.name}) ${expr};`);
-        emitStructuredValidations(lines, local, child, value);
-      } else {
-        emitNestedValidations(lines, expr, prop.type, value);
-      }
+      emitNestedValidations(lines, expr, prop.type, value);
     }
   }
 }
@@ -184,13 +192,142 @@ function emitNestedValidations(lines: string[], expr: string, node: TypeNode, sa
   }
 }
 
-function findSampleChildType(prop: PropertyNode, sample: Record<string, any>): TypeNode | undefined {
-  const discriminator = prop.type?.discriminator;
-  if (!discriminator) return undefined;
-  const discriminatorValue = sample[discriminator];
-  return prop.type?.childTypes.find(child =>
-    child.properties.some(childProp => childProp.name === discriminator && childProp.defaultValue === discriminatorValue)
+function emitCollectionValidation(
+  lines: string[],
+  expr: string,
+  propName: string,
+  values: any[],
+  prop: PropertyNode,
+  node: TypeNode,
+): void {
+  lines.push(`    assertEquals(${values.length}, ${expr}.size(), "Expected ${propName} size");`);
+
+  if (prop.isScalar) {
+    values.forEach((item, index) => {
+      emitScalarSampleValidation(lines, `${expr}.get(${index})`, `${propName}[${index}]`, item);
+    });
+    return;
+  }
+
+  const itemType = resolvePropertyType(node, prop);
+  if (!itemType) return;
+
+  values.forEach((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
+    const itemExpr = `${expr}.get(${index})`;
+    const child = findSampleChildType(prop, item, itemType);
+    if (child) {
+      const local = `${localIdentifier(expr)}${index}Value`;
+      lines.push(`    assertTrue(${itemExpr} instanceof ${child.typeName.name}, "Expected ${propName}[${index}] to be ${child.typeName.name}");`);
+      lines.push(`    ${child.typeName.name} ${local} = (${child.typeName.name}) ${itemExpr};`);
+      emitStructuredValidations(lines, local, child, item, true);
+      return;
+    }
+
+    emitNestedValidations(lines, itemExpr, itemType, item);
+  });
+}
+
+function emitPolymorphicValidation(
+  lines: string[],
+  expr: string,
+  propName: string,
+  value: Record<string, any>,
+  prop: PropertyNode,
+  varName: string,
+): void {
+  const child = findSampleChildType(prop, value);
+  if (!child) return;
+
+  const local = `${varName}${capitalize(propName)}Value`;
+  lines.push(`    assertTrue(${expr} instanceof ${child.typeName.name}, "Expected ${propName} to be ${child.typeName.name}");`);
+  lines.push(`    ${child.typeName.name} ${local} = (${child.typeName.name}) ${expr};`);
+  emitStructuredValidations(lines, local, child, value, true);
+}
+
+function emitShorthandObjectValidation(
+  lines: string[],
+  expr: string,
+  propName: string,
+  expected: string,
+  node: TypeNode,
+): void {
+  if (node.childTypes.length > 0) return;
+
+  const shorthandField = findStringCoercionField(node);
+  if (!shorthandField) return;
+
+  lines.push(`    assertEquals(${javaString(expected)}, ${expr}.${shorthandField}, "Expected ${propName}.${shorthandField}");`);
+}
+
+function emitScalarSampleValidation(lines: string[], expr: string, displayName: string, expected: any): void {
+  if (typeof expected === "string" || typeof expected === "number" || typeof expected === "boolean") {
+    lines.push(`    assertEquals(${javaLiteral(expected)}, ${expr}, "Expected ${displayName}");`);
+  }
+}
+
+function findSampleChildType(prop: PropertyNode, sample: Record<string, any>, type = prop.type): TypeNode | undefined {
+  const discriminator = type?.discriminator;
+  const discriminatorValue = discriminator ? sample[discriminator] : undefined;
+  if (discriminator && discriminatorValue !== undefined) {
+    return type?.childTypes.find(child =>
+      child.properties.some(childProp => childProp.name === discriminator && childProp.defaultValue === discriminatorValue)
+    );
+  }
+
+  return type?.childTypes.find(child =>
+    child.properties.some(childProp => childProp.defaultValue !== null && sample[childProp.name] === childProp.defaultValue)
   );
+}
+
+function resolvePropertyType(node: TypeNode, prop: PropertyNode): TypeNode | undefined {
+  if (prop.type && prop.type.childTypes.length > 0) return prop.type;
+  return findTypeByName(node, prop.typeName.name) ?? prop.type;
+}
+
+function findTypeByName(node: TypeNode, typeName: string, visited = new Set<TypeNode>()): TypeNode | undefined {
+  if (visited.has(node)) return undefined;
+  visited.add(node);
+  if (node.typeName.name === typeName) return node;
+
+  for (const child of node.childTypes) {
+    const match = findTypeByName(child, typeName, visited);
+    if (match) return match;
+  }
+
+  for (const prop of node.properties) {
+    if (!prop.type) continue;
+    const match = findTypeByName(prop.type, typeName, visited);
+    if (match) return match;
+  }
+
+  return undefined;
+}
+
+function findStringCoercionField(node: TypeNode): string | undefined {
+  const coercion = node.coercions.find(entry => entry.scalar === "string");
+  if (!coercion) return undefined;
+
+  for (const [key, value] of Object.entries(coercion.expansion)) {
+    if (value === "{value}") return key;
+  }
+
+  return undefined;
+}
+
+function isPolymorphicProperty(prop: PropertyNode): boolean {
+  return !prop.isScalar && !prop.isCollection && !prop.isDict && (prop.type?.childTypes.length ?? 0) > 0;
+}
+
+function javaLiteral(value: string | number | boolean): string {
+  if (typeof value === "string") return javaString(value);
+  return String(value);
+}
+
+function localIdentifier(expr: string): string {
+  return expr.replace(/[^A-Za-z0-9]+/g, " ").split(" ").filter(Boolean).map((part, index) =>
+    index === 0 ? part : capitalize(part)
+  ).join("");
 }
 
 function emitAssertions(lines: string[]): void {
