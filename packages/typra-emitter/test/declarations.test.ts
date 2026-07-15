@@ -20,6 +20,8 @@ import {
   lowerType,
   collectPolymorphicTypeNames,
 } from "../src/ir/lower.js";
+import { emitSwiftFile } from "../src/languages/swift/emitter.js";
+import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 import { emitGoFileContent } from "../src/languages/go/emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
 
@@ -418,6 +420,30 @@ describe("lowerFile", () => {
     assert.equal(file.containsAbstract, false);
   });
 
+  describe("Swift emitter inheritance", () => {
+    it("does not emit invalid struct conformance for non-polymorphic model inheritance", () => {
+      const base = makeType("BaseModel", [
+        makeProp("id", "string", { isScalar: true }),
+      ]);
+      const child = makeType("ChildModel", [
+        makeProp("id", "string", { isScalar: true }),
+        makeProp("label", "string", { isScalar: true }),
+      ], { base: { namespace: "Test", name: "BaseModel" } });
+
+      const content = emitSwiftFile({
+        typeName: child.typeName,
+        types: [child].map(node => lowerType(node, TypeRegistry.fromTypeGraph([base, child]), new Set())),
+        imports: [],
+        containsAbstract: false,
+        enums: [],
+        group: "",
+      }, new SwiftExprVisitor(TypeRegistry.fromTypeGraph([base, child])), new Set());
+
+      assert.match(content, /public struct ChildModel: TypraModel \{/);
+      assert.doesNotMatch(content, /public struct ChildModel: TypraModel, BaseModel/);
+    });
+  });
+
   // ============================================================================
   // Go emitter dispatch hardening tests
   // ============================================================================
@@ -469,8 +495,8 @@ describe("lowerFile", () => {
         file.enums,
         file.group,
       );
-
       assert.match(code, /switch discriminator := discriminator\.\(type\) \{/);
+      assert.match(code, /\t\t\tdefault:\n\t\t\t\treturn result, nil/);
       assert.match(code, /\t\t\tdefault:\n\t\t\t\treturn result, nil/);
     });
   });

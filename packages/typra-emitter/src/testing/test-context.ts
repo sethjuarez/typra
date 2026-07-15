@@ -8,6 +8,7 @@
 import { TypeNode, PropertyValidation, TestExample, CoercionTest, BaseTestContext } from "../ir/ast.js";
 import { getCombinations, scalarValue, toSnakeCase } from "../ir/utilities.js";
 import { toPascalCase } from "../ir/visitor.js";
+import { swiftPropertyName } from "../languages/swift/identifiers.js";
 import * as YAML from "yaml";
 
 const RUST_KEYWORDS = new Set([
@@ -389,6 +390,52 @@ export const rustTestOptions: TestContextOptions = {
     "float32": "f32",
     "float64": "f64",
     "number": "f64",
+  },
+};
+
+/**
+ * Swift test context options.
+ */
+export const swiftTestOptions: TestContextOptions = {
+  renderKey: (key: string) => {
+    const pascal = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    return pascal.charAt(0).toLowerCase() + pascal.slice(1);
+  },
+  renderBoolean: (val: boolean) => val ? "true" : "false",
+  escapeString: (str: string) => str
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\t/g, "\\t"),
+  getDelimiter: () => '"',
+  escapeJsonForTemplate: (json: string) => json.replace(/\\/g, "\\\\"),
+  escapeYamlForTemplate: (yaml: string) => yaml.replace(/\\/g, "\\\\"),
+  renderEnumValue: (enumName: string, rawValue: string, _fieldName: string, isOpenEnum?: boolean) => ({
+    value: isOpenEnum
+      ? `${enumName}(rawValue: "${rawValue}")`
+      : `${enumName}.${swiftPropertyName(rawValue)}`,
+    delimiter: '',
+  }),
+  scalarValues: {
+    "boolean": "false",
+    "float": "3.14",
+    "float32": "3.14",
+    "float64": "3.14",
+    "number": "3.14",
+    "int32": "3",
+    "int64": "3",
+    "integer": "3",
+    "string": '"example"',
+  },
+  typeMapper: {
+    "string": "String",
+    "boolean": "Bool",
+    "int32": "Int32",
+    "int64": "Int64",
+    "float32": "Float",
+    "float64": "Double",
+    "number": "Double",
   },
 };
 

@@ -52,6 +52,10 @@ options:
         output-dir: "generated/typescript"
         test-dir: "generated/typescript/tests"
         import-path: "../index"
+      - type: Swift
+        output-dir: "generated/swift"
+        test-dir: "generated/swift/Tests/MyProjectTests"
+        package-name: "MyProject"
       - type: Java
         output-dir: "generated/java"
         test-dir: "generated/java/tests"
@@ -100,13 +104,14 @@ Typra includes emitters for:
 - Go
 - Java
 - Rust
+- Swift
 - Markdown documentation
 - JSON AST
 
 The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust,
-Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture
-validation also exercises generated metadata, verifier CLI output, consumer
-smoke wiring, and cross-language generated-code compile/test surfaces.
+Swift, Markdown, and JSON AST generation from synthetic TypeSpec shapes.
+Fixture validation also exercises generated metadata, verifier CLI output,
+consumer smoke wiring, and cross-language generated-code compile/test surfaces.
 
 ### Go parity and validation
 

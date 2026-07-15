@@ -180,6 +180,7 @@ describe("export surface scaffolding", () => {
         { type: "Python", "output-dir": "generated/python" },
         { type: "Rust", "output-dir": "generated/rust" },
         { type: "Go", "output-dir": "generated/go", "package-name": "promptyruntime" },
+        { type: "Swift", "output-dir": "generated/swift", "package-name": "CustomSwiftRuntime" },
       ],
       allTypes,
       toolchain,
@@ -194,6 +195,9 @@ describe("export surface scaffolding", () => {
     ]);
     assert.deepEqual(snapshot.toolchain.packages.map((entry) => entry.version), ["1.10.0", "1.10.0", "0.2.5"]);
     assert.deepEqual(targets.get("go")?.packageName, "promptyruntime");
+    assert.deepEqual(targets.get("swift")?.packageName, "CustomSwiftRuntime");
+    assert.equal(targets.get("swift")?.exports.find((entry) => entry.name === "Checkpoint")?.source, "Sources/CustomSwiftRuntime/events/checkpoint.swift");
+    assert.equal(targets.get("swift")?.protocols.find((entry) => entry.name === "EventSink")?.source, "Sources/CustomSwiftRuntime/pipeline/event_sink.swift");
     assert.deepEqual(targets.get("typescript")?.rootExports, [
       "AudioPart",
       "Checkpoint",

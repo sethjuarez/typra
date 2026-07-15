@@ -70,7 +70,7 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
           "package-name": {
             type: "string",
             nullable: true,
-            description: "Language package/module name override. Currently used by Go; defaults to the emitted root namespace."
+            description: "Language package/module name override. Currently used by Go and Swift; defaults to the emitted root namespace."
           },
           "enum-parsing": {
             type: "string",

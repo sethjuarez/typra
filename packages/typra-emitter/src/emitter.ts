@@ -8,6 +8,7 @@ import { generateTypeScript } from "./languages/typescript/driver.js";
 import { generateGo } from "./languages/go/driver.js";
 import { generateJava } from "./languages/java/driver.js";
 import { generateRust } from "./languages/rust/driver.js";
+import { generateSwift } from "./languages/swift/driver.js";
 import { emitGeneratedFile, emitGeneratedManifest, emitGeneratedOutputReport } from "./cleanup/generated-file.js";
 import { buildExportSurfaceSnapshot, emitExportSurfaceSnapshot } from "./contract-surface.js";
 import { reportTypeSpecCompatibility, shouldBlockUnsupportedTypeSpecToolchain } from "./compatibility.js";
@@ -99,6 +100,7 @@ const generators: Record<string, GeneratorFn> = {
   go: generateGo,
   java: generateJava,
   rust: generateRust,
+  swift: generateSwift,
 };
 
 
