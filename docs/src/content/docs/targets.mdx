@@ -13,8 +13,8 @@ Typra emits generated model surfaces, tests, metadata, and documentation from th
 | `TypeScript` | Model classes, runtime helpers, JSON/YAML helpers, tests, and protocol scaffold tests. |
 | `Python` | Model surfaces, loader/saver helpers, JSON/YAML helpers, import-pruned output, and tests. |
 | `CSharp` | C# model types, `System.Text.Json` helpers, tests, and protocol scaffolds. |
-| `Go` | Structs, load/save helpers, JSON/YAML helpers, and generated tests. |
-| `Java` | Models with load, save, `fromJson`, `toJson`, scalar coercion, enum handling, polymorphic dispatch, and tests. |
+| `Go` | Structs, load/save helpers, JSON/YAML helpers, scalar shorthand coercion, polymorphic dispatch, and generated tests. |
+| `Java` | Models with load, save, `fromJson`, `toJson`, `fromYaml`, `toYaml`, scalar coercion, enum handling, polymorphic dispatch, and tests. |
 | `Rust` | Model structures with serde-oriented surfaces and optional case-insensitive enum parsing. |
 
 ## Reference targets
@@ -75,15 +75,15 @@ Target support is intentionally evidence-driven. The fixture suite validates gen
 
 | Target | Caveat to check before adopting |
 | --- | --- |
-| `TypeScript`, `Python`, `Go` | Best fit when JSON/YAML helper behavior matters. |
-| `CSharp`, `Java` | JSON-oriented model surfaces; confirm package/namespace conventions before publishing generated output. |
+| `TypeScript`, `Python`, `Go` | Best fit when JSON/YAML helper behavior and scalar shorthand loading matter. |
+| `CSharp`, `Java` | Confirm package/namespace conventions before publishing generated output. Java includes JSON/YAML helper surfaces. |
 | `Rust` | Choose `enum-parsing` deliberately; default behavior is case-sensitive. |
 | `Markdown` | Treat as generated reference output, not a replacement for product narrative docs. |
 | JSON AST | Use for tooling and review; do not treat it as a runtime API. |
 
 ## Confidence model
 
-The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust, Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture validation also exercises generated metadata, verifier CLI output, consumer smoke wiring, and cross-language generated-code compile/test surfaces.
+The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust, Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture validation also exercises generated metadata, verifier CLI output, consumer smoke wiring, and cross-language generated-code compile/test surfaces. For Go, that includes `gofmt`, `go vet`, `go test`, scalar coercion helper coverage, and executable conformance.
 
 The fixture source is the compact reference for supported shapes:
 

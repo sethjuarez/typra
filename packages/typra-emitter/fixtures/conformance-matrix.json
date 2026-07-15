@@ -59,8 +59,8 @@
             "path": "generated/fixtures/go/fixture_root.go",
             "snippets": [
               "case []string:",
-              "loaded, _ := LoadFixtureOwner",
-              "loaded, _ := LoadFixtureContent",
+              "loaded, err := LoadFixtureOwner",
+              "loaded, err := LoadFixtureContent",
               "result[\"content\"] = v.Save(ctx)"
             ]
           },
@@ -82,7 +82,20 @@
               "result.metadata = copyMap(dict);",
               "result.owner = FixtureOwner.load",
               "result.content = FixtureContent.load",
-              "result.put(\"content\", obj.content.save(ctx))"
+              "result.put(\"content\", obj.content.save(ctx))",
+              "public String toYaml()",
+              "public static FixtureRoot fromYaml(String yaml)"
+            ]
+          },
+          {
+            "path": "generated/fixtures/java/tests/FixtureRootGeneratedTest.java",
+            "snippets": [
+              "Expected content to be TextContent",
+              "hello from a polymorphic sample",
+              "Expected contentItems[0] to be TextContent",
+              "hello from a polymorphic collection",
+              "String yamlRoundtrip1 = instance1.toYaml();",
+              "FixtureRoot fromYaml1 = FixtureRoot.fromYaml(yamlRoundtrip1);"
             ]
           }
         ],

@@ -19,7 +19,8 @@ User-facing docs are available at <https://typra.dev>.
 TypeSpec is good at declaring contracts. Typra turns those declarations into the
 runtime surfaces developers need to consume the contracts consistently:
 
-- Generated types/classes/structs with JSON and YAML load/save helpers.
+- Generated types/classes/structs with JSON/YAML helpers where supported by
+  the target.
 - Polymorphic model loading from TypeSpec discriminators.
 - Provider wire-name metadata with `@@knownAs` and defaults with
   `@@defaultFor`.
@@ -64,6 +65,10 @@ options:
         output-dir: "generated/python"
         test-dir: "generated/python/tests"
         import-path: "todo_contracts"
+      - type: Java
+        output-dir: "generated/java"
+        test-dir: "generated/java/tests"
+        package-name: "todo.contracts"
       - type: Markdown
         output-dir: "generated/markdown"
 ```
@@ -198,8 +203,9 @@ emit-targets:
   output, and generated tests.
 - `CSharp`: C# model surfaces, `System.Text.Json` helpers, and generated
   tests/scaffolds.
-- `Go`: Go structs with JSON/YAML support and generated tests.
-- `Java`: Java model surfaces and generated fixture tests.
+- `Go`: Go structs with JSON/YAML support, scalar shorthand helpers,
+  propagated child-load errors, polymorphic dispatch, and generated tests.
+- `Java`: Java model surfaces with JSON/YAML helpers and generated fixture tests.
 - `Rust`: Rust model surfaces with optional case-insensitive enum parsing.
 - `Swift`: SwiftPM package output with JSON/YAML helpers backed by Foundation
   and Yams, generated XCTest coverage, and protocol compile scaffolds.
@@ -207,7 +213,9 @@ emit-targets:
 - JSON AST: `json-ast/model.json` emitted for every TypeSpec generation.
 
 The fixture validation flow exercises TypeScript, Python, C#, Go, Java, Rust,
-Swift, Markdown, and JSON AST generation.
+Swift, Markdown, and JSON AST generation. Go fixture validation includes
+formatting, vet, tests, scalar coercion helper coverage, and executable
+conformance.
 
 ## CLI
 

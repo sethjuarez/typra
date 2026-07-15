@@ -22,6 +22,8 @@ import {
 } from "../src/ir/lower.js";
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
+import { emitGoFileContent } from "../src/languages/go/emitter.js";
+import { GoExprVisitor } from "../src/languages/go/visitor.js";
 
 // ============================================================================
 // Test fixtures (same as expansion.test.ts)
@@ -439,6 +441,63 @@ describe("lowerFile", () => {
 
       assert.match(content, /public struct ChildModel: TypraModel \{/);
       assert.doesNotMatch(content, /public struct ChildModel: TypraModel, BaseModel/);
+    });
+  });
+
+  // ============================================================================
+  // Go emitter dispatch hardening tests
+  // ============================================================================
+
+  describe("Go emitter dispatch hardening", () => {
+    it("keeps abstract scalar coercions reachable before missing-discriminator errors", () => {
+      const tokenConnection = makeType("TokenConnection", [
+        makeProp("kind", "string", { isScalar: true, defaultValue: "token" }),
+        makeProp("endpoint", "string", { isScalar: true }),
+      ], { base: { namespace: "Test", name: "ConnectionWithCoercion" } });
+      const connectionWithCoercion = makeType("ConnectionWithCoercion", [
+        makeProp("kind", "string", { isScalar: true }),
+        makeProp("endpoint", "string", { isScalar: true }),
+      ], {
+        discriminator: "kind",
+        childTypes: [tokenConnection],
+        isAbstract: true,
+        coercions: [{ scalar: "string", expansion: { kind: "token", endpoint: "{value}" } }],
+      });
+      const registry = TypeRegistry.fromTypeGraph([connectionWithCoercion, tokenConnection]);
+      const file = lowerFile(connectionWithCoercion, registry, new Set(["ConnectionWithCoercion"]));
+      const code = emitGoFileContent(
+        file.types,
+        "fixtures",
+        new GoExprVisitor(registry),
+        new Set(["ConnectionWithCoercion"]),
+        file.enums,
+        file.group,
+      );
+
+      const coercionIndex = code.indexOf("// Handle alternate scalar representations");
+      const dispatchIndex = code.indexOf("// Handle polymorphic types based on discriminator");
+      assert.ok(coercionIndex >= 0, "expected generated coercion block");
+      assert.ok(dispatchIndex >= 0, "expected generated polymorphic dispatch block");
+      assert.ok(coercionIndex < dispatchIndex, "scalar coercions must run before abstract dispatch errors");
+      assert.match(code, /\t"fmt"/);
+      assert.match(code, /return nil, fmt\.Errorf\("unknown ConnectionWithCoercion discriminator value: %s", discriminator\)/);
+      assert.match(code, /return nil, fmt\.Errorf\("missing ConnectionWithCoercion discriminator property: kind"\)/);
+    });
+
+    it("routes non-string discriminators through the default variant when one exists", () => {
+      const registry = buildTestRegistry();
+      const file = lowerFile(contentPart, registry, new Set(["ContentPart"]));
+      const code = emitGoFileContent(
+        file.types,
+        "fixtures",
+        new GoExprVisitor(registry),
+        new Set(["ContentPart"]),
+        file.enums,
+        file.group,
+      );
+      assert.match(code, /switch discriminator := discriminator\.\(type\) \{/);
+      assert.match(code, /\t\t\tdefault:\n\t\t\t\treturn result, nil/);
+      assert.match(code, /\t\t\tdefault:\n\t\t\t\treturn result, nil/);
     });
   });
 

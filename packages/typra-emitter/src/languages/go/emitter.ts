@@ -88,7 +88,8 @@ export function emitGoFileContent(
 
   // Protocol-only files have a simpler header (no JSON/YAML imports)
   const hasNonProtocol = types.some(t => !t.isProtocol);
-  const needsFmt = enums.some(enumDef => hasParseAliases(enumDef) && !enumDef.isOpen);
+  const needsFmt = enums.some(enumDef => hasParseAliases(enumDef) && !enumDef.isOpen) ||
+    types.some(type => type.polymorphicDispatch?.isAbstract && !type.polymorphicDispatch.defaultVariant);
   if (hasNonProtocol) {
     emitHeader(lines, packageName, group, needsFmt);
   } else {
@@ -204,6 +205,7 @@ function emitTypeBlock(
   scalarCoercibleTypeNames: Set<string>,
 ): void {
   const typeName = type.typeName.name;
+  const hasCoercions = type.load.coercions.length > 0;
 
   // Protocol types → emit as Go interface
   if (type.isProtocol) {
@@ -237,10 +239,10 @@ function emitTypeBlock(
   emitToYAML(typeName, lines);
 
   // FromJSON function
-  emitFromJSON(typeName, isPolymorphicBase, lines);
+  emitFromJSON(typeName, isPolymorphicBase, hasCoercions, lines);
 
   // FromYAML function
-  emitFromYAML(typeName, isPolymorphicBase, lines);
+  emitFromYAML(typeName, isPolymorphicBase, hasCoercions, lines);
 
   // Factory functions
   if (type.factories.length > 0) {
@@ -333,14 +335,14 @@ function emitLoadFunction(
   lines.push(`\tresult := ${typeName}{}`);
   lines.push("");
 
-  // 1. Polymorphic dispatch
-  if (type.polymorphicDispatch) {
-    emitPolymorphicDispatch(type.polymorphicDispatch, lines);
-  }
-
-  // 2. Coercions
+  // 1. Coercions
   if (hasCoercions) {
     emitCoercions(type.load.coercions, typeName, lines);
+  }
+
+  // 2. Polymorphic dispatch
+  if (type.polymorphicDispatch) {
+    emitPolymorphicDispatch(typeName, type.polymorphicDispatch, lines);
   }
 
   // 3. Map loading
@@ -362,26 +364,50 @@ function emitLoadFunction(
 // Polymorphic dispatch
 // ============================================================================
 
-function emitPolymorphicDispatch(dispatch: PolymorphicDispatchDecl, lines: string[]): void {
+function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatchDecl, lines: string[]): void {
   lines.push("\t// Handle polymorphic types based on discriminator");
   lines.push("\tif m, ok := data.(map[string]interface{}); ok {");
   lines.push(`\t\tif discriminator, ok := m["${dispatch.discriminatorField}"]; ok {`);
-  lines.push("\t\t\tswitch discriminator {");
+  lines.push("\t\t\tswitch discriminator := discriminator.(type) {");
+  lines.push("\t\t\tcase string:");
+  lines.push("\t\t\t\tswitch discriminator {");
 
   for (const variant of dispatch.variants) {
-    lines.push(`\t\t\tcase "${variant.value}":`);
-    lines.push(`\t\t\t\treturn Load${variant.typeName.name}(data, ctx)`);
+    lines.push(`\t\t\t\tcase "${variant.value}":`);
+    lines.push(`\t\t\t\t\treturn Load${variant.typeName.name}(data, ctx)`);
   }
 
   // Default variant
-  if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
-    lines.push("\t\t\tdefault:");
-    lines.push(`\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
+  if (dispatch.defaultVariant) {
+    lines.push("\t\t\t\tdefault:");
+    if (dispatch.defaultVariant.isSelfReference) {
+      lines.push("\t\t\t\t\treturn result, nil");
+    } else {
+      lines.push(`\t\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
+    }
+  } else if (dispatch.isAbstract) {
+    lines.push("\t\t\t\tdefault:");
+    lines.push(`\t\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator value: %s", discriminator)`);
   }
 
+  lines.push("\t\t\t\t}");
+  if (dispatch.isAbstract && !dispatch.defaultVariant) {
+    lines.push("\t\t\tdefault:");
+    lines.push(`\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator value: %v", discriminator)`);
+  } else if (dispatch.defaultVariant) {
+    lines.push("\t\t\tdefault:");
+    if (dispatch.defaultVariant.isSelfReference) {
+      lines.push("\t\t\t\treturn result, nil");
+    } else {
+      lines.push(`\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
+    }
+  }
   lines.push("\t\t\t}");
   lines.push("\t\t}");
   lines.push("\t}");
+  if (dispatch.isAbstract && !dispatch.defaultVariant) {
+    lines.push(`\treturn nil, fmt.Errorf("missing ${typeName} discriminator property: ${dispatch.discriminatorField}")`);
+  }
 }
 
 // ============================================================================
@@ -588,7 +614,10 @@ function emitLoadComplex(
 
   lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
   lines.push(`\t\t\tif m, ok := val.(map[string]interface{}); ok {`);
-  lines.push(`\t\t\t\tloaded, _ := Load${typeName}(m, ctx)`);
+  lines.push(`\t\t\t\tloaded, err := Load${typeName}(m, ctx)`);
+  lines.push("\t\t\t\tif err != nil {");
+  lines.push("\t\t\t\t\treturn result, err");
+  lines.push("\t\t\t\t}");
 
   if (isPolymorphic) {
     if (assign.isOptional) {
@@ -607,7 +636,10 @@ function emitLoadComplex(
 
   if (acceptsScalarCoercion) {
     lines.push("\t\t\t} else {");
-    lines.push(`\t\t\t\tloaded, _ := Load${typeName}(val, ctx)`);
+    lines.push(`\t\t\t\tloaded, err := Load${typeName}(val, ctx)`);
+    lines.push("\t\t\t\tif err != nil {");
+    lines.push("\t\t\t\t\treturn result, err");
+    lines.push("\t\t\t\t}");
     if (assign.isOptional && !isPolymorphic) {
       lines.push(`\t\t\t\tresult.${fieldName} = &loaded`);
     } else {
@@ -661,7 +693,10 @@ function emitLoadCollectionComplex(
   lines.push(`\t\t\t\tresult.${fieldName} = make([]${goElemType}, len(arr))`);
   lines.push("\t\t\t\tfor i, v := range arr {");
   lines.push("\t\t\t\t\tif item, ok := v.(map[string]interface{}); ok {");
-  lines.push(`\t\t\t\t\t\tloaded, _ := Load${typeName}(item, ctx)`);
+  lines.push(`\t\t\t\t\t\tloaded, err := Load${typeName}(item, ctx)`);
+  lines.push("\t\t\t\t\t\tif err != nil {");
+  lines.push("\t\t\t\t\t\t\treturn result, err");
+  lines.push("\t\t\t\t\t\t}");
 
   if (isPolymorphic) {
     lines.push("\t\t\t\t\t\t// Polymorphic type - store as interface{}");
@@ -941,7 +976,7 @@ function emitToYAML(typeName: string, lines: string[]): void {
 // FromJSON / FromYAML functions
 // ============================================================================
 
-function emitFromJSON(typeName: string, isPolymorphic: boolean, lines: string[]): void {
+function emitFromJSON(typeName: string, isPolymorphic: boolean, hasCoercions: boolean, lines: string[]): void {
   lines.push(`// FromJSON creates ${typeName} from JSON string`);
   if (isPolymorphic) {
     lines.push("// Returns interface{} because this is a polymorphic base type that can resolve to different child types");
@@ -951,7 +986,7 @@ function emitFromJSON(typeName: string, isPolymorphic: boolean, lines: string[])
   const errorReturn = isPolymorphic ? "nil" : `${typeName}{}`;
 
   lines.push(`func ${typeName}FromJSON(jsonStr string) (${returnType}, error) {`);
-  lines.push("\tvar data map[string]interface{}");
+  lines.push(hasCoercions ? "\tvar data interface{}" : "\tvar data map[string]interface{}");
   lines.push("\tif err := json.Unmarshal([]byte(jsonStr), &data); err != nil {");
   lines.push(`\t\treturn ${errorReturn}, err`);
   lines.push("\t}");
@@ -961,7 +996,7 @@ function emitFromJSON(typeName: string, isPolymorphic: boolean, lines: string[])
   lines.push("");
 }
 
-function emitFromYAML(typeName: string, isPolymorphic: boolean, lines: string[]): void {
+function emitFromYAML(typeName: string, isPolymorphic: boolean, hasCoercions: boolean, lines: string[]): void {
   lines.push(`// FromYAML creates ${typeName} from YAML string`);
   if (isPolymorphic) {
     lines.push("// Returns interface{} because this is a polymorphic base type that can resolve to different child types");
@@ -971,7 +1006,7 @@ function emitFromYAML(typeName: string, isPolymorphic: boolean, lines: string[])
   const errorReturn = isPolymorphic ? "nil" : `${typeName}{}`;
 
   lines.push(`func ${typeName}FromYAML(yamlStr string) (${returnType}, error) {`);
-  lines.push("\tvar data map[string]interface{}");
+  lines.push(hasCoercions ? "\tvar data interface{}" : "\tvar data map[string]interface{}");
   lines.push("\tif err := yaml.Unmarshal([]byte(yamlStr), &data); err != nil {");
   lines.push(`\t\treturn ${errorReturn}, err`);
   lines.push("\t}");

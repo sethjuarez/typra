@@ -4,7 +4,7 @@ description: What Typra emits for JVM consumers.
 draft: false
 ---
 
-Use the Java target for JVM consumers that need generated model classes with JSON helper behavior.
+Use the Java target for JVM consumers that need generated model classes with JSON and YAML helper behavior.
 
 ```yaml
 emit-targets:
@@ -22,7 +22,7 @@ emit-targets:
 | `package-name` | Java package for generated classes. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
 
-Generated Java surfaces include models with load, save, `fromJson`, `toJson`, scalar coercion, enum handling, polymorphic dispatch, and tests.
+Generated Java surfaces include models with load, save, `fromJson`, `toJson`, `fromYaml`, `toYaml`, scalar coercion, enum handling, polymorphic dispatch, and tests.
 
 ## Typical usage shape
 
@@ -31,6 +31,8 @@ import typra.fixtures.FixtureRoot;
 
 FixtureRoot root = FixtureRoot.fromJson(jsonText);
 String saved = root.toJson();
+FixtureRoot yamlRoot = FixtureRoot.fromYaml(yamlText);
+String yamlSaved = yamlRoot.toYaml();
 ```
 
 Confirm package layout and generated API shape before publishing Java output for downstream consumers.

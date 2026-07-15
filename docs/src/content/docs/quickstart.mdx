@@ -48,6 +48,10 @@ options:
         test-dir: "generated/go/tests"
         import-path: "todo"
         package-name: "todo"
+      - type: Java
+        output-dir: "generated/java"
+        test-dir: "generated/java/tests"
+        package-name: "todo.contracts"
       - type: Markdown
         output-dir: "generated/markdown"
 ```
@@ -98,6 +102,7 @@ generated\
   typescript\
   python\
   go\
+  java\
   markdown\
   json-ast\model.json
   .typra-generated\manifest.json
