@@ -20,6 +20,8 @@ import {
   lowerType,
   collectPolymorphicTypeNames,
 } from "../src/ir/lower.js";
+import { emitSwiftFile } from "../src/languages/swift/emitter.js";
+import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 
 // ============================================================================
 // Test fixtures (same as expansion.test.ts)
@@ -414,6 +416,30 @@ describe("lowerFile", () => {
     assert.equal(file.typeName.name, "Model");
     assert.equal(file.types.length, 1);
     assert.equal(file.containsAbstract, false);
+  });
+
+  describe("Swift emitter inheritance", () => {
+    it("does not emit invalid struct conformance for non-polymorphic model inheritance", () => {
+      const base = makeType("BaseModel", [
+        makeProp("id", "string", { isScalar: true }),
+      ]);
+      const child = makeType("ChildModel", [
+        makeProp("id", "string", { isScalar: true }),
+        makeProp("label", "string", { isScalar: true }),
+      ], { base: { namespace: "Test", name: "BaseModel" } });
+
+      const content = emitSwiftFile({
+        typeName: child.typeName,
+        types: [child].map(node => lowerType(node, TypeRegistry.fromTypeGraph([base, child]), new Set())),
+        imports: [],
+        containsAbstract: false,
+        enums: [],
+        group: "",
+      }, new SwiftExprVisitor(TypeRegistry.fromTypeGraph([base, child])), new Set());
+
+      assert.match(content, /public struct ChildModel: TypraModel \{/);
+      assert.doesNotMatch(content, /public struct ChildModel: TypraModel, BaseModel/);
+    });
   });
 
   it("lowers a polymorphic file with parent + children", () => {

@@ -3,6 +3,7 @@ import { EmitTarget, TypraEmitterOptions } from "./lib.js";
 import { TypeNode } from "./ir/ast.js";
 import { toKebabCase, toSnakeCase } from "./ir/utilities.js";
 import { getToolchainMetadata, ToolchainMetadata } from "./compatibility.js";
+import { swiftFileName, swiftModuleName } from "./languages/swift/identifiers.js";
 
 export interface ExportSurfaceMethod {
   name: string;
@@ -93,9 +94,10 @@ export async function emitExportSurfaceSnapshot(
 
 function buildTargetSurface(rootNamespace: string, target: EmitTarget, nodes: TypeNode[]): TargetExportSurface {
   const targetName = normalizeTarget(target.type);
+  const moduleName = targetModuleName(rootNamespace, targetName, target);
   const baseTypes = nodes.filter((node) => !node.base).sort(compareNodes);
   const groups = buildGroups(targetName, baseTypes);
-  const exports = buildExports(targetName, baseTypes);
+  const exports = buildExports(targetName, baseTypes, moduleName);
   const rootExports = uniqueSorted(exports.map((entry) => entry.name));
   const protocols = nodes
     .filter((node) => node.isProtocol)
@@ -104,7 +106,7 @@ function buildTargetSurface(rootNamespace: string, target: EmitTarget, nodes: Ty
       name: node.typeName.name,
       group: node.group || "",
       symbol: node.typeName.name,
-      source: sourceFor(targetName, node, node.group || ""),
+      source: sourceFor(targetName, node, node.group || "", moduleName),
       methods: node.methods
         .map((method) => ({
           name: method.name,
@@ -124,15 +126,15 @@ function buildTargetSurface(rootNamespace: string, target: EmitTarget, nodes: Ty
     exports,
     groups,
     protocols,
-    modules: buildModules(targetName, baseTypes),
+    modules: buildModules(targetName, baseTypes, moduleName),
   };
 }
 
-function buildExports(targetName: string, baseTypes: TypeNode[]): ExportSurfaceEntry[] {
+function buildExports(targetName: string, baseTypes: TypeNode[], targetModule?: string): ExportSurfaceEntry[] {
   return baseTypes
     .flatMap((node) => {
       const group = node.group || "";
-      const source = sourceFor(targetName, node, group);
+      const source = sourceFor(targetName, node, group, targetModule);
       const kind: ExportSurfaceEntry["kind"] = node.isProtocol ? "type" : "value";
       return [node, ...node.childTypes].map((exportedNode) => ({
         name: exportedNode.typeName.name,
@@ -167,12 +169,12 @@ function buildGroups(targetName: string, baseTypes: TypeNode[]): ExportSurfaceGr
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function buildModules(targetName: string, baseTypes: TypeNode[]): string[] {
+function buildModules(targetName: string, baseTypes: TypeNode[], targetModule?: string): string[] {
   if (targetName === "rust") {
     return uniqueSorted(["context", ...baseTypes.map((node) => node.group || moduleName(node))]);
   }
 
-  return uniqueSorted(baseTypes.map((node) => sourceFor(targetName, node, node.group || "")));
+  return uniqueSorted(baseTypes.map((node) => sourceFor(targetName, node, node.group || "", targetModule)));
 }
 
 function targetMetadata(rootNamespace: string, targetName: string, target: EmitTarget): Pick<TargetExportSurface, "packageName" | "namespace"> {
@@ -206,10 +208,24 @@ function targetMetadata(rootNamespace: string, targetName: string, target: EmitT
     };
   }
 
+  if (targetName === "swift") {
+    return {
+      packageName: swiftModuleName(target["package-name"] || rootNamespace),
+    };
+  }
+
   return {};
 }
 
-function sourceFor(targetName: string, node: TypeNode, group: string): string {
+function targetModuleName(rootNamespace: string, targetName: string, target: EmitTarget): string | undefined {
+  if (targetName === "swift") {
+    return swiftModuleName(target["package-name"] || rootNamespace);
+  }
+
+  return undefined;
+}
+
+function sourceFor(targetName: string, node: TypeNode, group: string, targetModule?: string): string {
   const name = node.typeName.name;
   switch (targetName) {
     case "typescript":
@@ -224,6 +240,11 @@ function sourceFor(targetName: string, node: TypeNode, group: string): string {
       return group ? `${group}/${name}.cs` : `${name}.cs`;
     case "java":
       return `${name}.java`;
+    case "swift":
+      {
+        const swiftModule = targetModule || swiftModuleName(node.typeName.namespace);
+        return group ? `Sources/${swiftModule}/${group}/${swiftFileName(name)}` : `Sources/${swiftModule}/${swiftFileName(name)}`;
+      }
     default:
       return name;
   }
@@ -243,6 +264,8 @@ function groupModuleName(targetName: string, node: TypeNode): string {
       return `${node.typeName.name}.cs`;
     case "java":
       return `${node.typeName.name}.java`;
+    case "swift":
+      return swiftFileName(node.typeName.name);
     default:
       return moduleName(node);
   }

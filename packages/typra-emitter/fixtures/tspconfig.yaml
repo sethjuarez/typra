@@ -44,6 +44,12 @@ options:
         enum-parsing: "case-insensitive"
         format: false
         protocol-scaffolds: "compile-only"
+      - type: Swift
+        output-dir: "generated/fixtures/swift"
+        test-dir: "generated/fixtures/swift/Tests/TypraFixturesTests"
+        package-name: "TypraFixtures"
+        format: false
+        protocol-scaffolds: "compile-only"
       - type: Markdown
         output-dir: "generated/fixtures/markdown"
         format: false

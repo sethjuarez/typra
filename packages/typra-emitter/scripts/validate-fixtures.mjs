@@ -227,6 +227,7 @@ const GENERATED_TEXT_EXTENSIONS = new Set([
   ".md",
   ".py",
   ".rs",
+  ".swift",
   ".toml",
   ".ts",
   ".yaml",
@@ -234,6 +235,9 @@ const GENERATED_TEXT_EXTENSIONS = new Set([
 ]);
 
 function isGeneratedTextFile(file) {
+  if (file.includes(`${path.sep}.build${path.sep}`)) {
+    return false;
+  }
   return GENERATED_TEXT_EXTENSIONS.has(path.extname(file).toLowerCase());
 }
 
@@ -545,6 +549,93 @@ function runRustTests() {
       rmSync(targetDir, { recursive: true, force: true });
     }
   }
+}
+
+function runSwiftTests() {
+  const sourceDir = path.join(generatedRoot, "swift");
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".swift"));
+  if (sourceFiles.length === 0) {
+    fail("No generated Swift files found to test.");
+    return;
+  }
+
+  if (!commandExists("swift")) {
+    if (process.env.CI_SWIFT_REQUIRED === "1") {
+      fail("Generated Swift validation cannot run because swift is not available.");
+    } else {
+      console.warn("Warning: swift is not available. Skipping generated Swift compile/test validation.");
+    }
+    return;
+  }
+
+  const buildDir = path.join(sourceDir, ".build");
+  const env = { ...process.env };
+  if (process.platform === "win32" && !env.SDKROOT) {
+    const sdkRoot = findSwiftWindowsSdk();
+    if (sdkRoot) {
+      env.SDKROOT = sdkRoot;
+    }
+  }
+  if (process.platform === "win32") {
+    const gitExecPath = findWindowsGitExecPath();
+    if (gitExecPath) {
+      env.GIT_EXEC_PATH = gitExecPath;
+    }
+    env.GIT_CONFIG_COUNT = "1";
+    env.GIT_CONFIG_KEY_0 = "safe.bareRepository";
+    env.GIT_CONFIG_VALUE_0 = "all";
+  }
+  try {
+    runCommand("Generated Swift package tests", "swift", ["test", "--package-path", sourceDir], { cwd: sourceDir, env });
+  } finally {
+    if (existsSync(buildDir)) {
+      rmSync(buildDir, { recursive: true, force: true });
+    }
+  }
+}
+
+function findSwiftWindowsSdk() {
+  const localAppData = process.env.LOCALAPPDATA;
+  if (!localAppData) return undefined;
+  const platformsRoot = path.join(localAppData, "Programs", "Swift", "Platforms");
+  if (!existsSync(platformsRoot)) return undefined;
+  const versions = readdirSync(platformsRoot)
+    .map(version => path.join(platformsRoot, version, "Windows.platform", "Developer", "SDKs", "Windows.sdk"))
+    .filter(candidate => existsSync(candidate));
+  return versions.sort((left, right) => right.localeCompare(left))[0];
+}
+
+function findWindowsGitExecPath() {
+  const inherited = process.env.GIT_EXEC_PATH;
+  if (inherited && existsSync(path.join(inherited, "git-remote-https.exe"))) {
+    return inherited;
+  }
+
+  const candidates = [];
+  try {
+    const gitPaths = execFileSync("where", ["git"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+    for (const gitPath of gitPaths) {
+      const normalized = path.normalize(gitPath);
+      const lower = normalized.toLowerCase();
+      if (lower.endsWith(`${path.sep}cmd${path.sep}git.exe`)) {
+        candidates.push(path.join(path.dirname(path.dirname(normalized)), "mingw64", "libexec", "git-core"));
+      } else if (lower.endsWith(`${path.sep}mingw64${path.sep}bin${path.sep}git.exe`)) {
+        candidates.push(path.join(path.dirname(path.dirname(normalized)), "libexec", "git-core"));
+      }
+    }
+  } catch {
+    // Fall through to common install locations.
+  }
+
+  candidates.push(
+    "C:\\Program Files\\Git\\mingw64\\libexec\\git-core",
+    "C:\\Program Files (x86)\\Git\\mingw64\\libexec\\git-core",
+  );
+
+  return candidates.find(candidate => existsSync(path.join(candidate, "git-remote-https.exe")));
 }
 
 function runCSharpBuild() {
@@ -1171,7 +1262,7 @@ function runExecutableConformance() {
 }
 
 function assertGeneratedTargets() {
-  for (const target of ["typescript", "python", "go", "java", "csharp", "rust", "markdown", "json-ast"]) {
+  for (const target of ["typescript", "python", "go", "java", "csharp", "rust", "swift", "markdown", "json-ast"]) {
     requirePath(path.join("generated", "fixtures", target));
   }
 }
@@ -1309,6 +1400,25 @@ function assertStaticFixtureCoverage() {
     "panic!(\"EventSink.emit is a compile-only protocol scaffold.\")",
   );
   assertIncludes(
+    path.join("generated", "fixtures", "swift", "Sources", "TypraFixtures", "fixture_root.swift"),
+    "public struct FixtureRoot: TypraModel",
+    "public static func load(_ data: Any",
+    "public func save(_ context: SaveContext",
+    "try FixtureContent.load(value, context: context)",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "swift", "Sources", "TypraFixtures", "wire_options.swift"),
+    "public func toWire(_ provider: String",
+    "max_completion_tokens",
+    "max_tokens",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "swift", "Tests", "TypraFixturesTests", "ProtocolScaffoldsTests.swift"),
+    "final class ProtocolScaffoldsTests",
+    "final class CompileOnlyEventSink: EventSink",
+    "EventSink.emit is a compile-only protocol scaffold.",
+  );
+  assertIncludes(
     path.join("generated", "fixtures", "markdown", "FixtureRoot.md"),
     "FixtureOwner",
     "FixtureContent",
@@ -1346,7 +1456,7 @@ function assertExportSurfaceSnapshot() {
   }
 
   const targets = new Map((snapshot.targets ?? []).map(target => [target.target, target]));
-  for (const target of ["typescript", "python", "go", "java", "csharp", "rust", "markdown"]) {
+  for (const target of ["typescript", "python", "go", "java", "csharp", "rust", "swift", "markdown"]) {
     if (!targets.has(target)) {
       fail(`Export surface snapshot is missing target: ${target}`);
     }
@@ -1554,10 +1664,20 @@ function assertActualGeneratedSurface() {
     path.join("generated", "fixtures", "rust", "pipeline", "event_sink.rs"),
     "fn emit(&self, event: &serde_json::Value) -> ();",
   );
+  assertIncludes(
+    path.join("generated", "fixtures", "swift", "Package.swift"),
+    'name: "TypraFixtures"',
+    '.testTarget(name: "TypraFixturesTests"',
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "swift", "Sources", "TypraFixtures", "pipeline", "event_sink.swift"),
+    "public protocol EventSink",
+    "func emit(event: Any) throws",
+  );
 }
 
 function assertNoEmptyTargetDirs() {
-  for (const target of ["typescript", "python", "go", "java", "csharp", "rust", "markdown"]) {
+  for (const target of ["typescript", "python", "go", "java", "csharp", "rust", "swift", "markdown"]) {
     const dir = path.join(generatedRoot, target);
     if (existsSync(dir) && statSync(dir).isDirectory() && walkFiles(dir).length === 0) {
       fail(`Generated target directory is empty: ${target}`);
@@ -1580,6 +1700,7 @@ runGeneratedTypeScriptCompile();
 runPythonCompile();
 runGoTests();
 runRustTests();
+runSwiftTests();
 runCSharpBuild();
 runCSharpProtocolScaffoldBuild();
 runJavaBuild();
