@@ -205,7 +205,7 @@ emit-targets:
   tests/scaffolds.
 - `Go`: Go structs with JSON/YAML support, scalar shorthand helpers,
   propagated child-load errors, polymorphic dispatch, and generated tests.
-- `Java`: Java model surfaces and generated fixture tests.
+- `Java`: Java model surfaces with JSON/YAML helpers and generated fixture tests.
 - `Rust`: Rust model surfaces with optional case-insensitive enum parsing.
 - `Markdown`: reference documentation generated from the contract graph.
 - JSON AST: `json-ast/model.json` emitted for every TypeSpec generation.

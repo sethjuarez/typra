@@ -11,7 +11,7 @@ import { toPascalCase } from "../../ir/visitor.js";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import { buildBaseTestContext, TestContextOptions } from "../../testing/test-context.js";
 import { emitJavaFileContent } from "./emitter.js";
-import { emitJavaContext, emitJavaJson, emitJavaMaps, emitJavaSaveContext } from "./scaffolding.js";
+import { emitJavaContext, emitJavaJson, emitJavaMaps, emitJavaSaveContext, emitJavaYaml } from "./scaffolding.js";
 import { emitJavaTest, emitJavaTestRunner, javaTestClassName } from "./test-emitter.js";
 import { JavaExprVisitor } from "./visitor.js";
 import { collectProtocolNodes, emitJavaProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
@@ -64,6 +64,7 @@ export const generateJava = async (
   await emitJavaFile(context, "SaveContext.java", emitJavaSaveContext(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
   await emitJavaFile(context, "TypraMaps.java", emitJavaMaps(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
   await emitJavaFile(context, "TypraJson.java", emitJavaJson(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
+  await emitJavaFile(context, "TypraYaml.java", emitJavaYaml(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
 
   const testClassNames: string[] = [];
   for (const n of nodes) {

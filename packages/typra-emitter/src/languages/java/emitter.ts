@@ -149,7 +149,7 @@ function emitType(
     emitToWire(type.wire, lines);
   }
 
-  emitJsonHelpers(typeName, lines);
+  emitSerializationHelpers(typeName, lines);
   for (const factory of type.factories) {
     emitFactory(typeName, factory, visitor, lines);
   }
@@ -290,7 +290,15 @@ function emitSaveField(name: string, category: PropertyCategory, enumName: strin
       lines.push(`    if (obj.${name} != null) result.put("${name}", obj.${name}.save(ctx));`);
       break;
     case "collection_scalar":
-      lines.push(`    if (obj.${name} != null) result.put("${name}", new ArrayList<>(obj.${name}));`);
+      if (enumName) {
+        lines.push(`    if (obj.${name} != null) {`);
+        lines.push("      List<Object> items = new ArrayList<>();");
+        lines.push(`      for (${enumName} item : obj.${name}) items.add(item.value);`);
+        lines.push(`      result.put("${name}", items);`);
+        lines.push("    }");
+      } else {
+        lines.push(`    if (obj.${name} != null) result.put("${name}", new ArrayList<>(obj.${name}));`);
+      }
       break;
     case "collection_complex":
       lines.push(`    if (obj.${name} != null) {`);
@@ -338,9 +346,21 @@ function emitToWire(wire: WireDecl, lines: string[]): void {
   lines.push("");
 }
 
-function emitJsonHelpers(typeName: string, lines: string[]): void {
+function emitSerializationHelpers(typeName: string, lines: string[]): void {
+  lines.push("  public String toYaml() {");
+  lines.push("    return TypraYaml.stringify(save(new SaveContext()));");
+  lines.push("  }");
+  lines.push("");
   lines.push("  public String toJson() {");
   lines.push("    return TypraJson.stringify(save(new SaveContext()));");
+  lines.push("  }");
+  lines.push("");
+  lines.push(`  public static ${typeName} fromYaml(String yaml) {`);
+  lines.push("    return fromYaml(yaml, new LoadContext());");
+  lines.push("  }");
+  lines.push("");
+  lines.push(`  public static ${typeName} fromYaml(String yaml, LoadContext context) {`);
+  lines.push("    return load(TypraYaml.parse(yaml), context);");
   lines.push("  }");
   lines.push("");
   lines.push(`  public static ${typeName} fromJson(String json) {`);
