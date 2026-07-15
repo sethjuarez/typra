@@ -201,11 +201,13 @@ emit-targets:
 - `Go`: Go structs with JSON/YAML support and generated tests.
 - `Java`: Java model surfaces and generated fixture tests.
 - `Rust`: Rust model surfaces with optional case-insensitive enum parsing.
+- `Swift`: SwiftPM package output with JSON/YAML helpers backed by Foundation
+  and Yams, generated XCTest coverage, and protocol compile scaffolds.
 - `Markdown`: reference documentation generated from the contract graph.
 - JSON AST: `json-ast/model.json` emitted for every TypeSpec generation.
 
 The fixture validation flow exercises TypeScript, Python, C#, Go, Java, Rust,
-Markdown, and JSON AST generation.
+Swift, Markdown, and JSON AST generation.
 
 ## CLI
 
