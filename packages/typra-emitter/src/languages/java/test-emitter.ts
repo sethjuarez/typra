@@ -36,6 +36,7 @@ export function emitJavaTest(ctx: BaseTestContext): string {
       emitExampleTest(lines, typeName, ctx.node, example, index + 1);
     });
     emitInvalidJsonTest(lines, typeName);
+    emitInvalidYamlTest(lines, typeName);
   }
 
   ctx.coercions.forEach((coercion, index) => {
@@ -71,11 +72,14 @@ export function emitJavaTestRunner(packageName: string, testClassNames: string[]
 
 function emitExampleTest(lines: string[], typeName: string, node: TypeNode, example: TestExample, index: number): void {
   lines.push("");
-  lines.push(`    // ${typeName} example ${index}: fromJson, save, and reload`);
+  lines.push(`    // ${typeName} example ${index}: fromJson, fromYaml, save, and reload`);
   const jsonData = `jsonData${index}`;
   lines.push(...javaTextBlock(jsonData, example.json));
   lines.push(`    ${typeName} instance${index} = ${typeName}.fromJson(${jsonData});`);
   emitExampleValidations(lines, `instance${index}`, node, example);
+  lines.push(`    String yamlRoundtrip${index} = instance${index}.toYaml();`);
+  lines.push(`    ${typeName} fromYaml${index} = ${typeName}.fromYaml(yamlRoundtrip${index});`);
+  emitExampleValidations(lines, `fromYaml${index}`, node, example);
   lines.push(`    ${typeName} reloaded${index} = ${typeName}.load(instance${index}.save(new SaveContext()), new LoadContext());`);
   emitExampleValidations(lines, `reloaded${index}`, node, example);
 }
@@ -85,6 +89,11 @@ function emitInvalidJsonTest(lines: string[], typeName: string): void {
   lines.push(`    assertThrows(() -> ${typeName}.fromJson("{"), "${typeName}.fromJson should reject malformed JSON");`);
 }
 
+function emitInvalidYamlTest(lines: string[], typeName: string): void {
+  lines.push("");
+  lines.push(`    assertThrows(() -> ${typeName}.fromYaml(":\\n  broken"), "${typeName}.fromYaml should reject malformed YAML");`);
+}
+
 function emitCoercionTest(lines: string[], typeName: string, coercion: CoercionTest, index: number): void {
   if (coercion.scalarType !== "string") return;
   lines.push("");
@@ -92,6 +101,11 @@ function emitCoercionTest(lines: string[], typeName: string, coercion: CoercionT
   lines.push(`    ${typeName} ${coerced} = ${typeName}.fromJson(${javaString(JSON.stringify(coercion.value))});`);
   for (const validation of coercion.validations) {
     emitValidation(lines, coerced, validation);
+  }
+  const coercedYaml = `coercedYaml${index}`;
+  lines.push(`    ${typeName} ${coercedYaml} = ${typeName}.fromYaml(${javaString(JSON.stringify(coercion.value))});`);
+  for (const validation of coercion.validations) {
+    emitValidation(lines, coercedYaml, validation);
   }
 }
 

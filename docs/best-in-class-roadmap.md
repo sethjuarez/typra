@@ -6,7 +6,7 @@ Typra is now in a strong "ship after review" state for the current emitter work.
 
 Define a language-neutral semantic contract and make every target prove it with executable tests.
 
-- Cover `load`, `save`, `fromJson`, `toJson`, provider wire mappings, scalar coercions, enums, open enums, polymorphic dispatch, optionals, null handling, and error behavior.
+- Cover `load`, `save`, `fromJson`, `toJson`, `fromYaml`, `toYaml`, provider wire mappings, scalar coercions, enums, open enums, polymorphic dispatch, optionals, null handling, and error behavior.
 - Track each semantic feature by target language in a generated conformance matrix.
 - Treat missing or divergent semantics as explicit gaps, not implicit emitter behavior.
 

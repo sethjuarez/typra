@@ -82,7 +82,9 @@
               "result.metadata = copyMap(dict);",
               "result.owner = FixtureOwner.load",
               "result.content = FixtureContent.load",
-              "result.put(\"content\", obj.content.save(ctx))"
+              "result.put(\"content\", obj.content.save(ctx))",
+              "public String toYaml()",
+              "public static FixtureRoot fromYaml(String yaml)"
             ]
           },
           {
@@ -91,7 +93,9 @@
               "Expected content to be TextContent",
               "hello from a polymorphic sample",
               "Expected contentItems[0] to be TextContent",
-              "hello from a polymorphic collection"
+              "hello from a polymorphic collection",
+              "String yamlRoundtrip1 = instance1.toYaml();",
+              "FixtureRoot fromYaml1 = FixtureRoot.fromYaml(yamlRoundtrip1);"
             ]
           }
         ],
