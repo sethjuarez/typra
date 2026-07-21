@@ -34,9 +34,14 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
       type: "array",
       items: {
         type: "object",
+        additionalProperties: false,
         properties: {
           "type": {
-            type: "string"
+            type: "string",
+            enum: [
+              "TypeScript", "Python", "CSharp", "Go", "Java", "Rust", "Swift", "Markdown",
+              "typescript", "python", "csharp", "go", "java", "rust", "swift", "markdown",
+            ],
           },
           "output-dir": {
             type: "string",

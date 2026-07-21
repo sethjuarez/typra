@@ -1,6 +1,6 @@
 {
   "name": "@typra/emitter",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "description": "Generic TypeSpec emitter for generating multi-runtime model surfaces",
   "license": "MIT",
   "repository": {
@@ -63,6 +63,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepack": "npm run build",
     "watch": "tsc --watch",
     "generate:fixtures": "tsp compile ./fixtures/shapes/main.tsp --config ./fixtures/tspconfig.yaml",
     "validate:fixtures": "node ./scripts/validate-fixtures.mjs",

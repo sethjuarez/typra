@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { generate, TargetLanguage } from "./generate.js";
+import { generate, SUPPORTED_TARGET_LANGUAGES, TargetLanguage } from "./generate.js";
 import { parseArgs } from "util";
 
 const HELP = `
@@ -12,7 +12,8 @@ Usage:
 Options:
   -o, --output <dir>       Output directory (required)
   -t, --targets <list>     Comma-separated list of targets (default: python,csharp,typescript,go)
-  -r, --root-object <name> Root object to generate from (default: Typra.FixtureRoot)
+  -s, --spec <path>        TypeSpec entrypoint (default: bundled fixture)
+  -r, --root-object <name> Root object to generate from (default: Typra.Fixtures.FixtureRoot)
   --omit <list>            Comma-separated list of models to omit
   -n, --namespace <name>   Root namespace for generated code (default: Typra)
   --no-tests               Skip generating test files
@@ -21,14 +22,14 @@ Options:
   -h, --help               Show this help message
 
 Examples:
-  # Generate all runtimes to ./generated
+  # Generate the default runtimes to ./generated
   npx typra-generate -o ./generated
 
   # Generate only Python and C# 
   npx typra-generate -o ./lib -t python,csharp
 
   # Generate a different root object
-  npx typra-generate -o ./lib -r Typra.Widget
+  npx typra-generate -o ./lib --spec ./typespec/main.tsp -r MyProject.Widget
 
   # Omit specific models
   npx typra-generate -o ./lib --omit LegacyWidget
@@ -38,6 +39,9 @@ Targets:
   csharp       C# classes with System.Text.Json serialization
   typescript   TypeScript interfaces with js-yaml serialization
   go           Go structs with encoding/json and gopkg.in/yaml.v3
+  java         Java model surfaces with JSON/YAML serialization
+  rust         Rust model surfaces with serde JSON/YAML serialization
+  swift        SwiftPM package output with Foundation and Yams
   markdown     Markdown documentation
 `;
 
@@ -46,6 +50,7 @@ async function main() {
     options: {
       output: { type: "string", short: "o" },
       targets: { type: "string", short: "t" },
+      spec: { type: "string", short: "s" },
       "root-object": { type: "string", short: "r" },
       omit: { type: "string" },
       namespace: { type: "string", short: "n" },
@@ -75,7 +80,7 @@ async function main() {
   const targets = targetsString.split(",").map(t => t.trim().toLowerCase()) as TargetLanguage[];
 
   // Validate targets
-  const validTargets = ["python", "csharp", "typescript", "go", "markdown"];
+  const validTargets: readonly string[] = SUPPORTED_TARGET_LANGUAGES;
   for (const target of targets) {
     if (!validTargets.includes(target)) {
       console.error(`Error: Invalid target "${target}". Valid targets: ${validTargets.join(", ")}`);
@@ -89,7 +94,7 @@ async function main() {
   console.log(`\n🚀 Typra Generator\n`);
   console.log(`  Output:      ${output}`);
   console.log(`  Targets:     ${targets.join(", ")}`);
-  console.log(`  Root Object: ${values["root-object"] || "Typra.FixtureRoot"}`);
+  console.log(`  Root Object: ${values["root-object"] || "Typra.Fixtures.FixtureRoot"}`);
   if (omit.length > 0) {
     console.log(`  Omitting:    ${omit.join(", ")}`);
   }
@@ -98,7 +103,8 @@ async function main() {
   const result = await generate({
     output,
     targets,
-    rootObject: values["root-object"] || "Typra.FixtureRoot",
+    source: values.spec,
+    rootObject: values["root-object"] || "Typra.Fixtures.FixtureRoot",
     omit,
     namespace: values.namespace,
     generateTests: !values["no-tests"],

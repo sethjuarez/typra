@@ -88,7 +88,11 @@ function emitExampleTest(lines: string[], node: TypeNode, typeName: string, exam
   lines.push(`    let instance = try ${typeName}.fromJSON(json)`);
   emitValidations(lines, "instance", example, node);
   lines.push("    let reloaded = try " + typeName + ".fromJSON(try instance.toJSON())");
+  const jsonReloadValidationStart = lines.length;
   emitValidations(lines, "reloaded", example, node);
+  if (lines.length === jsonReloadValidationStart) {
+    lines.push("    _ = reloaded");
+  }
   lines.push("  }");
   lines.push("");
   lines.push(`  func testYAMLRoundTrip${index + 1}() throws {`);
@@ -96,7 +100,11 @@ function emitExampleTest(lines: string[], node: TypeNode, typeName: string, exam
   lines.push(`    let instance = try ${typeName}.fromYAML(yaml)`);
   emitValidations(lines, "instance", example, node);
   lines.push("    let reloaded = try " + typeName + ".fromYAML(try instance.toYAML())");
+  const yamlReloadValidationStart = lines.length;
   emitValidations(lines, "reloaded", example, node);
+  if (lines.length === yamlReloadValidationStart) {
+    lines.push("    _ = reloaded");
+  }
   lines.push("  }");
   lines.push("");
 }

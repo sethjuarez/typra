@@ -19,20 +19,20 @@ Typra currently validates against TypeSpec compiler and JSON schema emitter
 set `allow-unsupported-typespec-version: true` only when you intentionally accept
 possible generated output churn.
 
-## 0.3.0 release highlights
+## 0.4.0 release highlights
 
-`0.3.0` adds Java as a generated runtime target and expands executable fixture
-confidence across the supported languages:
+This release makes the published CLI and release pipeline dependable across all
+supported targets:
 
-- Java model emission with `load`, `save`, `fromJson`, `toJson`, provider wire
-  mapping, scalar coercion, enum handling, and polymorphic dispatch support.
-- Generated Java fixture tests that compile and run during fixture validation.
-- Stronger Go fixture tests and runtime behavior for scalar slices, JSON
-  round-trips, polymorphic values, scalar shorthand JSON/YAML helpers, child-load
-  error propagation, and malformed JSON handling.
-- Executable cross-language fixture conformance across TypeScript, Python, C#,
-  Go, Java, and Rust.
-- CI setup for Go and Java toolchains.
+- `typra-generate` supports every emitted runtime, accepts a `--spec`
+  TypeSpec entrypoint, and resolves the installed TypeSpec compiler directly.
+- Invalid programmatic targets and misspelled `emit-targets` configuration now
+  fail clearly instead of being ignored.
+- Consumer smoke commands and verification paths resolve from the smoke-config
+  directory.
+- Publish runs generated-fixture validation, including Swift, and npm packing
+  always builds the distributable artifacts.
+- Cross-language conformance evidence now includes Swift.
 
 ## Configure TypeSpec
 
@@ -83,7 +83,7 @@ The package includes `typra-generate`, `typra-verify`, and a generic
 
 ```powershell
 npx typra-generate --help
-npx typra-generate --deterministic -o ./generated
+npx typra-generate --spec ./typespec/main.tsp --root-object MyProject.ApiRoot --deterministic -o ./generated
 npx typra-verify --baseline ./baseline --current ./generated
 npx typra-consumer-smoke --config ./typra-smoke.json
 ```

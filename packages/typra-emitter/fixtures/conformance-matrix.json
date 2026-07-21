@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "targets": ["typescript", "python", "csharp", "go", "java", "rust"],
+  "targets": ["typescript", "python", "csharp", "go", "java", "rust", "swift"],
   "cases": [
     {
       "id": "fixture-root-sample-shape",
@@ -110,6 +110,17 @@
               "result.insert(\"content\".to_string(), self.content.clone())"
             ]
           }
+        ],
+        "swift": [
+          {
+            "path": "generated/fixtures/swift/Sources/TypraFixtures/fixture_root.swift",
+            "snippets": [
+              "public var tags: [String] = []",
+              "instance.owner = try FixtureOwner.load(value, context: context)",
+              "instance.content = try FixtureContent.load(value, context: context)",
+              "result[\"content\"] = try self.content.save(context)"
+            ]
+          }
         ]
       }
     },
@@ -203,6 +214,16 @@
               "result.insert(\"text\".to_string()"
             ]
           }
+        ],
+        "swift": [
+          {
+            "path": "generated/fixtures/swift/Sources/TypraFixtures/fixture_content.swift",
+            "snippets": [
+              "case \"text\": return .textContent(try TextContent.load(data, context: context))",
+              "case \"image\": return .imageContent(try ImageContent.load(data, context: context))",
+              "case .textContent(let value): return try value.save(context)"
+            ]
+          }
         ]
       }
     },
@@ -289,6 +310,16 @@
               "result.insert(wire_name.to_string(), value)"
             ]
           }
+        ],
+        "swift": [
+          {
+            "path": "generated/fixtures/swift/Sources/TypraFixtures/wire_options.swift",
+            "snippets": [
+              "public func toWire(_ provider: String, context: SaveContext = SaveContext()) throws -> [String: Any]",
+              "case \"openai\": wireNameMaxOutputTokens = \"max_completion_tokens\"",
+              "case \"anthropic\": wireNameMaxOutputTokens = \"max_tokens\""
+            ]
+          }
         ]
       }
     },
@@ -362,6 +393,16 @@
             "snippets": [
               "if let Some(s) = value.as_str()",
               "label: Some(\"coerced reference\".to_string())"
+            ]
+          }
+        ],
+        "swift": [
+          {
+            "path": "generated/fixtures/swift/Sources/TypraFixtures/fixture_reference.swift",
+            "snippets": [
+              "if let scalar = data as? String {",
+              "instance.id = try TypraRuntime.string(scalar, field: \"id\")",
+              "instance.label = \"coerced reference\""
             ]
           }
         ]
