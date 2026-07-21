@@ -223,6 +223,7 @@ The package includes convenience binaries:
 
 ```powershell
 npx typra-generate --help
+npx typra-generate --spec ./typespec/main.tsp --root-object Todo.Contracts.TodoList --output ./generated
 npx typra-verify --baseline ./baseline --current ./generated
 npx typra-consumer-smoke --config ./typra-smoke.json
 ```

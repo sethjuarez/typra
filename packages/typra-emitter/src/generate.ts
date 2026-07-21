@@ -1,16 +1,29 @@
 import path from "path";
 import { fileURLToPath } from "url";
-import { execSync, execFileSync } from "child_process";
+import { execFileSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "fs";
+import { createRequire } from "module";
 import * as YAML from "yaml";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+
+export const SUPPORTED_TARGET_LANGUAGES = [
+  "python",
+  "csharp",
+  "typescript",
+  "go",
+  "java",
+  "rust",
+  "swift",
+  "markdown",
+] as const;
 
 /**
  * Target language for code generation.
  */
-export type TargetLanguage = "python" | "csharp" | "typescript" | "go" | "java" | "rust" | "swift" | "markdown";
+export type TargetLanguage = typeof SUPPORTED_TARGET_LANGUAGES[number];
 
 /**
  * Options for a specific target language.
@@ -45,8 +58,14 @@ export interface GenerateOptions {
   targets?: TargetLanguage[] | Record<TargetLanguage, TargetOptions>;
 
   /**
+   * TypeSpec entrypoint to compile.
+   * @default The package's bundled fixture entrypoint.
+   */
+  source?: string;
+
+  /**
    * Root object to start generation from.
-   * @default "Typra.FixtureRoot"
+   * @default "Typra.Fixtures.FixtureRoot"
    */
   rootObject?: string;
 
@@ -115,7 +134,8 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
   const {
     output,
     targets = ["python", "csharp", "typescript", "go"],
-    rootObject = "Typra.FixtureRoot",
+    source,
+    rootObject = "Typra.Fixtures.FixtureRoot",
     omit = [],
     namespace = "Typra",
     rootAlias,
@@ -123,11 +143,33 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     format = true,
     deterministic = false,
   } = options;
+  const targetNames = Array.isArray(targets) ? targets : Object.keys(targets);
+  const unsupportedTargets = targetNames.filter(
+    (target): target is string => !SUPPORTED_TARGET_LANGUAGES.includes(target as TargetLanguage),
+  );
 
-  // Resolve the model path (inside the package)
-  // __dirname is dist/src at runtime, so we need to go up two levels to package root
+  if (unsupportedTargets.length > 0) {
+    return {
+      success: false,
+      outputDir: path.resolve(output),
+      targets: targetNames,
+      errors: [`Unsupported target language(s): ${unsupportedTargets.join(", ")}. Supported targets: ${SUPPORTED_TARGET_LANGUAGES.join(", ")}.`],
+    };
+  }
+
+  // __dirname is dist/src at runtime, so we need to go up two levels to package root.
   const packageRoot = path.resolve(__dirname, "../..");
-  const modelPath = path.resolve(packageRoot, "lib/model/main.tsp");
+  const modelPath = source
+    ? path.resolve(source)
+    : path.resolve(packageRoot, "fixtures", "shapes", "main.tsp");
+  if (!existsSync(modelPath)) {
+    return {
+      success: false,
+      outputDir: path.resolve(output),
+      targets: targetNames,
+      errors: [`TypeSpec entrypoint does not exist: ${modelPath}`],
+    };
+  }
 
   // Ensure output directory exists
   const outputDir = path.resolve(output);
@@ -159,8 +201,8 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
   writeFileSync(tempConfigPath, YAML.stringify(tspConfig));
 
   try {
-    // Run tsp compile — use execFileSync to avoid shell injection
-    execFileSync("tsp", ["compile", modelPath, "--config", tempConfigPath], {
+    // Resolve the peer dependency directly so the API and CLI work outside npm scripts.
+    execFileSync(process.execPath, [resolveTypeSpecCli(), "compile", modelPath, "--config", tempConfigPath], {
       stdio: "inherit",
       cwd: outputDir,
     });
@@ -168,13 +210,13 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     return {
       success: true,
       outputDir,
-      targets: Array.isArray(targets) ? targets : Object.keys(targets),
+      targets: targetNames,
     };
   } catch (error) {
     return {
       success: false,
       outputDir,
-      targets: Array.isArray(targets) ? targets : Object.keys(targets),
+      targets: targetNames,
       errors: [error instanceof Error ? error.message : String(error)],
     };
   } finally {
@@ -184,7 +226,14 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     } catch {
       // Ignore cleanup errors
     }
+
   }
+}
+
+function resolveTypeSpecCli(): string {
+  const compilerEntry = require.resolve("@typespec/compiler");
+  const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+  return path.join(compilerRoot, "cmd", "tsp.js");
 }
 
 function buildEmitTargets(

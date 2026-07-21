@@ -2,6 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { parseArgs } from "node:util";
 import { verifyTypraMetadata } from "./verify/index.js";
 
@@ -50,21 +51,23 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const config = readConfig(values.config);
-  runCommands("install", config.install ?? []);
-  runCommands("generate", config.generate ?? []);
+  const configPath = path.resolve(values.config);
+  const configDirectory = path.dirname(configPath);
+  const config = readConfig(configPath);
+  runCommands("install", config.install ?? [], configDirectory);
+  runCommands("generate", config.generate ?? [], configDirectory);
   if (config.verify) {
     const result = verifyTypraMetadata({
-      baselineRoot: config.verify.baseline,
-      currentRoot: config.verify.current,
-      configPath: config.verify.config,
+      baselineRoot: path.resolve(configDirectory, config.verify.baseline),
+      currentRoot: path.resolve(configDirectory, config.verify.current),
+      configPath: config.verify.config ? path.resolve(configDirectory, config.verify.config) : undefined,
     });
     if (!result.ok) {
       console.error(JSON.stringify(result, null, 2));
       process.exit(1);
     }
   }
-  runCommands("smoke", config.smoke ?? []);
+  runCommands("smoke", config.smoke ?? [], configDirectory);
 }
 
 function readConfig(configPath: string): ConsumerSmokeConfig {
@@ -83,11 +86,11 @@ function readConfig(configPath: string): ConsumerSmokeConfig {
   return config;
 }
 
-function runCommands(label: string, commands: string[]): void {
+function runCommands(label: string, commands: string[], cwd: string): void {
   for (const command of commands) {
     console.log(`[typra-consumer-smoke:${label}] ${command}`);
     execFileSync(command, {
-      cwd: process.cwd(),
+      cwd,
       shell: true,
       stdio: "inherit",
     });
