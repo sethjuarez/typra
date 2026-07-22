@@ -40,6 +40,11 @@ export interface TypraVerifySummary {
     ownershipChanged: number;
   };
   packageNamesChanged: number;
+  modules: {
+    added: number;
+    removed: number;
+    changedTargets: number;
+  };
   modulesChanged: number;
   toolchain: {
     changed: number;
@@ -68,6 +73,7 @@ export interface TypraVerifyResult {
   summary: TypraVerifySummary;
   failures: TypraVerifyFailure[];
   schemaEvolution: SchemaEvolutionChange[];
+  moduleChanges: TargetModuleChange[];
   conformanceMap: ConformanceMapEntry[];
   staleCleanupDryRun: StaleCleanupCandidate[];
   hydrationBoundaries: HydrationBoundaryReport;
@@ -81,6 +87,12 @@ export interface SchemaNode {
   discriminator?: string;
   childTypes?: SchemaNode[];
   properties?: SchemaProperty[];
+}
+
+export interface TargetModuleChange {
+  target: string;
+  added: string[];
+  removed: string[];
 }
 
 export interface SchemaProperty {
@@ -157,6 +169,7 @@ const EMPTY_SUMMARY: TypraVerifySummary = {
   protocols: { added: 0, removed: 0, changed: 0 },
   files: { added: 0, deleted: 0, ownershipChanged: 0 },
   packageNamesChanged: 0,
+  modules: { added: 0, removed: 0, changedTargets: 0 },
   modulesChanged: 0,
   toolchain: { changed: 0, unsupported: 0 },
   protectedPathTouches: 0,
@@ -221,8 +234,9 @@ export function compareTypraMetadata(
 ): TypraVerifyResult {
   const summary = cloneSummary();
   const failures: TypraVerifyFailure[] = [];
+  const moduleChanges: TargetModuleChange[] = [];
 
-  compareSnapshotIdentity(baseline.exportSurface, current.exportSurface, summary, failures);
+  compareSnapshotIdentity(baseline.exportSurface, current.exportSurface, summary, failures, moduleChanges);
   compareToolchain(baseline.exportSurface, current.exportSurface, summary, failures);
   compareExports(baseline.exportSurface, current.exportSurface, summary, failures);
   compareProtocols(baseline.exportSurface, current.exportSurface, summary, failures);
@@ -244,6 +258,7 @@ export function compareTypraMetadata(
     summary,
     failures,
     schemaEvolution,
+    moduleChanges,
     conformanceMap,
     staleCleanupDryRun,
     hydrationBoundaries,
@@ -257,7 +272,7 @@ export function formatVerifySummary(result: TypraVerifyResult): string {
     `protocols: +${result.summary.protocols.added} / -${result.summary.protocols.removed} / changed ${result.summary.protocols.changed}`,
     `files: +${result.summary.files.added} / deleted ${result.summary.files.deleted} / ownership changed ${result.summary.files.ownershipChanged}`,
     `package names changed: ${result.summary.packageNamesChanged}`,
-    `modules changed: ${result.summary.modulesChanged}`,
+    `modules: +${result.summary.modules.added} / -${result.summary.modules.removed} / targets changed ${result.summary.modules.changedTargets}`,
     `toolchain changed: ${result.summary.toolchain.changed} / unsupported ${result.summary.toolchain.unsupported}`,
     `protected path touches: ${result.summary.protectedPathTouches}`,
     `hydration zone touches: ${result.summary.hydrationZoneTouches}`,
@@ -304,8 +319,14 @@ function formatAdditionalGuidance(result: TypraVerifyResult): string[] {
   if (result.summary.files.ownershipChanged > 0) {
     guidance.push("generated ownership metadata changed; review marker/output-root changes before accepting the baseline.");
   }
-  if (result.summary.toolchain.changed > 0 || result.summary.packageNamesChanged > 0 || result.summary.modulesChanged > 0) {
+  if (result.summary.toolchain.changed > 0 || result.summary.packageNamesChanged > 0) {
     guidance.push("option or version drift is present; compare export-surfaces.json and report.json before accepting the baseline.");
+  }
+  if (result.summary.modules.added > 0) {
+    guidance.push("target module additions are compatible drift; inspect moduleChanges in --json output before accepting the baseline.");
+  }
+  if (result.summary.modules.removed > 0) {
+    guidance.push("target module removals are blocking; inspect moduleChanges in --json output before accepting the baseline.");
   }
   if (result.summary.staleCleanupCandidates > 0) {
     guidance.push("stale cleanup candidates are available in --json output; delete only entries marked safe after review.");
@@ -318,6 +339,7 @@ function compareSnapshotIdentity(
   current: ExportSurfaceSnapshot,
   summary: TypraVerifySummary,
   failures: TypraVerifyFailure[],
+  moduleChanges: TargetModuleChange[],
 ): void {
   if (baseline.emitter !== current.emitter || baseline.version !== current.version) {
     addFailure(failures, "snapshot.identity", `Snapshot identity changed from ${baseline.emitter}@${baseline.version} to ${current.emitter}@${current.version}.`);
@@ -344,9 +366,17 @@ function compareSnapshotIdentity(
       summary.packageNamesChanged += 1;
       addFailure(failures, "target.namespace", `${target} namespace changed from ${left.namespace ?? "<none>"} to ${right.namespace ?? "<none>"}.`);
     }
-    if (stableStringify(left.modules) !== stableStringify(right.modules)) {
+    const added = sortedDifference(right.modules, left.modules);
+    const removed = sortedDifference(left.modules, right.modules);
+    if (added.length > 0 || removed.length > 0) {
       summary.modulesChanged += 1;
-      addFailure(failures, "target.modules", `${target} module list changed.`);
+      summary.modules.changedTargets += 1;
+      summary.modules.added += added.length;
+      summary.modules.removed += removed.length;
+      moduleChanges.push({ target, added, removed });
+    }
+    if (removed.length > 0) {
+      addFailure(failures, "target.modules.removed", `${target} modules were removed: ${removed.join(", ")}.`);
     }
   }
 }
@@ -774,6 +804,7 @@ function classifyBreakingChange(
     summary.exports.added > 0 ||
     summary.protocols.added > 0 ||
     summary.files.added > 0 ||
+    summary.modules.added > 0 ||
     summary.schema.addedOptionalProperties > 0 ||
     summary.schema.addedTypes > 0
   ) {
@@ -868,6 +899,13 @@ function cloneSummary(): TypraVerifySummary {
 
 function sortedUnion(left: string[], right: string[]): string[] {
   return Array.from(new Set([...left, ...right])).sort((a, b) => a.localeCompare(b));
+}
+
+function sortedDifference(left: string[], right: string[]): string[] {
+  const rightEntries = new Set(right);
+  return Array.from(new Set(left))
+    .filter((entry) => !rightEntries.has(entry))
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function compareFailures(left: TypraVerifyFailure, right: TypraVerifyFailure): number {
