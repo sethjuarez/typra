@@ -30,7 +30,7 @@ npx typra-verify --baseline ./baseline --current ./generated
 
 `typra-verify` compares committed `.typra-generated` metadata against current generated metadata. It reports drift in exports, protocols, generated files, package identity, target modules, toolchain metadata, protected paths, schema evolution, stale cleanup candidates, hydration seams, and breaking-change classification. It does not delete files.
 
-Additive exports, generated files, and target modules are compatible drift and produce a `minor` classification for review. The `--json` result includes each target's `moduleChanges` with its added and removed module paths. Existing target module removals and relocation of existing export ownership remain blocking, as do destructive schema changes.
+Additive exports, generated files, and target modules are compatible drift and produce a `minor` classification for review. The `--json` result exposes a top-level `moduleChanges` array with one `{ target, added, removed }` entry for each affected target. Existing target module removals and relocation of existing export ownership remain blocking, as do destructive schema changes.
 
 ## Recommended CI gate
 
