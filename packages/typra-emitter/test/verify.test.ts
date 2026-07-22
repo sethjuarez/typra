@@ -23,7 +23,7 @@ describe("typra verifier", () => {
       "protocols: +0 / -0 / changed 0",
       "files: +0 / deleted 0 / ownership changed 0",
       "package names changed: 0",
-      "modules changed: 0",
+      "modules: +0 / -0 / targets changed 0",
       "toolchain changed: 0 / unsupported 0",
       "protected path touches: 0",
       "hydration zone touches: 0",
@@ -34,6 +34,7 @@ describe("typra verifier", () => {
       "",
     ].join("\n"));
     assert.equal(result.breakingChange, "patch");
+    assert.deepEqual(result.moduleChanges, []);
     assert.equal(result.conformanceMap.find((entry) => entry.contract === "EventSink")?.targets[0].source, "./pipeline/event-sink");
   });
 
@@ -59,6 +60,58 @@ describe("typra verifier", () => {
     assert.equal(result.summary.exports.added, 1);
     assert.equal(result.summary.files.added, 1);
     assert.deepEqual(result.failures, []);
+  });
+
+  it("allows additive target modules and reports them as a minor surface change", () => {
+    const current = makeMetadata();
+    current.exportSurface.targets[0].modules.push("./events/new-event");
+
+    const result = compareTypraMetadata(makeMetadata(), current);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.breakingChange, "minor");
+    assert.deepEqual(result.summary.modules, { added: 1, removed: 0, changedTargets: 1 });
+    assert.equal(result.summary.modulesChanged, 1);
+    assert.deepEqual(result.moduleChanges, [
+      { target: "typescript", added: ["./events/new-event"], removed: [] },
+    ]);
+    assert.deepEqual(result.failures, []);
+    assert.match(formatVerifySummary(result), /modules: \+1 \/ -0 \/ targets changed 1/);
+    assert.match(formatVerifySummary(result), /target module additions are compatible drift/);
+  });
+
+  it("blocks removal of existing target modules", () => {
+    const current = makeMetadata();
+    current.exportSurface.targets[0].modules = ["fixture-root"];
+
+    const result = compareTypraMetadata(makeMetadata(), current);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.breakingChange, "major");
+    assert.deepEqual(result.summary.modules, { added: 0, removed: 1, changedTargets: 1 });
+    assert.deepEqual(result.moduleChanges, [
+      { target: "typescript", added: [], removed: ["pipeline"] },
+    ]);
+    assert.deepEqual(result.failures.map((failure) => failure.code), ["target.modules.removed"]);
+  });
+
+  it("blocks module relocation through the existing export surface", () => {
+    const current = makeMetadata();
+    current.exportSurface.targets[0].modules = ["fixture-root", "pipeline-v2"];
+    current.exportSurface.targets[0].exports[1].source = "./pipeline-v2/event-sink";
+
+    const result = compareTypraMetadata(makeMetadata(), current);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.breakingChange, "major");
+    assert.deepEqual(result.summary.modules, { added: 1, removed: 1, changedTargets: 1 });
+    assert.deepEqual(result.moduleChanges, [
+      { target: "typescript", added: ["pipeline-v2"], removed: ["pipeline"] },
+    ]);
+    assert.deepEqual(result.failures.map((failure) => failure.code), [
+      "exports.changed",
+      "target.modules.removed",
+    ]);
   });
 
   it("blocks removed exports and generated files", () => {
@@ -284,7 +337,7 @@ describe("typra verifier", () => {
     assert.deepEqual(result.failures.map((failure) => failure.code), [
       "files.ownership",
       "protected-path.touch",
-      "target.modules",
+      "target.modules.removed",
       "target.package",
       "toolchain.changed",
       "toolchain.unsupported",
