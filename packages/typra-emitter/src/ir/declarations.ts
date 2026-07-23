@@ -414,6 +414,79 @@ export interface WireDecl {
 }
 
 /**
+ * Produces declarations suitable for targets without language-level model
+ * inheritance. Derived declarations include the fields that their base would
+ * otherwise provide, while child declarations override same-named fields.
+ */
+export function flattenInheritedTypeDeclarations(types: TypeDecl[]): TypeDecl[] {
+  const typesByName = new Map(types.map(type => [type.typeName.name, type]));
+  const cache = new Map<TypeDecl, TypeDecl>();
+
+  function mergeByName<T>(base: T[], derived: T[], getName: (value: T) => string): T[] {
+    const merged = new Map(base.map(value => [getName(value), value]));
+    for (const value of derived) {
+      merged.set(getName(value), value);
+    }
+    return [...merged.values()];
+  }
+
+  function flatten(type: TypeDecl, visited: Set<string>): TypeDecl {
+    const cached = cache.get(type);
+    if (cached) return cached;
+
+    const base = type.base ? typesByName.get(type.base.name) : undefined;
+    if (!base || visited.has(type.typeName.name)) {
+      return type;
+    }
+
+    const flattenedBase = flatten(base, new Set([...visited, type.typeName.name]));
+    const wire = flattenedBase.wire || type.wire
+      ? {
+          providers: [...new Set([
+            ...(flattenedBase.wire?.providers ?? []),
+            ...(type.wire?.providers ?? []),
+          ])],
+          mappings: mergeByName(
+            flattenedBase.wire?.mappings ?? [],
+            type.wire?.mappings ?? [],
+            mapping => mapping.fieldName,
+          ),
+        }
+      : null;
+    const flattened: TypeDecl = {
+      ...type,
+      fields: mergeByName(flattenedBase.fields, type.fields, field => field.name),
+      load: {
+        ...type.load,
+        assignments: mergeByName(
+          flattenedBase.load.assignments,
+          type.load.assignments,
+          assignment => assignment.fieldName,
+        ),
+      },
+      save: {
+        ...type.save,
+        assignments: mergeByName(
+          flattenedBase.save.assignments,
+          type.save.assignments,
+          assignment => assignment.fieldName,
+        ),
+      },
+      collectionHelpers: mergeByName(
+        flattenedBase.collectionHelpers,
+        type.collectionHelpers,
+        helper => helper.propertyName,
+      ),
+      wire,
+    };
+    cache.set(type, flattened);
+    return flattened;
+  }
+
+  return types.map(type => flatten(type, new Set()));
+}
+
+/**
  * A single field's wire name mappings across providers.
  */
 export interface WireFieldMapping {

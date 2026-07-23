@@ -23,6 +23,7 @@ import {
   TypeDecl,
   FieldDecl,
   EnumDef,
+  flattenInheritedTypeDeclarations,
   LoadAssignment,
   SaveAssignment,
   PolymorphicDispatchDecl,
@@ -85,11 +86,12 @@ export function emitGoFileContent(
   scalarCoercibleTypeNames: Set<string> = new Set(types.filter(t => t.load.coercions.length > 0).map(t => t.typeName.name)),
 ): string {
   const lines: string[] = [];
+  const effectiveTypes = flattenInheritedTypeDeclarations(types);
 
   // Protocol-only files have a simpler header (no JSON/YAML imports)
-  const hasNonProtocol = types.some(t => !t.isProtocol);
+  const hasNonProtocol = effectiveTypes.some(t => !t.isProtocol);
   const needsFmt = enums.some(enumDef => hasParseAliases(enumDef) && !enumDef.isOpen) ||
-    types.some(type => type.polymorphicDispatch?.isAbstract && !type.polymorphicDispatch.defaultVariant);
+    effectiveTypes.some(type => type.polymorphicDispatch?.isAbstract && !type.polymorphicDispatch.defaultVariant);
   if (hasNonProtocol) {
     emitHeader(lines, packageName, group, needsFmt);
   } else {
@@ -102,7 +104,7 @@ export function emitGoFileContent(
   }
 
   // Emit each type in the hierarchy
-  for (const type of types) {
+  for (const type of effectiveTypes) {
     emitTypeBlock(type, lines, visitor, polymorphicTypeNames, scalarCoercibleTypeNames);
   }
 

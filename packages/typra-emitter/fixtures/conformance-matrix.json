@@ -192,7 +192,7 @@
             "path": "generated/fixtures/java/FixtureContent.java",
             "snippets": [
               "case \"text\":",
-              "return TextContent.load(data, ctx);",
+              "result = TextContent.load(data, ctx);",
               "case \"image\":"
             ]
           },

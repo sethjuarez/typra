@@ -28,6 +28,19 @@ const JAVA_TYPE_MAP: Record<string, string> = {
   dictionary: "Map<String, Object>",
 };
 
+const JAVA_RESERVED_IDENTIFIERS = new Set([
+  "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
+  "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float",
+  "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native",
+  "new", "package", "private", "protected", "public", "return", "short", "static", "strictfp",
+  "super", "switch", "synchronized", "this", "throw", "throws", "transient", "try", "void",
+  "volatile", "while", "true", "false", "null",
+]);
+
+export function javaIdentifier(name: string): string {
+  return JAVA_RESERVED_IDENTIFIERS.has(name) ? `${name}_` : name;
+}
+
 export function emitJavaFileContent(
   types: TypeDecl[],
   packageName: string,
@@ -136,7 +149,7 @@ function emitType(
   lines.push("");
 
   for (const field of type.fields) {
-    lines.push(`  public ${javaFieldType(field, polymorphicTypeNames)} ${field.name}${javaDefault(field, polymorphicTypeNames)};`);
+    lines.push(`  public ${javaFieldType(field, polymorphicTypeNames)} ${javaIdentifier(field.name)}${javaDefault(field, polymorphicTypeNames)};`);
   }
   lines.push("");
   lines.push(`  public ${typeName}() { }`);
@@ -180,12 +193,14 @@ function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
   lines.push("    Object data = ctx.processInput(input);");
   emitCoercions(typeName, type.load.coercions, lines);
   if (type.polymorphicDispatch) {
-    emitPolymorphicDispatch(typeName, type.polymorphicDispatch, lines);
+    lines.push(`    ${typeName} result;`);
+    emitPolymorphicDispatch(typeName, type.polymorphicDispatch, type.isAbstract, lines);
+  } else {
+    lines.push(`    ${typeName} result = new ${typeName}();`);
   }
   lines.push("    if (!(data instanceof Map<?, ?> map)) {");
-  lines.push(`      return ctx.processOutput(new ${typeName}());`);
+  lines.push("      return ctx.processOutput(result);");
   lines.push("    }");
-  lines.push(`    ${typeName} result = new ${typeName}();`);
   for (const assignment of type.load.assignments) {
     const field = type.fields.find(f => f.name === assignment.fieldName);
     if (!field) continue;
@@ -203,43 +218,66 @@ function emitCoercions(typeName: string, coercions: CoercionDecl[], lines: strin
     lines.push(`    if (${check}) {`);
     lines.push(`      ${typeName} result = new ${typeName}();`);
     for (const assignment of coercion.assignments) {
-      lines.push(`      result.${assignment.fieldName} = ${coercionValue(assignment, coercion.scalarType)};`);
+      lines.push(`      result.${javaIdentifier(assignment.fieldName)} = ${coercionValue(assignment, coercion.scalarType)};`);
     }
     lines.push("      return ctx.processOutput(result);");
     lines.push("    }");
   }
 }
 
-function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatchDecl, lines: string[]): void {
+function emitPolymorphicDispatch(
+  typeName: string,
+  dispatch: PolymorphicDispatchDecl,
+  isAbstract: boolean,
+  lines: string[],
+): void {
   lines.push("    if (data instanceof Map<?, ?> dispatchMap) {");
   lines.push(`      Object discriminator = dispatchMap.get("${dispatch.discriminatorField}");`);
   lines.push("      if (discriminator != null) {");
   lines.push("        switch (String.valueOf(discriminator)) {");
   for (const variant of dispatch.variants) {
     lines.push(`          case "${escapeJava(variant.value)}":`);
-    lines.push(`            return ${variant.typeName.name}.load(data, ctx);`);
+    lines.push(`            result = ${variant.typeName.name}.load(data, ctx);`);
+    lines.push("            break;");
   }
   lines.push("          default:");
-  lines.push("            break;");
+  if (isAbstract) {
+    lines.push(`            throw new IllegalArgumentException("Unknown ${typeName} discriminator value: " + discriminator);`);
+  } else {
+    lines.push(`            result = new ${typeName}();`);
+  }
   lines.push("        }");
+  lines.push("      } else {");
+  if (isAbstract) {
+    lines.push(`        throw new IllegalArgumentException("Missing ${typeName} discriminator property: '${dispatch.discriminatorField}'");`);
+  } else {
+    lines.push(`        result = new ${typeName}();`);
+  }
   lines.push("      }");
+  lines.push("    } else {");
+  if (isAbstract) {
+    lines.push(`      throw new IllegalArgumentException("Invalid data for ${typeName}: expected an object");`);
+  } else {
+    lines.push(`      result = new ${typeName}();`);
+  }
   lines.push("    }");
   void typeName;
 }
 
 function emitLoadField(field: FieldDecl, lines: string[], polymorphicTypeNames: Set<string>): void {
-  const name = field.name;
-  lines.push(`    if (map.containsKey("${name}") && map.get("${name}") != null) {`);
+  const sourceName = field.name;
+  const name = javaIdentifier(sourceName);
+  lines.push(`    if (map.containsKey("${sourceName}") && map.get("${sourceName}") != null) {`);
   switch (field.category.kind) {
     case "scalar":
-      lines.push(`      result.${name} = ${loadScalar(`map.get("${name}")`, field.category.scalarType, field.isOpenEnum ? null : field.enumName, openEnumAliasParser(field))};`);
+      lines.push(`      result.${name} = ${loadScalar(`map.get("${sourceName}")`, field.category.scalarType, field.isOpenEnum ? null : field.enumName, openEnumAliasParser(field))};`);
       break;
     case "complex":
-      lines.push(`      result.${name} = ${field.category.typeName}.load(map.get("${name}"), ctx);`);
+      lines.push(`      result.${name} = ${field.category.typeName}.load(map.get("${sourceName}"), ctx);`);
       break;
     case "collection_scalar":
       lines.push(`      result.${name} = new ArrayList<>();`);
-      lines.push(`      if (map.get("${name}") instanceof Iterable<?> values) {`);
+      lines.push(`      if (map.get("${sourceName}") instanceof Iterable<?> values) {`);
       lines.push("        for (Object item : values) {");
       lines.push(`                      result.${name}.add(${loadScalar("item", field.category.scalarType, field.isOpenEnum ? null : field.enumName, openEnumAliasParser(field))});`);
       lines.push("        }");
@@ -247,14 +285,14 @@ function emitLoadField(field: FieldDecl, lines: string[], polymorphicTypeNames: 
       break;
     case "collection_complex":
       lines.push(`      result.${name} = new ArrayList<>();`);
-      lines.push(`      if (map.get("${name}") instanceof Iterable<?> values) {`);
+      lines.push(`      if (map.get("${sourceName}") instanceof Iterable<?> values) {`);
       lines.push("        for (Object item : values) {");
       lines.push(`          result.${name}.add(${field.category.typeName}.load(item, ctx));`);
       lines.push("        }");
       lines.push("      }");
       break;
     case "dict":
-      lines.push(`      if (map.get("${name}") instanceof Map<?, ?> dict) {`);
+      lines.push(`      if (map.get("${sourceName}") instanceof Map<?, ?> dict) {`);
       lines.push(`        result.${name} = copyMap(dict);`);
       lines.push("      }");
       break;
@@ -281,29 +319,30 @@ function emitSave(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
 }
 
 function emitSaveField(name: string, category: PropertyCategory, enumName: string | null, lines: string[], polymorphicTypeNames: Set<string>): void {
+  const fieldName = javaIdentifier(name);
   switch (category.kind) {
     case "scalar":
     case "dict":
-      lines.push(`    if (obj.${name} != null) result.put("${name}", ${enumName ? `obj.${name}.value` : `serializeScalar(obj.${name})`});`);
+      lines.push(`    if (obj.${fieldName} != null) result.put("${name}", ${enumName ? `obj.${fieldName}.value` : `serializeScalar(obj.${fieldName})`});`);
       break;
     case "complex":
-      lines.push(`    if (obj.${name} != null) result.put("${name}", obj.${name}.save(ctx));`);
+      lines.push(`    if (obj.${fieldName} != null) result.put("${name}", obj.${fieldName}.save(ctx));`);
       break;
     case "collection_scalar":
       if (enumName) {
-        lines.push(`    if (obj.${name} != null) {`);
+        lines.push(`    if (obj.${fieldName} != null) {`);
         lines.push("      List<Object> items = new ArrayList<>();");
-        lines.push(`      for (${enumName} item : obj.${name}) items.add(item.value);`);
+        lines.push(`      for (${enumName} item : obj.${fieldName}) items.add(item.value);`);
         lines.push(`      result.put("${name}", items);`);
         lines.push("    }");
       } else {
-        lines.push(`    if (obj.${name} != null) result.put("${name}", new ArrayList<>(obj.${name}));`);
+        lines.push(`    if (obj.${fieldName} != null) result.put("${name}", new ArrayList<>(obj.${fieldName}));`);
       }
       break;
     case "collection_complex":
-      lines.push(`    if (obj.${name} != null) {`);
+      lines.push(`    if (obj.${fieldName} != null) {`);
       lines.push("      List<Object> items = new ArrayList<>();");
-      lines.push(`      for (${category.typeName} item : obj.${name}) items.add(item.save(ctx));`);
+      lines.push(`      for (${category.typeName} item : obj.${fieldName}) items.add(item.save(ctx));`);
       lines.push(`      result.put("${name}", items);`);
       lines.push("    }");
       break;
@@ -332,13 +371,14 @@ function emitToWire(wire: WireDecl, lines: string[]): void {
   lines.push("    Map<String, Object> result = new LinkedHashMap<>();");
   lines.push("    String target = provider == null ? \"\" : provider;");
   for (const field of wire.mappings) {
+    const fieldName = javaIdentifier(field.fieldName);
     lines.push("    {");
     lines.push(`      String wireName = "${field.fieldName}";`);
     lines.push(`      boolean include = ${Object.keys(field.wireNames).length === 0 ? "true" : "target.isEmpty()"};`);
     for (const [provider, name] of Object.entries(field.wireNames)) {
       lines.push(`      if (target.equals("${escapeJava(provider)}")) { wireName = "${escapeJava(name)}"; include = true; }`);
     }
-    lines.push(`      if (include && this.${field.fieldName} != null) result.put(wireName, serializeScalar(this.${field.fieldName}));`);
+    lines.push(`      if (include && this.${fieldName} != null) result.put(wireName, serializeScalar(this.${fieldName}));`);
     lines.push("    }");
   }
   lines.push("    return result;");

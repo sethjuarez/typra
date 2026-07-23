@@ -69,6 +69,32 @@ model ImageContent extends FixtureContent {
   url: string;
 }
 
+@discriminator("kind")
+model FixtureProperty {
+  kind: string;
+
+  name: string;
+
+  required: boolean;
+
+  nullable: boolean;
+
+  default?: unknown;
+
+  example?: unknown;
+
+  enumValues?: string[];
+
+  description?: string;
+}
+
+model FixtureUnionProperty extends FixtureProperty {
+  kind: "union";
+
+  @sample(#{ members: #["one", "two"] })
+  members: string[];
+}
+
 @parseAlias("ready", #["complete"])
 union FixtureStatus {
   draft: "draft";

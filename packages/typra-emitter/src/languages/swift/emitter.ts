@@ -3,6 +3,7 @@ import {
   EnumDef,
   FieldDecl,
   FileDecl,
+  flattenInheritedTypeDeclarations,
   MethodStubDecl,
   PropertyCategory,
   TypeDecl,
@@ -41,7 +42,7 @@ export function emitSwiftFile(file: FileDecl, visitor: ExprVisitor, polymorphicT
     emitEnum(enumDef, lines);
   }
 
-  for (const type of file.types) {
+  for (const type of flattenInheritedTypeDeclarations(file.types)) {
     emitType(type, lines, visitor, polymorphicTypeNames);
   }
 

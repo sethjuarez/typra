@@ -24,6 +24,8 @@ import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 import { emitGoFileContent } from "../src/languages/go/emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
+import { emitJavaFileContent } from "../src/languages/java/emitter.js";
+import { JavaExprVisitor } from "../src/languages/java/visitor.js";
 
 // ============================================================================
 // Test fixtures (same as expansion.test.ts)
@@ -498,6 +500,90 @@ describe("lowerFile", () => {
       assert.match(code, /switch discriminator := discriminator\.\(type\) \{/);
       assert.match(code, /\t\t\tdefault:\n\t\t\t\treturn result, nil/);
       assert.match(code, /\t\t\tdefault:\n\t\t\t\treturn result, nil/);
+    });
+  });
+
+  describe("polymorphic inherited fields", () => {
+    const unionProperty = makeType("UnionProperty", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "union" }),
+      makeProp("members", "string", { isScalar: true, isCollection: true }),
+    ], { base: { namespace: "Test", name: "Property" } });
+    const property = makeType("Property", [
+      makeProp("kind", "string", { isScalar: true }),
+      makeProp("name", "string", { isScalar: true }),
+      makeProp("required", "boolean", { isScalar: true }),
+      makeProp("nullable", "boolean", { isScalar: true }),
+      makeProp("default", "unknown", { isScalar: true, isOptional: true }),
+      makeProp("example", "unknown", { isScalar: true, isOptional: true }),
+      makeProp("enum", "string", { isScalar: true, isCollection: true, isOptional: true }),
+      makeProp("description", "string", { isScalar: true, isOptional: true }),
+    ], {
+      discriminator: "kind",
+      childTypes: [unionProperty],
+    });
+    const inheritanceRegistry = TypeRegistry.fromTypeGraph([property, unionProperty]);
+    const inheritanceFile = lowerFile(property, inheritanceRegistry, new Set(["Property"]));
+
+    it("flattens inherited fields into Go derived structs, loaders, and savers", () => {
+      const code = emitGoFileContent(
+        inheritanceFile.types,
+        "fixtures",
+        new GoExprVisitor(inheritanceRegistry),
+        new Set(["Property"]),
+        inheritanceFile.enums,
+        inheritanceFile.group,
+      );
+
+      const unionStart = code.indexOf("type UnionProperty struct {");
+      const unionEnd = code.indexOf("\n}\n", unionStart);
+      const unionStruct = code.slice(unionStart, unionEnd);
+      assert.match(unionStruct, /\tName string /);
+      assert.match(unionStruct, /\tRequired bool /);
+      assert.match(unionStruct, /\tNullable bool /);
+      assert.match(unionStruct, /\tDefault \*interface\{\} /);
+      assert.match(unionStruct, /\tExample \*interface\{\} /);
+      assert.match(unionStruct, /\tEnum \[\]string /);
+      assert.match(unionStruct, /\tDescription \*string /);
+      assert.match(code, /func LoadUnionProperty[\s\S]*result\.Name = string\(val\.\(string\)\)/);
+      assert.match(code, /func \(obj UnionProperty\) Save[\s\S]*result\["name"\] = obj\.Name/);
+    });
+
+    it("hydrates inherited Java fields after polymorphic dispatch", () => {
+      const code = emitJavaFileContent(
+        inheritanceFile.types,
+        "fixtures",
+        new JavaExprVisitor(inheritanceRegistry),
+        new Set(["Property"]),
+        inheritanceFile.enums,
+      );
+
+      const dispatchIndex = code.indexOf("result = UnionProperty.load(data, ctx);");
+      const baseLoadIndex = code.indexOf('if (map.containsKey("name")');
+      assert.ok(dispatchIndex >= 0, "expected polymorphic dispatch to assign the derived instance");
+      assert.ok(baseLoadIndex > dispatchIndex, "expected inherited fields to hydrate after dispatch");
+      assert.doesNotMatch(code, /return UnionProperty\.load\(data, ctx\);/);
+      assert.match(code, /public Object default_ = null;/);
+      assert.match(code, /result\.default_ = map\.get\("default"\);/);
+      assert.match(code, /result\.put\("default", serializeScalar\(obj\.default_\)\);/);
+    });
+
+    it("flattens inherited fields into Swift polymorphic variants", () => {
+      const code = emitSwiftFile(
+        inheritanceFile,
+        new SwiftExprVisitor(inheritanceRegistry),
+        new Set(["Property"]),
+      );
+      const unionStart = code.indexOf("public struct UnionProperty");
+      const unionEnd = code.indexOf("\n}\n", unionStart);
+      const unionStruct = code.slice(unionStart, unionEnd);
+      assert.match(unionStruct, /public var name: String/);
+      assert.match(unionStruct, /public var `required`: Bool/);
+      assert.match(unionStruct, /public var nullable: Bool/);
+      assert.match(unionStruct, /public var `default`: Any\? = nil/);
+      assert.match(unionStruct, /public var example: Any\? = nil/);
+      assert.match(unionStruct, /public var `enum`: \[String\]\? = nil/);
+      assert.match(unionStruct, /public var description: String\? = nil/);
+      assert.match(code, /public func save[\s\S]*result\["name"\] = self\.name/);
     });
   });
 

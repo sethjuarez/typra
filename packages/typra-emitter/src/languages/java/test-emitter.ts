@@ -1,4 +1,5 @@
 import { BaseTestContext, CoercionTest, PropertyNode, PropertyValidation, TestExample, TypeNode } from "../../ir/ast.js";
+import { javaIdentifier } from "./emitter.js";
 
 function javaString(value: string): string {
   return JSON.stringify(value);
@@ -140,13 +141,13 @@ function emitExampleValidations(lines: string[], varName: string, node: TypeNode
 
 function emitValidation(lines: string[], varName: string, validation: PropertyValidation): void {
   if (validation.delimiter === '"') {
-    lines.push(`    assertEquals(${javaString(validation.value)}, ${varName}.${validation.key}, "Expected ${validation.key}");`);
+    lines.push(`    assertEquals(${javaString(validation.value)}, ${varName}.${javaIdentifier(validation.key)}, "Expected ${validation.key}");`);
     return;
   }
 
   const numeric = Number(validation.value);
   const expected = Number.isFinite(numeric) ? String(numeric) : validation.value;
-  lines.push(`    assertEquals(${expected}, ${varName}.${validation.key}, "Expected ${validation.key}");`);
+  lines.push(`    assertEquals(${expected}, ${varName}.${javaIdentifier(validation.key)}, "Expected ${validation.key}");`);
 }
 
 function emitStructuredValidations(
@@ -159,7 +160,7 @@ function emitStructuredValidations(
   for (const prop of node.properties) {
     if (!(prop.name in sample)) continue;
     const value = sample[prop.name];
-    const expr = `${varName}.${prop.name}`;
+    const expr = `${varName}.${javaIdentifier(prop.name)}`;
 
     if (includeScalars && prop.isScalar && !prop.isCollection && !prop.isDict) {
       emitScalarSampleValidation(lines, expr, prop.name, value);
@@ -201,7 +202,7 @@ function emitNestedValidations(lines: string[], expr: string, node: TypeNode, sa
     if (!(prop.name in sample)) continue;
     const expected = sample[prop.name];
     if (typeof expected === "string" || typeof expected === "number") {
-      lines.push(`    assertEquals(${typeof expected === "number" ? expected : javaString(expected)}, ${expr}.${prop.name}, "Expected ${expr}.${prop.name}");`);
+      lines.push(`    assertEquals(${typeof expected === "number" ? expected : javaString(expected)}, ${expr}.${javaIdentifier(prop.name)}, "Expected ${expr}.${prop.name}");`);
     }
   }
 }
@@ -271,7 +272,7 @@ function emitShorthandObjectValidation(
   const shorthandField = findStringCoercionField(node);
   if (!shorthandField) return;
 
-  lines.push(`    assertEquals(${javaString(expected)}, ${expr}.${shorthandField}, "Expected ${propName}.${shorthandField}");`);
+  lines.push(`    assertEquals(${javaString(expected)}, ${expr}.${javaIdentifier(shorthandField)}, "Expected ${propName}.${shorthandField}");`);
 }
 
 function emitScalarSampleValidation(lines: string[], expr: string, displayName: string, expected: any): void {
