@@ -30,13 +30,14 @@ async function main(): Promise<void> {
 
   if (values.help) {
     console.log(HELP);
-    process.exit(0);
+    return;
   }
 
   if (!values.baseline || !values.current) {
     console.error("Error: --baseline and --current are required.\n");
     console.log(HELP);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const result = verifyTypraMetadata({
@@ -51,10 +52,14 @@ async function main(): Promise<void> {
     process.stdout.write(formatVerifySummary(result));
   }
 
-  process.exit(result.ok ? 0 : 1);
+  // Do NOT call process.exit() here: for large --json payloads stdout is an
+  // async pipe, and exiting synchronously truncates it mid-write (surfaces as
+  // "Unexpected end of JSON input" in consumers). Set exitCode and let Node
+  // flush stdio and exit naturally.
+  process.exitCode = result.ok ? 0 : 1;
 }
 
 main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
+  process.exitCode = 1;
 });
