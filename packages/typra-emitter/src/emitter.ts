@@ -91,17 +91,26 @@ type GeneratorFn = (
   options?: GeneratorOptions
 ) => Promise<void>;
 
-// Registry of available code generators
-const generators: Record<string, GeneratorFn> = {
-  markdown: generateMarkdown,
-  python: generatePython,
-  csharp: generateCsharp,
-  typescript: generateTypeScript,
-  go: generateGo,
-  java: generateJava,
-  rust: generateRust,
-  swift: generateSwift,
-};
+// Registry of available code generators.
+// Built lazily inside a function (not a top-level const) so the driver-module
+// references are resolved at call time rather than at module-evaluation time.
+// emitter.ts and each language driver form an import cycle (drivers import
+// GeneratorOptions/filterNodes from here; here we import the driver entrypoints),
+// and a top-level map would read a driver export before it is initialized when
+// the cycle is entered driver-first — a `Cannot access '<generator>' before
+// initialization` TDZ error. Deferring the reads makes import order irrelevant.
+function getGenerators(): Record<string, GeneratorFn> {
+  return {
+    markdown: generateMarkdown,
+    python: generatePython,
+    csharp: generateCsharp,
+    typescript: generateTypeScript,
+    go: generateGo,
+    java: generateJava,
+    rust: generateRust,
+    swift: generateSwift,
+  };
+}
 
 
 export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
@@ -212,6 +221,7 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   });
 
   // Dispatch to registered generators
+  const generators = getGenerators();
   for (const target of targets) {
     const generatorName = target.type.toLowerCase().trim();
     const generator = generators[generatorName];

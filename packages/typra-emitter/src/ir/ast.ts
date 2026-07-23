@@ -187,6 +187,16 @@ export class PropertyNode {
   public enumName: string | null = null;
   /** True when the union includes a bare `string` variant (open enum — accepts any string). */
   public isOpenEnum: boolean = false;
+  /**
+   * True when this property is a keyed (property-bag) collection whose elements carry an
+   * injected `name` — i.e. resolved from a `Record<T> | Named<T,...>[]` (or `Named<T> | T`)
+   * union. Its canonical wire form is a name-keyed MAP. This is tracked STRUCTURALLY because
+   * the element type's `.type` (the `Named<T>` wrapper that injects `name`) is only resolved
+   * for the FIRST property of a given element type — a later sibling with the same element
+   * type has `.type` undefined (cycle-prevention in resolveModel), so its injected-name-ness
+   * cannot be recovered from the raw registry type (which lacks the injected `name`).
+   */
+  public isNamedCollection: boolean = false;
 
   public property: ModelProperty;
   public type: TypeNode | undefined = undefined;
@@ -217,6 +227,7 @@ export class PropertyNode {
       parseAliases: this.parseAliases,
       enumName: this.enumName,
       isOpenEnum: this.isOpenEnum,
+      isNamedCollection: this.isNamedCollection,
       type: this.type ? this.type.getSanitizedObject() : undefined,
     };
   }
@@ -565,6 +576,10 @@ export const resolveUnionProperty = (program: Program, property: ModelProperty, 
 
       if (recordType && arrayType && namedType && recordType.name === arrayType.name) {
         prop.isCollection = true;
+        // Elements carry an injected `name` (from the `Named<T>` wrapper) → keyed MAP wire.
+        // Set structurally so a 2nd same-element-typed sibling (whose `.type` is left unset
+        // by the cycle guard below) is still recognized as a keyed collection downstream.
+        prop.isNamedCollection = true;
         // Use T as actual class model for naming purposes
         prop.typeName = getModelType(arrayType, rootNamespace, rootAlias);
         // Use Named<T> for actual model props

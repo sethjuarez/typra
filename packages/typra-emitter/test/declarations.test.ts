@@ -24,6 +24,9 @@ import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 import { emitGoFileContent } from "../src/languages/go/emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
+import { emitRustFile } from "../src/languages/rust/emitter.js";
+import type { RustTestContext } from "../src/languages/rust/driver.js";
+import { RustExprVisitor } from "../src/languages/rust/visitor.js";
 
 // ============================================================================
 // Test fixtures (same as expansion.test.ts)
@@ -61,6 +64,7 @@ function makeProp(name: string, typeName: string, opts?: {
   defaultValue?: string | number | boolean | null;
   namespace?: string;
   allowedValues?: string[];
+  isNamedCollection?: boolean;
 }): PropertyNode {
   const prop = new PropertyNode({} as ModelProperty, `Test ${name}`);
   prop.name = name;
@@ -72,6 +76,7 @@ function makeProp(name: string, typeName: string, opts?: {
   prop.type = opts?.type;
   prop.defaultValue = opts?.defaultValue ?? null;
   prop.allowedValues = opts?.allowedValues ?? [];
+  prop.isNamedCollection = opts?.isNamedCollection ?? false;
   return prop;
 }
 
@@ -370,6 +375,36 @@ describe("lowerType", () => {
     assert.deepEqual(decl.collectionHelpers[0].innerFields, ["value"]); // "name" excluded
   });
 
+  it("recovers keyed-collection detection for a 2nd same-element collection whose prop.type is unset", () => {
+    // resolveModel leaves a collection property's `type` UNSET when the same element type
+    // was already resolved by an earlier sibling (cycle-prevention) — e.g. Prompty.outputs
+    // after inputs, both `Record<Property>|Named<..>[]`. Without registry fallback the 2nd
+    // collection loses keyed-collection codegen (hasNameProperty=false) and saves/loads as a
+    // degenerate array — silent data loss on map-form input. The registry lookup restores it.
+    const inputs = makeProp("inputs", "Binding", { isCollection: true, type: namedBinding });
+    const outputs = makeProp("outputs", "Binding", { isCollection: true }); // type UNSET (cycle quirk)
+    const holder = makeType("Holder", [inputs, outputs]);
+    const holderRegistry = TypeRegistry.fromTypeGraph([holder, namedBinding]);
+    const decl = lowerType(holder, holderRegistry, new Set());
+    const out = decl.collectionHelpers.find(h => h.propertyName === "outputs")!;
+    assert.equal(out.hasNameProperty, true, "2nd same-element collection must still detect the keyed collection via registry");
+    assert.deepEqual(out.innerFields, ["value"]);
+  });
+
+  it("recovers keyed-collection detection via structural isNamedCollection when the element type lacks a real name field", () => {
+    // Record<T>|Named<T>[]: the `name` field is INJECTED by the Named<T> wrapper, not present
+    // on raw T. When prop.type is unset on the 2nd sibling, registry.get(T) returns raw T
+    // WITHOUT name, so the registry fallback alone can't recover keyed detection. The structural
+    // isNamedCollection flag (set in resolveUnionProperty regardless of the cycle guard) does.
+    const rawBinding = makeType("RawBinding", [makeProp("value", "string", { isScalar: true })]);
+    const outputs = makeProp("outputs", "RawBinding", { isCollection: true, isNamedCollection: true }); // type UNSET, raw element has NO name
+    const holder = makeType("KeyedHolder", [outputs]);
+    const holderRegistry = TypeRegistry.fromTypeGraph([holder, rawBinding]);
+    const decl = lowerType(holder, holderRegistry, new Set());
+    const out = decl.collectionHelpers.find(h => h.propertyName === "outputs")!;
+    assert.equal(out.hasNameProperty, true, "structural isNamedCollection must recover keyed detection even when the raw element type has no name field");
+  });
+
   it("lowers load assignments for all property categories", () => {
     const decl = lowerType(complexType, registry, polyNames);
     const cats = decl.load.assignments.map(a => a.category.kind);
@@ -499,6 +534,54 @@ describe("lowerFile", () => {
       assert.match(code, /\t\t\tdefault:\n\t\t\t\treturn result, nil/);
       assert.match(code, /\t\t\tdefault:\n\t\t\t\treturn result, nil/);
     });
+
+    it("flattens inherited base fields into child structs (extends)", () => {
+      // Base carries the discriminator PLUS extra optional non-discriminator fields.
+      const apiKeyConn = makeType("ApiKeyConn", [
+        makeProp("kind", "string", { isScalar: true, defaultValue: "apiKey" }),
+        makeProp("endpoint", "string", { isScalar: true }),
+        makeProp("apiKey", "string", { isScalar: true, isOptional: true }),
+      ], { base: { namespace: "Test", name: "Conn" } });
+      const conn = makeType("Conn", [
+        makeProp("kind", "string", { isScalar: true }),
+        makeProp("authenticationMode", "string", { isScalar: true, isOptional: true }),
+        makeProp("usageDescription", "string", { isScalar: true, isOptional: true }),
+      ], {
+        discriminator: "kind",
+        childTypes: [apiKeyConn],
+        isAbstract: true,
+      });
+      const registry = TypeRegistry.fromTypeGraph([conn, apiKeyConn]);
+      const file = lowerFile(conn, registry, new Set(["Conn"]));
+      const code = emitGoFileContent(
+        file.types,
+        "fixtures",
+        new GoExprVisitor(registry),
+        new Set(["Conn"]),
+        file.enums,
+        file.group,
+      );
+
+      // Isolate the child struct definition.
+      const structStart = code.indexOf("type ApiKeyConn struct {");
+      assert.ok(structStart >= 0, "expected ApiKeyConn struct");
+      const structBody = code.slice(structStart, code.indexOf("}", structStart));
+
+      // Inherited base fields must be present in the child struct...
+      assert.match(structBody, /AuthenticationMode \*string/);
+      assert.match(structBody, /UsageDescription \*string/);
+      // ...alongside the child's own fields...
+      assert.match(structBody, /Endpoint string/);
+      assert.match(structBody, /ApiKey \*string/);
+      // ...and the discriminator exactly once.
+      assert.equal((structBody.match(/\bKind\b/g) || []).length, 1);
+
+      // Load and Save for the child must also cover the inherited fields so round-trips work.
+      const loadStart = code.indexOf("func LoadApiKeyConn(");
+      const loadBody = code.slice(loadStart, code.indexOf("\nfunc ", loadStart + 1));
+      assert.match(loadBody, /m\["authenticationMode"\]/);
+      assert.match(loadBody, /m\["usageDescription"\]/);
+    });
   });
 
   it("lowers a polymorphic file with parent + children", () => {
@@ -544,5 +627,277 @@ describe("lowerFile", () => {
     const file1 = lowerFile(modelType, registry, polyNames);
     const file2 = lowerFile(modelType, registry, polyNames);
     assert.deepEqual(file1, file2);
+  });
+});
+
+// ============================================================================
+// Rust emitter — first-class serde derives (Serialize/Deserialize/PartialEq)
+// ============================================================================
+
+describe("Rust emitter serde derives", () => {
+  const registry = buildTestRegistry();
+
+  it("emits manual serde (delegating to canonical to_value/load_from_value) on plain data structs", () => {
+    // Every data struct — flat ones included — routes serde through the canonical
+    // to_value/load_from_value path, NOT a field-by-field derive, so custom
+    // canonicalization (map<->list, empty-omission, etc.) is always honored.
+    const file = lowerFile(namedBinding, registry, new Set());
+    const code = emitRustFile(file, new RustExprVisitor(registry), new Set());
+
+    // No serde derive on the struct — only Debug/Clone/Default/PartialEq.
+    assert.match(
+      code,
+      /#\[derive\(Debug, Clone, Default, PartialEq\)\]\npub struct Binding \{/,
+    );
+    assert.doesNotMatch(code, /#\[derive\([^)]*serde::Serialize[^)]*\)\]\npub struct Binding/);
+    assert.doesNotMatch(code, /#\[serde\(rename_all = "camelCase"\)\]\n#\[serde\(default\)\]\npub struct Binding/);
+    // Manual delegating serde instead.
+    assert.match(code, /impl serde::Serialize for Binding \{/);
+    assert.match(
+      code,
+      /serde::Serialize::serialize\(&self\.to_value\(&SaveContext::default\(\)\), serializer\)/,
+    );
+    assert.match(code, /impl<'de> serde::Deserialize<'de> for Binding \{/);
+    assert.match(
+      code,
+      /Self::load_from_value\(&value, &LoadContext::default\(\)\)/,
+    );
+  });
+
+  it("uses a manual serde impl (not a derive) for scalar-coercible structs", () => {
+    // `Model` has a `@coerce(Model, string, ...)` shorthand: a bare string expands
+    // into the struct. Derived `Deserialize` would reject that scalar, so the struct
+    // must delegate to the canonical load_from_value (which understands the coercion).
+    const file = lowerFile(modelType, registry, new Set());
+    const code = emitRustFile(file, new RustExprVisitor(registry), new Set());
+
+    assert.match(
+      code,
+      /#\[derive\(Debug, Clone, Default, PartialEq\)\]\npub struct Model \{/,
+    );
+    assert.match(code, /impl serde::Serialize for Model \{/);
+    assert.match(code, /impl<'de> serde::Deserialize<'de> for Model \{/);
+    assert.match(
+      code,
+      /Self::load_from_value\(&value, &LoadContext::default\(\)\)/,
+    );
+  });
+
+  it("uses a manual serde impl (not a derive) for polymorphic discriminated unions", () => {
+    const file = lowerFile(contentPart, registry, new Set(["ContentPart"]));
+    const code = emitRustFile(
+      file,
+      new RustExprVisitor(registry),
+      new Set(["ContentPart"]),
+    );
+
+    // The Kind data enum keeps PartialEq but must NOT derive serde: the derived
+    // (externally-tagged) repr would emit Rust variant names instead of the wire
+    // discriminator. An exact match on the derive line proves serde is absent.
+    assert.match(
+      code,
+      /#\[derive\(Debug, Clone, PartialEq\)\]\npub enum ContentPartKind \{/,
+    );
+
+    // The polymorphic base struct also does not derive serde...
+    assert.match(
+      code,
+      /#\[derive\(Debug, Clone, Default, PartialEq\)\]\npub struct ContentPart \{/,
+    );
+
+    // ...instead it gets manual serde impls delegating to the canonical
+    // to_value/load_from_value so the `kind` discriminator round-trips to its
+    // exact wire value while the LoadContext/SaveContext API stays intact.
+    assert.match(code, /impl serde::Serialize for ContentPart \{/);
+    assert.match(
+      code,
+      /serde::Serialize::serialize\(&self\.to_value\(&SaveContext::default\(\)\), serializer\)/,
+    );
+    assert.match(code, /impl<'de> serde::Deserialize<'de> for ContentPart \{/);
+    assert.match(
+      code,
+      /Self::load_from_value\(&value, &LoadContext::default\(\)\)/,
+    );
+
+    // The Kind enum ITSELF is also independently serde-serializable to the same
+    // canonical, internally-tagged wire: it wraps the variant back into its parent
+    // and delegates to to_value/load_from_value — NOT the externally-tagged derive.
+    assert.match(code, /impl serde::Serialize for ContentPartKind \{/);
+    assert.match(
+      code,
+      /let parent = ContentPart \{ kind: self\.clone\(\), \.\.Default::default\(\) \};/,
+    );
+    assert.match(
+      code,
+      /serde::Serialize::serialize\(&parent\.to_value\(&SaveContext::default\(\)\), serializer\)/,
+    );
+    assert.match(code, /impl<'de> serde::Deserialize<'de> for ContentPartKind \{/);
+    assert.match(
+      code,
+      /Ok\(ContentPart::load_from_value\(&value, &LoadContext::default\(\)\)\.kind\)/,
+    );
+  });
+
+  it("emits serde support for string enums (plain-string round-trip)", () => {
+    const role = makeProp("role", "string", {
+      isScalar: true,
+      allowedValues: ["user", "assistant"],
+    });
+    role.enumName = "Role";
+    role.isOpenEnum = false;
+    const chat = makeType("ChatTurn", [role]);
+    const reg = TypeRegistry.fromTypeGraph([chat]);
+    const file = lowerFile(chat, reg, new Set());
+    const code = emitRustFile(file, new RustExprVisitor(reg), new Set());
+
+    assert.match(code, /pub enum Role \{/);
+    assert.match(code, /impl serde::Serialize for Role \{/);
+    assert.match(code, /impl<'de> serde::Deserialize<'de> for Role \{/);
+    assert.match(code, /serializer\.serialize_str\(self\.as_str\(\)\)/);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// Rust test-generator — sample-completeness gating of the serde_roundtrip gate
+// ----------------------------------------------------------------------------
+// The auto-generated `*_serde_roundtrip` template runs against BOTH typra's own
+// complete-sample fixtures AND arbitrary consumer models whose `@sample` annotates
+// only some fields. Byte-identity vs the sample is only valid for complete, float-safe
+// samples; partial samples must fall back to the always-on delegation-equivalence
+// assertions. This guards that the template partitions correctly on sample shape.
+describe("Rust test generator serde_roundtrip gating", () => {
+  function makeExample(sample: Record<string, unknown>, json: string[]): any {
+    return { sample, json, yaml: [], validations: [] };
+  }
+
+  it("falls back to delegation-equivalence (no byte-identity) for a partial / float-unsafe sample", async () => {
+    const { emitRustTest } = await import("../src/languages/rust/driver.js");
+    // `status` is REQUIRED but unsampled (to_value would emit it → partial sample),
+    // and `weight` is a float sampled as an integer (`3` canonicalizes to `3.0`).
+    const node = makeType("PartialSample", [
+      makeProp("title", "string", { isScalar: true }),
+      makeProp("status", "string", { isScalar: true }),
+      makeProp("weight", "float64", { isScalar: true }),
+    ]);
+    const code = emitRustTest({
+      node,
+      isAbstract: false,
+      examples: [makeExample({ title: "hi", weight: 3 }, ['{', '  "title": "hi",', '  "weight": 3', '}'])],
+      coercions: [],
+      factories: [],
+      importPath: "crate::model",
+      isPolymorphicBase: false,
+    } as RustTestContext);
+
+    // Delegation-equivalence is ALWAYS emitted — the sample-agnostic invariant.
+    assert.match(code, /serde serialize must equal canonical to_value/);
+    assert.match(code, /serde deserialize must equal canonical load_from_value/);
+    // Byte-identity against the partial/float-unsafe sample must be suppressed.
+    assert.doesNotMatch(code, /byte-identical canonical wire/);
+  });
+
+  it("keeps byte-identity for a complete, float-safe sample", async () => {
+    const { emitRustTest } = await import("../src/languages/rust/driver.js");
+    const node = makeType("CompleteSample", [
+      makeProp("title", "string", { isScalar: true }),
+      makeProp("count", "int32", { isScalar: true }),
+    ]);
+    const code = emitRustTest({
+      node,
+      isAbstract: false,
+      examples: [makeExample({ title: "hi", count: 3 }, ['{', '  "title": "hi",', '  "count": 3', '}'])],
+      coercions: [],
+      factories: [],
+      importPath: "crate::model",
+      isPolymorphicBase: false,
+    } as RustTestContext);
+
+    // Delegation-equivalence still present...
+    assert.match(code, /serde serialize must equal canonical to_value/);
+    // ...AND the stronger byte-identity check is retained for complete samples.
+    assert.match(code, /byte-identical canonical wire/);
+  });
+
+  it("suppresses byte-identity when an optional-WITH-DEFAULT field is absent from the sample", async () => {
+    const { emitRustTest } = await import("../src/languages/rust/driver.js");
+    // `status` is optional (`?`) but carries a default, so to_value materializes+emits it
+    // on save even though the sample omits it — byte-identity vs the partial sample would
+    // FAIL (this is prompty's TurnCommit `status`/`contextState` case). Must suppress.
+    const node = makeType("DefaultedSample", [
+      makeProp("title", "string", { isScalar: true }),
+      makeProp("status", "string", { isScalar: true, isOptional: true, defaultValue: "active" }),
+    ]);
+    const code = emitRustTest({
+      node,
+      isAbstract: false,
+      examples: [makeExample({ title: "hi" }, ['{', '  "title": "hi"', '}'])],
+      coercions: [],
+      factories: [],
+      importPath: "crate::model",
+      isPolymorphicBase: false,
+    } as RustTestContext);
+
+    assert.match(code, /serde serialize must equal canonical to_value/);
+    assert.doesNotMatch(code, /byte-identical canonical wire/);
+  });
+
+  it("never emits integer-index nested-discriminator navigation", async () => {
+    const { emitRustTest } = await import("../src/languages/rust/driver.js");
+    // The `value[prop][0].get(disc)` navigation is unsafe for keyed collections (name-keyed
+    // MAP wire) and redundant with delegation-equivalence — it must not be generated at all.
+    const child = makeType("TextPart2", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "text" }),
+      makeProp("value", "string", { isScalar: true }),
+    ], { base: { namespace: "Test", name: "Part2" } });
+    const part = makeType("Part2", [makeProp("kind", "string", { isScalar: true })], {
+      discriminator: "kind",
+      childTypes: [child],
+    });
+    const holder = makeType("Holder2", [
+      makeProp("parts", "Part2", { isCollection: true, type: part }),
+    ]);
+    const code = emitRustTest({
+      node: holder,
+      isAbstract: false,
+      examples: [makeExample(
+        { parts: [{ kind: "text", value: "hi" }] },
+        ['{', '  "parts": [ { "kind": "text", "value": "hi" } ]', '}'],
+      )],
+      coercions: [],
+      factories: [],
+      importPath: "crate::model",
+      isPolymorphicBase: false,
+    } as RustTestContext);
+
+    assert.doesNotMatch(code, /nested discriminator must round-trip/);
+    assert.doesNotMatch(code, /\.and_then\(\|v\| v\.get\(0\)\)/);
+  });
+
+  it("suppresses byte-identity when a REQUIRED field is authored at its omittable zero/empty value", async () => {
+    const { emitRustTest } = await import("../src/languages/rust/driver.js");
+    // to_value OMITS required string==""/int==0/float==0.0/empty-collection fields, so a
+    // sample authoring them is NOT a canonical fixed point — byte-identity vs it would fail
+    // (prompty's validation_result `errors:[]`, turn_model_request `iteration:0`). Must fall
+    // back to delegation-equivalence. (Optional fields authored at zero ARE emitted → safe.)
+    const node = makeType("OverAuthored", [
+      makeProp("title", "string", { isScalar: true }),
+      makeProp("count", "int32", { isScalar: true }),
+      makeProp("tags", "string", { isScalar: true, isCollection: true }),
+    ]);
+    const code = emitRustTest({
+      node,
+      isAbstract: false,
+      examples: [makeExample(
+        { title: "hi", count: 0, tags: [] },
+        ['{', '  "title": "hi",', '  "count": 0,', '  "tags": []', '}'],
+      )],
+      coercions: [],
+      factories: [],
+      importPath: "crate::model",
+      isPolymorphicBase: false,
+    } as RustTestContext);
+
+    assert.match(code, /serde serialize must equal canonical to_value/);
+    assert.doesNotMatch(code, /byte-identical canonical wire/);
   });
 });

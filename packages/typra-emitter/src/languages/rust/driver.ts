@@ -501,15 +501,30 @@ function rustAssertionValue(node: TypeNode, key: string, value: unknown, delimit
   return `${value}`;
 }
 
-interface RustTestContext extends BaseTestContext {
+export interface RustTestContext extends BaseTestContext {
   importPath: string;
   isPolymorphicBase: boolean;
 }
 
 /**
+ * True if a sample value contains any non-integer number anywhere in its tree.
+ * Such values (e.g. f32 `0.7`) may be re-printed by serde with different precision
+ * than the canonical JSON text, so a byte-identical `value == canonical` assertion
+ * is not safe for types whose sample carries them.
+ */
+function hasNonIntegerNumber(v: unknown): boolean {
+  if (typeof v === "number") return !Number.isInteger(v);
+  if (Array.isArray(v)) return v.some(hasNonIntegerNumber);
+  if (v && typeof v === "object") {
+    return Object.values(v as Record<string, unknown>).some(hasNonIntegerNumber);
+  }
+  return false;
+}
+
+/**
  * Emit an integration test file for a TypeSpec model type.
  */
-function emitRustTest(ctx: RustTestContext): string {
+export function emitRustTest(ctx: RustTestContext): string {
   const { node, isAbstract, examples, coercions, factories, importPath, isPolymorphicBase } = ctx;
   const typeName = node.typeName.name;
   const snakeName = toSnakeCase(typeName);
@@ -621,8 +636,267 @@ function emitRustTest(ctx: RustTestContext): string {
     }
     out += '}\n';
     out += '\n';
-  }
 
+    // Serde round-trip test: deserialize EXTERNAL canonical JSON via serde,
+    // re-serialize via serde, and deserialize again — proving Serialize +
+    // Deserialize + PartialEq all work and that the discriminated union's `kind`
+    // survives the serde path with its exact canonical wire value. With the old
+    // externally-tagged derive this would fail to even deserialize nested
+    // discriminated values (e.g. `{"kind":"text",...}`).
+    if (!isAbstract) {
+      out += '#[test]\n';
+      out += `fn test_${snakeName}_serde_roundtrip${suffix}() {\n`;
+      out += '    let json = r####"\n';
+      for (const line of sample.json) {
+        out += `${line}\n`;
+      }
+      out += '"####;\n';
+      out += `    let instance: ${typeName} = serde_json::from_str(json)\n`;
+      out += '        .expect("serde should deserialize canonical JSON");\n';
+      out += '    let value = serde_json::to_value(&instance)\n';
+      out += '        .expect("serde should serialize");\n';
+      // Parse the ORIGINAL canonical (internally-tagged) JSON so we can assert the
+      // serde-re-serialized polymorphic sub-values are byte-identical to it — this is
+      // the acceptance gate: it proves serde produces canonical internally-tagged wire
+      // (`{"kind":"text",...}`), NOT the externally-tagged derive form
+      // (`{"kind":{"TextContent":{...}}}`), with empty-omission preserved.
+      out += '    let canonical: serde_json::Value = serde_json::from_str(json)\n';
+      out += '        .expect("canonical json parses");\n';
+      // Delegation-equivalence (ALWAYS): the uniform manual serde impls route Serialize
+      // through `to_value` and Deserialize through `load_from_value`, so serde output/input
+      // MUST equal the canonical context-aware form for EVERY type — independent of whether
+      // the `@sample` is complete, how collections are shaped, or int-vs-float rendering.
+      // This is the sample-agnostic invariant that holds for arbitrary consumer models
+      // (whose `@sample` annotates only some fields); the byte-identity assertions below are
+      // ADDITIONALLY emitted only for complete, byte-safe samples (typra's own fixtures).
+      out += '    assert_eq!(value, instance.to_value(&SaveContext::default()), "serde serialize must equal canonical to_value");\n';
+      out += `    assert_eq!(instance, ${typeName}::load_from_value(&canonical, &LoadContext::default()), "serde deserialize must equal canonical load_from_value");\n`;
+      // A whole-object/nested byte-identity assertion against the `@sample` JSON is only
+      // valid when the sample is a canonical fixed point: every REQUIRED field is present
+      // (otherwise `to_value` correctly emits required fields the partial sample omits) and
+      // no float-typed field is sampled with an integer literal (`12` canonicalizes to
+      // `12.0`, which serde_json::Value compares unequal). Consumer models annotate partial
+      // samples and must fall back to the delegation-equivalence above; typra's own fixtures
+      // author complete samples and keep the stronger byte-identity checks.
+      const floatScalarNames = new Set(["float", "float32", "float64", "number", "numeric"]);
+      const isByteSafeSample = (
+        tn: TypeNode | undefined,
+        sv: unknown,
+        path: Set<string>,
+      ): boolean => {
+        if (!tn) return true; // element type unresolved (cycle quirk) — cannot verify, don't block
+        if (!sv || typeof sv !== "object" || Array.isArray(sv)) return true;
+        const key = `${tn.typeName.namespace}.${tn.typeName.name}`;
+        if (path.has(key)) return true; // cycle — stop descending
+        path.add(key);
+        try {
+          const obj = sv as Record<string, unknown>;
+          for (const p of tn.properties) {
+            // A field that `to_value` ALWAYS emits — required (no `?`) OR carrying a
+            // default (materialized on load, so present on save even when the `@sample`
+            // omits it, e.g. prompty's `status`/`contextState`) — must be present in the
+            // sample for whole-object byte-identity vs that sample to be valid.
+            if ((!p.isOptional || p.defaultValue != null) && !(p.name in obj)) return false;
+            const pv = obj[p.name];
+            // Cause D (mirror image of the above): a REQUIRED field authored in the sample
+            // at its zero/empty value is OMITTED by to_value — required string == "", int
+            // == 0, float == 0.0, and empty collections are all dropped (see emitScalarSave /
+            // emitSaveField omission guards). So the sample is not a canonical fixed point and
+            // whole-object byte-identity vs it is invalid (e.g. prompty's validation_result
+            // `errors:[]`, turn_model_request `iteration:0`). Optional fields authored at zero
+            // ARE emitted (`Some(0)`), so this only applies to required (non-`?`) fields.
+            if (!p.isOptional && p.name in obj) {
+              if (p.isCollection && Array.isArray(pv) && pv.length === 0) return false;
+              if (p.isScalar && !p.isCollection && typeof pv === "string" && pv === "") return false;
+              if (p.isScalar && !p.isCollection && typeof pv === "number" && pv === 0) return false;
+            }
+            if (
+              p.isScalar &&
+              !p.isCollection &&
+              floatScalarNames.has(p.typeName.name) &&
+              typeof pv === "number" &&
+              Number.isInteger(pv)
+            ) {
+              return false;
+            }
+            if (pv && typeof pv === "object" && !Array.isArray(pv)) {
+              if (!isByteSafeSample(p.type, pv, path)) return false;
+            } else if (Array.isArray(pv) && p.type) {
+              for (const el of pv) {
+                if (!isByteSafeSample(p.type, el, path)) return false;
+              }
+            }
+          }
+          return true;
+        } finally {
+          path.delete(key);
+        }
+      };
+      const byteSafeSample = isByteSafeSample(node, sample.sample, new Set());
+      const kindV = sample.validations.find(v => v.key === "kind" && !v.isOptional);
+      if (isPolymorphicBase && kindV) {
+        out += `    assert_eq!(value.get("kind").and_then(|v| v.as_str()), Some(${rustAssertionValue(node, "kind", kindV.value, kindV.delimiter)}), "discriminator must round-trip to its canonical wire value");\n`;
+        // A directly-sampled polymorphic type must re-serialize byte-identical to its
+        // canonical internally-tagged input — but only when the sample is byte-safe
+        // (complete + no int/float ambiguity). Partial consumer samples rely on the
+        // delegation-equivalence assertions above instead.
+        if (byteSafeSample) {
+          out += '    assert_eq!(value, canonical, "polymorphic type must re-serialize to byte-identical canonical internally-tagged JSON");\n';
+        }
+      }
+      // Nested discriminated-union canonicity (discriminator string + exact sub-value
+      // wire) is proven sample-independently by the delegation-equivalence assertion above
+      // (`value == instance.to_value(..)` compares the ENTIRE wire, including every nested
+      // discriminator, so an externally-tagged regression fails loudly) and, for complete
+      // byte-safe samples, by the whole-object byte-identity below. We deliberately do NOT
+      // navigate into sampled collections by integer index to re-assert discriminators:
+      // that is redundant and, for keyed (property-bag) collections whose canonical wire is
+      // a name-keyed MAP, `value[prop][0]` navigates into an object → None and mis-fails.
+      // Element type names known to carry a `name` property (i.e. keyed collections),
+      // used by the keyed-map assertion + synthesized map-input block below. Built once to
+      // work around the cycle-prevention quirk where an element's `prop.type` is unset on a
+      // later sibling of the same element type. `isNamedCollection` is the structural flag
+      // set at IR resolution for `Record<T>|Named<..>[]` bags — authoritative even when
+      // `prop.type` (the injected-`name` wrapper) was left unresolved on a later sibling.
+      const namedElementTypes = new Set<string>();
+      for (const p of node.properties) {
+        if (p.isNamedCollection || (p.type && p.type.properties.some(t => t.name === "name"))) {
+          namedElementTypes.add(p.typeName.name);
+        }
+      }
+      const isKeyedCollection = (prop: TypeNode["properties"][number]): boolean =>
+        prop.isCollection &&
+        (prop.isNamedCollection ||
+          (prop.type?.properties.some(t => t.name === "name") ?? false) ||
+          namedElementTypes.has(prop.typeName.name));
+      // Keyed-collection canonicalization: a collection whose element model has a
+      // `name` property saves as a canonical name-keyed MAP. This is exactly the
+      // property-bag pattern (e.g. prompty's `inputs`/`outputs`/`parameters`,
+      // declared as the union `Record<T> | Named<T>[]`) that a plain
+      // `#[derive(serde::Serialize/Deserialize)]` on a `Vec<T>` field CANNOT
+      // reproduce — the derive emits/demands a JSON array and REJECTS the canonical
+      // map on load with "invalid type: map, expected a sequence". Prove the manual
+      // delegating serde produces the canonical map: assert the field serialized to a
+      // JSON object keyed by name. Handles a sample authored in either MAP form
+      // (`{"alpha":{...}}` — keys ARE the names) or ARRAY shorthand
+      // (`[{"name":"alpha",...}]`).
+      for (const prop of node.properties) {
+        if (!isKeyedCollection(prop)) continue;
+        const sampleVal = sample.sample ? sample.sample[prop.name] : undefined;
+        let keys: string[] = [];
+        if (Array.isArray(sampleVal)) {
+          keys = sampleVal
+            .map(e =>
+              e && typeof e === "object"
+                ? (e as Record<string, unknown>).name
+                : undefined,
+            )
+            .filter((k): k is string => typeof k === "string");
+        } else if (sampleVal && typeof sampleVal === "object") {
+          keys = Object.keys(sampleVal as Record<string, unknown>);
+        } else {
+          continue;
+        }
+        if (keys.length === 0) continue;
+        out += `    assert!(value.get(${JSON.stringify(prop.name)}).map(|v| v.is_object()).unwrap_or(false), "keyed collection must serialize to canonical name-keyed map, not an array");\n`;
+        out += `    assert!(value.get(${JSON.stringify(prop.name)}).and_then(|v| v.get(${JSON.stringify(keys[0])})).is_some(), "keyed collection map must be keyed by the element name");\n`;
+      }
+      // Whole-object byte-identity: for byte-stable types the serde re-serialization
+      // must equal the canonical wire EXACTLY. This proves flat structs honor the
+      // canonical to_value/load_from_value semantics — most importantly EMPTY-OMISSION
+      // (unset optionals are dropped, NOT emitted as `null`/`[]` as a plain
+      // `#[derive(serde::Serialize)]` would). We skip types that legitimately differ
+      // from their canonical input: those with scalar-coercion shorthand (a complex
+      // field sampled as a bare scalar that expands on load) and those carrying
+      // non-integer floats (serde may re-print the precision differently).
+      const assertedFullEquality = isPolymorphicBase && !!kindV;
+      if (!assertedFullEquality) {
+        let byteStable = coercions.length === 0;
+        if (byteStable) {
+          for (const prop of node.properties) {
+            const sv = sample.sample ? sample.sample[prop.name] : undefined;
+            // A keyed collection sampled in ARRAY shorthand (`[{"name":..}]`) has a
+            // canonical wire (name-keyed MAP) that legitimately differs from the sample
+            // text, so whole-object byte-identity is invalid — the keyed-map assertion
+            // above + the synthesized map-input round-trip below cover it.
+            if (isKeyedCollection(prop) && Array.isArray(sv)) {
+              byteStable = false;
+              break;
+            }
+            if (sv === undefined || sv === null) continue;
+            const isPrimitive =
+              typeof sv === "string" || typeof sv === "number" || typeof sv === "boolean";
+            const isComplexModel = !prop.isScalar && !prop.isCollection && !prop.enumName;
+            if (isPrimitive && isComplexModel) {
+              byteStable = false;
+              break;
+            }
+          }
+        }
+        const hasFloat = sample.sample ? hasNonIntegerNumber(sample.sample) : false;
+        if (byteStable && !hasFloat && byteSafeSample) {
+          out += `    assert_eq!(value, canonical, "serde must serialize to byte-identical canonical wire (empty-omission preserved; no plain-derive divergence)");\n`;
+        }
+      }
+      out += `    let reparsed: ${typeName} = serde_json::from_value(value)\n`;
+      out += '        .expect("serde should re-deserialize");\n';
+      out += '    assert_eq!(instance, reparsed, "serde round-trip must be stable");\n';
+      // Synthesized MAP-form input regression (Rust-only). The canonical wire form of a
+      // keyed collection (property bag) is a name-keyed MAP, but a fixture may author its
+      // `@sample` in ARRAY shorthand so the shared cross-language gate (incl. Swift, which
+      // is array-only) stays green. Here we synthesize the equivalent MAP-form JSON and
+      // prove the uniform delegating serde DESERIALIZES it — the exact input that a plain
+      // `#[derive(serde::Deserialize)]` on a `Vec<T>` field REJECTS with
+      // "invalid type: map, expected a sequence" (prompty's real `Prompty`/`inputs` failure).
+      {
+        const keyedMapProps: string[] = [];
+        const mapSample: Record<string, unknown> = { ...(sample.sample ?? {}) };
+        for (const prop of node.properties) {
+          if (!isKeyedCollection(prop)) continue;
+          const sv = sample.sample ? sample.sample[prop.name] : undefined;
+          if (!Array.isArray(sv) || sv.length === 0) continue;
+          const asMap: Record<string, unknown> = {};
+          let ok = true;
+          for (const el of sv) {
+            if (!el || typeof el !== "object" || Array.isArray(el)) {
+              ok = false;
+              break;
+            }
+            const rec = el as Record<string, unknown>;
+            const nm = rec.name;
+            if (typeof nm !== "string") {
+              ok = false;
+              break;
+            }
+            const rest: Record<string, unknown> = { ...rec };
+            delete rest.name;
+            asMap[nm] = rest;
+          }
+          if (!ok) continue;
+          mapSample[prop.name] = asMap;
+          keyedMapProps.push(prop.name);
+        }
+        if (keyedMapProps.length > 0) {
+          const mapJson = JSON.stringify(mapSample, null, 2);
+          out += '    let map_json = r####"\n';
+          for (const line of mapJson.split("\n")) {
+            out += `${line}\n`;
+          }
+          out += '"####;\n';
+          out += `    let from_map: ${typeName} = serde_json::from_str(map_json)\n`;
+          out += '        .expect("serde must deserialize the canonical name-keyed MAP form (a plain Vec derive fails here with \\"invalid type: map, expected a sequence\\")");\n';
+          out += '    assert_eq!(from_map, instance, "map-form and array-form inputs must load to equal instances");\n';
+          out += '    let map_value = serde_json::to_value(&from_map)\n';
+          out += '        .expect("serde should serialize the map-loaded instance");\n';
+          for (const name of keyedMapProps) {
+            out += `    assert!(map_value.get(${JSON.stringify(name)}).map(|v| v.is_object()).unwrap_or(false), "keyed collection loaded from a MAP must re-serialize to the canonical name-keyed map");\n`;
+          }
+        }
+      }
+      out += '}\n';
+      out += '\n';
+    }
+  }
   // Coercion tests
   for (let i = 0; i < coercions.length; i++) {
     const alt = coercions[i];
