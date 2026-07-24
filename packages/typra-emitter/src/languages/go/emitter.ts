@@ -86,6 +86,11 @@ export function emitGoFileContent(
 ): string {
   const lines: string[] = [];
 
+  // Go has no inheritance: flatten transitive base fields into each child struct
+  // so inherited (non-discriminator) fields are not dropped. All ancestors live in
+  // this same `types` array (the driver emits one file per root hierarchy).
+  types = flattenGoInheritance(types);
+
   // Protocol-only files have a simpler header (no JSON/YAML imports)
   const hasNonProtocol = types.some(t => !t.isProtocol);
   const needsFmt = enums.some(enumDef => hasParseAliases(enumDef) && !enumDef.isOpen) ||
@@ -111,6 +116,105 @@ export function emitGoFileContent(
 
 function emitCleanGoLines(lines: string[], suffix = ""): string {
   return lines.map(line => line.trimEnd()).join("\n") + suffix;
+}
+
+// ============================================================================
+// Inheritance flattening (Go has no inheritance)
+// ============================================================================
+
+/**
+ * Merge grouped items into a single ordered list.
+ *
+ * Position is decided by first occurrence (base-chain groups come first, so base
+ * fields lead). Definition is decided by the LAST occurrence, so a more-derived
+ * type overrides an inherited field of the same name (e.g. a child's concrete
+ * discriminator literal overrides the abstract base declaration) while keeping the
+ * discriminator/base field emitted exactly once.
+ */
+function mergeInheritedByKey<T>(groups: T[][], key: (item: T) => string): T[] {
+  const order: string[] = [];
+  const chosen = new Map<string, T>();
+  for (const group of groups) {
+    for (const item of group) {
+      const k = key(item);
+      if (!chosen.has(k)) order.push(k);
+      chosen.set(k, item);
+    }
+  }
+  return order.map(k => chosen.get(k)!);
+}
+
+/**
+ * Flatten transitive base fields into every child TypeDecl.
+ *
+ * Go emits child structs by value duplication, so a `Child extends Base` struct must
+ * carry ALL of Base's (and its ancestors') fields, not just Child's own fields plus the
+ * discriminator. The struct, Load, Save and ToWire methods all derive from the same
+ * `fields`/assignments, so we merge every one of them to keep round-trips consistent.
+ *
+ * Ancestors are never mutated — each child gets a fresh TypeDecl with merged members.
+ */
+function flattenGoInheritance(types: TypeDecl[]): TypeDecl[] {
+  const byName = new Map<string, TypeDecl>();
+  for (const t of types) {
+    byName.set(t.typeName.name, t);
+  }
+
+  // Ordered ancestor chain (root → … → direct parent) for a type.
+  const ancestorChain = (t: TypeDecl): TypeDecl[] => {
+    const chain: TypeDecl[] = [];
+    const guard = new Set<string>([t.typeName.name]);
+    let cur = t.base ? byName.get(t.base.name) : undefined;
+    while (cur && !guard.has(cur.typeName.name)) {
+      guard.add(cur.typeName.name);
+      chain.unshift(cur);
+      cur = cur.base ? byName.get(cur.base.name) : undefined;
+    }
+    return chain;
+  };
+
+  return types.map(t => {
+    if (!t.base) return t;
+    const chain = ancestorChain(t);
+    if (chain.length === 0) return t;
+
+    const fields = mergeInheritedByKey(
+      [...chain.map(a => a.fields), t.fields],
+      f => f.name,
+    );
+    const loadAssignments = mergeInheritedByKey(
+      [...chain.map(a => a.load.assignments), t.load.assignments],
+      a => a.fieldName,
+    );
+    const saveAssignments = mergeInheritedByKey(
+      [...chain.map(a => a.save.assignments), t.save.assignments],
+      a => a.fieldName,
+    );
+
+    // Wire: if any ancestor (or the child) carries knownAs mappings, the merged child
+    // now owns those inherited fields too and must emit a ToWire method.
+    const wireSources = [...chain.map(a => a.wire), t.wire].filter(
+      (w): w is WireDecl => w != null,
+    );
+    let wire: WireDecl | null = t.wire;
+    if (wireSources.length > 0) {
+      wire = {
+        providers: Array.from(new Set(wireSources.flatMap(w => w.providers))),
+        mappings: mergeInheritedByKey(
+          wireSources.map(w => w.mappings),
+          m => m.fieldName,
+        ),
+      };
+    }
+
+    return {
+      ...t,
+      fields,
+      load: { ...t.load, assignments: loadAssignments },
+      save: { ...t.save, assignments: saveAssignments },
+      wire,
+    };
+  });
 }
 
 // ============================================================================

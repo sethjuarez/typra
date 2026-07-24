@@ -199,6 +199,24 @@ function emitStringEnum(enumDef: EnumDef, lines: string[], options: RustEmitterO
   lines.push("    }");
   lines.push("}");
   lines.push("");
+
+  // First-class serde support: round-trip as the plain string value (matching `as_str`
+  // / `Display`). Implemented manually so open enums correctly capture unknown strings
+  // into `Other(..)` — a plain derive cannot express that catch-all.
+  lines.push(`impl serde::Serialize for ${enumDef.name} {`);
+  lines.push("    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {");
+  lines.push("        serializer.serialize_str(self.as_str())");
+  lines.push("    }");
+  lines.push("}");
+  lines.push("");
+  lines.push(`impl<'de> serde::Deserialize<'de> for ${enumDef.name} {`);
+  lines.push("    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {");
+  lines.push("        let s = <String as serde::Deserialize>::deserialize(deserializer)?;");
+  lines.push("        Self::from_str_opt(&s)");
+  lines.push(`            .ok_or_else(|| serde::de::Error::custom(format!("invalid ${enumDef.name} value: {}", s)))`);
+  lines.push("    }");
+  lines.push("}");
+  lines.push("");
 }
 
 /**
@@ -325,6 +343,13 @@ export function emitRustFile(
   emitStruct(baseType, polymorphicTypeNames, lines);
   emitImpl(baseType, childTypes, baseFieldNames, visitor, polymorphicTypeNames, lines);
 
+  // Manual serde impls for EVERY data struct: serde delegates to the canonical
+  // to_value/load_from_value so its output/input always equals the canonical wire
+  // form — polymorphic discriminators, scalar-coercion shorthand, map<->list
+  // normalization, empty-omission, etc. This is the single robust invariant
+  // (serde == canonical), replacing the earlier flat-vs-polymorphic classification.
+  emitDelegatingSerde(baseType, lines);
+
   // Method stubs as trait
   if (baseType.methods.length > 0) {
     emitMethodTrait(baseType, lines);
@@ -355,7 +380,12 @@ function emitKindEnum(
 
   lines.push("");
   lines.push(`/// Variant-specific data for [\`${baseType.typeName.name}\`], discriminated by \`${dispatch.discriminatorField}\`.`);
-  lines.push("#[derive(Debug, Clone)]");
+  // No serde derive here: the default derived enum representation is externally
+  // tagged (`{"VariantName": {...}}`) and would emit Rust variant names instead of
+  // the canonical `${dispatch.discriminatorField}` wire value. Serde for the
+  // discriminated union is provided by a manual impl on the parent struct
+  // (see emitPolymorphicSerde) that delegates to the canonical to_value/load_from_value.
+  lines.push("#[derive(Debug, Clone, PartialEq)]");
   lines.push(`pub enum ${enumName} {`);
 
   // Named variants
@@ -498,12 +528,17 @@ function emitStruct(
   if (type.description) {
     emitDocComment(type.description, "", lines);
   }
-  if (type.wire) {
-    lines.push("#[derive(Debug, Clone, Default, serde::Serialize)]");
-    lines.push('#[serde(rename_all = "camelCase")]');
-  } else {
-    lines.push("#[derive(Debug, Clone, Default)]");
-  }
+  // Data structs are first-class serde types: they round-trip through
+  // Serialize/Deserialize and support `==` (PartialEq). Serde is provided by a
+  // MANUAL impl (emitDelegatingSerde) that delegates to the canonical
+  // to_value/load_from_value — NOT a `#[derive(serde::...)]`. A field-by-field
+  // derive cannot reproduce the canonical wire semantics the emitter bakes into
+  // to_value/load_from_value (polymorphic discriminators, scalar-coercion
+  // shorthand, map<->list normalization of keyed collections, empty-omission on
+  // save, provider wire-name remaps, ...), so ALL data structs — flat ones
+  // included — route serde through that single canonical path. The derives below
+  // are additive and coexist with the context-aware LoadContext/load_from_value API.
+  lines.push("#[derive(Debug, Clone, Default, PartialEq)]");
   lines.push(`pub struct ${type.typeName.name} {`);
 
   for (const field of type.fields) {
@@ -525,8 +560,80 @@ function emitStruct(
 }
 
 // ============================================================================
-// Impl Block
+// Manual (delegating) serde support
 // ============================================================================
+
+/**
+ * Emit manual `serde::Serialize` / `serde::Deserialize` impls for a data struct,
+ * delegating to the canonical `to_value` / `load_from_value` logic. This is emitted
+ * for EVERY data struct (flat, polymorphic, and scalar-coercible alike) so that
+ * serde's wire form always equals the canonical form — a field-by-field derive
+ * cannot reproduce the semantics the emitter bakes into to_value/load_from_value:
+ *  - discriminated unions round-trip to their exact flat wire form
+ *    (`{"<discriminator>": "<value>", ...}`) with the canonical discriminator string
+ *    (e.g. `"key"`), not the Rust variant name;
+ *  - scalar-coercible structs accept their bare-scalar shorthand on deserialize;
+ *  - keyed collections normalize between their map and list wire forms;
+ *  - empty/optional fields are omitted on save; provider wire-name remaps apply; etc.
+ *
+ * A default (no-op) context is used, so no `${env:}` / `${file:}` resolution
+ * happens on the serde path; the context-aware LoadContext/SaveContext API
+ * remains fully intact and is used by the explicit from_json/to_json helpers.
+ */
+function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
+  const name = type.typeName.name;
+  const reason = type.polymorphicDispatch
+    ? `the \`${type.polymorphicDispatch.discriminatorField}\` discriminator round-trips to its exact wire value`
+    : type.coercionProperty !== null
+      ? `its scalar-coercion shorthand round-trips through the canonical semantics`
+      : `its serde wire form always equals the canonical to_value/load_from_value form`;
+
+  lines.push("");
+  lines.push(`// Serde for \`${name}\` delegates to the canonical to_value/load_from_value`);
+  lines.push(`// logic so ${reason}. Uses a default (no-op) context — no \${env:}/\${file:}`);
+  lines.push(`// resolution here — leaving the context-aware LoadContext/SaveContext API intact.`);
+  lines.push(`impl serde::Serialize for ${name} {`);
+  lines.push(`    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {`);
+  lines.push(`        serde::Serialize::serialize(&self.to_value(&SaveContext::default()), serializer)`);
+  lines.push(`    }`);
+  lines.push(`}`);
+  lines.push("");
+  lines.push(`impl<'de> serde::Deserialize<'de> for ${name} {`);
+  lines.push(`    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {`);
+  lines.push(`        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;`);
+  lines.push(`        Ok(Self::load_from_value(&value, &LoadContext::default()))`);
+  lines.push(`    }`);
+  lines.push(`}`);
+
+  // For polymorphic types, the `XxxKind` enum is ALSO independently serde-serializable
+  // to the SAME canonical, internally-tagged wire form. We do this by wrapping the bare
+  // variant back into its parent struct and delegating to the parent's to_value /
+  // load_from_value — NOT by deriving serde on the enum (the derived, externally-tagged
+  // repr `{"Variant": {...}}` is a different, non-canonical wire format).
+  if (type.polymorphicDispatch) {
+    const kindName = `${name}Kind`;
+    const discField = rustFieldName(type.polymorphicDispatch.discriminatorField);
+    const discWire = type.polymorphicDispatch.discriminatorField;
+    lines.push("");
+    lines.push(`// Serde for \`${kindName}\` wraps the variant into its parent \`${name}\` and delegates`);
+    lines.push(`// to the canonical to_value/load_from_value logic, so a bare \`${kindName}\``);
+    lines.push(`// serializes to internally-tagged \`{"${discWire}": "<value>", ...}\` — the same wire`);
+    lines.push(`// form as its parent — instead of serde's externally-tagged \`{"<Variant>": {...}}\`.`);
+    lines.push(`impl serde::Serialize for ${kindName} {`);
+    lines.push(`    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {`);
+    lines.push(`        let parent = ${name} { ${discField}: self.clone(), ..Default::default() };`);
+    lines.push(`        serde::Serialize::serialize(&parent.to_value(&SaveContext::default()), serializer)`);
+    lines.push(`    }`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`impl<'de> serde::Deserialize<'de> for ${kindName} {`);
+    lines.push(`    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {`);
+    lines.push(`        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;`);
+    lines.push(`        Ok(${name}::load_from_value(&value, &LoadContext::default()).${discField})`);
+    lines.push(`    }`);
+    lines.push(`}`);
+  }
+}
 
 function emitImpl(
   type: TypeDecl,
