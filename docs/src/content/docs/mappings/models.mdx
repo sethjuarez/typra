@@ -28,7 +28,7 @@ model FixtureOwner {
 | `owner: FixtureOwner` | Required nested object field. |
 | `displayName?: string` | Optional nested object field. |
 
-Targets choose idiomatic syntax for the same shape: TypeScript emits classes and optional properties, Python emits model surfaces with loader/saver helpers, C# emits `System.Text.Json`-oriented types, and Go emits structs with JSON/YAML helper behavior.
+Targets choose idiomatic syntax for the same shape: TypeScript emits classes and optional properties, Python emits model surfaces with loader/saver helpers, C# emits `System.Text.Json`-oriented types, Go emits structs with JSON/YAML helper behavior, and Swift emits `TypraModel` structs in a SwiftPM package.
 
 ## Generated shape
 
@@ -178,6 +178,34 @@ impl FixtureRoot {
             ..Default::default()
         }
     }
+}
+```
+
+  </TabItem>
+  <TabItem label="Swift">
+
+```swift
+public struct FixtureRoot: TypraModel {
+  public var name: String = ""
+  public var description: String? = nil
+  public var tags: [String] = []
+  public var metadata: [String: Any]? = nil
+  public var owner: FixtureOwner = FixtureOwner()
+
+  public static func load(_ data: Any, context: LoadContext = LoadContext()) throws -> FixtureRoot {
+    let object = try TypraRuntime.object(data, typeName: "FixtureRoot")
+    var instance = FixtureRoot()
+    if let value = object["name"] { instance.name = try TypraRuntime.string(value, field: "name") }
+    if let value = object["owner"] { instance.owner = try FixtureOwner.load(value, context: context) }
+    return instance
+  }
+
+  public func save(_ context: SaveContext = SaveContext()) throws -> [String: Any] {
+    var result: [String: Any] = [:]
+    result["name"] = self.name
+    result["owner"] = try self.owner.save(context)
+    return result
+  }
 }
 ```
 

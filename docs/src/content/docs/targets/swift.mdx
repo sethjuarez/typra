@@ -1,0 +1,110 @@
+---
+title: Swift target
+description: What Typra emits for Swift consumers.
+draft: false
+---
+
+Use the Swift target for Apple-platform apps and Swift services that need generated model types with JSON/YAML load and save helpers. Typra emits a ready-to-build SwiftPM package.
+
+```yaml
+emit-targets:
+  - type: Swift
+    output-dir: "generated/swift"
+    test-dir: "generated/swift/tests"
+    package-name: "TypraFixtures"
+    protocol-scaffolds: "compile-only"
+```
+
+| Option | Why it matters |
+| --- | --- |
+| `output-dir` | Where the generated SwiftPM package is written. |
+| `test-dir` | Where generated Swift tests are written (enables the test target). |
+| `package-name` | Swift module and package name. Defaults to the root namespace when unset. |
+| `format` | Boolean toggle (default `true`). Runs `swiftformat` on emitted files when available. |
+| `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+
+Swift does not use `import-path`, `namespace`, or `enum-parsing`.
+
+## Generated surface
+
+Typra emits a complete SwiftPM package:
+
+- A `Package.swift` manifest targeting `swift-tools-version` 5.9, platforms macOS 12 and iOS 15, with a [Yams](https://github.com/jpsim/Yams) dependency (`from: "5.1.3"`) for YAML support.
+- One Swift source file per model under `Sources/<Module>/`, plus a shared `TypraRuntime.swift`.
+- Generated `XCTest` files under `Tests/<Module>Tests/` when `test-dir` is set.
+
+Every generated model conforms to the `TypraModel` protocol and exposes the same helper set:
+
+```swift
+public struct FixtureRoot: TypraModel {
+  public var name: String = ""
+  public var description: String? = nil
+  public var tags: [String] = []
+  public var owner: FixtureOwner = FixtureOwner()
+
+  public static func load(_ data: Any, context: LoadContext = LoadContext()) throws -> FixtureRoot { /* ... */ }
+  public func save(_ context: SaveContext = SaveContext()) throws -> [String: Any] { /* ... */ }
+
+  public static func fromJSON(_ json: String, context: LoadContext = LoadContext()) throws -> FixtureRoot { /* ... */ }
+  public func toJSON(_ context: SaveContext = SaveContext()) throws -> String { /* ... */ }
+  public static func fromYAML(_ yaml: String, context: LoadContext = LoadContext()) throws -> FixtureRoot { /* ... */ }
+  public func toYAML(_ context: SaveContext = SaveContext()) throws -> String { /* ... */ }
+}
+```
+
+## Typical usage shape
+
+```swift
+import TypraFixtures
+
+let root = try FixtureRoot.fromJSON(jsonText)
+let saved = try root.toJSON()
+```
+
+Load and save also accept already-parsed values through `load(_:)` and `save(_:)`, so you can bridge from other decoders without re-serializing to text.
+
+## Scalar coercion
+
+Models with a `@@coerce` rule accept scalar shorthand directly. The generated `load` and `fromJSON` helpers detect a scalar input and expand it into the object shape:
+
+```swift
+let reference = try FixtureReference.fromJSON("\"ref-coerced\"")
+// reference.id == "ref-coerced", reference.label == "coerced reference"
+```
+
+## Factories and polymorphism
+
+`@@factory` adds named constructors, and discriminated hierarchies lower to a Swift enum with associated values:
+
+```swift
+let named = FixtureReference.named(id: "ref-1", label: "Primary")
+
+let content = try FixtureContent.fromJSON(payload)
+switch content {
+case .textContent(let text): print(text.text)
+case .imageContent(let image): print(image.url)
+case .unknown(let raw): print(raw)
+}
+```
+
+## Provider wire names
+
+`@@knownAs` mappings emit a `toWire(_:)` helper that renames canonical fields for a target provider:
+
+```swift
+let wire = try options.toWire("openai")
+// maxOutputTokens is emitted as "max_completion_tokens"
+```
+
+## Method stubs
+
+`@@method` signatures emit throwing stubs that must be completed by hand-authored extension code. Until implemented, they throw `TypraRuntimeError.unsupported`, so generated code compiles while keeping domain behavior in the consuming app.
+
+## Validation coverage
+
+Swift generation is part of the fixture suite. When a Swift toolchain is available, fixture validation runs `swift build` and `swift test` against the generated package. If Swift is unavailable, the Swift checks skip with a warning unless `CI_SWIFT_REQUIRED=1` is set, which promotes a missing toolchain to a hard failure.
+
+```powershell
+npm run generate:fixtures --workspace @typra/emitter
+npm run validate:fixtures --workspace @typra/emitter
+```

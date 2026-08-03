@@ -27,10 +27,14 @@ Generated Python surfaces include model surfaces, loader/saver helpers, JSON/YAM
 ## Typical usage shape
 
 ```python
+import json
+
 from fixtures import FixtureRoot
 
-root = FixtureRoot.from_json(json_text)
+root = FixtureRoot.load(json.loads(json_text))
 saved = root.to_json()
 ```
+
+Python models expose instance `to_json()` and `to_yaml()` helpers plus the static `load()` and instance `save()` methods. There is no `from_json`; parse the text yourself (for example with `json.loads`) and pass the parsed value to `load()`.
 
 Review generated tests for the exact helper names emitted by your selected contract and target options.

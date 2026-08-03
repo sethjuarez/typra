@@ -32,9 +32,11 @@ options:
 | --- | --- |
 | Root selection | `root-object`, `root-namespace`, `root-alias`, `additional-roots`, `omit-models` |
 | Review and safety | `deterministic-output`, `protected-paths`, `hydration-zones`, `allow-unsupported-typespec-version` |
-| Output shape | `emit-targets`, `schema-output-dir` |
+| Output shape | `emit-targets` |
 
 `root-object` is the required anchor for generation. Use a fully qualified model name.
+
+`schema-output-dir` is accepted but reserved for future manifest-based cleanup of omitted models. It does not change generated output today.
 
 ## Target options
 
@@ -44,10 +46,10 @@ Each `emit-targets` entry has a required `type` and can set target-specific opti
 | --- | --- |
 | `output-dir` | Generated source output. |
 | `test-dir` | Generated target tests. |
-| `format` | Target formatting behavior when supported. |
+| `format` | Boolean toggle (default `true`). Runs the target formatter on emitted files when a formatter is available. |
 | `import-path` | Import path used by generated tests or target modules. |
-| `package-name` | Go or Java package naming. |
-| `namespace` | C# namespace naming. |
+| `package-name` | Go, Java, and Swift package or module naming. |
+| `namespace` | C# namespace, and the Java package when `package-name` is unset. |
 | `alias` | Target aliasing when supported by the emitter. |
 | `enum-parsing` | Rust enum parsing mode. |
 | `protocol-scaffolds` | Compile-only protocol scaffold generation. |

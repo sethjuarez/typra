@@ -10,16 +10,17 @@ Unsupported TypeSpec versions report an emitter diagnostic unless `allow-unsuppo
 
 ## Target confidence
 
-Target support is evidence-driven. The fixture suite validates generated compile/test surfaces across TypeScript, Python, C#, Go, Java, Rust, Markdown, and JSON AST generation.
+Target support is evidence-driven. The fixture suite validates generated compile/test surfaces across TypeScript, Python, C#, Go, Java, Rust, Swift, Markdown, and JSON AST generation.
 
 | Target | Current confidence note |
 | --- | --- |
 | TypeScript | Best fit when JSON/YAML helper behavior matters. |
 | Python | Best fit when JSON/YAML helper behavior matters. |
 | Go | Best fit when JSON/YAML helper behavior matters. |
-| C# | JSON-oriented model surfaces; confirm namespace conventions before publishing generated output. |
+| C# | JSON and YAML model helper surfaces; confirm namespace conventions before publishing generated output. |
 | Java | JSON/YAML model helper surfaces; confirm package conventions before publishing generated output. |
 | Rust | Choose `enum-parsing` deliberately; default behavior is case-sensitive. |
+| Swift | SwiftPM package with JSON/YAML helpers; build and test require a Swift toolchain (gated by `CI_SWIFT_REQUIRED`). |
 | Markdown | Generated reference output; review before publishing product docs. |
 | JSON AST | Tooling and review artifact, not a runtime API. |
 
