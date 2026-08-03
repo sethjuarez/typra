@@ -4,7 +4,7 @@ description: What Typra emits for .NET consumers.
 draft: false
 ---
 
-Use the C# target for .NET product surfaces that need generated model types and JSON-oriented serialization helpers.
+Use the C# target for .NET product surfaces that need generated model types with JSON and YAML serialization helpers.
 
 ```yaml
 emit-targets:
@@ -22,7 +22,7 @@ emit-targets:
 | `namespace` | Namespace for generated types. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
 
-Generated C# surfaces include model types, `System.Text.Json` helpers, tests, and protocol scaffolds.
+Generated C# surfaces include model types, `System.Text.Json` helpers, `FromYaml`/`ToYaml` helpers, tests, and protocol scaffolds.
 
 ## Typical usage shape
 
@@ -32,5 +32,7 @@ using Typra.Fixtures;
 var root = FixtureRoot.FromJson(jsonText);
 var saved = root.ToJson();
 ```
+
+`FromYaml` and `ToYaml` provide the same round-trip against YAML input.
 
 Confirm namespace conventions and nullable behavior before publishing generated C# output as a package.

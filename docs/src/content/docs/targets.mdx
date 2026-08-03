@@ -15,7 +15,8 @@ Typra emits generated model surfaces, tests, metadata, and documentation from th
 | `CSharp` | C# model types, `System.Text.Json` helpers, tests, and protocol scaffolds. |
 | `Go` | Structs, load/save helpers, JSON/YAML helpers, scalar shorthand coercion, polymorphic dispatch, and generated tests. |
 | `Java` | Models with load, save, `fromJson`, `toJson`, `fromYaml`, `toYaml`, scalar coercion, enum handling, polymorphic dispatch, and tests. |
-| `Rust` | Model structures with serde-oriented surfaces and optional case-insensitive enum parsing. |
+| `Rust` | serde-oriented structs with `from_json`/`to_json`, `from_yaml`/`to_yaml`, provider wire mapping, and optional case-insensitive enum parsing. |
+| `Swift` | A SwiftPM package with `TypraModel` types, `fromJSON`/`toJSON`, `fromYAML`/`toYAML`, scalar coercion, polymorphic enums, provider wire mapping, and XCTest tests. |
 
 ## Reference targets
 
@@ -54,6 +55,7 @@ emit-targets:
 | Go services or CLIs | Add `Go` and set `package-name`. |
 | JVM consumers | Add `Java` and set `package-name`. |
 | Rust consumers | Add `Rust`; choose `enum-parsing` deliberately. |
+| Apple platforms or Swift services | Add `Swift` and set `package-name`. |
 | Human-readable contract reference | Add `Markdown`. |
 | Tooling, review, or schema evolution | Use the always-emitted JSON AST. |
 
@@ -67,6 +69,7 @@ emit-targets:
 | `Go` | [Go target](/targets/go/) |
 | `Java` | [Java target](/targets/java/) |
 | `Rust` | [Rust target](/targets/rust/) |
+| `Swift` | [Swift target](/targets/swift/) |
 | `Markdown` | [Markdown target](/targets/markdown/) |
 
 ## Capability caveats
@@ -76,14 +79,15 @@ Target support is intentionally evidence-driven. The fixture suite validates gen
 | Target | Caveat to check before adopting |
 | --- | --- |
 | `TypeScript`, `Python`, `Go` | Best fit when JSON/YAML helper behavior and scalar shorthand loading matter. |
-| `CSharp`, `Java` | Confirm package/namespace conventions before publishing generated output. Java includes JSON/YAML helper surfaces. |
+| `CSharp`, `Java` | Confirm package/namespace conventions before publishing generated output. Both include JSON and YAML helper surfaces. |
 | `Rust` | Choose `enum-parsing` deliberately; default behavior is case-sensitive. |
+| `Swift` | Emits a SwiftPM package with a Yams dependency for YAML; requires a Swift toolchain to build and test. |
 | `Markdown` | Treat as generated reference output, not a replacement for product narrative docs. |
 | JSON AST | Use for tooling and review; do not treat it as a runtime API. |
 
 ## Confidence model
 
-The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust, Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture validation also exercises generated metadata, verifier CLI output, consumer smoke wiring, and cross-language generated-code compile/test surfaces. For Go, that includes `gofmt`, `go vet`, `go test`, scalar coercion helper coverage, and executable conformance.
+The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust, Swift, Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture validation also exercises generated metadata, verifier CLI output, consumer smoke wiring, and cross-language generated-code compile/test surfaces. For Go, that includes `gofmt`, `go vet`, `go test`, scalar coercion helper coverage, and executable conformance. Swift build and test run when a Swift toolchain is available, and are gated to a hard requirement with `CI_SWIFT_REQUIRED=1`.
 
 The fixture source is the compact reference for supported shapes:
 

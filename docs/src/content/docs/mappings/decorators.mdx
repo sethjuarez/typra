@@ -152,6 +152,24 @@ pub fn to_wire(&self, provider: &str) -> serde_json::Value {
 ```
 
   </TabItem>
+  <TabItem label="Swift">
+
+```swift
+public func toWire(_ provider: String, context: SaveContext = SaveContext()) throws -> [String: Any] {
+  var result: [String: Any] = [:]
+  let wireNameMaxOutputTokens: String
+  switch provider {
+  case "openai": wireNameMaxOutputTokens = "max_completion_tokens"
+  case "anthropic": wireNameMaxOutputTokens = "max_tokens"
+  default: wireNameMaxOutputTokens = "maxOutputTokens"
+  }
+  if let value = self.maxOutputTokens { result[wireNameMaxOutputTokens] = value }
+  if let value = self.temperature { result["temperature"] = value }
+  return result
+}
+```
+
+  </TabItem>
   <TabItem label="JSON AST">
 
 ```json
@@ -305,6 +323,29 @@ impl FixtureReference {
     pub fn named(id: String, label: String) -> Self {
         Self { id, label: Some(label) }
     }
+}
+```
+
+  </TabItem>
+  <TabItem label="Swift">
+
+```swift
+public static func load(_ data: Any, context: LoadContext = LoadContext()) throws -> FixtureReference {
+  if let scalar = data as? String {
+    var instance = FixtureReference()
+    instance.id = try TypraRuntime.string(scalar, field: "id")
+    instance.label = "coerced reference"
+    return instance
+  }
+  let object = try TypraRuntime.object(data, typeName: "FixtureReference")
+  var instance = FixtureReference()
+  if let value = object["id"] { instance.id = try TypraRuntime.string(value, field: "id") }
+  if let value = object["label"] { instance.label = try TypraRuntime.string(value, field: "label") }
+  return instance
+}
+
+public static func named(id: String, label: String) -> FixtureReference {
+  return FixtureReference(id: id, label: label)
 }
 ```
 

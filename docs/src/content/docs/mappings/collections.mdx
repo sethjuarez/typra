@@ -134,6 +134,32 @@ content_items: value
 ```
 
   </TabItem>
+  <TabItem label="Swift">
+
+```swift
+public struct FixtureRoot: TypraModel {
+  public var tags: [String] = []
+  public var metadata: [String: Any]? = nil
+  public var contentItems: [FixtureContent] = []
+
+  public static func load(_ data: Any, context: LoadContext = LoadContext()) throws -> FixtureRoot {
+    let object = try TypraRuntime.object(data, typeName: "FixtureRoot")
+    var instance = FixtureRoot()
+    if let value = object["tags"] {
+      instance.tags = try TypraRuntime.array(value, field: "tags").map { try TypraRuntime.string($0, field: "tags") }
+    }
+    if let value = object["metadata"] {
+      instance.metadata = try TypraRuntime.dictionary(value, field: "metadata")
+    }
+    if let value = object["contentItems"] {
+      instance.contentItems = try TypraRuntime.array(value, field: "contentItems").map { try FixtureContent.load($0, context: context) }
+    }
+    return instance
+  }
+}
+```
+
+  </TabItem>
   <TabItem label="JSON AST">
 
 ```json

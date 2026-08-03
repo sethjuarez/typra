@@ -24,15 +24,17 @@ emit-targets:
 | `enum-parsing` | Controls whether enum parsing is case-sensitive or case-insensitive. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
 
-Generated Rust surfaces include model structures with serde-oriented behavior and optional case-insensitive enum parsing.
+Generated Rust surfaces include serde-oriented model structures, `from_json`/`to_json` and `from_yaml`/`to_yaml` helpers, provider wire mapping, and optional case-insensitive enum parsing.
 
 ## Typical usage shape
 
 ```rust
-use fixtures::model::FixtureRoot;
+use fixtures::model::{FixtureRoot, LoadContext, SaveContext};
 
-let root = FixtureRoot::from_json(json_text)?;
-let saved = root.to_json()?;
+let root = FixtureRoot::from_json(json_text, &LoadContext::default())?;
+let saved = root.to_json(&SaveContext::default())?;
 ```
+
+The `from_yaml` and `to_yaml` helpers provide the same round-trip against YAML. JSON and YAML helpers return `Result`, so callers propagate serde errors with `?`.
 
 Choose `enum-parsing` deliberately. Default behavior is case-sensitive unless configured otherwise.

@@ -8,9 +8,29 @@ draft: false
 
 | Command | Purpose |
 | --- | --- |
-| `typra-generate` | Generation CLI entry point. |
+| `typra-generate` | Standalone generation CLI. Emits target runtimes without a full TypeSpec project. |
 | `typra-verify` | Compares generated metadata between a baseline and current output. |
-| `typra-consumer-smoke` | Consumer smoke-check helper. |
+| `typra-consumer-smoke` | Runs a config-driven install, generate, verify, and smoke harness. |
+
+## Generate with the standalone CLI
+
+`typra-generate` emits runtime surfaces directly. It is useful for quick generation and CI harnesses that do not run a full TypeSpec project.
+
+```powershell
+npx typra-generate -o ./generated -t python,csharp,typescript,go
+```
+
+| Flag | Purpose |
+| --- | --- |
+| `-o, --output <dir>` | Output directory. Required (also accepted as the first positional argument). |
+| `-t, --targets <list>` | Comma-separated targets. Default `python,csharp,typescript,go`. Supports `python`, `csharp`, `typescript`, `go`, `java`, `rust`, `swift`, `markdown`. |
+| `-s, --spec <path>` | TypeSpec entrypoint. Defaults to the bundled fixture spec. |
+| `-r, --root-object <name>` | Root object to generate from. Default `Typra.Fixtures.FixtureRoot`. |
+| `--omit <list>` | Comma-separated model names to omit. |
+| `-n, --namespace <name>` | Root namespace for generated code. Default `Typra`. |
+| `--no-tests` | Skip generating test files. |
+| `--no-format` | Skip running formatters. |
+| `--deterministic` | Emit stable generated metadata for CI verification. |
 
 ## Compile through TypeSpec
 
@@ -28,9 +48,35 @@ Use `typra-verify` when generated output is committed and needs CI review.
 npx typra-verify --baseline ./baseline --current ./generated
 ```
 
-`typra-verify` compares committed `.typra-generated` metadata against current generated metadata. It reports drift in exports, protocols, generated files, package identity, target modules, toolchain metadata, protected paths, schema evolution, stale cleanup candidates, hydration seams, and breaking-change classification. It does not delete files.
+| Flag | Purpose |
+| --- | --- |
+| `--baseline <dir>` | Baseline output root or `.typra-generated` directory. Required. |
+| `--current <dir>` | Current output root or `.typra-generated` directory. Required. |
+| `--config <file>` | Optional verifier config JSON (for example `protectedPaths`). |
+| `--json` | Print the machine-readable JSON result. |
+
+`typra-verify` compares committed `.typra-generated` metadata against current generated metadata. It reports drift in exports, protocols, generated files, package identity, target modules, toolchain metadata, protected paths, schema evolution, stale cleanup candidates, hydration seams, and breaking-change classification. It does not delete files. The process exits `0` when there is no blocking drift and `1` when blocking drift is found.
 
 Additive exports, generated files, and target modules are compatible drift and produce a `minor` classification for review. The `--json` result exposes a top-level `moduleChanges` array with one `{ target, added, removed }` entry for each affected target. Existing target module removals and relocation of existing export ownership remain blocking, as do destructive schema changes.
+
+## Consumer smoke harness
+
+`typra-consumer-smoke` runs a config-driven pipeline so a downstream project can prove it still consumes generated output. It is intentionally generic: each stage is a list of shell commands, and `verify` reuses the same metadata comparison as `typra-verify`.
+
+```powershell
+npx typra-consumer-smoke --config ./typra-smoke.json
+```
+
+```json
+{
+  "install": ["npm ci"],
+  "generate": ["npx tsp compile ./typespec/main.tsp --config ./tspconfig.yaml"],
+  "verify": { "baseline": "./baseline", "current": "./generated" },
+  "smoke": ["npm test"]
+}
+```
+
+The harness runs `install`, then `generate`, then `verify` (when present), then `smoke`, in that order. Missing stages are skipped.
 
 ## Recommended CI gate
 

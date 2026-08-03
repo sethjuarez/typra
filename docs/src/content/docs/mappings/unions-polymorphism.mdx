@@ -205,6 +205,50 @@ pub enum FixtureContent {
 ```
 
   </TabItem>
+  <TabItem label="Swift">
+
+```swift
+public enum FixtureStatus: String, Codable, CaseIterable {
+  case draft, ready, archived
+  public static func parse(_ value: String) throws -> FixtureStatus {
+    switch value {
+    case "draft": return .draft
+    case "ready", "complete": return .ready
+    case "archived": return .archived
+    default: throw TypraRuntimeError.invalidEnum(type: "FixtureStatus", value: value)
+    }
+  }
+}
+
+public struct FixtureMode: RawRepresentable, Equatable, Hashable, Codable {
+  public let rawValue: String
+  public static let interactive = FixtureMode(rawValue: "interactive")
+  public static let batch = FixtureMode(rawValue: "batch")
+  public static func parse(_ value: String) throws -> FixtureMode {
+    switch value {
+    case "bulk": return .batch
+    default: return FixtureMode(rawValue: value)
+    }
+  }
+}
+
+public enum FixtureContent: TypraModel {
+  case textContent(TextContent)
+  case imageContent(ImageContent)
+  case unknown([String: Any])
+
+  public static func load(_ data: Any, context: LoadContext = LoadContext()) throws -> FixtureContent {
+    let object = try TypraRuntime.object(data, typeName: "FixtureContent")
+    switch try TypraRuntime.string(object["kind"] ?? "", field: "kind") {
+    case "text": return .textContent(try TextContent.load(data, context: context))
+    case "image": return .imageContent(try ImageContent.load(data, context: context))
+    default: return .unknown(object)
+    }
+  }
+}
+```
+
+  </TabItem>
   <TabItem label="JSON AST">
 
 ```json
