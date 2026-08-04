@@ -706,7 +706,7 @@ describe("lowerFile", () => {
 
     it("keeps whitespace-sensitive multiline YAML trim-proof", () => {
       const instructions = makeProp("instructions", "string", { isScalar: true });
-      const expected = "some\npersonal\ncontent";
+      const expected = "some \npersonal\ncontent";
       instructions.samples = [{ sample: { instructions: expected }, description: "" }];
       const prompty = makeType("Prompty", [instructions]);
 
@@ -734,7 +734,10 @@ describe("lowerFile", () => {
       instructions.samples = [{ sample: { instructions: trailingValue }, description: "" }];
       const trailingContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
       assert.deepEqual(trailingContext.examples[0].yaml, [
-        `instructions: "some\\npersonal\\ncontent${"\u00a0"}"`,
+        "instructions: |-",
+        "  some",
+        "  personal",
+        `  content${"\u00a0"}`,
         "",
       ]);
 

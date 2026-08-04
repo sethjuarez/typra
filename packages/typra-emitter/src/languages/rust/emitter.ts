@@ -1722,7 +1722,7 @@ function emitSaveField(
   // Named enum — serialize via .to_string()
   if (a.enumName) {
     if (a.isOptional) {
-      lines.push(`${indent}if let Some(ref val) = ${fieldRef} {`);
+      lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.to_string()));`);
       lines.push(`${indent}}`);
     } else {
@@ -1744,7 +1744,7 @@ function emitSaveField(
         return;
       }
       if (a.isOptional) {
-        lines.push(`${indent}if let Some(ref val) = ${fieldRef} {`);
+        lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
         lines.push(`${indent}    let nested = val.to_value(ctx);`);
         lines.push(`${indent}    if !nested.is_null() {`);
         lines.push(`${indent}        result.insert("${key}".to_string(), nested);`);
@@ -1764,7 +1764,7 @@ function emitSaveField(
       if (a.isOptional && a.hasExplicitDefault) {
         lines.push(`${indent}result.insert("${key}".to_string(), serde_json::to_value(&${fieldRef}).unwrap_or(serde_json::Value::Null));`);
       } else if (a.isOptional) {
-        lines.push(`${indent}if let Some(ref items) = ${fieldRef} {`);
+        lines.push(`${indent}if let Some(items) = ${fieldRef} {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
       } else {
@@ -1778,7 +1778,7 @@ function emitSaveField(
       if (a.isOptional && a.hasExplicitDefault) {
         lines.push(`${indent}result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(&${fieldRef}, ctx));`);
       } else if (a.isOptional) {
-        lines.push(`${indent}if let Some(ref items) = ${fieldRef} {`);
+        lines.push(`${indent}if let Some(items) = ${fieldRef} {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(items, ctx));`);
         lines.push(`${indent}}`);
       } else {
@@ -1808,7 +1808,7 @@ function emitScalarSave(
   if (isValueType(scalarType)) {
     if (scalarType !== "dictionary" && isOptional) {
       // Optional value types (any, object, unknown) are Option<Value>
-      lines.push(`${indent}if let Some(ref val) = ${fieldRef} {`);
+      lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), val.clone());`);
       lines.push(`${indent}}`);
     } else {
@@ -1890,7 +1890,7 @@ function emitVariantSaveField(
   // Named enum — serialize via .to_string()
   if (field.enumName && field.allowedValues.length > 0) {
     if (field.isOptional) {
-      lines.push(`${indent}if let Some(ref val) = ${fieldRef} {`);
+      lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.to_string()));`);
       lines.push(`${indent}}`);
     } else {
@@ -1932,7 +1932,7 @@ function emitVariantSaveField(
     }
     case "collection_scalar": {
       if (field.isOptional) {
-        lines.push(`${indent}if let Some(ref items) = ${fieldRef} {`);
+        lines.push(`${indent}if let Some(items) = ${fieldRef} {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
       } else {
@@ -1944,7 +1944,7 @@ function emitVariantSaveField(
     }
     case "collection_complex": {
       if (field.isOptional) {
-        lines.push(`${indent}if let Some(ref items) = ${fieldRef} {`);
+        lines.push(`${indent}if let Some(items) = ${fieldRef} {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(items.iter().map(|item| item.to_value(ctx)).collect()));`);
         lines.push(`${indent}}`);
       } else {
