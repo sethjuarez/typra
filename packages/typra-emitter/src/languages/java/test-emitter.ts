@@ -1,12 +1,16 @@
 import { BaseTestContext, CoercionTest, PropertyNode, PropertyValidation, TestExample, TypeNode } from "../../ir/ast.js";
-import { javaPropertyName, javaTypeName } from "./identifiers.js";
+import { javaEnumTypeName, javaPropertyName, javaTypeName } from "./identifiers.js";
 
 function javaString(value: string): string {
   return JSON.stringify(value);
 }
 
 function javaTextBlock(name: string, lines: string[]): string[] {
-  return [`    String ${name} = ${javaString(lines.join("\n"))};`];
+  return [
+    `    String ${name} = """`,
+    ...lines.map(line => `      ${line.replace(/\\/g, "\\\\").replace(/"""/g, '\\"\\"\\"')}`),
+    "      \"\"\";",
+  ];
 }
 
 function className(typeName: string): string {
@@ -37,7 +41,7 @@ export function emitJavaTest(ctx: BaseTestContext): string {
   }
 
   ctx.coercions.forEach((coercion, index) => {
-    emitCoercionTest(lines, typeName, ctx.node, coercion, index + 1);
+    emitCoercionTest(lines, typeName, coercion, index + 1);
   });
 
   if (ctx.node.properties.some(prop => prop.knownAs.length > 0) && ctx.examples.length > 0) {
@@ -91,24 +95,18 @@ function emitInvalidYamlTest(lines: string[], typeName: string): void {
   lines.push(`    assertThrows(() -> ${typeName}.fromYaml(":\\n  broken"), "${typeName}.fromYaml should reject malformed YAML");`);
 }
 
-function emitCoercionTest(
-  lines: string[],
-  typeName: string,
-  node: TypeNode,
-  coercion: CoercionTest,
-  index: number,
-): void {
+function emitCoercionTest(lines: string[], typeName: string, coercion: CoercionTest, index: number): void {
   if (coercion.scalarType !== "string") return;
   lines.push("");
   const coerced = `coerced${index}`;
   lines.push(`    ${typeName} ${coerced} = ${typeName}.fromJson(${javaString(JSON.stringify(coercion.value))});`);
   for (const validation of coercion.validations) {
-    emitNodeValidation(lines, coerced, node, validation);
+    emitValidation(lines, coerced, validation);
   }
   const coercedYaml = `coercedYaml${index}`;
   lines.push(`    ${typeName} ${coercedYaml} = ${typeName}.fromYaml(${javaString(JSON.stringify(coercion.value))});`);
   for (const validation of coercion.validations) {
-    emitNodeValidation(lines, coercedYaml, node, validation);
+    emitValidation(lines, coercedYaml, validation);
   }
 }
 
@@ -135,33 +133,10 @@ function emitWireTest(lines: string[], typeName: string, node: TypeNode, example
 }
 
 function emitExampleValidations(lines: string[], varName: string, node: TypeNode, example: TestExample): void {
-  emitStructuredValidations(lines, varName, node, example.sample, true);
-}
-
-function emitNodeValidation(
-  lines: string[],
-  varName: string,
-  node: TypeNode,
-  validation: PropertyValidation,
-): void {
-  const prop = node.properties.find(candidate => candidate.name === validation.key);
-  if (!prop) {
+  for (const validation of example.validations) {
     emitValidation(lines, varName, validation);
-    return;
   }
-
-  const expr = `${varName}.${javaPropertyName(prop.name)}`;
-  if (prop.enumName && !prop.isOpenEnum && validation.delimiter === '"') {
-    lines.push(`    assertEquals(${javaString(validation.value)}, ${expr}.value, "Expected ${validation.key}");`);
-    return;
-  }
-
-  if (!prop.isScalar && prop.type && validation.delimiter === '"') {
-    emitShorthandObjectValidation(lines, expr, prop.name, validation.value, prop.type);
-    return;
-  }
-
-  emitValidation(lines, varName, validation);
+  emitStructuredValidations(lines, varName, node, example.sample);
 }
 
 function emitValidation(lines: string[], varName: string, validation: PropertyValidation): void {
@@ -181,6 +156,7 @@ function emitStructuredValidations(
   node: TypeNode,
   sample: Record<string, any>,
   includeScalars = false,
+  inheritedNode?: TypeNode,
 ): void {
   for (const prop of node.properties) {
     if (!(prop.name in sample)) continue;
@@ -188,7 +164,11 @@ function emitStructuredValidations(
     const expr = `${varName}.${javaPropertyName(prop.name)}`;
 
     if (includeScalars && prop.isScalar && !prop.isCollection && !prop.isDict) {
-      emitScalarSampleValidation(lines, expr, prop.name, value, prop);
+      const emittedProp = inheritedNode?.discriminator === prop.name
+        || node.discriminator === prop.name
+        ? undefined
+        : inheritedNode?.properties.find(candidate => candidate.name === prop.name) ?? prop;
+      emitScalarSampleValidation(lines, expr, prop.name, value, emittedProp);
       continue;
     }
 
@@ -197,9 +177,13 @@ function emitStructuredValidations(
       continue;
     }
 
-    if (prop.isCollection) {
-      const values = collectionSampleValues(value, prop, node);
-      if (values) emitCollectionValidation(lines, expr, prop.name, values, prop, node);
+    if (prop.isCollection && prop.isNamedCollection && value && typeof value === "object" && !Array.isArray(value)) {
+      emitNamedCollectionMapValidation(lines, expr, prop.name, value, prop, node);
+      continue;
+    }
+
+    if (prop.isCollection && Array.isArray(value)) {
+      emitCollectionValidation(lines, expr, prop.name, value, prop, node);
       continue;
     }
 
@@ -224,7 +208,20 @@ function emitStructuredValidations(
 }
 
 function emitNestedValidations(lines: string[], expr: string, node: TypeNode, sample: Record<string, any>): void {
-  emitStructuredValidations(lines, expr, node, sample, true);
+  for (const prop of node.properties) {
+    if (!(prop.name in sample)) continue;
+    const expected = sample[prop.name];
+    if (!prop.isScalar
+      && prop.type
+      && (typeof expected === "string" || typeof expected === "number" || typeof expected === "boolean")) {
+      emitShorthandObjectValidation(lines, `${expr}.${javaPropertyName(prop.name)}`, prop.name, expected, prop.type);
+      continue;
+    }
+    if (typeof expected === "string" || typeof expected === "number") {
+      const emittedProp = node.discriminator === prop.name ? undefined : prop;
+      lines.push(`    assertEquals(${javaExpectedLiteral(expected, emittedProp)}, ${expr}.${javaPropertyName(prop.name)}, "Expected ${expr}.${prop.name}");`);
+    }
+  }
 }
 
 function emitCollectionValidation(
@@ -257,13 +254,48 @@ function emitCollectionValidation(
     const child = findSampleChildType(prop, item, itemType);
     if (child) {
       const local = `${localIdentifier(expr)}${index}Value`;
-      const childTypeName = javaTypeName(child.typeName.name);
-      lines.push(`    assertTrue(${itemExpr} instanceof ${childTypeName}, "Expected ${propName}[${index}] to be ${childTypeName}");`);
-      lines.push(`    ${childTypeName} ${local} = (${childTypeName}) ${itemExpr};`);
-      emitStructuredValidations(lines, local, child, item, true);
+      lines.push(`    assertTrue(${itemExpr} instanceof ${child.typeName.name}, "Expected ${propName}[${index}] to be ${child.typeName.name}");`);
+      lines.push(`    ${child.typeName.name} ${local} = (${child.typeName.name}) ${itemExpr};`);
+      emitStructuredValidations(lines, local, child, item, true, itemType);
       return;
     }
 
+    emitNestedValidations(lines, itemExpr, itemType, item);
+  });
+}
+
+function emitNamedCollectionMapValidation(
+  lines: string[],
+  expr: string,
+  propName: string,
+  values: Record<string, any>,
+  prop: PropertyNode,
+  node: TypeNode,
+): void {
+  const entries = Object.entries(values);
+  lines.push(`    assertEquals(${entries.length}, ${expr}.size(), "Expected ${propName} size");`);
+  const itemType = resolvePropertyType(node, prop);
+  if (!itemType) return;
+
+  entries.forEach(([key, item], index) => {
+    const itemExpr = `${expr}.get(${index})`;
+    const nameProperty = itemType.properties.find(itemProp => itemProp.name === "name");
+    if (nameProperty) {
+      lines.push(`    assertEquals(${javaString(key)}, ${itemExpr}.${javaPropertyName(nameProperty.name)}, "Expected ${propName}.${key} name");`);
+    }
+    if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+      emitShorthandObjectValidation(lines, itemExpr, `${propName}.${key}`, item, itemType);
+      return;
+    }
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
+    const child = findSampleChildType(prop, item, itemType);
+    if (child) {
+      const local = `${localIdentifier(expr)}${index}Value`;
+      lines.push(`    assertTrue(${itemExpr} instanceof ${child.typeName.name}, "Expected ${propName}.${key} to be ${child.typeName.name}");`);
+      lines.push(`    ${child.typeName.name} ${local} = (${child.typeName.name}) ${itemExpr};`);
+      emitStructuredValidations(lines, local, child, item, true, itemType);
+      return;
+    }
     emitNestedValidations(lines, itemExpr, itemType, item);
   });
 }
@@ -280,10 +312,9 @@ function emitPolymorphicValidation(
   if (!child) return;
 
   const local = `${varName}${capitalize(propName)}Value`;
-  const childTypeName = javaTypeName(child.typeName.name);
-  lines.push(`    assertTrue(${expr} instanceof ${childTypeName}, "Expected ${propName} to be ${childTypeName}");`);
-  lines.push(`    ${childTypeName} ${local} = (${childTypeName}) ${expr};`);
-  emitStructuredValidations(lines, local, child, value, true);
+  lines.push(`    assertTrue(${expr} instanceof ${child.typeName.name}, "Expected ${propName} to be ${child.typeName.name}");`);
+  lines.push(`    ${child.typeName.name} ${local} = (${child.typeName.name}) ${expr};`);
+  emitStructuredValidations(lines, local, child, value, true, prop.type);
 }
 
 function emitShorthandObjectValidation(
@@ -295,10 +326,12 @@ function emitShorthandObjectValidation(
 ): void {
   if (node.childTypes.length > 0) return;
 
-  const shorthandField = findScalarCoercionField(node, expected);
+  const shorthandField = findScalarCoercionField(node, typeof expected);
   if (!shorthandField) return;
 
-  lines.push(`    assertEquals(${javaLiteral(expected)}, ${expr}.${javaPropertyName(shorthandField)}, "Expected ${propName}.${shorthandField}");`);
+  const shorthandProp = node.properties.find(prop => prop.name === shorthandField);
+  const emittedProp = node.discriminator === shorthandField ? undefined : shorthandProp;
+  lines.push(`    assertEquals(${javaExpectedLiteral(expected, emittedProp)}, ${expr}.${javaPropertyName(shorthandField)}, "Expected ${propName}.${shorthandField}");`);
 }
 
 function emitScalarSampleValidation(
@@ -309,35 +342,8 @@ function emitScalarSampleValidation(
   prop?: PropertyNode,
 ): void {
   if (typeof expected === "string" || typeof expected === "number" || typeof expected === "boolean") {
-    if (prop?.enumName && !prop.isOpenEnum && typeof expected === "string") {
-      lines.push(`    assertEquals(${javaString(expected)}, ${expr}.value, "Expected ${displayName}");`);
-      return;
-    }
-    lines.push(`    assertEquals(${javaLiteral(expected)}, ${expr}, "Expected ${displayName}");`);
+    lines.push(`    assertEquals(${javaExpectedLiteral(expected, prop)}, ${expr}, "Expected ${displayName}");`);
   }
-}
-
-function collectionSampleValues(
-  value: any,
-  prop: PropertyNode,
-  node: TypeNode,
-): any[] | null {
-  if (Array.isArray(value)) return value;
-  if (!value || typeof value !== "object") return null;
-
-  const itemType = resolvePropertyType(node, prop);
-  const firstInnerField = itemType?.properties.find(candidate => candidate.name !== "name")?.name ?? "kind";
-  return Object.entries(value).map(([name, item]) => {
-    if (item && typeof item === "object" && !Array.isArray(item)) {
-      return { name, ...item as Record<string, unknown> };
-    }
-    const shorthandField = itemType && (
-      typeof item === "string" || typeof item === "number" || typeof item === "boolean"
-    )
-      ? findScalarCoercionField(itemType, item)
-      : undefined;
-    return { name, [shorthandField ?? firstInnerField]: item };
-  });
 }
 
 function findSampleChildType(prop: PropertyNode, sample: Record<string, any>, type = prop.type): TypeNode | undefined {
@@ -378,24 +384,12 @@ function findTypeByName(node: TypeNode, typeName: string, visited = new Set<Type
   return undefined;
 }
 
-function findScalarCoercionField(node: TypeNode, value: string | number | boolean): string | undefined {
-  let coercion;
-  if (typeof value === "number") {
-    const byScalar = (scalars: string[]) =>
-      scalars.map(scalar => node.coercions.find(entry => entry.scalar === scalar)).find(Boolean);
-    const fitsInt32 = value >= -2147483648 && value <= 2147483647;
-    if (Number.isInteger(value)) {
-      coercion = (fitsInt32 ? byScalar(["int32", "integer"]) : undefined)
-        ?? byScalar(["int64"])
-        ?? byScalar(["number", "float", "numeric", "float64", "float32"]);
-    } else {
-      coercion = byScalar(["number", "float", "numeric", "float64"])
-        ?? byScalar(["float32"])
-        ?? byScalar(["int32", "integer", "int64"]);
-    }
-  } else {
-    coercion = node.coercions.find(entry => entry.scalar === typeof value);
-  }
+function findScalarCoercionField(node: TypeNode, scalarType: string): string | undefined {
+  const coercion = node.coercions.find(entry =>
+    scalarType === "number"
+      ? ["int32", "int64", "integer", "number", "float", "numeric", "float32", "float64"].includes(entry.scalar)
+      : entry.scalar === scalarType
+  );
   if (!coercion) return undefined;
 
   for (const [key, value] of Object.entries(coercion.expansion)) {
@@ -412,6 +406,18 @@ function isPolymorphicProperty(prop: PropertyNode): boolean {
 function javaLiteral(value: string | number | boolean): string {
   if (typeof value === "string") return javaString(value);
   return String(value);
+}
+
+function javaExpectedLiteral(value: string | number | boolean, prop?: PropertyNode): string {
+  if (
+    typeof value === "string"
+    && prop?.enumName
+    && !prop.isOpenEnum
+    && prop.allowedValues.length > 0
+  ) {
+    return `${javaEnumTypeName(prop.enumName)}.fromValue(${javaString(value)})`;
+  }
+  return javaLiteral(value);
 }
 
 function localIdentifier(expr: string): string {

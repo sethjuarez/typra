@@ -20,7 +20,7 @@ describe("Python test emitter", () => {
     } as unknown as TypeNode;
     const context = buildBaseTestContext(node, "prompty", pythonTestOptions);
     assert.equal(context.examples[0].yaml.length, 2);
-    assert.match(context.examples[0].yaml[0], /add some \\npersonal flair/);
+    assert.match(context.examples[0].yaml[0], /add some\\ \\npersonal flair/);
 
     const output = emitPythonTest({
       ...context,

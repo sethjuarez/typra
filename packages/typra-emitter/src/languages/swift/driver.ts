@@ -49,7 +49,6 @@ export const generateSwift = async (
     ]),
   );
   const declarationUniverse = Array.from(fileDecls.values()).flatMap(file => file.types);
-
   await emitSwiftGeneratedFile(context, "Package.swift", emitSwiftPackage(moduleName, packageTestPath), outputDir, outputDir, { marker: false });
   await emitSwiftGeneratedFile(context, "TypraRuntime.swift", emitSwiftRuntime(moduleName), sourceRoot, outputDir);
 

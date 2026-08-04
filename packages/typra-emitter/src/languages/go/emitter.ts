@@ -34,7 +34,6 @@ import {
   WireDecl,
 } from "../../ir/declarations.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
-import { goFieldName } from "./identifiers.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
 
 // ============================================================================
@@ -1108,6 +1107,14 @@ function getStructTag(fieldName: string, isOptional: boolean, hasExplicitDefault
   const jsonTag = omitEmpty ? `${fieldName},omitempty` : fieldName;
   const yamlTag = omitEmpty ? `${fieldName},omitempty` : fieldName;
   return `\`json:"${jsonTag}" yaml:"${yamlTag}"\``;
+}
+
+function goFieldName(name: string): string {
+  const converted = toPascalCase(name);
+  const leading = converted.match(/^[^A-Za-z]+/)?.[0] ?? "";
+  const identifier = converted.slice(leading.length);
+  const prefix = "Field".repeat(leading.length);
+  return `${prefix}${identifier || "Value"}`;
 }
 
 // ============================================================================

@@ -250,16 +250,12 @@ function emitStruct(type: TypeDecl, lines: string[], visitor: ExprVisitor, polym
   lines.push(`public struct ${typeName}: ${conformances.join(", ")} {`);
   lines.push(`  public static let shorthandProperty: String? = ${type.coercionProperty ? swiftStringLiteral(type.coercionProperty) : "nil"}`);
   for (const field of type.fields) {
-    const defaultValue = field.isOptional && !field.hasExplicitDefault
-      ? "nil"
-      : swiftDefaultValue(field, polymorphicTypeNames);
+    const defaultValue = swiftFieldDefaultValue(field, polymorphicTypeNames);
     lines.push(`  public var ${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`);
   }
   lines.push("");
   lines.push(`  public init(${type.fields.map(field => {
-    const defaultValue = field.isOptional && !field.hasExplicitDefault
-      ? "nil"
-      : swiftDefaultValue(field, polymorphicTypeNames);
+    const defaultValue = swiftFieldDefaultValue(field, polymorphicTypeNames);
     return `${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`;
   }).join(", ")}) {`);
   for (const field of type.fields) {
@@ -372,11 +368,16 @@ function emitNamedCollectionSaveHelper(
   lines.push(`        throw TypraRuntimeError.unsupported("Cannot save named ${helper.propertyName} item without a name.")`);
   lines.push("      }");
   if (!polymorphicTypeNames.has(helper.elementTypeName.name)) {
-    lines.push(`      if context.useShorthand, let shorthand = ${elementType}.shorthandProperty, itemData.count == 1, let value = itemData[shorthand] {`);
-    lines.push("        result[name] = value");
-    lines.push("      } else {");
-    lines.push("        result[name] = itemData");
-    lines.push("      }");
+    const shorthandProperty = helper.innerFields.length === 1 ? helper.innerFields[0] : undefined;
+    if (shorthandProperty) {
+      lines.push(`      if context.useShorthand, itemData.count == 1, let value = itemData[${swiftStringLiteral(shorthandProperty)}] {`);
+      lines.push("        result[name] = value");
+      lines.push("      } else {");
+      lines.push("        result[name] = itemData");
+      lines.push("      }");
+    } else {
+      lines.push("      result[name] = itemData");
+    }
   } else {
     lines.push("      result[name] = itemData");
   }
@@ -470,13 +471,19 @@ function emitSave(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
   lines.push("    var result: [String: Any] = [:]");
   for (const assignment of type.save.assignments) {
     const prop = `self.${swiftPropertyName(assignment.fieldName)}`;
-    const helper = type.collectionHelpers.find(candidate =>
-      candidate.propertyName === assignment.fieldName && candidate.hasNameProperty
+    const collectionHelper = type.collectionHelpers.find(helper =>
+      helper.propertyName === assignment.fieldName && helper.hasNameProperty
     );
-    const serialized = swiftSaveExpression(assignment.category, assignment.enumName, prop, polymorphicTypeNames, helper);
+    const serialized = swiftSaveExpression(
+      assignment.category,
+      assignment.enumName,
+      prop,
+      polymorphicTypeNames,
+      collectionHelper,
+    );
     if (assignment.isOptional) {
       lines.push(`    if let value = ${prop} {`);
-      lines.push(`      result[${swiftStringLiteral(assignment.targetName)}] = ${swiftSaveExpression(assignment.category, assignment.enumName, "value", polymorphicTypeNames, helper)}`);
+      lines.push(`      result[${swiftStringLiteral(assignment.targetName)}] = ${swiftSaveExpression(assignment.category, assignment.enumName, "value", polymorphicTypeNames, collectionHelper)}`);
       lines.push("    }");
     } else {
       lines.push(`    result[${swiftStringLiteral(assignment.targetName)}] = ${serialized}`);
@@ -490,10 +497,10 @@ function emitToWire(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<s
   lines.push("  public func toWire(_ provider: String, context: SaveContext = SaveContext()) throws -> [String: Any] {");
   lines.push("    var result: [String: Any] = [:]");
   for (const mapping of type.wire!.mappings) {
-    const helper = type.collectionHelpers.find(candidate =>
-      candidate.propertyName === mapping.fieldName && candidate.hasNameProperty
+    const collectionHelper = type.collectionHelpers.find(helper =>
+      helper.propertyName === mapping.fieldName && helper.hasNameProperty
     );
-    emitWireField(mapping, lines, polymorphicTypeNames, helper);
+    emitWireField(mapping, lines, polymorphicTypeNames, collectionHelper);
   }
   lines.push("    return result");
   lines.push("  }");
@@ -568,6 +575,15 @@ function swiftCategoryType(category: PropertyCategory, enumName: string | null, 
     case "dict":
       return "[String: Any]";
   }
+}
+
+function swiftFieldDefaultValue(field: FieldDecl, polymorphicTypeNames: Set<string>): string {
+  const materializesCollectionDefault =
+    field.hasExplicitDefault &&
+    (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex");
+  return field.isOptional && !materializesCollectionDefault
+    ? "nil"
+    : swiftDefaultValue(field, polymorphicTypeNames);
 }
 
 function swiftDefaultValue(field: FieldDecl, polymorphicTypeNames: Set<string>): string {

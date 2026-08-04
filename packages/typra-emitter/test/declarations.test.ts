@@ -704,22 +704,42 @@ describe("lowerFile", () => {
       assert.doesNotMatch(code, /if instance\.Instructions != /);
     });
 
-    it("emits multiline YAML samples as block literals", () => {
+    it("keeps whitespace-sensitive multiline YAML trim-proof", () => {
       const instructions = makeProp("instructions", "string", { isScalar: true });
-      const expected = "some\npersonal\ncontent";
+      const expected = "some \npersonal\ncontent";
       instructions.samples = [{ sample: { instructions: expected }, description: "" }];
       const prompty = makeType("Prompty", [instructions]);
 
       const context = buildBaseTestContext(prompty, "prompty", goTestOptions);
 
       assert.deepEqual(context.examples[0].yaml, [
+        'instructions: "some\\ \\npersonal\\ncontent"',
+        "",
+      ]);
+      assert.equal(context.examples[0].sample.instructions, expected);
+
+      const blockValue = "some\npersonal\ncontent";
+      instructions.samples = [{ sample: { instructions: blockValue }, description: "" }];
+      const blockContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
+      assert.deepEqual(blockContext.examples[0].yaml, [
         "instructions: |-",
         "  some",
         "  personal",
         "  content",
         "",
       ]);
-      assert.equal(context.examples[0].sample.instructions, expected);
+      assert.equal(blockContext.examples[0].sample.instructions, blockValue);
+
+      const trailingValue = "some\npersonal\ncontent\u00a0";
+      instructions.samples = [{ sample: { instructions: trailingValue }, description: "" }];
+      const trailingContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
+      assert.deepEqual(trailingContext.examples[0].yaml, [
+        "instructions: |-",
+        "  some",
+        "  personal",
+        `  content${"\u00a0"}`,
+        "",
+      ]);
 
       const trailingSpace = makeProp("value", "string", { isScalar: true });
       trailingSpace.samples = [{
@@ -733,7 +753,7 @@ describe("lowerFile", () => {
       );
       assert.deepEqual(
         trailingSpaceContext.examples[0].yaml,
-        ['value: "first line with trailing space \\nsecond line\\n"', ""],
+        ['value: "first line with trailing space\\ \\nsecond line\\n"', ""],
       );
 
       const whitespace = makeProp("value", "string", { isScalar: true });
@@ -811,6 +831,60 @@ describe("lowerFile", () => {
 
 describe("Rust emitter serde derives", () => {
   const registry = buildTestRegistry();
+
+  it("uses concrete vectors for explicit empty defaults and options for absent defaults", () => {
+    const owner = makeType("CollectionOwner", [
+      makeProp("name", "string", { isScalar: true }),
+    ]);
+    const collectionModel = makeType("CollectionModel", [
+      makeProp("inputModalities", "string", {
+        isScalar: true,
+        isCollection: true,
+        isOptional: true,
+      }),
+      makeProp("outputModalities", "string", {
+        isScalar: true,
+        isCollection: true,
+        isOptional: true,
+        defaultValue: null,
+      }),
+      makeProp("owners", "CollectionOwner", {
+        isCollection: true,
+        isOptional: true,
+        type: owner,
+      }),
+      makeProp("defaultOwners", "CollectionOwner", {
+        isCollection: true,
+        isOptional: true,
+        type: owner,
+        defaultValue: null,
+      }),
+    ]);
+    const collectionRegistry = TypeRegistry.fromTypeGraph([collectionModel, owner]);
+    const file = lowerFile(collectionModel, collectionRegistry, new Set());
+    const code = emitRustFile(file, new RustExprVisitor(collectionRegistry), new Set());
+
+    assert.match(code, /pub input_modalities: Option<Vec<String>>/);
+    assert.match(code, /pub output_modalities: Vec<String>/);
+    assert.match(code, /pub owners: Option<Vec<CollectionOwner>>/);
+    assert.match(code, /pub default_owners: Vec<CollectionOwner>/);
+    assert.match(
+      code,
+      /output_modalities: value\.get\("outputModalities"\).*\.unwrap_or_default\(\)/,
+    );
+    assert.match(
+      code,
+      /default_owners: value\.get\("defaultOwners"\).*\.unwrap_or_default\(\)/,
+    );
+    assert.match(
+      code,
+      /result\.insert\("outputModalities"\.to_string\(\), serde_json::to_value\(&self\.output_modalities\)/,
+    );
+    assert.match(
+      code,
+      /result\.insert\("defaultOwners"\.to_string\(\), Self::save_default_owners\(&self\.default_owners, ctx\)\)/,
+    );
+  });
 
   it("emits manual serde (delegating to canonical to_value/load_from_value) on plain data structs", () => {
     // Every data struct — flat ones included — routes serde through the canonical

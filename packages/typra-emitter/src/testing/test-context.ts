@@ -49,8 +49,8 @@ export interface TestContextOptions {
   /** Use YAML block literals for multiline strings instead of quoted folding. */
   yamlMultilineStyle?: "block-literal";
 
-  /** Escape trim-sensitive multiline YAML scalars for any target literal. */
-  yamlTrimSensitiveScalar?: boolean;
+  /** Minimum encoded length at which double-quoted multiline values may be folded. */
+  yamlDoubleQuotedMinMultiLineLength?: number;
 
   /** Default scalar values for each type (used when @sample doesn't provide example) */
   scalarValues: Record<string, string>;
@@ -136,14 +136,10 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
     let yamlStr = doc.toString({
       indent: 2,
       lineWidth: 0,
-      ...(options.yamlTrimSensitiveScalar
-        ? { doubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER }
-        : {}),
+      ...(options.yamlDoubleQuotedMinMultiLineLength === undefined
+        ? {}
+        : { doubleQuotedMinMultiLineLength: options.yamlDoubleQuotedMinMultiLineLength }),
     });
-    if (options.yamlTrimSensitiveScalar) {
-      yamlStr = yamlStr.replace(/"([^"]*(?:\\.|[^"\\])*)"/g, scalar =>
-        scalar.replace(/\\ (?=\\n)/g, " "));
-    }
     if (options.escapeYamlForTemplate) {
       yamlStr = options.escapeYamlForTemplate(yamlStr);
     }
@@ -317,7 +313,7 @@ export const pythonTestOptions: TestContextOptions = {
   renderBoolean: (val: boolean) => val ? "True" : "False",
   escapeString: (str: string) => str.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),
   getDelimiter: (str: string) => str.includes('\n') ? '"""' : '"',
-  yamlTrimSensitiveScalar: true,
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   scalarValues: {
     "boolean": "False",
     "float": "3.14",
@@ -394,13 +390,13 @@ export const rustTestOptions: TestContextOptions = {
     .replace(/\r/g, '\\r')
     .replace(/\t/g, '\\t'),
   getDelimiter: (str: string) => '"',
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   renderEnumValue: (enumName: string, rawValue: string) => ({
     value: `${enumName}::${toPascalCase(rawValue)}`,
     delimiter: '',
   }),
   escapeJsonForTemplate: undefined,
   escapeYamlForTemplate: undefined,
-  yamlTrimSensitiveScalar: true,
   scalarValues: {
     "boolean": "false",
     "float": "3.14",
@@ -439,9 +435,9 @@ export const swiftTestOptions: TestContextOptions = {
     .replace(/\r/g, "\\r")
     .replace(/\t/g, "\\t"),
   getDelimiter: () => '"',
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   escapeJsonForTemplate: (json: string) => json.replace(/\\/g, "\\\\"),
   escapeYamlForTemplate: (yaml: string) => yaml.replace(/\\/g, "\\\\"),
-  yamlTrimSensitiveScalar: true,
   renderEnumValue: (enumName: string, rawValue: string, _fieldName: string, isOpenEnum?: boolean) => ({
     value: isOpenEnum
       ? `${swiftTypeName(enumName)}(rawValue: "${rawValue}")`
@@ -488,8 +484,8 @@ export const goTestOptions: TestContextOptions = {
     .replace(/\r/g, '\\r')
     .replace(/\t/g, '\\t'),
   getDelimiter: (str: string) => '"',
-  yamlTrimSensitiveScalar: true,
   yamlMultilineStyle: "block-literal",
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   scalarValues: {
     "boolean": "false",
     "float": "3.14",
