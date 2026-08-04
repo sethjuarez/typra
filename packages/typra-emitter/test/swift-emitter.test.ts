@@ -7,6 +7,7 @@ import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import { emitSwiftProtocolScaffolds } from "../src/languages/swift/scaffolding.js";
+import { emitSwiftConformanceTest, emitSwiftTests } from "../src/languages/swift/test-emitter.js";
 import { swiftType } from "../src/languages/swift/types.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 
@@ -220,5 +221,192 @@ describe("Swift protocol type mapping", () => {
     protocolNode.methods = parser.methods;
     const scaffold = emitSwiftProtocolScaffolds([protocolNode], "PromptyModel");
     assert.match(scaffold, /func parse\(data: Any\?, context: \[String: Any\]\?\) async throws -> \[Message\]/);
+  });
+});
+
+describe("Swift generated tests", () => {
+  it("unwraps optional collections and nested models before assertions", () => {
+    const modelInfo = new TypeNode({} as Model, "");
+    modelInfo.typeName = { namespace: "Test", name: "ModelInfo" };
+    const inputModalities = new PropertyNode({} as ModelProperty, "");
+    inputModalities.name = "inputModalities";
+    inputModalities.typeName = { namespace: "", name: "string" };
+    inputModalities.isScalar = true;
+    inputModalities.isCollection = true;
+    inputModalities.isOptional = true;
+    const owner = new PropertyNode({} as ModelProperty, "");
+    owner.name = "owner";
+    owner.typeName = { namespace: "Test", name: "FixtureOwner" };
+    owner.isOptional = true;
+    const ownerType = new TypeNode({} as Model, "");
+    ownerType.typeName = owner.typeName;
+    const ownerId = new PropertyNode({} as ModelProperty, "");
+    ownerId.name = "id";
+    ownerId.typeName = { namespace: "", name: "string" };
+    ownerId.isScalar = true;
+    ownerType.properties = [ownerId];
+    owner.type = ownerType;
+    modelInfo.properties = [inputModalities, owner];
+
+    const source = emitSwiftTests({
+      node: modelInfo,
+      isAbstract: false,
+      package: undefined,
+      examples: [{
+        sample: {
+          inputModalities: ["text"],
+          owner: { id: "owner-1" },
+        },
+        json: ["{}"],
+        yaml: ["{}"],
+        validations: [],
+      }],
+      coercions: [],
+      factories: [],
+      moduleName: "TestModels",
+    });
+
+    assert.match(source, /XCTAssertEqual\(\(try XCTUnwrap\(instance\.inputModalities\)\)\.count, 1\)/);
+    assert.match(source, /XCTAssertEqual\(\(try XCTUnwrap\(instance\.owner\)\)\.id, "owner-1"\)/);
+  });
+
+  it("pattern-matches polymorphic roots before validating payload fields", () => {
+    const connection = new TypeNode({} as Model, "");
+    connection.typeName = { namespace: "Test", name: "Connection" };
+    connection.discriminator = "kind";
+    connection.isAbstract = true;
+    const kind = new PropertyNode({} as ModelProperty, "");
+    kind.name = "kind";
+    kind.typeName = { namespace: "", name: "string" };
+    kind.isScalar = true;
+    connection.properties = [kind];
+    const custom = new TypeNode({} as Model, "");
+    custom.typeName = { namespace: "Test", name: "CustomConnection" };
+    const customKind = new PropertyNode({} as ModelProperty, "");
+    customKind.name = "kind";
+    customKind.typeName = kind.typeName;
+    customKind.isScalar = true;
+    customKind.defaultValue = "custom";
+    const endpoint = new PropertyNode({} as ModelProperty, "");
+    endpoint.name = "endpoint";
+    endpoint.typeName = { namespace: "", name: "string" };
+    endpoint.isScalar = true;
+    custom.properties = [customKind, endpoint];
+    connection.childTypes = [custom];
+
+    const source = emitSwiftTests({
+      node: connection,
+      isAbstract: true,
+      package: undefined,
+      examples: [{
+        sample: { kind: "custom", endpoint: "https://example.test" },
+        json: ["{}"],
+        yaml: ["{}"],
+        validations: [{ key: "kind", value: "custom", delimiter: "\"", isOptional: false }],
+      }],
+      coercions: [],
+      factories: [],
+      moduleName: "TestModels",
+    });
+
+    assert.match(source, /if case \.customConnection\(let concrete\) = instance/);
+    assert.match(source, /XCTAssertEqual\(concrete\.endpoint, "https:\/\/example\.test"\)/);
+    assert.doesNotMatch(source, /instance\.kind/);
+  });
+
+  it("pattern-matches wildcard children for unknown discriminator values", () => {
+    const connection = new TypeNode({} as Model, "");
+    connection.typeName = { namespace: "Test", name: "Connection" };
+    connection.discriminator = "kind";
+    connection.isAbstract = true;
+    const kind = new PropertyNode({} as ModelProperty, "");
+    kind.name = "kind";
+    kind.typeName = { namespace: "", name: "string" };
+    kind.isScalar = true;
+    connection.properties = [kind];
+    const fallback = new TypeNode({} as Model, "");
+    fallback.typeName = { namespace: "Test", name: "FallbackConnection" };
+    const fallbackKind = new PropertyNode({} as ModelProperty, "");
+    fallbackKind.name = "kind";
+    fallbackKind.typeName = kind.typeName;
+    fallbackKind.isScalar = true;
+    const endpoint = new PropertyNode({} as ModelProperty, "");
+    endpoint.name = "endpoint";
+    endpoint.typeName = { namespace: "", name: "string" };
+    endpoint.isScalar = true;
+    fallback.properties = [fallbackKind, endpoint];
+    connection.childTypes = [fallback];
+
+    const source = emitSwiftTests({
+      node: connection,
+      isAbstract: true,
+      package: undefined,
+      examples: [{
+        sample: { kind: "vendor", endpoint: "https://vendor.example.test" },
+        json: ["{}"],
+        yaml: ["{}"],
+        validations: [{ key: "kind", value: "vendor", delimiter: "\"", isOptional: false }],
+      }],
+      coercions: [],
+      factories: [],
+      moduleName: "TestModels",
+    });
+
+    assert.match(source, /if case \.fallbackConnection\(let concrete\) = instance/);
+    assert.match(source, /XCTAssertEqual\(concrete\.endpoint, "https:\/\/vendor\.example\.test"\)/);
+    assert.doesNotMatch(source, /instance\.kind|\.unknown/);
+  });
+
+  it("validates compound coercion values through their typed nested field", () => {
+    const mode = new TypeNode({} as Model, "");
+    mode.typeName = { namespace: "Test", name: "McpApprovalMode" };
+    const config = new PropertyNode({} as ModelProperty, "");
+    config.name = "config";
+    config.typeName = { namespace: "Test", name: "McpApprovalConfig" };
+    const configType = new TypeNode({} as Model, "");
+    configType.typeName = config.typeName;
+    configType.coercions = [{
+      scalar: "string",
+      expansion: { kind: "{value}" },
+      title: "config",
+      description: "",
+      example: "always",
+    }];
+    const configKind = new PropertyNode({} as ModelProperty, "");
+    configKind.name = "kind";
+    configKind.typeName = { namespace: "", name: "string" };
+    configKind.isScalar = true;
+    configType.properties = [configKind];
+    config.type = configType;
+    mode.properties = [config];
+
+    const source = emitSwiftTests({
+      node: mode,
+      isAbstract: false,
+      package: undefined,
+      examples: [],
+      coercions: [{
+        title: "mode",
+        scalarType: "String",
+        value: "\"always\"",
+        validations: [{
+          key: "config",
+          value: "always",
+          delimiter: "\"",
+          isOptional: false,
+        }],
+      }],
+      factories: [],
+      moduleName: "TestModels",
+    });
+
+    assert.match(source, /XCTAssertEqual\(instance\.config\.kind, "always"\)/);
+    assert.doesNotMatch(source, /XCTAssertEqual\(instance\.config, "always"\)/);
+  });
+
+  it("omits fixture-specific conformance references for consumer schemas", () => {
+    const source = emitSwiftConformanceTest("PromptyModels");
+    assert.doesNotMatch(source, /FixtureRoot|FixtureContent|WireOptions|FixtureReference/);
+    assert.match(source, /testIntegerValidationRejectsUnsafeValues/);
   });
 });

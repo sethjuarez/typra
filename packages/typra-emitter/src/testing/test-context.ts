@@ -59,6 +59,9 @@ export interface TestContextOptions {
    * The returned value+delimiter replace the default.
    */
   renderEnumValue?: (enumName: string, rawValue: string, fieldName: string, isOpenEnum?: boolean) => { value: string; delimiter: string } | null;
+
+  /** Include scalar samples for complex properties that support scalar coercion. */
+  includeCoercedComplexValues?: boolean;
 }
 
 /**
@@ -143,7 +146,10 @@ function buildValidations(
   return Object.keys(sample)
     .filter(key => {
       const prop = node.properties.find(p => p.name === key);
-      return typeof sample[key] !== 'object' && (prop?.isScalar || prop?.enumName);
+      const supportsScalarCoercion = options.includeCoercedComplexValues
+        && (prop?.type?.coercions.length ?? 0) > 0;
+      return typeof sample[key] !== 'object'
+        && (prop?.isScalar || prop?.enumName || supportsScalarCoercion);
     })
     .map(key => {
       const prop = node.properties.find(p => p.name === key);
@@ -417,6 +423,7 @@ export const swiftTestOptions: TestContextOptions = {
       : `${enumName}.${swiftPropertyName(rawValue)}`,
     delimiter: '',
   }),
+  includeCoercedComplexValues: true,
   scalarValues: {
     "boolean": "false",
     "float": "3.14",

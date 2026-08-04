@@ -184,6 +184,42 @@ model FixtureOmit {
   owners?: FixtureOwner[];
 }
 
+// Prompty-like Swift generated-test regressions:
+// - optional collections must be unwrapped before assertions,
+// - polymorphic roots must be pattern-matched before payload access,
+// - compound coercion fields must validate their typed nested value.
+model ModelInfo {
+  @sample(#{ inputModalities: #["text"] })
+  inputModalities?: string[];
+
+  @sample(#{ outputModalities: #[] })
+  outputModalities?: string[];
+
+  @sample(#{ owner: #{ id: "owner-1", displayName: "Fixture Owner" } })
+  owner?: FixtureOwner;
+}
+
+@discriminator("kind")
+model FixtureConnection {
+  @sample(#{ kind: "custom", endpoint: "https://example.test" })
+  kind: string;
+}
+
+model FixtureCustomConnection extends FixtureConnection {
+  kind: "custom";
+  endpoint: string;
+}
+
+@@coerce(McpApprovalConfig, string, #{ kind: "{value}" }, "config", "Load an approval config from its kind.", "always");
+model McpApprovalConfig {
+  kind: string;
+}
+
+model McpApprovalMode {
+  @sample(#{ config: "always" })
+  config: McpApprovalConfig;
+}
+
 @discriminator("kind")
 model FixtureProperty {
   kind: string;
