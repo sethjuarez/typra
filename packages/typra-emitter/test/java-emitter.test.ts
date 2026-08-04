@@ -5,7 +5,7 @@ import type { Model, ModelProperty } from "@typespec/compiler";
 import type { EnumDef, TypeDecl } from "../src/ir/declarations.js";
 import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
-import { emitJavaEnum, emitJavaFileContent } from "../src/languages/java/emitter.js";
+import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper } from "../src/languages/java/emitter.js";
 import {
   javaEnumTypeName,
   javaIdentifier,
@@ -227,6 +227,64 @@ describe("Java emitter runtime semantics", () => {
     assert.match(customSource, /Tool\.loadBaseInto\(result, map, ctx\);/);
     assert.doesNotMatch(customSource, /map\.containsKey\("kind"\)/);
     assert.doesNotMatch(customSource, /result\.put\("kind"/);
+  });
+
+  describe("Java method extension seams", () => {
+    it("delegates generated model methods to a hand-editable helper", () => {
+      const decl = typeDecl([]);
+      decl.typeName = { namespace: "Test", name: "Message" };
+      decl.methods = [{
+        name: "text",
+        returns: "string",
+        description: "Render message text.",
+        params: { prefix: "string" },
+        optional: false,
+        sync: true,
+      }];
+
+      const modelSource = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+      const helper = emitJavaMethodHelper(decl, "test");
+
+      assert.match(modelSource, /return MessageMethods\.text\(this, prefix\);/);
+      assert.ok(helper);
+      assert.equal(helper.filename, "MessageMethods.java");
+      assert.match(helper.source, /public static String text\(Message self, String prefix\)/);
+      assert.match(helper.source, /Implement Message\.text in MessageMethods/);
+      assert.doesNotMatch(helper.source, /Code generated|auto-generated/);
+    });
+
+    it("delegates void methods without returning a value", () => {
+      const decl = typeDecl([]);
+      decl.typeName = { namespace: "Test", name: "Message" };
+      decl.methods = [{
+        name: "clear",
+        returns: "void",
+        description: "Clear the message.",
+        params: {},
+        optional: false,
+        sync: true,
+      }];
+
+      const modelSource = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+      assert.match(modelSource, /MessageMethods\.clear\(this\);/);
+      assert.doesNotMatch(modelSource, /return MessageMethods\.clear/);
+    });
+
+    it("does not create method helpers for protocol interfaces", () => {
+      const decl = typeDecl([]);
+      decl.typeName = { namespace: "Test", name: "MessageSink" };
+      decl.isProtocol = true;
+      decl.methods = [{
+        name: "emit",
+        returns: "void",
+        description: "Emit a message.",
+        params: { value: "string" },
+        optional: false,
+        sync: true,
+      }];
+
+      assert.equal(emitJavaMethodHelper(decl, "test"), null);
+    });
   });
 
   it("uses enum factories and boxed numeric literals in generated expressions", () => {

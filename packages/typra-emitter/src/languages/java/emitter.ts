@@ -192,7 +192,7 @@ function emitType(
     emitFactory(typeName, factory, visitor, lines);
   }
   for (const method of type.methods) {
-    emitMethodStub(method, lines);
+    emitMethodDelegation(typeName, method, lines);
   }
   emitClassHelpers(lines);
 
@@ -479,16 +479,46 @@ function emitFactory(typeName: string, factory: FactoryDecl, visitor: ExprVisito
   lines.push("");
 }
 
-function emitMethodStub(method: MethodStubDecl, lines: string[]): void {
+function emitMethodDelegation(typeName: string, method: MethodStubDecl, lines: string[]): void {
   const params = Object.entries(method.params).map(([name, type]) => `${javaScalarType(type)} ${javaPropertyName(name)}`).join(", ");
   lines.push(`  public ${javaScalarType(method.returns)} ${javaMethodName(method.name)}(${params}) {`);
+  const args = ["this", ...Object.keys(method.params).map(javaPropertyName)].join(", ");
   if (method.returns === "void") {
-    lines.push("    return;");
+    lines.push(`    ${typeName}Methods.${javaMethodName(method.name)}(${args});`);
   } else {
-    lines.push("    throw new UnsupportedOperationException(\"Implement this helper outside generated code.\");");
+    lines.push(`    return ${typeName}Methods.${javaMethodName(method.name)}(${args});`);
   }
   lines.push("  }");
   lines.push("");
+}
+
+export function emitJavaMethodHelper(type: TypeDecl, packageName: string): { filename: string; source: string } | null {
+  if (type.isProtocol || type.methods.length === 0) return null;
+  const typeName = javaTypeName(type.typeName.name);
+  const helperName = `${typeName}Methods`;
+  const lines = [
+    "// Typra extension seam. This file is created once and is safe to edit.",
+    `package ${packageName};`,
+    "",
+    `public final class ${helperName} {`,
+    `  private ${helperName}() { }`,
+    "",
+  ];
+  for (const method of type.methods) {
+    const params = [
+      `${typeName} self`,
+      ...Object.entries(method.params).map(([name, paramType]) =>
+        `${javaScalarType(paramType)} ${javaPropertyName(name)}`
+      ),
+    ].join(", ");
+    lines.push(`  public static ${javaScalarType(method.returns)} ${javaMethodName(method.name)}(${params}) {`);
+    lines.push(`    throw new UnsupportedOperationException("Implement ${typeName}.${javaMethodName(method.name)} in ${helperName}.");`);
+    lines.push("  }");
+    lines.push("");
+  }
+  lines.push("}");
+  lines.push("");
+  return { filename: `${helperName}.java`, source: lines.join("\n") };
 }
 
 function javaFieldType(field: FieldDecl, polymorphicTypeNames: Set<string>): string {
@@ -516,7 +546,7 @@ function javaScalarType(typeName: string): string {
   }
   if (typeName === "void") return "void";
   if (typeName === "Record<unknown>") return "Map<String, Object>";
-  return JAVA_TYPE_MAP[typeName] ?? typeName;
+  return JAVA_TYPE_MAP[typeName] ?? javaTypeName(typeName);
 }
 
 function javaDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): string {

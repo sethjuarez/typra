@@ -1,7 +1,7 @@
 import { execFileSync } from "child_process";
 import { existsSync, readdirSync } from "fs";
 import { resolve } from "path";
-import { EmitContext, resolvePath } from "@typespec/compiler";
+import { emitFile, EmitContext, resolvePath } from "@typespec/compiler";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { enumerateTypes, TypeNode } from "../../ir/ast.js";
@@ -9,7 +9,7 @@ import { TypeRegistry } from "../../ir/expansion.js";
 import { collectPolymorphicTypeNames, lowerFile } from "../../ir/lower.js";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import { buildBaseTestContext, TestContextOptions } from "../../testing/test-context.js";
-import { emitJavaEnum, emitJavaFileContent } from "./emitter.js";
+import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper } from "./emitter.js";
 import { emitJavaContext, emitJavaJson, emitJavaMaps, emitJavaSaveContext, emitJavaYaml } from "./scaffolding.js";
 import { emitJavaTest, emitJavaTestRunner, javaTestClassName } from "./test-emitter.js";
 import { JavaExprVisitor } from "./visitor.js";
@@ -79,6 +79,7 @@ export const generateJava = async (
   }
 
   const testClassNames: string[] = [];
+  const helperFiles = new Set<string>();
   for (let index = 0; index < nodes.length; index++) {
     const n = nodes[index];
     const fileContent = emitJavaFileContent(
@@ -90,6 +91,11 @@ export const generateJava = async (
       allTypeDecls,
     );
     await emitJavaFile(context, `${javaTypeName(n.typeName.name)}.java`, fileContent, emitTarget["output-dir"], emitTarget["output-dir"]);
+    const helper = emitJavaMethodHelper(fileDecls[index].types[0], packageName);
+    if (helper) {
+      helperFiles.add(helper.filename);
+      await emitJavaMethodHelperIfMissing(context, helper.filename, helper.source, emitTarget["output-dir"]);
+    }
 
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const testClass = javaTestClassName(n.typeName.name);
@@ -112,7 +118,7 @@ export const generateJava = async (
   }
 
   if (emitTarget.format !== false) {
-    formatJavaFiles(resolve(process.cwd(), emitTarget["output-dir"] ?? context.emitterOutputDir));
+    formatJavaFiles(resolve(process.cwd(), emitTarget["output-dir"] ?? context.emitterOutputDir), helperFiles);
   }
 
 };
@@ -132,10 +138,21 @@ async function emitJavaFile(
   await emitGeneratedFile(context, filePath, content, { outputRoot: outputRoot || outputDir });
 }
 
-function formatJavaFiles(outputDir: string): void {
+async function emitJavaMethodHelperIfMissing(
+  context: EmitContext<TypraEmitterOptions>,
+  filename: string,
+  content: string,
+  outputDir?: string,
+): Promise<void> {
+  const filePath = resolvePath(outputDir || `${context.emitterOutputDir}/java`, filename);
+  if (existsSync(filePath)) return;
+  await emitFile(context.program, { path: filePath, content });
+}
+
+function formatJavaFiles(outputDir: string, excludedFiles: Set<string>): void {
   if (!existsSync(outputDir)) return;
   const javaFiles = readdirSync(outputDir)
-    .filter(file => file.endsWith(".java"))
+    .filter(file => file.endsWith(".java") && !excludedFiles.has(file))
     .map(file => resolve(outputDir, file));
   if (javaFiles.length === 0) return;
 
