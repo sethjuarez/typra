@@ -48,6 +48,7 @@ import {
   PropertyCategory,
   MethodStubDecl,
   WireDecl,
+  isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
@@ -616,6 +617,9 @@ function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
   lines.push(`impl<'de> serde::Deserialize<'de> for ${name} {`);
   lines.push(`    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {`);
   lines.push(`        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;`);
+  if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
+    lines.push("        Self::validate_discriminator(&value).map_err(serde::de::Error::custom)?;");
+  }
   lines.push(`        Ok(Self::load_from_value(&value, &LoadContext::default()))`);
   lines.push(`    }`);
   lines.push(`}`);
@@ -644,6 +648,9 @@ function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
     lines.push(`impl<'de> serde::Deserialize<'de> for ${kindName} {`);
     lines.push(`    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {`);
     lines.push(`        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;`);
+    if (isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
+      lines.push(`        ${name}::validate_discriminator(&value).map_err(serde::de::Error::custom)?;`);
+    }
     lines.push(`        Ok(${name}::load_from_value(&value, &LoadContext::default()).${discField})`);
     lines.push(`    }`);
     lines.push(`}`);
@@ -670,13 +677,16 @@ function emitImpl(
   lines.push("");
 
   // from_json()
-  emitFromJson(name, lines);
+  emitFromJson(name, type, lines);
 
   // from_yaml()
-  emitFromYaml(name, lines);
+  emitFromYaml(name, type, lines);
 
   // load_from_value()
   emitLoadFromValue(name, type, childTypes, baseFieldNames, polymorphicTypeNames, lines);
+  if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
+    emitClosedDiscriminatorValidation(type, lines);
+  }
 
   // kind_str() for polymorphic types
   if (type.polymorphicDispatch) {
@@ -734,20 +744,44 @@ function emitImpl(
 // from_json / from_yaml
 // ============================================================================
 
-function emitFromJson(name: string, lines: string[]): void {
+function emitFromJson(name: string, type: TypeDecl, lines: string[]): void {
   lines.push(`    /// Load ${name} from a JSON string.`);
   lines.push(`    pub fn from_json(json: &str, ctx: &LoadContext) -> Result<Self, serde_json::Error> {`);
   lines.push("        let value: serde_json::Value = serde_json::from_str(json)?;");
+  if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
+    lines.push("        Self::validate_discriminator(&value)");
+    lines.push("            .map_err(|message| <serde_json::Error as serde::de::Error>::custom(message))?;");
+  }
   lines.push("        Ok(Self::load_from_value(&value, ctx))");
   lines.push("    }");
   lines.push("");
 }
 
-function emitFromYaml(name: string, lines: string[]): void {
+function emitFromYaml(name: string, type: TypeDecl, lines: string[]): void {
   lines.push(`    /// Load ${name} from a YAML string.`);
   lines.push(`    pub fn from_yaml(yaml: &str, ctx: &LoadContext) -> Result<Self, serde_yaml::Error> {`);
   lines.push("        let value: serde_json::Value = serde_yaml::from_str(yaml)?;");
+  if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
+    lines.push("        Self::validate_discriminator(&value)");
+    lines.push("            .map_err(|message| <serde_yaml::Error as serde::de::Error>::custom(message))?;");
+  }
   lines.push("        Ok(Self::load_from_value(&value, ctx))");
+  lines.push("    }");
+  lines.push("");
+}
+
+function emitClosedDiscriminatorValidation(type: TypeDecl, lines: string[]): void {
+  const dispatch = type.polymorphicDispatch!;
+  const name = type.typeName.name;
+  const knownValues = dispatch.variants.map(variant => `"${variant.value}"`).join(" | ");
+  lines.push("    fn validate_discriminator(value: &serde_json::Value) -> Result<(), String> {");
+  lines.push(`        let discriminator = value.get("${dispatch.discriminatorField}")`);
+  lines.push("            .and_then(|candidate| candidate.as_str())");
+  lines.push(`            .ok_or_else(|| "Missing ${name} discriminator property: '${dispatch.discriminatorField}'".to_string())?;`);
+  lines.push("        match discriminator {");
+  lines.push(`            ${knownValues} => Ok(()),`);
+  lines.push(`            _ => Err(format!("Unknown ${name} discriminator field '${dispatch.discriminatorField}' value: {}", discriminator)),`);
+  lines.push("        }");
   lines.push("    }");
   lines.push("");
 }
@@ -769,6 +803,11 @@ function emitLoadFromValue(
   lines.push("    /// Calls `ctx.process_input` before field extraction.");
   lines.push("    pub fn load_from_value(value: &serde_json::Value, ctx: &LoadContext) -> Self {");
   lines.push("        let value = ctx.process_input(value.clone());");
+  if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
+    lines.push("        if let Err(message) = Self::validate_discriminator(&value) {");
+    lines.push('            panic!("{}", message);');
+    lines.push("        }");
+  }
 
   // Coercions
   for (const c of type.load.coercions) {
@@ -961,6 +1000,8 @@ function emitPolymorphicLoad(
       lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
       lines.push(`            },`);
     }
+  } else if (isClosedPolymorphicDispatch(dispatch)) {
+    lines.push(`            _ => panic!("Unknown ${name} discriminator field '${dispatch.discriminatorField}' value: {}", ${discSnake}_str),`);
   } else {
     lines.push(`            _ => ${enumName}::default(),`);
   }

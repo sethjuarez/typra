@@ -319,6 +319,11 @@ export interface PolymorphicDispatchDecl {
   isAbstract: boolean;
 }
 
+/** Closed unions have no wildcard/self fallback and must reject unknown discriminator values. */
+export function isClosedPolymorphicDispatch(dispatch: PolymorphicDispatchDecl): boolean {
+  return dispatch.defaultVariant === null;
+}
+
 /**
  * A concrete polymorphic variant (a child type with a known discriminator value).
  */

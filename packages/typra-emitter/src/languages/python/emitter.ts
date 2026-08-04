@@ -36,6 +36,7 @@ import {
   CoercionDecl,
   PropertyCategory,
   WireFieldMapping,
+  isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
@@ -857,11 +858,12 @@ function emitPolymorphicDispatch(
   lines: string[],
 ): void {
   const discSnake = toSnakeCase(dispatch.discriminatorField);
+  const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push("    @staticmethod");
   lines.push(`    def load_${discSnake}(data: dict, context: LoadContext | None) -> "${parentName}":`);
   lines.push(`        # load polymorphic ${parentName} instance`);
   lines.push(`        if data is not None and "${dispatch.discriminatorField}" in data:`);
-  lines.push(`            discriminator_value = str(data["${dispatch.discriminatorField}"]).lower()`);
+  lines.push(`            discriminator_value = str(data["${dispatch.discriminatorField}"])${isClosed ? "" : ".lower()"}`);
 
   for (let i = 0; i < dispatch.variants.length; i++) {
     const v = dispatch.variants[i];
@@ -885,11 +887,11 @@ function emitPolymorphicDispatch(
   } else {
     lines.push("");
     lines.push("            else:");
-    lines.push(`                raise ValueError(f"Unknown ${parentName} discriminator value: {discriminator_value}")`);
+    lines.push(`                raise ValueError(f"Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: {discriminator_value}")`);
   }
 
   lines.push("        else:");
-  if (isAbstract) {
+  if (isClosed || isAbstract) {
     lines.push("");
     lines.push(`            raise ValueError("Missing ${parentName} discriminator property: '${dispatch.discriminatorField}'")`);
   } else {

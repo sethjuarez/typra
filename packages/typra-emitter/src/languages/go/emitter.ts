@@ -32,6 +32,7 @@ import {
   FactoryDecl,
   MethodStubDecl,
   WireDecl,
+  isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
@@ -410,6 +411,7 @@ function emitLoadFunction(
 // ============================================================================
 
 function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatchDecl, lines: string[]): void {
+  const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push("\t// Handle polymorphic types based on discriminator");
   lines.push("\tif m, ok := data.(map[string]interface{}); ok {");
   lines.push(`\t\tif discriminator, ok := m["${dispatch.discriminatorField}"]; ok {`);
@@ -428,15 +430,15 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
       lines.push("\t\t\t\tdefault:");
       lines.push(`\t\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
     }
-  } else if (dispatch.isAbstract) {
+  } else if (isClosed || dispatch.isAbstract) {
     lines.push("\t\t\t\tdefault:");
-    lines.push(`\t\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator value: %s", discriminator)`);
+    lines.push(`\t\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: %s", discriminator)`);
   }
 
   lines.push("\t\t\t\t}");
-  if (dispatch.isAbstract && !dispatch.defaultVariant) {
+  if ((isClosed || dispatch.isAbstract) && !dispatch.defaultVariant) {
     lines.push("\t\t\tdefault:");
-    lines.push(`\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator value: %v", discriminator)`);
+    lines.push(`\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: %v", discriminator)`);
   } else if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
     lines.push("\t\t\tdefault:");
     lines.push(`\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
@@ -444,7 +446,7 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   lines.push("\t\t\t}");
   lines.push("\t\t}");
   lines.push("\t}");
-  if (dispatch.isAbstract && !dispatch.defaultVariant) {
+  if ((isClosed || dispatch.isAbstract) && !dispatch.defaultVariant) {
     lines.push(`\treturn nil, fmt.Errorf("missing ${typeName} discriminator property: ${dispatch.discriminatorField}")`);
   }
 }

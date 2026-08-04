@@ -23,6 +23,7 @@ import {
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 import { emitGoFileContent } from "../src/languages/go/emitter.js";
+import { isClosedPolymorphicDispatch } from "../src/ir/declarations.js";
 import { goFieldName } from "../src/languages/go/identifiers.js";
 import { emitGoTest } from "../src/languages/go/test-emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
@@ -104,6 +105,25 @@ const contentPart = makeType("ContentPart", [
 ], {
   discriminator: "kind",
   childTypes: [textPart, imagePart],
+});
+
+describe("closed polymorphic dispatch", () => {
+  it("treats only no-default unions as closed", () => {
+    const base = {
+      discriminatorField: "kind",
+      variants: [],
+      isAbstract: true,
+    };
+    assert.equal(isClosedPolymorphicDispatch({ ...base, defaultVariant: null }), true);
+    assert.equal(isClosedPolymorphicDispatch({
+      ...base,
+      defaultVariant: { typeName: { namespace: "", name: "Connection" }, isSelfReference: true },
+    }), false);
+    assert.equal(isClosedPolymorphicDispatch({
+      ...base,
+      defaultVariant: { typeName: { namespace: "", name: "CustomTool" }, isSelfReference: false },
+    }), false);
+  });
 });
 
 // NamedProp for testing collection hasNameProperty
@@ -542,7 +562,7 @@ describe("lowerFile", () => {
       assert.ok(dispatchIndex >= 0, "expected generated polymorphic dispatch block");
       assert.ok(coercionIndex < dispatchIndex, "scalar coercions must run before abstract dispatch errors");
       assert.match(code, /\t"fmt"/);
-      assert.match(code, /return nil, fmt\.Errorf\("unknown ConnectionWithCoercion discriminator value: %s", discriminator\)/);
+      assert.match(code, /return nil, fmt\.Errorf\("unknown ConnectionWithCoercion discriminator field 'kind' value: %s", discriminator\)/);
       assert.match(code, /return nil, fmt\.Errorf\("missing ConnectionWithCoercion discriminator property: kind"\)/);
       const loadStart = code.indexOf("func LoadConnectionWithCoercion(");
       const loadBody = code.slice(loadStart, code.indexOf("\nfunc ", loadStart + 1));

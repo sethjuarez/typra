@@ -26,11 +26,11 @@ model FixtureRoot {
   @doc("Nested object field")
   owner: FixtureOwner;
 
-  @sample(#{ content: #{ kind: "text", text: "hello from a polymorphic sample" } })
+  @sample(#{ content: #{ kind: "text", value: "hello from a polymorphic sample" } })
   @doc("Discriminated union field")
   content: FixtureContent;
 
-  @sample(#{ contentItems: #[#{ kind: "text", text: "hello from a polymorphic collection" }] })
+  @sample(#{ contentItems: #[#{ kind: "text", value: "hello from a polymorphic collection" }] })
   @doc("Array of discriminated union values")
   contentItems: FixtureContent[];
 
@@ -67,6 +67,7 @@ model FixtureCheckpoint {
   pendingToolRequests: FixtureToolRequest[];
 }
 
+@abstract
 @discriminator("kind")
 model FixtureContent {
   kind: string;
@@ -75,8 +76,8 @@ model FixtureContent {
 model TextContent extends FixtureContent {
   kind: "text";
 
-  @sample(#{ text: "hello from text content" })
-  text: string;
+  @sample(#{ value: "hello from text content" })
+  value: string;
 }
 
 model ImageContent extends FixtureContent {
@@ -84,6 +85,16 @@ model ImageContent extends FixtureContent {
 
   @sample(#{ url: "https://example.test/image.png" })
   url: string;
+}
+
+model FileContent extends FixtureContent {
+  kind: "file";
+  value: string;
+}
+
+model AudioContent extends FixtureContent {
+  kind: "audio";
+  value: string;
 }
 
 @abstract

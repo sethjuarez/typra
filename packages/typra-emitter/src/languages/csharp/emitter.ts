@@ -34,6 +34,7 @@ import {
   CoercionAssignment,
   PropertyCategory,
   MethodStubDecl,
+  isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
 import { csharpIdentifier } from "./identifiers.js";
@@ -754,6 +755,7 @@ function emitCollectionLoadHelper(
 function emitLoadKind(type: TypeDecl, lines: string[]): void {
   const dispatch = type.polymorphicDispatch!;
   const typeName = type.typeName.name;
+  const isClosed = isClosedPolymorphicDispatch(dispatch);
 
   lines.push("");
   lines.push("    /// <summary>");
@@ -763,7 +765,7 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
   lines.push("    {");
   lines.push(`        if (data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) && discriminatorValue is not null)`);
   lines.push("        {");
-  lines.push("            var discriminator = discriminatorValue.ToString()?.ToLowerInvariant();");
+  lines.push(`            var discriminator = discriminatorValue.ToString()${isClosed ? "" : "?.ToLowerInvariant()"};`);
   lines.push("            return discriminator switch");
   lines.push("            {");
 
@@ -778,8 +780,8 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
     } else {
       lines.push(`                _ => ${dispatch.defaultVariant.typeName.name}.Load(data, context),`);
     }
-  } else if (dispatch.isAbstract) {
-    lines.push(`                _ => throw new ArgumentException($"Unknown ${typeName} discriminator value: {discriminator}"),`);
+  } else if (isClosed || dispatch.isAbstract) {
+    lines.push(`                _ => throw new ArgumentException($"Unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: {discriminator}"),`);
   } else {
     lines.push(`                _ => new ${typeName}(),`);
   }
@@ -789,7 +791,7 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
   lines.push("");
 
   // Fallback when discriminator property is missing
-  if (dispatch.isAbstract && !dispatch.defaultVariant) {
+  if ((isClosed || dispatch.isAbstract) && !dispatch.defaultVariant) {
     lines.push(`        throw new ArgumentException("Missing ${typeName} discriminator property: '${dispatch.discriminatorField}'");`);
   } else if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
     lines.push(`        throw new ArgumentException("Missing ${typeName} discriminator property: '${dispatch.discriminatorField}'");`);
