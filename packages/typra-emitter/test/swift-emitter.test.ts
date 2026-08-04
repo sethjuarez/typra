@@ -516,7 +516,7 @@ describe("Swift generated tests", () => {
       moduleName: "TestModels",
     });
 
-    assert.match(context.examples[0].yaml.join("\n"), /some\\\\ \\\\npersonal/);
+    assert.match(context.examples[0].yaml.join("\n"), /some \\\\npersonal/);
     assert.equal(
       source.match(/XCTAssertEqual\((?:instance|reloaded)\.instructions, "some \\npersonal"\)/g)?.length,
       4,

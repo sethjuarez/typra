@@ -1707,7 +1707,7 @@ function assertStaticFixtureCoverage() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "go", "tests", "fixture_multiline_whitespace_test.go"),
-    'value: "first line with trailing space\\ \\nsecond line\\n"',
+    'value: "first line with trailing space \\nsecond line\\n"',
     "TestFixtureMultilineWhitespaceLoadYAML",
     "TestFixtureMultilineWhitespaceFromYAML",
     'instance.Value != "first line with trailing space \\nsecond line\\n"',
