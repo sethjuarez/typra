@@ -26,6 +26,7 @@ import { emitGoFileContent } from "../src/languages/go/emitter.js";
 import { goFieldName } from "../src/languages/go/identifiers.js";
 import { emitGoTest } from "../src/languages/go/test-emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
+import { buildGoFieldNames } from "../src/languages/go/identifiers.js";
 import { emitRustFile } from "../src/languages/rust/emitter.js";
 import type { RustTestContext } from "../src/languages/rust/driver.js";
 import { RustExprVisitor } from "../src/languages/rust/visitor.js";
@@ -566,13 +567,13 @@ describe("lowerFile", () => {
         file.group,
       );
 
-      assert.match(code, /FieldTime string `json:"__time" yaml:"__time"`/);
-      assert.match(code, /FieldUsage interface\{\} `json:"__usage" yaml:"__usage"`/);
-      assert.match(code, /FieldFrames \[\]string `json:"__frames" yaml:"__frames"`/);
-      assert.match(code, /result\.FieldTime = string\(val\.\(string\)\)/);
-      assert.match(code, /result\["__time"\] = obj\.FieldTime/);
+      assert.match(code, /Time string `json:"__time" yaml:"__time"`/);
+      assert.match(code, /Usage interface\{\} `json:"__usage" yaml:"__usage"`/);
+      assert.match(code, /Frames \[\]string `json:"__frames" yaml:"__frames"`/);
+      assert.match(code, /result\.Time = string\(val\.\(string\)\)/);
+      assert.match(code, /result\["__time"\] = obj\.Time/);
       assert.doesNotMatch(code, /\n\s+_Time\s/);
-      assert.equal(goFieldName("__time"), "FieldTime");
+      assert.equal(goFieldName("__time"), "Time");
       assert.equal(
         new GoExprVisitor(registry).visitExpr({
           kind: "field_read",
@@ -581,7 +582,7 @@ describe("lowerFile", () => {
           fieldType: "string",
           isOptional: false,
         }),
-        "span.FieldTime",
+        "span.Time",
       );
 
       const envelope = makeType("TraceEnvelope", [
@@ -601,8 +602,32 @@ describe("lowerFile", () => {
         coercions: [],
         factories: [],
       });
-      assert.match(testCode, /instance\.Span\.FieldTime/);
+      assert.match(testCode, /instance\.Span\.Time/);
       assert.doesNotMatch(testCode, /instance\.Span\._Time/);
+    });
+
+    it("deterministically disambiguates normalized leading-underscore collisions", () => {
+      const traceSpan = makeType("TraceSpan", [
+        makeProp("__time", "string", { isScalar: true }),
+        makeProp("time", "string", { isScalar: true }),
+        makeProp("fieldTime", "string", { isScalar: true }),
+      ]);
+      const registry = TypeRegistry.fromTypeGraph([traceSpan]);
+      const file = lowerFile(traceSpan, registry);
+      const code = emitGoFileContent(
+        file.types,
+        "fixtures",
+        new GoExprVisitor(registry),
+        new Set(),
+        file.enums,
+        file.group,
+      );
+
+      assert.match(code, /Time string `json:"time" yaml:"time"`/);
+      assert.match(code, /FieldTime string `json:"fieldTime" yaml:"fieldTime"`/);
+      assert.match(code, /Field2Time string `json:"__time" yaml:"__time"`/);
+      assert.match(code, /result\.Field2Time = string\(val\.\(string\)\)/);
+      assert.match(code, /result\["__time"\] = obj\.Field2Time/);
     });
 
     it("falls through self-referential defaults so base fields are loaded", () => {
@@ -676,6 +701,129 @@ describe("lowerFile", () => {
   });
 
   describe("Go test emitter optional assertions", () => {
+    it("uses collision-aware field names in generated validations", () => {
+      const traceSpan = makeType("TraceSpan", [
+        makeProp("__time", "string", { isScalar: true }),
+        makeProp("time", "string", { isScalar: true }),
+        makeProp("fieldTime", "string", { isScalar: true }),
+      ]);
+      const code = emitGoTest({
+        node: traceSpan,
+        isAbstract: false,
+        package: "prompty",
+        importPath: "prompty/model",
+        examples: [{
+          sample: { __time: "internal", time: "public", fieldTime: "existing" },
+          json: ['{"__time":"internal","time":"public","fieldTime":"existing"}'],
+          yaml: ["__time: internal", "time: public", "fieldTime: existing"],
+          validations: [
+            { key: "Time", value: "internal", delimiter: '"', isOptional: false },
+            { key: "Time", value: "public", delimiter: '"', isOptional: false },
+            { key: "FieldTime", value: "existing", delimiter: '"', isOptional: false },
+          ],
+        }],
+        coercions: [],
+        factories: [],
+      });
+
+      assert.match(code, /instance\.Field2Time != "internal"/);
+      assert.match(code, /instance\.Time != "public"/);
+      assert.match(code, /instance\.FieldTime != "existing"/);
+    });
+
+    it("keeps scalar validations aligned after complex shorthand properties", () => {
+      const model = makeType("Model", [
+        makeProp("id", "string", { isScalar: true }),
+      ], {
+        coercions: [{ scalar: "string", expansion: { id: "{value}" } }],
+      });
+      const prompty = makeType("Prompty", [
+        makeProp("model", "Model", { isScalar: false, type: model }),
+        makeProp("name", "string", { isScalar: true }),
+      ]);
+      const code = emitGoTest({
+        node: prompty,
+        isAbstract: false,
+        package: "prompty",
+        importPath: "prompty/model",
+        examples: [{
+          sample: { model: "provider/model", name: "example" },
+          json: ['{"model":"provider/model","name":"example"}'],
+          yaml: ["model: provider/model", "name: example"],
+          validations: [
+            { key: "Name", value: "example", delimiter: '"', isOptional: false },
+          ],
+        }],
+        coercions: [],
+        factories: [],
+      });
+
+      assert.match(code, /instance\.Name != "example"/);
+      assert.doesNotMatch(code, /instance\.Model != "example"/);
+    });
+
+    it("uses collision-aware field names in coercion validations", () => {
+      const traceSpan = makeType("TraceSpan", [
+        makeProp("__time", "string", { isScalar: true }),
+        makeProp("time", "string", { isScalar: true }),
+      ]);
+      const code = emitGoTest({
+        node: traceSpan,
+        isAbstract: false,
+        package: "prompty",
+        importPath: "prompty/model",
+        examples: [],
+        coercions: [{
+          title: "string",
+          scalarType: "string",
+          value: '"internal"',
+          validations: [{
+            sourceKey: "__time",
+            key: "Time",
+            value: "internal",
+            delimiter: '"',
+            isOptional: false,
+          }],
+        }],
+        factories: [],
+      });
+
+      assert.match(code, /instance\.FieldTime != "internal"/);
+      assert.doesNotMatch(code, /instance\.Time != "internal"/);
+    });
+
+    it("uses inherited fields when naming generated validations", () => {
+      const traceSpan = makeType("TraceSpan", [
+        makeProp("__time", "string", { isScalar: true }),
+      ], {
+        base: { namespace: "Test", name: "BaseSpan" },
+      });
+      const code = emitGoTest({
+        node: traceSpan,
+        isAbstract: false,
+        package: "prompty",
+        importPath: "prompty/model",
+        fieldNames: buildGoFieldNames(["time", "__time"]),
+        examples: [{
+          sample: { __time: "internal" },
+          json: ['{"__time":"internal"}'],
+          yaml: ["__time: internal"],
+          validations: [{
+            sourceKey: "__time",
+            key: "Time",
+            value: "internal",
+            delimiter: '"',
+            isOptional: false,
+          }],
+        }],
+        coercions: [],
+        factories: [],
+      });
+
+      assert.match(code, /instance\.FieldTime != "internal"/);
+      assert.doesNotMatch(code, /instance\.Time != "internal"/);
+    });
+
     it("nil-checks and dereferences optional string properties", () => {
       const instructions = makeProp("instructions", "string", { isScalar: true, isOptional: true });
       const prompty = makeType("Prompty", [instructions]);

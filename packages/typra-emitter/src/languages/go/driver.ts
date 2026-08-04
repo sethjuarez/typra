@@ -17,6 +17,7 @@ import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
 import { emitGoFileContent } from "./emitter.js";
 import { emitGoContext } from "./scaffolding.js";
 import { emitGoTest } from "./test-emitter.js";
+import { buildGoFieldNames } from "./identifiers.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import { collectProtocolNodes, emitGoProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
 
@@ -91,7 +92,8 @@ export const generateGo = async (
     // Emit test file for each type (skip protocols — they have no data to test)
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const importPath = emitTarget["import-path"] || packageName;
-      const testContext = { ...buildTestContext(n, packageName), importPath };
+      const fieldNames = buildGoFieldNames(collectInheritedPropertyNames(n, registry));
+      const testContext = { ...buildTestContext(n, packageName), importPath, fieldNames };
       const testContent = emitGoTest(testContext);
       const testFileName = toSnakeCase(n.typeName.name) + '_test.go';
       await emitGoFile(context, testFileName, testContent, emitTarget["test-dir"], emitTarget["test-dir"]);
@@ -151,6 +153,29 @@ function formatGoFiles(outputDir: string, testDir?: string): void {
  */
 function buildTestContext(node: TypeNode, packageName: string): BaseTestContext {
   return buildBaseTestContext(node, packageName, goTestOptions);
+}
+
+function collectInheritedPropertyNames(node: TypeNode, registry: TypeRegistry): string[] {
+  const chain: TypeNode[] = [];
+  const visited = new Set<string>();
+  let current: TypeNode | undefined = node;
+  while (current && !visited.has(current.typeName.name)) {
+    visited.add(current.typeName.name);
+    chain.unshift(current);
+    current = current.base ? registry.get(current.base.name) : undefined;
+  }
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const type of chain) {
+    for (const prop of type.properties) {
+      if (!seen.has(prop.name)) {
+        names.push(prop.name);
+        seen.add(prop.name);
+      }
+    }
+  }
+  return names;
 }
 
 export function goPackageNameFromNamespace(namespace: string): string {

@@ -869,6 +869,8 @@ export interface BaseRenderContext {
  * Validation assertion for a single property in a test.
  */
 export interface PropertyValidation {
+  /** Original schema property name before target-language identifier normalization. */
+  sourceKey?: string;
   /** Property name in target language casing (PascalCase, snake_case, camelCase) */
   key: string;
   /** Expected value after loading */

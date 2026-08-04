@@ -9,6 +9,7 @@ import { TypeNode, PropertyValidation, TestExample, CoercionTest, BaseTestContex
 import { getCombinations, scalarValue, toSnakeCase } from "../ir/utilities.js";
 import { toPascalCase } from "../ir/visitor.js";
 import { swiftPropertyName, swiftTypeName } from "../languages/swift/identifiers.js";
+import { goFieldName } from "../languages/go/identifiers.js";
 import * as YAML from "yaml";
 
 const RUST_KEYWORDS = new Set([
@@ -179,6 +180,7 @@ function buildValidations(
         const enumResult = options.renderEnumValue(prop.enumName, rawValue, key, prop.isOpenEnum);
         if (enumResult) {
           return {
+            sourceKey: key,
             key: options.renderKey(key),
             value: enumResult.value,
             delimiter: enumResult.delimiter,
@@ -200,6 +202,7 @@ function buildValidations(
       }
 
       return {
+        sourceKey: key,
         key: options.renderKey(key),
         value,
         delimiter,
@@ -239,6 +242,7 @@ function buildCoercions(node: TypeNode, options: TestContextOptions): CoercionTe
           const enumResult = options.renderEnumValue(prop.enumName, strValue, key, prop.isOpenEnum);
           if (enumResult) {
             return {
+              sourceKey: key,
               key: options.renderKey(key),
               value: enumResult.value,
               delimiter: enumResult.delimiter,
@@ -251,6 +255,7 @@ function buildCoercions(node: TypeNode, options: TestContextOptions): CoercionTe
         const needsQuotes = typeof value === 'string' && !value.includes('"') && !isValuePlaceholder;
 
         return {
+          sourceKey: key,
           key: options.renderKey(key),
           value: needsQuotes ? options.escapeString(value) : value,
           delimiter: needsQuotes ? '"' : '',
@@ -471,11 +476,7 @@ export const swiftTestOptions: TestContextOptions = {
  * Go test context options.
  */
 export const goTestOptions: TestContextOptions = {
-  renderKey: (key: string) => {
-    // Convert snake_case to PascalCase for exported Go fields
-    const pascal = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-    return pascal.charAt(0).toUpperCase() + pascal.slice(1);
-  },
+  renderKey: goFieldName,
   renderBoolean: (val: boolean) => val ? "true" : "false",
   escapeString: (str: string) => str
     .replace(/\\/g, '\\\\')
