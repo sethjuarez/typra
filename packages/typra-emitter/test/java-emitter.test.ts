@@ -5,6 +5,7 @@ import type { Model, ModelProperty } from "@typespec/compiler";
 import type { EnumDef, TypeDecl } from "../src/ir/declarations.js";
 import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
+import { javaTestOptions } from "../src/languages/java/driver.js";
 import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper } from "../src/languages/java/emitter.js";
 import { emitJavaSaveContext } from "../src/languages/java/scaffolding.js";
 import { emitJavaTest } from "../src/languages/java/test-emitter.js";
@@ -232,6 +233,10 @@ describe("Java emitter runtime semantics", () => {
   });
 
   describe("Java generated tests", () => {
+    it("preserves raw multiline strings for Java literal rendering", () => {
+      assert.equal(javaTestOptions.escapeString("some \npersonal"), "some \npersonal");
+    });
+
     it("asserts named map/list shorthand and expanded collection items", () => {
       const item = new TypeNode({ name: "Binding" } as Model, "");
       item.typeName = { namespace: "Test", name: "Binding" };
@@ -285,6 +290,144 @@ describe("Java emitter runtime semantics", () => {
       assert.match(source, /assertEquals\(2\.5, instance1\.bindings\.get\(1\)\.weight, "Expected bindings\.beta\.weight"\);/);
       assert.match(source, /assertEquals\("expanded", instance1\.bindings\.get\(2\)\.value, "Expected instance1\.bindings\.get\(2\)\.value"\);/);
       assert.match(source, /assertEquals\(3, instance1\.bindings\.get\(2\)\.weight, "Expected instance1\.bindings\.get\(2\)\.weight"\);/);
+    });
+
+    it("uses typed enum values for nested assertions", () => {
+      const approval = new TypeNode({ name: "Approval" } as Model, "");
+      approval.typeName = { namespace: "Test", name: "Approval" };
+      const kind = new PropertyNode({ name: "kind" } as ModelProperty, "");
+      kind.name = "kind";
+      kind.typeName = { namespace: "TypeSpec", name: "string" };
+      kind.isScalar = true;
+      kind.enumName = "approvalKind";
+      kind.allowedValues = ["always", "never"];
+      approval.properties = [kind];
+
+      const container = new TypeNode({ name: "Tool" } as Model, "");
+      container.typeName = { namespace: "Test", name: "Tool" };
+      const approvalProp = new PropertyNode({ name: "approval" } as ModelProperty, "");
+      approvalProp.name = "approval";
+      approvalProp.typeName = approval.typeName;
+      approvalProp.type = approval;
+      container.properties = [approvalProp];
+
+      const source = emitJavaTest({
+        node: container,
+        isAbstract: false,
+        package: "test",
+        examples: [{
+          sample: { approval: { kind: "always" } },
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [],
+        }],
+        coercions: [],
+        factories: [],
+      });
+
+      assert.match(
+        source,
+        /assertEquals\(ApprovalKind\.fromValue\("always"\), instance1\.approval\.kind, "Expected instance1\.approval\.kind"\);/,
+      );
+    });
+
+    it("asserts nested scalar shorthand through its expanded property", () => {
+      const format = new TypeNode({ name: "FormatConfig" } as Model, "");
+      format.typeName = { namespace: "Test", name: "FormatConfig" };
+      format.coercions = [{ scalar: "string", expansion: { kind: "{value}" } }];
+      const kind = new PropertyNode({ name: "kind" } as ModelProperty, "");
+      kind.typeName = { namespace: "TypeSpec", name: "string" };
+      kind.isScalar = true;
+      format.properties = [kind];
+
+      const template = new TypeNode({ name: "Template" } as Model, "");
+      template.typeName = { namespace: "Test", name: "Template" };
+      const formatProp = new PropertyNode({ name: "format" } as ModelProperty, "");
+      formatProp.typeName = format.typeName;
+      formatProp.type = format;
+      template.properties = [formatProp];
+
+      const container = new TypeNode({ name: "Prompt" } as Model, "");
+      container.typeName = { namespace: "Test", name: "Prompt" };
+      const templateProp = new PropertyNode({ name: "template" } as ModelProperty, "");
+      templateProp.typeName = template.typeName;
+      templateProp.type = template;
+      container.properties = [templateProp];
+
+      const source = emitJavaTest({
+        node: container,
+        isAbstract: false,
+        package: "test",
+        examples: [{
+          sample: { template: { format: "mustache" } },
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [],
+        }],
+        coercions: [],
+        factories: [],
+      });
+
+      assert.match(
+        source,
+        /assertEquals\("mustache", instance1\.template\.format\.kind, "Expected format\.kind"\);/,
+      );
+      assert.doesNotMatch(source, /assertEquals\("mustache", instance1\.template\.format,/);
+    });
+
+    it("keeps polymorphic discriminator assertions as raw strings", () => {
+      const base = new TypeNode({ name: "Property" } as Model, "");
+      base.typeName = { namespace: "Test", name: "Property" };
+      base.discriminator = "kind";
+      const baseKind = new PropertyNode({ name: "kind" } as ModelProperty, "");
+      baseKind.typeName = { namespace: "TypeSpec", name: "string" };
+      baseKind.isScalar = true;
+      baseKind.enumName = "simpleTypes";
+      baseKind.allowedValues = ["string", "number"];
+      base.properties = [baseKind];
+
+      const stringProperty = new TypeNode({ name: "StringProperty" } as Model, "");
+      stringProperty.typeName = { namespace: "Test", name: "StringProperty" };
+      const childKind = new PropertyNode({ name: "kind" } as ModelProperty, "");
+      childKind.typeName = { namespace: "TypeSpec", name: "string" };
+      childKind.isScalar = true;
+      childKind.enumName = "simpleTypes";
+      childKind.allowedValues = ["string", "number"];
+      childKind.defaultValue = "string";
+      const priority = new PropertyNode({ name: "priority" } as ModelProperty, "");
+      priority.typeName = { namespace: "TypeSpec", name: "string" };
+      priority.isScalar = true;
+      priority.enumName = "priority";
+      priority.allowedValues = ["normal", "high"];
+      priority.defaultValue = "normal";
+      stringProperty.properties = [childKind, priority];
+      base.childTypes = [stringProperty];
+
+      const container = new TypeNode({ name: "ObjectProperty" } as Model, "");
+      container.typeName = { namespace: "Test", name: "ObjectProperty" };
+      const properties = new PropertyNode({ name: "properties" } as ModelProperty, "");
+      properties.typeName = base.typeName;
+      properties.type = base;
+      properties.isCollection = true;
+      container.properties = [properties];
+
+      const source = emitJavaTest({
+        node: container,
+        isAbstract: false,
+        package: "test",
+        examples: [{
+          sample: { properties: [{ kind: "string", priority: "normal" }] },
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [],
+        }],
+        coercions: [],
+        factories: [],
+      });
+
+      assert.match(source, /assertEquals\("string", instance1Properties0Value\.kind, "Expected kind"\);/);
+      assert.doesNotMatch(source, /SimpleTypes\.fromValue\("string"\)/);
+      assert.match(source, /assertEquals\(Priority\.fromValue\("normal"\), instance1Properties0Value\.priority, "Expected priority"\);/);
     });
   });
 

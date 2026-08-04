@@ -1,5 +1,5 @@
 import { BaseTestContext, CoercionTest, PropertyNode, PropertyValidation, TestExample, TypeNode } from "../../ir/ast.js";
-import { javaPropertyName, javaTypeName } from "./identifiers.js";
+import { javaEnumTypeName, javaPropertyName, javaTypeName } from "./identifiers.js";
 
 function javaString(value: string): string {
   return JSON.stringify(value);
@@ -156,6 +156,7 @@ function emitStructuredValidations(
   node: TypeNode,
   sample: Record<string, any>,
   includeScalars = false,
+  inheritedNode?: TypeNode,
 ): void {
   for (const prop of node.properties) {
     if (!(prop.name in sample)) continue;
@@ -163,7 +164,11 @@ function emitStructuredValidations(
     const expr = `${varName}.${javaPropertyName(prop.name)}`;
 
     if (includeScalars && prop.isScalar && !prop.isCollection && !prop.isDict) {
-      emitScalarSampleValidation(lines, expr, prop.name, value);
+      const emittedProp = inheritedNode?.discriminator === prop.name
+        || node.discriminator === prop.name
+        ? undefined
+        : inheritedNode?.properties.find(candidate => candidate.name === prop.name) ?? prop;
+      emitScalarSampleValidation(lines, expr, prop.name, value, emittedProp);
       continue;
     }
 
@@ -206,8 +211,15 @@ function emitNestedValidations(lines: string[], expr: string, node: TypeNode, sa
   for (const prop of node.properties) {
     if (!(prop.name in sample)) continue;
     const expected = sample[prop.name];
+    if (!prop.isScalar
+      && prop.type
+      && (typeof expected === "string" || typeof expected === "number" || typeof expected === "boolean")) {
+      emitShorthandObjectValidation(lines, `${expr}.${javaPropertyName(prop.name)}`, prop.name, expected, prop.type);
+      continue;
+    }
     if (typeof expected === "string" || typeof expected === "number") {
-      lines.push(`    assertEquals(${typeof expected === "number" ? expected : javaString(expected)}, ${expr}.${javaPropertyName(prop.name)}, "Expected ${expr}.${prop.name}");`);
+      const emittedProp = node.discriminator === prop.name ? undefined : prop;
+      lines.push(`    assertEquals(${javaExpectedLiteral(expected, emittedProp)}, ${expr}.${javaPropertyName(prop.name)}, "Expected ${expr}.${prop.name}");`);
     }
   }
 }
@@ -224,7 +236,7 @@ function emitCollectionValidation(
 
   if (prop.isScalar) {
     values.forEach((item, index) => {
-      emitScalarSampleValidation(lines, `${expr}.get(${index})`, `${propName}[${index}]`, item);
+      emitScalarSampleValidation(lines, `${expr}.get(${index})`, `${propName}[${index}]`, item, prop);
     });
     return;
   }
@@ -244,7 +256,7 @@ function emitCollectionValidation(
       const local = `${localIdentifier(expr)}${index}Value`;
       lines.push(`    assertTrue(${itemExpr} instanceof ${child.typeName.name}, "Expected ${propName}[${index}] to be ${child.typeName.name}");`);
       lines.push(`    ${child.typeName.name} ${local} = (${child.typeName.name}) ${itemExpr};`);
-      emitStructuredValidations(lines, local, child, item, true);
+      emitStructuredValidations(lines, local, child, item, true, itemType);
       return;
     }
 
@@ -281,7 +293,7 @@ function emitNamedCollectionMapValidation(
       const local = `${localIdentifier(expr)}${index}Value`;
       lines.push(`    assertTrue(${itemExpr} instanceof ${child.typeName.name}, "Expected ${propName}.${key} to be ${child.typeName.name}");`);
       lines.push(`    ${child.typeName.name} ${local} = (${child.typeName.name}) ${itemExpr};`);
-      emitStructuredValidations(lines, local, child, item, true);
+      emitStructuredValidations(lines, local, child, item, true, itemType);
       return;
     }
     emitNestedValidations(lines, itemExpr, itemType, item);
@@ -302,7 +314,7 @@ function emitPolymorphicValidation(
   const local = `${varName}${capitalize(propName)}Value`;
   lines.push(`    assertTrue(${expr} instanceof ${child.typeName.name}, "Expected ${propName} to be ${child.typeName.name}");`);
   lines.push(`    ${child.typeName.name} ${local} = (${child.typeName.name}) ${expr};`);
-  emitStructuredValidations(lines, local, child, value, true);
+  emitStructuredValidations(lines, local, child, value, true, prop.type);
 }
 
 function emitShorthandObjectValidation(
@@ -317,12 +329,20 @@ function emitShorthandObjectValidation(
   const shorthandField = findScalarCoercionField(node, typeof expected);
   if (!shorthandField) return;
 
-  lines.push(`    assertEquals(${javaLiteral(expected)}, ${expr}.${javaPropertyName(shorthandField)}, "Expected ${propName}.${shorthandField}");`);
+  const shorthandProp = node.properties.find(prop => prop.name === shorthandField);
+  const emittedProp = node.discriminator === shorthandField ? undefined : shorthandProp;
+  lines.push(`    assertEquals(${javaExpectedLiteral(expected, emittedProp)}, ${expr}.${javaPropertyName(shorthandField)}, "Expected ${propName}.${shorthandField}");`);
 }
 
-function emitScalarSampleValidation(lines: string[], expr: string, displayName: string, expected: any): void {
+function emitScalarSampleValidation(
+  lines: string[],
+  expr: string,
+  displayName: string,
+  expected: any,
+  prop?: PropertyNode,
+): void {
   if (typeof expected === "string" || typeof expected === "number" || typeof expected === "boolean") {
-    lines.push(`    assertEquals(${javaLiteral(expected)}, ${expr}, "Expected ${displayName}");`);
+    lines.push(`    assertEquals(${javaExpectedLiteral(expected, prop)}, ${expr}, "Expected ${displayName}");`);
   }
 }
 
@@ -386,6 +406,18 @@ function isPolymorphicProperty(prop: PropertyNode): boolean {
 function javaLiteral(value: string | number | boolean): string {
   if (typeof value === "string") return javaString(value);
   return String(value);
+}
+
+function javaExpectedLiteral(value: string | number | boolean, prop?: PropertyNode): string {
+  if (
+    typeof value === "string"
+    && prop?.enumName
+    && !prop.isOpenEnum
+    && prop.allowedValues.length > 0
+  ) {
+    return `${javaEnumTypeName(prop.enumName)}.fromValue(${javaString(value)})`;
+  }
+  return javaLiteral(value);
 }
 
 function localIdentifier(expr: string): string {

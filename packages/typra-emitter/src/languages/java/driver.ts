@@ -16,10 +16,10 @@ import { JavaExprVisitor } from "./visitor.js";
 import { collectProtocolNodes, emitJavaProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
 import { javaEnumTypeName, javaTypeName } from "./identifiers.js";
 
-const javaTestOptions: TestContextOptions = {
+export const javaTestOptions: TestContextOptions = {
   renderKey: (key: string) => key,
   renderBoolean: (value: boolean) => value ? "true" : "false",
-  escapeString: (value: string) => value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r"),
+  escapeString: (value: string) => value,
   getDelimiter: () => '"',
   scalarValues: {
     boolean: "false",
