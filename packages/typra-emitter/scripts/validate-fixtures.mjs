@@ -991,12 +991,14 @@ function runPythonExecutableConformance() {
     'assert [request.name for request in checkpoint.pending_tool_requests] == ["echo", "echo"]',
     "omitted_model_info = ModelInfo.load({})",
     "assert omitted_model_info.input_modalities is None",
-    "assert omitted_model_info.output_modalities is None",
-    "assert omitted_model_info.save() == {}",
+    "assert omitted_model_info.output_modalities == []",
+    "assert omitted_model_info.owners is None",
+    "assert omitted_model_info.default_owners == []",
+    'assert omitted_model_info.save() == {"outputModalities": [], "defaultOwners": []}',
     'explicit_model_info = ModelInfo.load({"inputModalities": [], "outputModalities": []})',
     "assert explicit_model_info.input_modalities == []",
     "assert explicit_model_info.output_modalities == []",
-    'assert explicit_model_info.save() == {"inputModalities": [], "outputModalities": []}',
+    'assert explicit_model_info.save() == {"inputModalities": [], "outputModalities": [], "defaultOwners": []}',
     `image_content = FixtureContent.load(${JSON.stringify(imageContentSample)})`,
     `wire = WireOptions.load(${JSON.stringify(wireOptionsSample)})`,
     'reference = FixtureReference.load("ref-coerced")',
@@ -1517,6 +1519,61 @@ function assertStaticFixtureCoverage() {
     path.join("generated", "fixtures", "python", "_FixtureReference.py"),
     "def named(",
     "def display(",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "python", "_ModelInfo.py"),
+    "input_modalities: list[str] | None = None",
+    "output_modalities: list[str] | None = field(default_factory=list)",
+    "owners: list[FixtureOwner] | None = None",
+    "default_owners: list[FixtureOwner] | None = field(default_factory=list)",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "typescript", "model-info.ts"),
+    "inputModalities?: string[];",
+    "outputModalities?: string[] = [];",
+    "owners?: FixtureOwner[];",
+    "defaultOwners?: FixtureOwner[] = [];",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "go", "model_info.go"),
+    "InputModalities  []string",
+    "OutputModalities []string",
+    "OutputModalities: []string{}",
+    'json:"outputModalities" yaml:"outputModalities"',
+    "Owners           []FixtureOwner",
+    "DefaultOwners    []FixtureOwner",
+    "DefaultOwners:    []FixtureOwner{}",
+    'json:"defaultOwners" yaml:"defaultOwners"',
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "java", "ModelInfo.java"),
+    "public List<String> inputModalities = null;",
+    "public List<String> outputModalities = new ArrayList<>();",
+    "public List<FixtureOwner> owners = null;",
+    "public List<FixtureOwner> defaultOwners = new ArrayList<>();",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "csharp", "ModelInfo.cs"),
+    "public IList<string>? InputModalities { get; set; }",
+    "public IList<string>? OutputModalities { get; set; } = [];",
+    "public IList<FixtureOwner>? Owners { get; set; }",
+    "public IList<FixtureOwner>? DefaultOwners { get; set; } = [];",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust", "model_info.rs"),
+    "pub input_modalities: Option<Vec<String>>",
+    "pub output_modalities: Option<Vec<String>>",
+    'output_modalities: value.get("outputModalities").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).or_else(|| Some(Vec::new()))',
+    "pub owners: Option<Vec<FixtureOwner>>",
+    "pub default_owners: Option<Vec<FixtureOwner>>",
+    'default_owners: value.get("defaultOwners").map(|v| Self::load_default_owners(v, ctx)).or_else(|| Some(Vec::new()))',
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "swift", "Sources", "TypraFixtures", "model_info.swift"),
+    "public var inputModalities: [String]? = nil",
+    "public var outputModalities: [String]? = []",
+    "public var owners: [FixtureOwner]? = nil",
+    "public var defaultOwners: [FixtureOwner]? = []",
   );
   assertIncludes(
     path.join("generated", "fixtures", "python", "tests", "test_protocol_scaffolds.py"),

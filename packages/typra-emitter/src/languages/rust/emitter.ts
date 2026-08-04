@@ -1482,10 +1482,8 @@ function fieldType(field: FieldDecl, polymorphicTypeNames: Set<string>): string 
       return field.isOptional ? `Option<Vec<${elemType}>>` : `Vec<${elemType}>`;
     }
     case "collection_complex": {
-      if (cat.typeName === "unknown") {
-        return "Vec<serde_json::Value>";
-      }
-      return `Vec<${cat.typeName}>`;
+      const elemType = cat.typeName === "unknown" ? "serde_json::Value" : cat.typeName;
+      return field.isOptional ? `Option<Vec<${elemType}>>` : `Vec<${elemType}>`;
     }
     case "dict": {
       return "serde_json::Value";
@@ -1528,7 +1526,9 @@ function fieldDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): stri
     }
     case "collection_scalar":
     case "collection_complex":
-      return field.isOptional ? "None" : "Vec::new()";
+      return field.isOptional
+        ? (field.hasExplicitDefault ? "Some(Vec::new())" : "None")
+        : "Vec::new()";
     case "dict":
       return "serde_json::Value::Null";
   }
@@ -1565,10 +1565,19 @@ function loadExpr(a: LoadAssignment, polymorphicTypeNames: Set<string>): string 
       }
       return `value.get("${key}").filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx)).unwrap_or_default()`;
     }
-    case "collection_scalar":
-      return collectionScalarLoadExpr(key, cat.scalarType, a.isOptional);
-    case "collection_complex":
-      return `value.get("${key}").map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx)).unwrap_or_default()`;
+    case "collection_scalar": {
+      const loaded = collectionScalarLoadExpr(key, cat.scalarType, a.isOptional);
+      return a.isOptional && a.hasExplicitDefault
+        ? `${loaded}.or_else(|| Some(Vec::new()))`
+        : loaded;
+    }
+    case "collection_complex": {
+      const loaded = `value.get("${key}").map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx))`;
+      if (a.isOptional) {
+        return a.hasExplicitDefault ? `${loaded}.or_else(|| Some(Vec::new()))` : loaded;
+      }
+      return `${loaded}.unwrap_or_default()`;
+    }
     case "dict":
       return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
   }
@@ -1673,11 +1682,20 @@ function variantLoadExpr(
       }
       return `value.get("${key}").filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx)).unwrap_or_default()`;
     }
-    case "collection_scalar":
-      return collectionScalarLoadExpr(key, cat.scalarType, field.isOptional);
-    case "collection_complex":
+    case "collection_scalar": {
+      const loaded = collectionScalarLoadExpr(key, cat.scalarType, field.isOptional);
+      return field.isOptional && field.hasExplicitDefault
+        ? `${loaded}.or_else(|| Some(Vec::new()))`
+        : loaded;
+    }
+    case "collection_complex": {
       // Collection in a variant — use the parent type's helper
-      return `value.get("${key}").map(|v| Self::load_${toSnakeCase(field.name)}(v, ctx)).unwrap_or_default()`;
+      const loaded = `value.get("${key}").map(|v| Self::load_${toSnakeCase(field.name)}(v, ctx))`;
+      if (field.isOptional) {
+        return field.hasExplicitDefault ? `${loaded}.or_else(|| Some(Vec::new()))` : loaded;
+      }
+      return `${loaded}.unwrap_or_default()`;
+    }
     case "dict":
       return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
   }
@@ -1752,9 +1770,15 @@ function emitSaveField(
       return;
     }
     case "collection_complex": {
-      lines.push(`${indent}if !${fieldRef}.is_empty() {`);
-      lines.push(`${indent}    result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(&${fieldRef}, ctx));`);
-      lines.push(`${indent}}`);
+      if (a.isOptional) {
+        lines.push(`${indent}if let Some(ref items) = ${fieldRef} {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(items, ctx));`);
+        lines.push(`${indent}}`);
+      } else {
+        lines.push(`${indent}if !${fieldRef}.is_empty() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(&${fieldRef}, ctx));`);
+        lines.push(`${indent}}`);
+      }
       return;
     }
     case "dict": {
@@ -1901,7 +1925,7 @@ function emitVariantSaveField(
     }
     case "collection_scalar": {
       if (field.isOptional) {
-        lines.push(`${indent}if let Some(items) = ${fieldRef} {`);
+        lines.push(`${indent}if let Some(ref items) = ${fieldRef} {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
       } else {
@@ -1912,9 +1936,15 @@ function emitVariantSaveField(
       return;
     }
     case "collection_complex": {
-      lines.push(`${indent}if !${fieldRef}.is_empty() {`);
-      lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`);
-      lines.push(`${indent}}`);
+      if (field.isOptional) {
+        lines.push(`${indent}if let Some(ref items) = ${fieldRef} {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(items.iter().map(|item| item.to_value(ctx)).collect()));`);
+        lines.push(`${indent}}`);
+      } else {
+        lines.push(`${indent}if !${fieldRef}.is_empty() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`);
+        lines.push(`${indent}}`);
+      }
       return;
     }
     case "dict": {

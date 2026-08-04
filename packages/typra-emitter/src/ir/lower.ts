@@ -225,6 +225,7 @@ function lowerField(
     category: classifyProperty(prop, polymorphicTypeNames),
     isOptional: prop.isOptional,
     defaultValue: prop.defaultValue,
+    hasExplicitDefault: prop.hasExplicitDefault,
     allowedValues: prop.allowedValues,
     parseAliases: prop.parseAliases,
     enumName: prop.enumName,
@@ -288,6 +289,7 @@ function lowerLoad(
     allowedValues: f.allowedValues,
     parseAliases: f.parseAliases,
     defaultValue: f.defaultValue,
+    hasExplicitDefault: f.hasExplicitDefault,
     isOpenEnum: f.isOpenEnum,
   }));
 

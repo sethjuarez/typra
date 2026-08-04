@@ -183,6 +183,7 @@ export class PropertyNode {
   public isDict: boolean = false;
 
   public defaultValue: string | number | boolean | null = null;
+  public hasExplicitDefault: boolean = false;
   public allowedValues: string[] = [];
   public parseAliases: Record<string, string[]> = {};
   /** Name of the string-literal union alias (e.g., "Role"), null if unnamed or not an enum. */
@@ -207,6 +208,7 @@ export class PropertyNode {
     this.name = property.name;
     this.description = description;
     this.property = property;
+    this.hasExplicitDefault = property.defaultValue !== undefined;
   }
 
   getSanitizedObject(): Record<string, any> {
@@ -225,6 +227,7 @@ export class PropertyNode {
       isDict: this.isDict,
 
       defaultValue: this.defaultValue || "null",
+      hasExplicitDefault: this.hasExplicitDefault,
       allowedValues: this.allowedValues,
       parseAliases: this.parseAliases,
       enumName: this.enumName,

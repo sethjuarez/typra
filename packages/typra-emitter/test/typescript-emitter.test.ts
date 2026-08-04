@@ -10,6 +10,7 @@ function field(
   name: string,
   category: FieldDecl["category"],
   isOptional: boolean,
+  hasExplicitDefault = false,
 ): FieldDecl {
   const typeName = category.kind === "collection_complex"
     ? category.typeName
@@ -22,6 +23,7 @@ function field(
     category,
     isOptional,
     defaultValue: null,
+    hasExplicitDefault,
     allowedValues: [],
     parseAliases: {},
     enumName: null,
@@ -71,7 +73,14 @@ function typeDecl(fields: FieldDecl[]): TypeDecl {
       hasContextHooks: true,
     },
     factories: [],
-    collectionHelpers: [],
+    collectionHelpers: fields
+      .filter(item => item.category.kind === "collection_complex")
+      .map(item => ({
+        propertyName: item.name,
+        elementTypeName: item.typeName,
+        innerFields: [],
+        hasNameProperty: false,
+      })),
     polymorphicDispatch: null,
     methods: [],
     wire: null,
@@ -92,6 +101,7 @@ function fileDecl(type: TypeDecl): FileDecl {
 interface GeneratedCollectionModel {
   inputModalities?: string[];
   outputModalities?: string[];
+  defaultOwners?: unknown[];
   requiredTags: string[];
   save(): Record<string, unknown>;
 }
@@ -128,16 +138,16 @@ describe("TypeScript optional collection defaults", () => {
   it("preserves omitted optional collections while accepting explicit empty arrays", () => {
     const type = typeDecl([
       field("inputModalities", { kind: "collection_scalar", scalarType: "string" }, true),
-      field("outputModalities", { kind: "collection_scalar", scalarType: "string" }, true),
       field("owners", { kind: "collection_complex", typeName: "Owner" }, true),
+      field("outputModalities", { kind: "collection_scalar", scalarType: "string" }, true, true),
+      field("defaultOwners", { kind: "collection_complex", typeName: "Owner" }, true, true),
       field("requiredTags", { kind: "collection_scalar", scalarType: "string" }, false),
     ]);
-
     const source = emitTypeScriptFile(fileDecl(type), new TypeScriptExprVisitor());
-
     assert.match(source, /inputModalities\?: string\[\];/);
-    assert.match(source, /outputModalities\?: string\[\];/);
     assert.match(source, /owners\?: Owner\[\];/);
+    assert.match(source, /outputModalities\?: string\[\] = \[\];/);
+    assert.match(source, /defaultOwners\?: Owner\[\] = \[\];/);
     assert.doesNotMatch(source, /inputModalities\?: string\[\] = \[\];/);
     assert.doesNotMatch(source, /owners\?: Owner\[\] = \[\];/);
     assert.match(source, /requiredTags: string\[\] = \[\];/);
@@ -145,6 +155,8 @@ describe("TypeScript optional collection defaults", () => {
     assert.match(source, /if \(init\?\.inputModalities !== undefined\) \{\s+this\.inputModalities = init\.inputModalities;\s+\}/);
     assert.match(source, /if \(init\?\.owners !== undefined\) \{\s+this\.owners = init\.owners;\s+\}/);
     assert.match(source, /this\.requiredTags = init\?\.requiredTags \?\? \[\];/);
+    assert.match(source, /this\.outputModalities = init\?\.outputModalities \?\? \[\];/);
+    assert.match(source, /this\.defaultOwners = init\?\.defaultOwners \?\? \[\];/);
 
     assert.match(source, /if \(data\["inputModalities"\] !== undefined && data\["inputModalities"\] !== null\) \{\s+instance\.inputModalities = \(data\["inputModalities"\] as unknown\[\]\)\.map\(v => String\(v\)\);\s+\}/);
     assert.match(source, /if \(data\["owners"\] !== undefined && data\["owners"\] !== null\) \{\s+instance\.owners = CollectionModel\.loadOwners\(data\["owners"\] as unknown\[\], context\);\s+\}/);
@@ -152,17 +164,28 @@ describe("TypeScript optional collection defaults", () => {
     const CollectionModel = evaluateCollectionModel(source);
     const omitted = new CollectionModel();
     assert.equal(omitted.inputModalities, undefined);
-    assert.equal(omitted.outputModalities, undefined);
-    assert.deepEqual(omitted.save(), { requiredTags: [] });
+    assert.deepEqual(omitted.outputModalities, []);
+    assert.deepEqual(omitted.defaultOwners, []);
+    assert.deepEqual(omitted.save(), {
+      outputModalities: [],
+      defaultOwners: [],
+      requiredTags: [],
+    });
 
     const explicit = new CollectionModel({ inputModalities: [], outputModalities: [] });
     assert.deepEqual(explicit.inputModalities, []);
     assert.deepEqual(explicit.outputModalities, []);
-    assert.deepEqual(explicit.save(), { inputModalities: [], outputModalities: [], requiredTags: [] });
+    assert.deepEqual(explicit.save(), {
+      inputModalities: [],
+      outputModalities: [],
+      defaultOwners: [],
+      requiredTags: [],
+    });
 
     assert.equal(CollectionModel.load({}).inputModalities, undefined);
+    assert.deepEqual(CollectionModel.load({}).outputModalities, []);
+    assert.deepEqual(CollectionModel.load({}).defaultOwners, []);
     assert.deepEqual(CollectionModel.load({ inputModalities: [] }).inputModalities, []);
-    assert.equal(CollectionModel.load({}).outputModalities, undefined);
     assert.deepEqual(CollectionModel.load({ outputModalities: [] }).outputModalities, []);
   });
 });

@@ -451,7 +451,7 @@ function tsDefaultValue(f: FieldDecl): string {
   const cat = f.category;
 
   if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
-    if (f.isOptional && f.defaultValue === null) {
+    if (f.isOptional && !f.hasExplicitDefault) {
       return "";
     }
     return " = []";
@@ -523,7 +523,13 @@ function emitConstructor(type: TypeDecl, lines: string[]): void {
 
   for (const field of type.fields) {
     const cat = field.category;
-    if (field.isOptional) {
+    if (
+      field.isOptional &&
+      field.hasExplicitDefault &&
+      (cat.kind === "collection_scalar" || cat.kind === "collection_complex")
+    ) {
+      lines.push(`    this.${field.name} = init?.${field.name} ?? [];`);
+    } else if (field.isOptional) {
       lines.push(`    if (init?.${field.name} !== undefined) {`);
       lines.push(`      this.${field.name} = init.${field.name};`);
       lines.push("    }");

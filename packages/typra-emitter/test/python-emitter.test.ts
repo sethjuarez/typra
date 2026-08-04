@@ -9,6 +9,7 @@ function field(
   name: string,
   category: FieldDecl["category"],
   isOptional: boolean,
+  hasExplicitDefault = false,
 ): FieldDecl {
   const typeName = category.kind === "collection_complex"
     ? category.typeName
@@ -21,6 +22,7 @@ function field(
     category,
     isOptional,
     defaultValue: null,
+    hasExplicitDefault,
     allowedValues: [],
     parseAliases: {},
     enumName: null,
@@ -93,6 +95,8 @@ describe("Python optional collection defaults", () => {
     const type = typeDecl([
       field("inputModalities", { kind: "collection_scalar", scalarType: "string" }, true),
       field("owners", { kind: "collection_complex", typeName: "Owner" }, true),
+      field("outputModalities", { kind: "collection_scalar", scalarType: "string" }, true, true),
+      field("defaultOwners", { kind: "collection_complex", typeName: "Owner" }, true, true),
       field("requiredTags", { kind: "collection_scalar", scalarType: "string" }, false),
     ]);
 
@@ -100,6 +104,8 @@ describe("Python optional collection defaults", () => {
 
     assert.match(source, /input_modalities: list\[str\] \| None = None/);
     assert.match(source, /owners: list\[Owner\] \| None = None/);
+    assert.match(source, /output_modalities: list\[str\] \| None = field\(default_factory=list\)/);
+    assert.match(source, /default_owners: list\[Owner\] \| None = field\(default_factory=list\)/);
     assert.match(source, /required_tags: list\[str\] = field\(default_factory=list\)/);
     assert.match(source, /if data is not None and "inputModalities" in data:\s+instance\.input_modalities = data\["inputModalities"\]/);
     assert.match(source, /if obj\.input_modalities is not None:\s+result\["inputModalities"\] = obj\.input_modalities/);

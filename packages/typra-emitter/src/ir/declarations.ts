@@ -168,6 +168,8 @@ export interface FieldDecl {
   isOptional: boolean;
   /** Default value for the field (primitives only) */
   defaultValue: string | number | boolean | null;
+  /** Whether TypeSpec explicitly declared a default, including collection defaults such as `#[]` */
+  hasExplicitDefault?: boolean;
   /** Allowed string values (for enum-like constraints) */
   allowedValues: string[];
   /** Parse-only aliases keyed by canonical enum/string-union value */
@@ -254,6 +256,8 @@ export interface LoadAssignment {
   parseAliases: Record<string, string[]>;
   /** Default value (for fallback on missing/invalid data) */
   defaultValue: string | number | boolean | null;
+  /** Whether TypeSpec explicitly declared a default */
+  hasExplicitDefault?: boolean;
   /** Whether the enum is open (accepts arbitrary string values) */
   isOpenEnum: boolean;
 }

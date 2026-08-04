@@ -250,10 +250,18 @@ function emitStruct(type: TypeDecl, lines: string[], visitor: ExprVisitor, polym
   lines.push(`public struct ${typeName}: ${conformances.join(", ")} {`);
   lines.push(`  public static let shorthandProperty: String? = ${type.coercionProperty ? swiftStringLiteral(type.coercionProperty) : "nil"}`);
   for (const field of type.fields) {
-    lines.push(`  public var ${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)}${field.isOptional ? " = nil" : ` = ${swiftDefaultValue(field, polymorphicTypeNames)}`}`);
+    const defaultValue = field.isOptional && !field.hasExplicitDefault
+      ? "nil"
+      : swiftDefaultValue(field, polymorphicTypeNames);
+    lines.push(`  public var ${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`);
   }
   lines.push("");
-  lines.push(`  public init(${type.fields.map(field => `${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${field.isOptional ? "nil" : swiftDefaultValue(field, polymorphicTypeNames)}`).join(", ")}) {`);
+  lines.push(`  public init(${type.fields.map(field => {
+    const defaultValue = field.isOptional && !field.hasExplicitDefault
+      ? "nil"
+      : swiftDefaultValue(field, polymorphicTypeNames);
+    return `${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`;
+  }).join(", ")}) {`);
   for (const field of type.fields) {
     lines.push(`    self.${swiftPropertyName(field.name)} = ${swiftPropertyName(field.name)}`);
   }
@@ -563,6 +571,12 @@ function swiftCategoryType(category: PropertyCategory, enumName: string | null, 
 }
 
 function swiftDefaultValue(field: FieldDecl, polymorphicTypeNames: Set<string>): string {
+  if (
+    field.hasExplicitDefault &&
+    (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex")
+  ) {
+    return "[]";
+  }
   if (field.defaultValue !== null && field.defaultValue !== undefined) {
     return swiftLiteralDefault(field);
   }

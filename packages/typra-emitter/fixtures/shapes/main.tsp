@@ -252,10 +252,14 @@ model ModelInfo {
   inputModalities?: string[];
 
   @sample(#{ outputModalities: #[] })
-  outputModalities?: string[];
+  outputModalities?: string[] = #[];
 
   @sample(#{ owner: #{ id: "owner-1", displayName: "Fixture Owner" } })
   owner?: FixtureOwner;
+
+  owners?: FixtureOwner[];
+
+  defaultOwners?: FixtureOwner[] = #[];
 }
 
 @discriminator("kind")

@@ -674,6 +674,12 @@ function javaScalarType(typeName: string): string {
 }
 
 function javaDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): string {
+  if (
+    field.hasExplicitDefault &&
+    (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex")
+  ) {
+    return " = new ArrayList<>()";
+  }
   if (field.isOptional) {
     return " = null";
   }

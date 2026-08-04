@@ -79,6 +79,7 @@ function makeProp(name: string, typeName: string, opts?: {
   prop.isDict = opts?.isDict ?? false;
   prop.type = opts?.type;
   prop.defaultValue = opts?.defaultValue ?? null;
+  prop.hasExplicitDefault = opts?.defaultValue !== undefined;
   prop.allowedValues = opts?.allowedValues ?? [];
   prop.isNamedCollection = opts?.isNamedCollection ?? false;
   return prop;

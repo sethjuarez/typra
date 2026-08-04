@@ -701,7 +701,7 @@ export function emitRustTest(ctx: RustTestContext): string {
             // default (materialized on load, so present on save even when the `@sample`
             // omits it, e.g. prompty's `status`/`contextState`) — must be present in the
             // sample for whole-object byte-identity vs that sample to be valid.
-            if ((!p.isOptional || p.defaultValue != null) && !(p.name in obj)) return false;
+            if ((!p.isOptional || p.hasExplicitDefault) && !(p.name in obj)) return false;
             const pv = obj[p.name];
             // Cause D (mirror image of the above): a REQUIRED field authored in the sample
             // at its zero/empty value is OMITTED by to_value — required string == "", int

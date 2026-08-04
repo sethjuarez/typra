@@ -462,7 +462,15 @@ function getCSharpType(category: PropertyCategory, isOptional: boolean, enumName
 }
 
 function getPropertyDefault(field: FieldDecl): string {
-  if (field.isOptional) return "";
+  if (field.isOptional) {
+    if (
+      field.hasExplicitDefault &&
+      (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex")
+    ) {
+      return " = [];";
+    }
+    return "";
+  }
 
   // Enum fields use EnumName.MemberName syntax (skip open enums — they use string)
   if (field.enumName && !field.isOpenEnum && field.allowedValues.length > 0) {

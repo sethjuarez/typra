@@ -609,7 +609,7 @@ function pythonDefaultValue(f: FieldDecl): string {
   const cat = f.category;
 
   if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
-    return f.isOptional ? " = None" : " = field(default_factory=list)";
+    return f.isOptional && !f.hasExplicitDefault ? " = None" : " = field(default_factory=list)";
   }
 
   if (f.isOptional) {
