@@ -793,6 +793,43 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     XCTAssertEqual(output["kind"] as? String, "future")
     XCTAssertEqual(output["endpoint"] as? String, "https://future.test")
   }
+
+  func testNamedCollectionsUseLosslessFallbackAndRejectNestedArrays() throws {
+    let unique = try FixtureNamedPayloadCollection.load([
+      "items": [
+        ["name": "alpha", "payload": ["nested": [1, NSNull()]]],
+        ["name": "beta", "payload": "second"],
+      ],
+    ])
+    XCTAssertEqual((try unique.save()["items"] as? [String: Any])?.count, 2)
+    XCTAssertNotNil(try unique.save(SaveContext(collectionFormat: "array"))["items"] as? [[String: Any]])
+
+    let unnamed = try FixtureNamedPayloadCollection.load([
+      "items": [
+        ["payload": ["nested": [1, NSNull()]]],
+        ["name": "", "payload": "second"],
+      ],
+    ])
+    let unnamedItems = try unnamed.save()["items"] as? [[String: Any]]
+    XCTAssertEqual(unnamedItems?.count, 2)
+    XCTAssertNil(unnamedItems?[1]["name"])
+
+    let duplicate = try FixtureNamedPayloadCollection.load([
+      "items": [
+        ["name": "dup", "payload": 1],
+        ["name": "dup", "payload": 2],
+      ],
+    ])
+    XCTAssertEqual((try duplicate.save()["items"] as? [[String: Any]])?.count, 2)
+
+    XCTAssertThrowsError(try FixtureNamedRoot.load([
+      "inputs": ["profile": ["properties": ["arrayEntry": []]]],
+    ])) { error in
+      let message = String(describing: error)
+      XCTAssertTrue(message.contains("inputs.profile.properties.arrayEntry"), message)
+      XCTAssertTrue(message.contains("array"), message)
+    }
+  }
 }
 `);
   try {
@@ -1197,7 +1234,7 @@ function runTypeScriptExecutableConformance() {
   const configPath = path.join(sourceDir, "tsconfig.conformance.json");
   const outDir = path.join(sourceDir, ".typra-conformance");
   writeFileSync(runnerPath, [
-    'import { FixtureContent, FixtureReference, FixtureRoot, WireOptions } from "./index";',
+    'import { FixtureContent, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, SaveContext, WireOptions } from "./index";',
     "",
     `const root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)});`,
     `const imageContent = FixtureContent.load(${JSON.stringify(imageContentSample)});`,
@@ -1214,6 +1251,16 @@ function runTypeScriptExecutableConformance() {
     "}",
     `const wire = WireOptions.load(${JSON.stringify(wireOptionsSample)});`,
     'const reference = FixtureReference.load("ref-coerced" as any);',
+    'const uniqueNamed = FixtureNamedPayloadCollection.load({ items: [{ name: "alpha", payload: { nested: [1, null] } }, { name: "beta", payload: "second" }] });',
+    'const uniqueSaved = uniqueNamed.save();',
+    'if (Array.isArray(uniqueSaved.items) || Object.keys(uniqueSaved.items as object).join(",") !== "alpha,beta") throw new Error("unique named collection did not save as object");',
+    'const lossyNamed = FixtureNamedPayloadCollection.load({ items: [{ payload: { nested: [1, null] } }, { name: "", payload: "second" }] });',
+    'const lossySaved = lossyNamed.save();',
+    'if (!Array.isArray(lossySaved.items) || lossySaved.items.length !== 2 || "name" in lossySaved.items[1]) throw new Error("unnamed collection did not preserve whole-array fallback");',
+    'const duplicateSaved = FixtureNamedPayloadCollection.load({ items: [{ name: "dup", payload: 1 }, { name: "dup", payload: 2 }] }).save();',
+    'if (!Array.isArray(duplicateSaved.items) || duplicateSaved.items.length !== 2) throw new Error("duplicate named collection lost entries");',
+    'if (!Array.isArray(uniqueNamed.save(new SaveContext({ collectionFormat: "array" })).items)) throw new Error("explicit array format was ignored");',
+    'try { FixtureNamedRoot.load({ inputs: { profile: { properties: { arrayEntry: [] } } } }); throw new Error("array-valued named entry was accepted"); } catch (error) { const message = String(error); if (!message.includes("inputs.profile.properties.arrayEntry") || !message.includes("array")) throw error; }',
     "console.log(JSON.stringify({",
     "  root: root.save(),",
     "  imageContent: imageContent.save(),",
@@ -1265,7 +1312,7 @@ function runPythonExecutableConformance() {
     "import json",
     "import sys",
     `sys.path.insert(0, ${JSON.stringify(generatedRoot)})`,
-    "from python import FixtureCheckpoint, FixtureContent, FixtureReference, FixtureRoot, ModelInfo, WireOptions",
+    "from python import FixtureCheckpoint, FixtureContent, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, LoadContext, ModelInfo, SaveContext, WireOptions",
     `root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)})`,
     "root = FixtureRoot.load(json.loads(json.dumps(root.save())))",
     'checkpoint = FixtureCheckpoint.load({"pendingToolRequests": [{"id": "call-a", "name": "echo"}, {"id": "call-b", "name": "echo"}]})',
@@ -1295,6 +1342,21 @@ function runPythonExecutableConformance() {
     '        raise AssertionError(f"closed discriminator unexpectedly accepted {invalid_kind}")',
     `wire = WireOptions.load(${JSON.stringify(wireOptionsSample)})`,
     'reference = FixtureReference.load("ref-coerced")',
+    'unique_named = FixtureNamedPayloadCollection.load({"items": [{"name": "alpha", "payload": {"nested": [1, None]}}, {"name": "beta", "payload": "second"}]})',
+    "unique_saved = unique_named.save()",
+    'assert isinstance(unique_saved["items"], dict) and list(unique_saved["items"]) == ["alpha", "beta"]',
+    'lossy_saved = FixtureNamedPayloadCollection.load({"items": [{"payload": {"nested": [1, None]}}, {"name": "", "payload": "second"}]}).save()',
+    'assert isinstance(lossy_saved["items"], list) and len(lossy_saved["items"]) == 2 and "name" not in lossy_saved["items"][1]',
+    'duplicate_saved = FixtureNamedPayloadCollection.load({"items": [{"name": "dup", "payload": 1}, {"name": "dup", "payload": 2}]}).save()',
+    'assert isinstance(duplicate_saved["items"], list) and len(duplicate_saved["items"]) == 2',
+    'assert isinstance(unique_named.save(SaveContext(collection_format="array"))["items"], list)',
+    "try:",
+    '    FixtureNamedRoot.load({"inputs": {"profile": {"properties": {"arrayEntry": []}}}})',
+    "except TypeError as error:",
+    "    message = str(error)",
+    '    assert "inputs.profile.properties.arrayEntry" in message and "array" in message',
+    "else:",
+    '    raise AssertionError("array-valued named entry was accepted")',
     "print(json.dumps({",
     '    "root": root.save(),',
     '    "imageContent": image_content.save(),',
@@ -1504,6 +1566,20 @@ function runGoExecutableConformance() {
     '\t\t\tpanic("FixtureUnionProperty anyOf scalar branch did not load base fields")',
     "\t\t}",
     "\t}",
+    '\tuniqueNamed, err := fixtures.LoadFixtureNamedPayloadCollection(map[string]interface{}{"items": []interface{}{map[string]interface{}{"name": "alpha", "payload": map[string]interface{}{"nested": []interface{}{1, nil}}}, map[string]interface{}{"name": "beta", "payload": "second"}}}, loadCtx)',
+    "\tif err != nil { panic(err) }",
+    '\tif values, ok := uniqueNamed.Save(saveCtx)["items"].(map[string]interface{}); !ok || len(values) != 2 { panic("unique named collection did not save as object") }',
+    '\tlossyNamed, err := fixtures.LoadFixtureNamedPayloadCollection(map[string]interface{}{"items": []interface{}{map[string]interface{}{"payload": map[string]interface{}{"nested": []interface{}{1, nil}}}, map[string]interface{}{"name": "", "payload": "second"}}}, loadCtx)',
+    "\tif err != nil { panic(err) }",
+    '\tif values, ok := lossyNamed.Save(saveCtx)["items"].([]interface{}); !ok || len(values) != 2 { panic("unnamed collection did not preserve whole-array fallback") }',
+    '\tduplicateNamed, err := fixtures.LoadFixtureNamedPayloadCollection(map[string]interface{}{"items": []interface{}{map[string]interface{}{"name": "dup", "payload": 1}, map[string]interface{}{"name": "dup", "payload": 2}}}, loadCtx)',
+    "\tif err != nil { panic(err) }",
+    '\tif values, ok := duplicateNamed.Save(saveCtx)["items"].([]interface{}); !ok || len(values) != 2 { panic("duplicate named collection lost entries") }',
+    '\tarrayCtx := fixtures.NewSaveContext()',
+    '\tarrayCtx.CollectionFormat = fixtures.CollectionFormatArray',
+    '\tif _, ok := uniqueNamed.Save(arrayCtx)["items"].([]interface{}); !ok { panic("explicit array format was ignored") }',
+    '\t_, namedErr := fixtures.LoadFixtureNamedRoot(map[string]interface{}{"inputs": map[string]interface{}{"profile": map[string]interface{}{"properties": map[string]interface{}{"arrayEntry": []interface{}{}}}}}, loadCtx)',
+    '\tif namedErr == nil || !strings.Contains(namedErr.Error(), "inputs.profile.properties.arrayEntry") || !strings.Contains(namedErr.Error(), "array") { panic("array-valued named entry was accepted") }',
     "\timageContentSaved := imageContent.(interface {",
     "\t\tSave(*fixtures.SaveContext) map[string]interface{}",
     "\t}).Save(saveCtx)",
@@ -1645,6 +1721,18 @@ function runRustExecutableConformance() {
     "    assert!(matches!(explicit_model_info.owners.as_ref(), Some(values) if values.is_empty()));",
     "    assert!(explicit_model_info.default_owners.is_empty());",
     '    assert_eq!(explicit_model_info.to_value(&save_ctx), json!({"inputModalities": [], "outputModalities": [], "owners": [], "defaultOwners": []}));',
+    '    let unique_named = FixtureNamedPayloadCollection::load_from_value(&json!({"items": [{"name": "alpha", "payload": {"nested": [1, null]}}, {"name": "beta", "payload": "second"}]}), &load_ctx);',
+    '    assert_eq!(unique_named.to_value(&save_ctx), json!({"items": {"alpha": {"payload": {"nested": [1, null]}}, "beta": {"payload": "second"}}}));',
+    '    let lossy_named = FixtureNamedPayloadCollection::load_from_value(&json!({"items": [{"payload": {"nested": [1, null]}}, {"name": "", "payload": "second"}]}), &load_ctx);',
+    '    assert_eq!(lossy_named.to_value(&save_ctx), json!({"items": [{"payload": {"nested": [1, null]}}, {"payload": "second"}]}));',
+    '    let duplicate_named = FixtureNamedPayloadCollection::load_from_value(&json!({"items": [{"name": "dup", "payload": 1}, {"name": "dup", "payload": 2}]}), &load_ctx);',
+    '    assert_eq!(duplicate_named.to_value(&save_ctx), json!({"items": [{"name": "dup", "payload": 1}, {"name": "dup", "payload": 2}]}));',
+    '    let mut array_ctx = SaveContext::new();',
+    '    array_ctx.collection_format = "array".to_string();',
+    '    assert!(unique_named.to_value(&array_ctx).get("items").unwrap().is_array());',
+    '    let error = FixtureNamedRoot::from_json(r#"{"inputs":{"profile":{"properties":{"arrayEntry":[]}}}}"#, &load_ctx).expect_err("array-valued named entry");',
+    '    let message = error.to_string();',
+    '    assert!(message.contains("inputs.profile.properties.arrayEntry") && message.contains("array"), "{message}");',
     "    println!(\"{}\", json!({",
     '        "root": root.to_value(&save_ctx),',
     '        "imageContent": image_content.to_value(&save_ctx),',
@@ -1762,6 +1850,14 @@ function runCSharpExecutableConformance() {
     "    }",
     "}",
     'var reference = FixtureReference.FromJson("\\"ref-coerced\\"");',
+    'var uniqueNamed = FixtureNamedPayloadCollection.FromJson("""{"items":[{"name":"alpha","payload":{"nested":[1,null]}},{"name":"beta","payload":"second"}]}""");',
+    'if (uniqueNamed.Save()["items"] is not IDictionary<string, object?> uniqueItems || uniqueItems.Count != 2) throw new InvalidOperationException("unique named collection did not save as object");',
+    'var lossyNamed = FixtureNamedPayloadCollection.FromJson("""{"items":[{"payload":{"nested":[1,null]}},{"name":"","payload":"second"}]}""");',
+    'if (lossyNamed.Save()["items"] is not IList<Dictionary<string, object?>> lossyItems || lossyItems.Count != 2 || lossyItems[1].ContainsKey("name")) throw new InvalidOperationException("unnamed collection did not preserve whole-array fallback");',
+    'var duplicateNamed = FixtureNamedPayloadCollection.FromJson("""{"items":[{"name":"dup","payload":1},{"name":"dup","payload":2}]}""");',
+    'if (duplicateNamed.Save()["items"] is not IList<Dictionary<string, object?>> duplicateItems || duplicateItems.Count != 2) throw new InvalidOperationException("duplicate named collection lost entries");',
+    'if (uniqueNamed.Save(new SaveContext { CollectionFormat = "array" })["items"] is not IList<Dictionary<string, object?>>) throw new InvalidOperationException("explicit array format was ignored");',
+    'try { FixtureNamedRoot.FromJson("""{"inputs":{"profile":{"properties":{"arrayEntry":[]}}}}"""); throw new InvalidOperationException("array-valued named entry was accepted"); } catch (ArgumentException error) { if (!error.Message.Contains("inputs.profile.properties.arrayEntry") || !error.Message.Contains("array")) throw; }',
     "Console.WriteLine(JsonSerializer.Serialize(new Dictionary<string, object?>",
     "{",
     '    ["root"] = root.Save(),',
@@ -1892,6 +1988,32 @@ function runJavaExecutableConformance() {
     '    require(((Map<?, ?>) expandedBag.get("items")).get("alpha") instanceof Map<?, ?>, "useShorthand=false must preserve the item object");',
     "    Map<String, Object> arrayBag = bag.save(new SaveContext(null, null, \"array\", true));",
     '    require(arrayBag.get("items") instanceof List<?>, "collectionFormat=array must save named collections as arrays");',
+    "    FixtureNamedPayload alpha = new FixtureNamedPayload();",
+    '    alpha.name = "alpha";',
+    '    alpha.payload = Map.of("nested", java.util.Arrays.asList(1, null));',
+    "    FixtureNamedPayload beta = new FixtureNamedPayload();",
+    '    beta.name = "beta";',
+    '    beta.payload = "second";',
+    "    FixtureNamedPayloadCollection uniqueNamed = new FixtureNamedPayloadCollection();",
+    "    uniqueNamed.items = new java.util.ArrayList<>(List.of(alpha, beta));",
+    '    require(uniqueNamed.save(new SaveContext()).get("items") instanceof Map<?, ?>, "unique named collection did not save as object");',
+    "    FixtureNamedPayload unnamed = new FixtureNamedPayload();",
+    "    unnamed.payload = alpha.payload;",
+    "    beta.name = \"\";",
+    "    FixtureNamedPayloadCollection lossyNamed = new FixtureNamedPayloadCollection();",
+    "    lossyNamed.items = new java.util.ArrayList<>(List.of(unnamed, beta));",
+    '    require(lossyNamed.save(new SaveContext()).get("items") instanceof List<?> values && values.size() == 2 && !((Map<?, ?>) values.get(1)).containsKey("name"), "unnamed collection did not preserve whole-array fallback");',
+    '    alpha.name = "dup"; beta.name = "dup";',
+    "    FixtureNamedPayloadCollection duplicateNamed = new FixtureNamedPayloadCollection();",
+    "    duplicateNamed.items = new java.util.ArrayList<>(List.of(alpha, beta));",
+    '    require(duplicateNamed.save(new SaveContext()).get("items") instanceof List<?> values && values.size() == 2, "duplicate named collection lost entries");',
+    '    require(uniqueNamed.save(new SaveContext(null, null, "array", true)).get("items") instanceof List<?>, "explicit array format was ignored");',
+    "    try {",
+    '      FixtureNamedRoot.load(Map.of("inputs", Map.of("profile", Map.of("properties", Map.of("arrayEntry", List.of())))), new LoadContext());',
+    '      throw new AssertionError("array-valued named entry was accepted");',
+    "    } catch (IllegalArgumentException error) {",
+    '      require(error.getMessage().contains("inputs.profile.properties.arrayEntry") && error.getMessage().contains("array"), "array-valued named entry error lost recursive path");',
+    "    }",
     "",
     "    FixtureUnionProperty union = new FixtureUnionProperty();",
     "    union.anyOf.add(new FixtureProperty());",
@@ -2216,7 +2338,7 @@ function assertStaticFixtureCoverage() {
     "public struct FixtureRoot: TypraModel",
     "public static func load(_ data: Any",
     "public func save(_ context: SaveContext",
-    "try FixtureContent.load(value, context: context)",
+    'try FixtureContent.load(value, context: context.at("content"))',
   );
   assertIncludes(
     path.join("generated", "fixtures", "swift", "Sources", "TypraFixtures", "wire_options.swift"),

@@ -385,7 +385,7 @@ function emitLoadField(
       lines.push(`      result.${name} = ${loadScalar(`map.get("${wireName}")`, field.category.scalarType, field.isOpenEnum ? null : field.enumName, openEnumAliasParser(field))};`);
       break;
     case "complex":
-      lines.push(`      result.${name} = ${javaTypeName(field.category.typeName)}.load(map.get("${wireName}"), ctx);`);
+      lines.push(`      result.${name} = ${javaTypeName(field.category.typeName)}.load(map.get("${wireName}"), ctx.at("${wireName}"));`);
       break;
     case "collection_scalar":
       lines.push(`      result.${name} = new ArrayList<>();`);
@@ -400,8 +400,18 @@ function emitLoadField(
       if (collectionHelper?.hasNameProperty) {
         lines.push(`      if (map.get("${wireName}") instanceof Map<?, ?> values) {`);
         lines.push("        for (Map.Entry<?, ?> entry : values.entrySet()) {");
-        lines.push(`          ${javaTypeName(field.category.typeName)} item = ${javaTypeName(field.category.typeName)}.load(entry.getValue(), ctx);`);
-        lines.push("          item.name = String.valueOf(entry.getKey());");
+        lines.push("          if (entry.getValue() instanceof Iterable<?>) {");
+        lines.push(`            throw new IllegalArgumentException(ctx.at("${wireName}").at(String.valueOf(entry.getKey())).path + ": invalid named collection entry category array");`);
+        lines.push("          }");
+        lines.push("          Map<String, Object> itemData;");
+        lines.push("          if (entry.getValue() instanceof Map<?, ?> itemMap) {");
+        lines.push("            itemData = copyMap(itemMap);");
+        lines.push("          } else {");
+        lines.push("            itemData = new LinkedHashMap<>();");
+        lines.push(`            itemData.put("${collectionHelper.innerFields[0] || "kind"}", entry.getValue());`);
+        lines.push("          }");
+        lines.push("          itemData.put(\"name\", String.valueOf(entry.getKey()));");
+        lines.push(`          ${javaTypeName(field.category.typeName)} item = ${javaTypeName(field.category.typeName)}.load(itemData, ctx.at("${wireName}").at(String.valueOf(entry.getKey())));`);
         lines.push(`          result.${name}.add(item);`);
         lines.push("        }");
         lines.push(`      } else if (map.get("${wireName}") instanceof Iterable<?> values) {`);
@@ -409,7 +419,7 @@ function emitLoadField(
         lines.push(`      if (map.get("${wireName}") instanceof Iterable<?> values) {`);
       }
       lines.push("        for (Object item : values) {");
-      lines.push(`          result.${name}.add(${javaTypeName(field.category.typeName)}.load(item, ctx));`);
+      lines.push(`          result.${name}.add(${javaTypeName(field.category.typeName)}.load(item, ctx.at("${wireName}")));`);
       lines.push("        }");
       lines.push("      }");
       break;
@@ -490,23 +500,37 @@ function emitSaveField(
     case "collection_complex":
       lines.push(`    if (obj.${propertyName} != null) {`);
       if (collectionHelper?.hasNameProperty) {
+        lines.push("      List<Object> serializedItems = new ArrayList<>();");
+        lines.push(`      for (${javaTypeName(category.typeName)} item : obj.${propertyName}) {`);
+        lines.push("        Map<String, Object> itemData = new LinkedHashMap<>(item.save(ctx));");
+        lines.push('        if ("".equals(itemData.get("name"))) itemData.remove("name");');
+        lines.push("        serializedItems.add(itemData);");
+        lines.push("      }");
         lines.push(`      if ("array".equals(ctx.collectionFormat)) {`);
-        lines.push("        List<Object> items = new ArrayList<>();");
-        lines.push(`        for (${javaTypeName(category.typeName)} item : obj.${propertyName}) items.add(item.save(ctx));`);
-        lines.push(`        result.put("${wireName}", items);`);
+        lines.push(`        result.put("${wireName}", serializedItems);`);
         lines.push("      } else {");
-        lines.push("        Map<String, Object> items = new LinkedHashMap<>();");
-        lines.push(`        for (${javaTypeName(category.typeName)} item : obj.${propertyName}) {`);
-        lines.push("          Map<String, Object> itemData = new LinkedHashMap<>(item.save(ctx));");
-        lines.push('          Object nameValue = itemData.remove("name");');
-        lines.push('          if (!(nameValue instanceof String itemName)) throw new IllegalStateException("Cannot save named collection item without a name.");');
-        lines.push(`          if (ctx.useShorthand && ${javaTypeName(category.typeName)}.SHORTHAND_PROPERTY != null && itemData.size() == 1 && itemData.containsKey(${javaTypeName(category.typeName)}.SHORTHAND_PROPERTY)) {`);
-        lines.push(`            items.put(itemName, itemData.get(${javaTypeName(category.typeName)}.SHORTHAND_PROPERTY));`);
-        lines.push("          } else {");
-        lines.push("            items.put(itemName, itemData);");
-        lines.push("          }");
+        lines.push("        java.util.Set<String> names = new java.util.HashSet<>();");
+        lines.push("        boolean canUseObject = true;");
+        lines.push("        for (Object value : serializedItems) {");
+        lines.push("          Map<?, ?> itemData = (Map<?, ?>) value;");
+        lines.push('          Object nameValue = itemData.get("name");');
+        lines.push("          if (!(nameValue instanceof String itemName) || itemName.isEmpty() || !names.add(itemName)) { canUseObject = false; break; }");
         lines.push("        }");
-        lines.push(`        result.put("${wireName}", items);`);
+        lines.push("        if (!canUseObject) {");
+        lines.push(`          result.put("${wireName}", serializedItems);`);
+        lines.push("        } else {");
+        lines.push("          Map<String, Object> objectItems = new LinkedHashMap<>();");
+        lines.push("          for (Object value : serializedItems) {");
+        lines.push("            Map<String, Object> itemData = new LinkedHashMap<>((Map<String, Object>) value);");
+        lines.push('            String itemName = (String) itemData.remove("name");');
+        lines.push(`            if (ctx.useShorthand && ${javaTypeName(category.typeName)}.SHORTHAND_PROPERTY != null && itemData.size() == 1 && itemData.containsKey(${javaTypeName(category.typeName)}.SHORTHAND_PROPERTY)) {`);
+        lines.push(`              objectItems.put(itemName, itemData.get(${javaTypeName(category.typeName)}.SHORTHAND_PROPERTY));`);
+        lines.push("            } else {");
+        lines.push("              objectItems.put(itemName, itemData);");
+        lines.push("            }");
+        lines.push("          }");
+        lines.push(`          result.put("${wireName}", objectItems);`);
+        lines.push("        }");
         lines.push("      }");
       } else {
         lines.push("      List<Object> items = new ArrayList<>();");

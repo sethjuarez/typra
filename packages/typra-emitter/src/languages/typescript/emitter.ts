@@ -593,6 +593,7 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   const name = type.typeName.name;
 
   lines.push(`  static load(data: Record<string, unknown>, context?: LoadContext): ${name} {`);
+  lines.push("    context ??= new LoadContext();");
 
   // Context pre-processing
   lines.push("    if (context) {");
@@ -659,7 +660,7 @@ function emitLoadAssignment(a: LoadAssignment): string {
       }
     }
     case "complex":
-      return `instance.${a.fieldName} = ${cat.typeName}.load(data["${a.sourceName}"] as Record<string, unknown>, context);`;
+      return `instance.${a.fieldName} = ${cat.typeName}.load(data["${a.sourceName}"] as Record<string, unknown>, context.at("${a.sourceName}"));`;
     case "collection_scalar": {
       const tsType = TYPE_MAP[cat.scalarType];
       switch (tsType) {
@@ -674,7 +675,7 @@ function emitLoadAssignment(a: LoadAssignment): string {
       }
     }
     case "collection_complex":
-      return `instance.${a.fieldName} = ${a.parentTypeName}.load${capitalize(a.fieldName)}(data["${a.sourceName}"] as unknown[], context);`;
+      return `instance.${a.fieldName} = ${a.parentTypeName}.load${capitalize(a.fieldName)}(data["${a.sourceName}"] as unknown[], context.at("${a.sourceName}"));`;
     case "dict":
       return `instance.${a.fieldName} = data["${a.sourceName}"] as Record<string, unknown>;`;
   }
@@ -851,10 +852,14 @@ function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDe
   const firstInnerField = helper.innerFields[0] || "kind";
 
   lines.push(`  static ${methodName}(data: Record<string, unknown>[] | unknown[], context?: LoadContext): ${elemName}[] {`);
+  lines.push(`    context ??= new LoadContext({ path: "${helper.propertyName}" });`);
   lines.push("    if (!Array.isArray(data)) {");
   lines.push("      // Convert dict/object format to array format");
   lines.push("      const result: Record<string, unknown>[] = [];");
   lines.push("      for (const [k, v] of Object.entries(data)) {");
+  lines.push("        if (Array.isArray(v)) {");
+  lines.push('          throw new TypeError(context.at(k).path + ": invalid named collection entry category array");');
+  lines.push("        }");
   lines.push("        if (typeof v === \"object\" && v !== null && !Array.isArray(v)) {");
   lines.push(`          result.push({ name: k, ...(v as Record<string, unknown>) });`);
   lines.push("        } else {");
@@ -879,31 +884,36 @@ function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDe
 
   if (helper.hasNameProperty) {
     lines.push("");
+    lines.push("    const serialized = items.map(item => ({ ...item.save(context) } as Record<string, unknown>));");
+    lines.push("    for (const itemData of serialized) {");
+    lines.push('      if (itemData["name"] === "") delete itemData["name"];');
+    lines.push("    }");
+    lines.push("");
     lines.push('    if (context.collectionFormat === "array") {');
-    lines.push("      return items.map(item => item.save(context));");
+    lines.push("      return serialized;");
+    lines.push("    }");
+    lines.push("");
+    lines.push("    const names = new Set<string>();");
+    lines.push("    for (const itemData of serialized) {");
+    lines.push('      const name = itemData["name"];');
+    lines.push('      if (typeof name !== "string" || name.length === 0 || names.has(name)) return serialized;');
+    lines.push("      names.add(name);");
     lines.push("    }");
     lines.push("");
     lines.push("    // Object format: use name as key");
     lines.push("    const result: Record<string, unknown> = {};");
-    lines.push("    for (const item of items) {");
-    lines.push("      const itemData = item.save(context) as Record<string, unknown>;");
-    lines.push('      const name = itemData["name"] as string | undefined;');
+    lines.push("    for (let index = 0; index < items.length; index++) {");
+    lines.push("      const item = items[index];");
+    lines.push("      const itemData = serialized[index];");
+    lines.push('      const name = itemData["name"] as string;');
     lines.push('      delete itemData["name"];');
-    lines.push("      if (name) {");
-    lines.push("        // Check if we can use shorthand (only primary property set)");
-    lines.push(`        const shorthand = (item.constructor as typeof ${elemName}).shorthandProperty;`);
-    lines.push("        if (context.useShorthand && shorthand && Object.keys(itemData).length === 1 && shorthand in itemData) {");
-    lines.push("          result[name] = itemData[shorthand];");
-    lines.push("          continue;");
-    lines.push("        }");
-    lines.push("        result[name] = itemData;");
-    lines.push("      } else {");
-    lines.push("        // No name, fall back to array format for this item");
-    lines.push('        if (!result["_unnamed"]) {');
-    lines.push('          result["_unnamed"] = [];');
-    lines.push("        }");
-    lines.push('        (result["_unnamed"] as unknown[]).push(itemData);');
+    lines.push("      // Check if we can use shorthand (only primary property set)");
+    lines.push(`      const shorthand = (item.constructor as typeof ${elemName}).shorthandProperty;`);
+    lines.push("      if (context.useShorthand && shorthand && Object.keys(itemData).length === 1 && shorthand in itemData) {");
+    lines.push("        result[name] = itemData[shorthand];");
+    lines.push("        continue;");
     lines.push("      }");
+    lines.push("      result[name] = itemData;");
     lines.push("    }");
     lines.push("    return result;");
   } else {

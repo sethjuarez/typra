@@ -674,8 +674,9 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   lines.push("");
   lines.push(`        """`);
   lines.push("");
-  lines.push("        if context is not None:");
-  lines.push("            data = context.process_input(data)");
+  lines.push("        if context is None:");
+  lines.push("            context = LoadContext()");
+  lines.push("        data = context.process_input(data)");
 
   // Coercion checks — direct property setting instead of dict construction
   if (type.load.coercions.length > 0) {
@@ -734,9 +735,9 @@ function emitLoadAssignment(a: LoadAssignment): string {
     case "collection_scalar":
       return `instance.${snake} = data["${a.sourceName}"]`;
     case "collection_complex":
-      return `instance.${snake} = ${a.parentTypeName}.load_${snake}(data["${a.sourceName}"], context)`;
+      return `instance.${snake} = ${a.parentTypeName}.load_${snake}(data["${a.sourceName}"], context.at("${a.sourceName}"))`;
     case "complex":
-      return `instance.${snake} = ${cat.typeName}.load(data["${a.sourceName}"], context)`;
+      return `instance.${snake} = ${cat.typeName}.load(data["${a.sourceName}"], context.at("${a.sourceName}"))`;
   }
 }
 
@@ -793,10 +794,14 @@ function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDe
   lines.push("");
   lines.push("    @staticmethod");
   lines.push(`    def load_${snake}(data: dict | list, context: LoadContext | None) -> list[${elemName}]:`);
+  lines.push("        if context is None:");
+  lines.push(`            context = LoadContext(path="${helper.propertyName}")`);
   lines.push("        if isinstance(data, dict):");
   lines.push(`            # convert simple named ${helper.propertyName} to list of ${elemName}`);
   lines.push("            result = []");
   lines.push("            for k, v in data.items():");
+  lines.push("                if isinstance(v, list):");
+  lines.push('                    raise TypeError(f"{context.at(k).path}: invalid named collection entry category array")');
   lines.push("                if isinstance(v, dict):");
   lines.push("                    # value is an object, spread its properties");
   lines.push(`                    result.append({"name": k, **v})`);
@@ -818,27 +823,32 @@ function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDe
 
   if (helper.hasNameProperty) {
     lines.push("");
+    lines.push("        serialized = [dict(item.save(context)) for item in items]");
+    lines.push("        for item_data in serialized:");
+    lines.push('            if item_data.get("name") == "":');
+    lines.push('                item_data.pop("name")');
+    lines.push("");
     lines.push('        if context.collection_format == "array":');
-    lines.push("            return [item.save(context) for item in items]");
+    lines.push("            return serialized");
+    lines.push("");
+    lines.push("        names: set[str] = set()");
+    lines.push("        for item_data in serialized:");
+    lines.push('            name = item_data.get("name")');
+    lines.push("            if not isinstance(name, str) or not name or name in names:");
+    lines.push("                return serialized");
+    lines.push("            names.add(name)");
     lines.push("");
     lines.push("        # Object format: use name as key");
     lines.push("        result: dict[str, Any] = {}");
-    lines.push("        for item in items:");
-    lines.push("            item_data = item.save(context)");
-    lines.push('            name = item_data.pop("name", None)');
-    lines.push("            if name:");
-    lines.push("                # Check if we can use shorthand (only primary property set)");
-    lines.push("                if context.use_shorthand and hasattr(item, '_shorthand_property'):");
-    lines.push("                    shorthand_prop = item._shorthand_property");
-    lines.push("                    if shorthand_prop and len(item_data) == 1 and shorthand_prop in item_data:");
-    lines.push("                        result[name] = item_data[shorthand_prop]");
-    lines.push("                        continue");
-    lines.push("                result[name] = item_data");
-    lines.push("            else:");
-    lines.push('                # No name, fall back to array format for this item');
-    lines.push('                if "_unnamed" not in result:');
-    lines.push('                    result["_unnamed"] = []');
-    lines.push('                result["_unnamed"].append(item_data)');
+    lines.push("        for item, item_data in zip(items, serialized):");
+    lines.push('            name = item_data.pop("name")');
+    lines.push("            # Check if we can use shorthand (only primary property set)");
+    lines.push("            if context.use_shorthand and hasattr(item, '_shorthand_property'):");
+    lines.push("                shorthand_prop = item._shorthand_property");
+    lines.push("                if shorthand_prop and len(item_data) == 1 and shorthand_prop in item_data:");
+    lines.push("                    result[name] = item_data[shorthand_prop]");
+    lines.push("                    continue");
+    lines.push("            result[name] = item_data");
     lines.push("        return result");
   } else {
     lines.push("");

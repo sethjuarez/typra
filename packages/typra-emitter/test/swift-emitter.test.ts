@@ -214,7 +214,7 @@ describe("Swift polymorphic enums", () => {
     file.types.push(binding);
     const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set());
 
-    assert.match(source, /instance\.bindings = try loadBindings\(value, context: context\)/);
+    assert.match(source, /instance\.bindings = try loadBindings\(value, context: context\.at\("bindings"\)\)/);
     assert.match(source, /public struct Binding: TypraModel \{[\s\S]*public var name: String\? = nil/);
     assert.match(source, /if let values = data as\? \[Any\] \{\s+return try values\.map \{ try Binding\.load\(\$0, context: context\) \}/);
     assert.match(source, /let values = try TypraRuntime\.dictionary\(data, field: "bindings"\)/);
@@ -353,7 +353,7 @@ describe("Swift inherited model fields", () => {
 
     const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set());
     const functionToolSource = source.slice(source.indexOf("public struct FunctionTool"));
-    assert.match(functionToolSource, /instance\.bindings = try loadBindings\(value, context: context\)/);
+    assert.match(functionToolSource, /instance\.bindings = try loadBindings\(value, context: context\.at\("bindings"\)\)/);
     assert.match(functionToolSource, /private static func loadBindings\(_ data: Any, context: LoadContext\) throws -> \[Binding\]/);
   });
 

@@ -629,6 +629,7 @@ function emitLoadMethod(
   lines.push(`    /// <returns>The loaded ${typeName} instance.</returns>`);
   lines.push(`    public ${new_}static ${typeName} Load(Dictionary<string, object?> data, LoadContext? context = null)`);
   lines.push("    {");
+  lines.push("        context ??= new LoadContext();");
 
   // ProcessInput
   lines.push("        if (context is not null)");
@@ -718,9 +719,9 @@ function getLoadExpression(
     case "dict":
       return `instance.${propName} = ${varName}.GetDictionary()!;`;
     case "complex":
-      return `instance.${propName} = ${cat.typeName}.Load(${varName}.GetDictionary(${cat.typeName}.ShorthandProperty), context);`;
+      return `instance.${propName} = ${cat.typeName}.Load(${varName}.GetDictionary(${cat.typeName}.ShorthandProperty), context!.At("${assign.sourceName}"));`;
     case "collection_complex":
-      return `instance.${propName} = Load${propName}(${varName}, context);`;
+      return `instance.${propName} = Load${propName}(${varName}, context!.At("${assign.sourceName}"));`;
     case "collection_scalar": {
       const csType = CSHARP_TYPE_MAP[cat.scalarType] || "object";
       if (csType === "string") {
@@ -772,7 +773,7 @@ function emitCollectionLoadHelper(
   lines.push("                if (kvp.Value is IEnumerable<object>)");
   lines.push("                {");
   lines.push("                    throw new ArgumentException(");
-  lines.push(`                        $"Invalid '${helper.propertyName}' format: key '{kvp.Key}' has an array value. " +`);
+  lines.push(`                        $"{(string.IsNullOrEmpty(context?.Path) ? "${helper.propertyName}" : context.Path)}.{kvp.Key}: invalid named collection entry category array. " +`);
   lines.push(`                        $"'${helper.propertyName}' must be a flat list of objects or a name-keyed dict — " +`);
   lines.push(`                        "not a nested {" + kvp.Key + ": [...]} structure.");`);
   lines.push("                }");
@@ -1051,36 +1052,42 @@ function emitCollectionSaveHelper(helper: CollectionHelperDecl, lines: string[])
 
   if (helper.hasNameProperty) {
     lines.push("");
+    lines.push("        var serialized = items.Select(item => new Dictionary<string, object?>(item.Save(context))).ToList();");
+    lines.push("        foreach (var itemData in serialized)");
+    lines.push("        {");
+    lines.push('            if (itemData.TryGetValue("name", out var nameValue) && nameValue is string { Length: 0 }) itemData.Remove("name");');
+    lines.push("        }");
+    lines.push("");
     lines.push('        if (context.CollectionFormat == "array")');
     lines.push("        {");
-    lines.push("            return items.Select(item => item.Save(context)).ToList();");
+    lines.push("            return serialized;");
+    lines.push("        }");
+    lines.push("");
+    lines.push("        var names = new HashSet<string>(StringComparer.Ordinal);");
+    lines.push("        foreach (var itemData in serialized)");
+    lines.push("        {");
+    lines.push('            if (!itemData.TryGetValue("name", out var nameValue) || nameValue is not string { Length: > 0 } name || !names.Add(name)) return serialized;');
     lines.push("        }");
     lines.push("");
     lines.push("        // Object format: use name as key");
     lines.push("        var result = new Dictionary<string, object?>();");
-    lines.push("        foreach (var item in items)");
+    lines.push("        for (var index = 0; index < items.Count; index++)");
     lines.push("        {");
-    lines.push("            var itemData = item.Save(context);");
-    lines.push('            if (itemData.TryGetValue("name", out var nameValue) && nameValue is string name)');
-    lines.push("            {");
-    lines.push('                itemData.Remove("name");');
+    lines.push("            var item = items[index];");
+    lines.push("            var itemData = serialized[index];");
+    lines.push('            var name = (string)itemData["name"]!;');
+    lines.push('            itemData.Remove("name");');
     lines.push("");
-    lines.push("                // Check if we can use shorthand");
-    lines.push(`                if (context.UseShorthand && ${elemType}.ShorthandProperty is string shorthandProp)`);
-    lines.push("                {");
-    lines.push("                    if (itemData.Count == 1 && itemData.ContainsKey(shorthandProp))");
-    lines.push("                    {");
-    lines.push("                        result[name] = itemData[shorthandProp];");
-    lines.push("                        continue;");
-    lines.push("                    }");
-    lines.push("                }");
-    lines.push("                result[name] = itemData;");
-    lines.push("            }");
-    lines.push("            else");
+    lines.push("            // Check if we can use shorthand");
+    lines.push(`            if (context.UseShorthand && ${elemType}.ShorthandProperty is string shorthandProp)`);
     lines.push("            {");
-    lines.push('                // No name, can\'t use object format for this item');
-    lines.push('                throw new InvalidOperationException("Cannot save item in object format: missing \'name\' property");');
+    lines.push("                if (itemData.Count == 1 && itemData.ContainsKey(shorthandProp))");
+    lines.push("                {");
+    lines.push("                    result[name] = itemData[shorthandProp];");
+    lines.push("                    continue;");
+    lines.push("                }");
     lines.push("            }");
+    lines.push("            result[name] = itemData;");
     lines.push("        }");
     lines.push("        return result;");
   } else {

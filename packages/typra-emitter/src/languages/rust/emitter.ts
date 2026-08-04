@@ -625,9 +625,7 @@ function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
   lines.push(`impl<'de> serde::Deserialize<'de> for ${name} {`);
   lines.push(`    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {`);
   lines.push(`        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;`);
-  if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
-    lines.push("        Self::validate_discriminator(&value).map_err(serde::de::Error::custom)?;");
-  }
+  lines.push("        Self::validate_input_at(&value, \"\").map_err(serde::de::Error::custom)?;");
   lines.push(`        Ok(Self::load_from_value(&value, &LoadContext::default()))`);
   lines.push(`    }`);
   lines.push(`}`);
@@ -656,9 +654,7 @@ function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
     lines.push(`impl<'de> serde::Deserialize<'de> for ${kindName} {`);
     lines.push(`    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {`);
     lines.push(`        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;`);
-    if (isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
-      lines.push(`        ${name}::validate_discriminator(&value).map_err(serde::de::Error::custom)?;`);
-    }
+    lines.push(`        ${name}::validate_input_at(&value, "").map_err(serde::de::Error::custom)?;`);
     lines.push(`        Ok(${name}::load_from_value(&value, &LoadContext::default()).${discField})`);
     lines.push(`    }`);
     lines.push(`}`);
@@ -692,6 +688,7 @@ function emitImpl(
 
   // load_from_value()
   emitLoadFromValue(name, type, childTypes, baseFieldNames, polymorphicTypeNames, lines);
+  emitInputValidation(type, lines);
   if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
     emitClosedDiscriminatorValidation(type, lines);
   }
@@ -756,10 +753,8 @@ function emitFromJson(name: string, type: TypeDecl, lines: string[]): void {
   lines.push(`    /// Load ${name} from a JSON string.`);
   lines.push(`    pub fn from_json(json: &str, ctx: &LoadContext) -> Result<Self, serde_json::Error> {`);
   lines.push("        let value: serde_json::Value = serde_json::from_str(json)?;");
-  if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
-    lines.push("        Self::validate_discriminator(&value)");
-    lines.push("            .map_err(|message| <serde_json::Error as serde::de::Error>::custom(message))?;");
-  }
+  lines.push("        Self::validate_input_at(&value, \"\")");
+  lines.push("            .map_err(|message| <serde_json::Error as serde::de::Error>::custom(message))?;");
   lines.push("        Ok(Self::load_from_value(&value, ctx))");
   lines.push("    }");
   lines.push("");
@@ -769,10 +764,8 @@ function emitFromYaml(name: string, type: TypeDecl, lines: string[]): void {
   lines.push(`    /// Load ${name} from a YAML string.`);
   lines.push(`    pub fn from_yaml(yaml: &str, ctx: &LoadContext) -> Result<Self, serde_yaml::Error> {`);
   lines.push("        let value: serde_json::Value = serde_yaml::from_str(yaml)?;");
-  if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
-    lines.push("        Self::validate_discriminator(&value)");
-    lines.push("            .map_err(|message| <serde_yaml::Error as serde::de::Error>::custom(message))?;");
-  }
+  lines.push("        Self::validate_input_at(&value, \"\")");
+  lines.push("            .map_err(|message| <serde_yaml::Error as serde::de::Error>::custom(message))?;");
   lines.push("        Ok(Self::load_from_value(&value, ctx))");
   lines.push("    }");
   lines.push("");
@@ -794,6 +787,65 @@ function emitClosedDiscriminatorValidation(type: TypeDecl, lines: string[]): voi
   lines.push("");
 }
 
+function emitInputValidation(type: TypeDecl, lines: string[]): void {
+  const closed = type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch);
+  lines.push("    pub(crate) fn validate_input_at(value: &serde_json::Value, path: &str) -> Result<(), String> {");
+  if (closed) {
+    lines.push("        Self::validate_discriminator(value)?;");
+  }
+  for (const assignment of type.load.assignments) {
+    const field = assignment.sourceName;
+    const category = assignment.category;
+    const helper = type.collectionHelpers.find(candidate => candidate.propertyName === field);
+    if (category.kind === "complex") {
+      lines.push(`        if let Some(child) = value.get("${field}") {`);
+      lines.push(`            let child_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
+      lines.push(`            ${category.typeName}::validate_input_at(child, &child_path)?;`);
+      lines.push("        }");
+    } else if (category.kind === "collection_complex" && helper?.hasNameProperty) {
+      const shorthandField = helper.innerFields[0] || "value";
+      lines.push(`        if let Some(collection) = value.get("${field}") {`);
+      lines.push(`            let collection_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
+      lines.push("            match collection {");
+      lines.push("                serde_json::Value::Object(entries) => {");
+      lines.push("                    for (name, entry) in entries {");
+      lines.push('                        let entry_path = format!("{}.{}", collection_path, name);');
+      lines.push("                        if entry.is_array() {");
+      lines.push('                            return Err(format!("{}: invalid named collection entry category array", entry_path));');
+      lines.push("                        }");
+      lines.push("                        let mut candidate = if entry.is_object() {");
+      lines.push("                            entry.clone()");
+      lines.push("                        } else {");
+      lines.push(`                            serde_json::json!({ "${shorthandField}": entry })`);
+      lines.push("                        };");
+      lines.push("                        if let serde_json::Value::Object(ref mut map) = candidate {");
+      lines.push('                            map.insert("name".to_string(), serde_json::Value::String(name.clone()));');
+      lines.push("                        }");
+      lines.push(`                        ${category.typeName}::validate_input_at(&candidate, &entry_path)?;`);
+      lines.push("                    }");
+      lines.push("                }");
+      lines.push("                serde_json::Value::Array(entries) => {");
+      lines.push("                    for entry in entries {");
+      lines.push(`                        ${category.typeName}::validate_input_at(entry, &collection_path)?;`);
+      lines.push("                    }");
+      lines.push("                }");
+      lines.push("                _ => {}");
+      lines.push("            }");
+      lines.push("        }");
+    } else if (category.kind === "collection_complex") {
+      lines.push(`        if let Some(entries) = value.get("${field}").and_then(|candidate| candidate.as_array()) {`);
+      lines.push(`            let collection_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
+      lines.push("            for entry in entries {");
+      lines.push(`                ${category.typeName}::validate_input_at(entry, &collection_path)?;`);
+      lines.push("            }");
+      lines.push("        }");
+    }
+  }
+  lines.push("        Ok(())");
+  lines.push("    }");
+  lines.push("");
+}
+
 // ============================================================================
 // load_from_value
 // ============================================================================
@@ -811,11 +863,9 @@ function emitLoadFromValue(
   lines.push("    /// Calls `ctx.process_input` before field extraction.");
   lines.push("    pub fn load_from_value(value: &serde_json::Value, ctx: &LoadContext) -> Self {");
   lines.push("        let value = ctx.process_input(value.clone());");
-  if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
-    lines.push("        if let Err(message) = Self::validate_discriminator(&value) {");
-    lines.push('            panic!("{}", message);');
-    lines.push("        }");
-  }
+  lines.push("        if let Err(message) = Self::validate_input_at(&value, \"\") {");
+  lines.push('            panic!("{}", message);');
+  lines.push("        }");
 
   // Coercions
   for (const c of type.load.coercions) {
@@ -1310,9 +1360,9 @@ function emitCollectionLoadHelper(
     const shorthandField = helper.innerFields.length > 0 ? helper.innerFields[0] : "value";
     lines.push("            serde_json::Value::Object(obj) => {");
     lines.push("                obj.iter()");
-    lines.push("                    .filter_map(|(name, value)| {");
+    lines.push("                    .map(|(name, value)| {");
     lines.push("                        if value.is_array() {");
-    lines.push("                            return None;");
+    lines.push(`                            panic!("${helper.propertyName}.{}: invalid named collection entry category array", name);`);
     lines.push("                        }");
     lines.push("                        let mut v = if value.is_object() {");
     lines.push("                            value.clone()");
@@ -1322,7 +1372,7 @@ function emitCollectionLoadHelper(
     lines.push('                        if let serde_json::Value::Object(ref mut m) = v {');
     lines.push('                            m.entry("name".to_string()).or_insert_with(|| serde_json::Value::String(name.clone()));');
     lines.push("                        }");
-    lines.push(`                        Some(${elemType}::load_from_value(&v, ctx))`);
+    lines.push(`                        ${elemType}::load_from_value(&v, ctx)`);
     lines.push("                    })");
     lines.push("                    .collect()");
     lines.push("            }");
@@ -1349,19 +1399,34 @@ function emitCollectionSaveHelper(
 
   if (helper.hasNameProperty) {
     lines.push("");
+    lines.push("        let mut serialized = items.iter().map(|item| item.to_value(ctx)).collect::<Vec<_>>();");
+    lines.push("        for item_data in &mut serialized {");
+    lines.push('            if let serde_json::Value::Object(map) = item_data {');
+    lines.push('                if matches!(map.get("name"), Some(serde_json::Value::String(name)) if name.is_empty()) { map.remove("name"); }');
+    lines.push("            }");
+    lines.push("        }");
+    lines.push("");
     lines.push('        if ctx.collection_format == "array" {');
-    lines.push("            return serde_json::Value::Array(items.iter().map(|item| item.to_value(ctx)).collect::<Vec<_>>());");
+    lines.push("            return serde_json::Value::Array(serialized);");
+    lines.push("        }");
+    lines.push("        let mut names = std::collections::HashSet::new();");
+    lines.push("        for item_data in &serialized {");
+    lines.push('            let Some(name) = item_data.get("name").and_then(|value| value.as_str()) else {');
+    lines.push("                return serde_json::Value::Array(serialized);");
+    lines.push("            };");
+    lines.push("            if name.is_empty() || !names.insert(name.to_string()) {");
+    lines.push("                return serde_json::Value::Array(serialized);");
+    lines.push("            }");
     lines.push("        }");
     lines.push("        // Object format: use name as key");
     lines.push("        let mut result = serde_json::Map::new();");
-    lines.push("        for item in items {");
-    lines.push("            let mut item_data = match item.to_value(ctx) {");
+    lines.push("        for item_data in serialized {");
+    lines.push("            let mut item_data = match item_data {");
     lines.push('                serde_json::Value::Object(m) => m,');
     lines.push('                other => { let mut m = serde_json::Map::new(); m.insert("value".to_string(), other); m },');
     lines.push("            };");
-    lines.push('            if let Some(serde_json::Value::String(name)) = item_data.remove("name") {');
-    lines.push("                result.insert(name, serde_json::Value::Object(item_data));");
-    lines.push("            }");
+    lines.push('            let serde_json::Value::String(name) = item_data.remove("name").expect("validated named collection item") else { unreachable!() };');
+    lines.push("            result.insert(name, serde_json::Value::Object(item_data));");
     lines.push("        }");
     lines.push("        serde_json::Value::Object(result)");
   } else {
