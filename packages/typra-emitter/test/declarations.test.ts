@@ -23,6 +23,7 @@ import {
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 import { emitGoFileContent } from "../src/languages/go/emitter.js";
+import { isClosedPolymorphicDispatch } from "../src/ir/declarations.js";
 import { goFieldName } from "../src/languages/go/identifiers.js";
 import { emitGoTest } from "../src/languages/go/test-emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
@@ -104,6 +105,37 @@ const contentPart = makeType("ContentPart", [
 ], {
   discriminator: "kind",
   childTypes: [textPart, imagePart],
+});
+
+describe("closed polymorphic dispatch", () => {
+  it("uses the lowered discriminator contract instead of abstractness", () => {
+    const base = {
+      discriminatorField: "kind",
+      variants: [],
+      isAbstract: true,
+      defaultVariant: null,
+    };
+    assert.equal(isClosedPolymorphicDispatch({ ...base, isClosed: true }), true);
+    assert.equal(isClosedPolymorphicDispatch({ ...base, isClosed: false }), false);
+  });
+
+  it("lowers closed enums separately from open abstract discriminators", () => {
+    const closedText = makeType("ClosedText", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "text" }),
+    ], { base: { namespace: "Test", name: "ClosedContent" } });
+    const closedContent = makeType("ClosedContent", [
+      makeProp("kind", "ClosedContentKind", { allowedValues: ["text"] }),
+    ], {
+      discriminator: "kind",
+      childTypes: [closedText],
+      isAbstract: true,
+    });
+    const closedDispatch = lowerFile(closedContent, buildTestRegistry(), new Set(["ClosedContent"])).types[0].polymorphicDispatch!;
+    const openDispatch = lowerFile(connectionType, buildTestRegistry(), new Set(["Connection"])).types[0].polymorphicDispatch!;
+
+    assert.equal(isClosedPolymorphicDispatch(closedDispatch), true);
+    assert.equal(isClosedPolymorphicDispatch(openDispatch), false);
+  });
 });
 
 // NamedProp for testing collection hasNameProperty
@@ -542,7 +574,7 @@ describe("lowerFile", () => {
       assert.ok(dispatchIndex >= 0, "expected generated polymorphic dispatch block");
       assert.ok(coercionIndex < dispatchIndex, "scalar coercions must run before abstract dispatch errors");
       assert.match(code, /\t"fmt"/);
-      assert.match(code, /return nil, fmt\.Errorf\("unknown ConnectionWithCoercion discriminator value: %s", discriminator\)/);
+      assert.match(code, /return nil, fmt\.Errorf\("unknown ConnectionWithCoercion discriminator field 'kind' value: %s", discriminator\)/);
       assert.match(code, /return nil, fmt\.Errorf\("missing ConnectionWithCoercion discriminator property: kind"\)/);
       const loadStart = code.indexOf("func LoadConnectionWithCoercion(");
       const loadBody = code.slice(loadStart, code.indexOf("\nfunc ", loadStart + 1));

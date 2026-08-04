@@ -10,6 +10,7 @@ import {
   PropertyCategory,
   TypeDecl,
   WireDecl,
+  isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import {
@@ -344,6 +345,7 @@ function isBroadNumberCoercion(scalarType: string): boolean {
 }
 
 function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatchDecl, lines: string[]): void {
+  const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push("    if (data instanceof Map<?, ?> dispatchMap) {");
   lines.push(`      Object discriminator = dispatchMap.get("${escapeJava(dispatch.discriminatorField)}");`);
   lines.push("      if (discriminator != null) {");
@@ -355,11 +357,16 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   lines.push("          default:");
   if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
     lines.push(`            return ${javaTypeName(dispatch.defaultVariant.typeName.name)}.load(data, ctx);`);
+  } else if (isClosed) {
+    lines.push(`            throw new IllegalArgumentException("Unknown ${typeName} discriminator field '${escapeJava(dispatch.discriminatorField)}' value: " + discriminator);`);
   } else {
     lines.push("            break;");
   }
   lines.push("        }");
   lines.push("      }");
+  if (isClosed) {
+    lines.push(`      throw new IllegalArgumentException("Missing ${typeName} discriminator property: '${escapeJava(dispatch.discriminatorField)}'");`);
+  }
   lines.push("    }");
   void typeName;
 }

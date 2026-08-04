@@ -8,6 +8,7 @@ import {
   PropertyCategory,
   TypeDecl,
   WireFieldMapping,
+  isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
@@ -25,10 +26,14 @@ export function emitSwiftFile(
     augmentedUniverse
       .filter(type => type.polymorphicDispatch !== null)
       .map(type => {
-        const fallback = type.polymorphicDispatch!.defaultVariant;
+        const dispatch = type.polymorphicDispatch!;
+        const fallback = dispatch.defaultVariant;
+        const closedDefault = isClosedPolymorphicDispatch(dispatch)
+          ? dispatch.variants[0]?.typeName.name ?? null
+          : null;
         return [
           type.typeName.name,
-          fallback && !fallback.isSelfReference ? fallback.typeName.name : null,
+          fallback && !fallback.isSelfReference ? fallback.typeName.name : closedDefault,
         ] as const;
       }),
   );
@@ -124,7 +129,8 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
   const fallback = dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference
     ? dispatch.defaultVariant
     : null;
-  const usesUnknownFallback = fallback === null;
+  const isClosed = isClosedPolymorphicDispatch(dispatch);
+  const usesUnknownFallback = fallback === null && !isClosed;
   for (const variant of dispatch.variants) {
     const childName = swiftTypeName(variant.typeName.name);
     lines.push(`  case ${swiftPropertyName(variant.typeName.name)}(${childName})`);
@@ -149,6 +155,8 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
   }
   if (fallback) {
     lines.push(`    default: return .${swiftPropertyName(fallback.typeName.name)}(try ${swiftTypeName(fallback.typeName.name)}.load(normalizedData, context: context))`);
+  } else if (isClosed) {
+    lines.push(`    default: throw TypraRuntimeError.unknownDiscriminator(type: ${swiftStringLiteral(typeName)}, field: ${swiftStringLiteral(dispatch.discriminatorField)}, value: discriminator)`);
   } else {
     lines.push("    default: return .unknown(object)");
   }

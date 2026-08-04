@@ -42,6 +42,7 @@ import {
   CoercionDecl,
   PropertyCategory,
   WireDecl,
+  isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toKebabCase } from "../../ir/utilities.js";
@@ -801,10 +802,11 @@ function emitPolymorphicDispatch(
   dispatch: PolymorphicDispatchDecl,
   lines: string[],
 ): void {
+  const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push(`  private static loadKind(data: Record<string, unknown>, context?: LoadContext): ${parentName} {`);
   lines.push(`    const discriminatorValue = data["${dispatch.discriminatorField}"];`);
   lines.push("    if (discriminatorValue !== undefined && discriminatorValue !== null) {");
-  lines.push("      const discriminator = String(discriminatorValue).toLowerCase();");
+  lines.push(`      const discriminator = String(discriminatorValue)${isClosed ? "" : ".toLowerCase()"};`);
   lines.push("      switch (discriminator) {");
 
   for (const v of dispatch.variants) {
@@ -822,14 +824,14 @@ function emitPolymorphicDispatch(
     }
   } else {
     lines.push("        default:");
-    lines.push(`          throw new Error(\`Unknown ${parentName} discriminator value: \${discriminator}\`);`);
+    lines.push(`          throw new Error(\`Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: \${discriminator}\`);`);
   }
 
   lines.push("      }");
   lines.push("    }");
 
   // Missing discriminator
-  if (dispatch.isAbstract) {
+  if (isClosed || dispatch.isAbstract) {
     lines.push(`    throw new Error("Missing ${parentName} discriminator property: '${dispatch.discriminatorField}'");`);
   } else {
     lines.push(`    return new ${parentName}();`);

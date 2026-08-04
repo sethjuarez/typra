@@ -358,11 +358,15 @@ function lowerPolymorphicDispatch(
     };
   }
 
+  const discriminatorProperty = node.properties.find(property => property.name === node.discriminator);
   const baseDispatch: PolymorphicDispatchDecl = {
     discriminatorField: node.discriminator!,
     variants,
     defaultVariant,
     isAbstract: node.isAbstract,
+    isClosed: defaultVariant === null
+      && (discriminatorProperty?.allowedValues.length ?? 0) > 0
+      && discriminatorProperty?.isOpenEnum !== true,
   };
 
   return baseDispatch;
