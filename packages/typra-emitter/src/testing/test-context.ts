@@ -400,6 +400,7 @@ export const rustTestOptions: TestContextOptions = {
     value: `${enumName}::${toPascalCase(rawValue)}`,
     delimiter: '',
   }),
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   escapeJsonForTemplate: undefined,
   escapeYamlForTemplate: undefined,
   scalarValues: {
