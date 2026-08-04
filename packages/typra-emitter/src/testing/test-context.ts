@@ -434,6 +434,7 @@ export const swiftTestOptions: TestContextOptions = {
     .replace(/\r/g, "\\r")
     .replace(/\t/g, "\\t"),
   getDelimiter: () => '"',
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   escapeJsonForTemplate: (json: string) => json.replace(/\\/g, "\\\\"),
   escapeYamlForTemplate: (yaml: string) => yaml.replace(/\\/g, "\\\\"),
   renderEnumValue: (enumName: string, rawValue: string, _fieldName: string, isOpenEnum?: boolean) => ({

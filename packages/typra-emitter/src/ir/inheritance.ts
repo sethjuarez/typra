@@ -54,6 +54,10 @@ export function flattenInheritance(types: TypeDecl[], declarationUniverse: TypeD
       [...ancestors.map(ancestor => ancestor.save.assignments), type.save.assignments],
       assignment => assignment.fieldName,
     );
+    const collectionHelpers = mergeInheritedByKey(
+      [...ancestors.map(ancestor => ancestor.collectionHelpers), type.collectionHelpers],
+      helper => helper.propertyName,
+    );
     const wireSources = [...ancestors.map(ancestor => ancestor.wire), type.wire]
       .filter((wire): wire is WireDecl => wire !== null);
     const wire = wireSources.length === 0
@@ -71,6 +75,7 @@ export function flattenInheritance(types: TypeDecl[], declarationUniverse: TypeD
       fields,
       load: { ...type.load, assignments: loadAssignments },
       save: { ...type.save, assignments: saveAssignments },
+      collectionHelpers,
       wire,
     };
   });
