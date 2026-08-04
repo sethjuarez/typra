@@ -866,6 +866,35 @@ describe("lowerFile", () => {
       ]);
       assert.equal(context.examples[0].sample.instructions, expected);
 
+      const generated = emitGoTest({
+        ...context,
+        importPath: "prompty/model",
+      });
+      const loadJson = generated.slice(
+        generated.indexOf("func TestPromptyLoadJSON"),
+        generated.indexOf("func TestPromptyLoadYAML"),
+      );
+      const loadYaml = generated.slice(
+        generated.indexOf("func TestPromptyLoadYAML"),
+        generated.indexOf("func TestPromptyFromJSON"),
+      );
+      const fromYaml = generated.slice(
+        generated.indexOf("func TestPromptyFromYAML"),
+        generated.indexOf("func TestPromptyRoundtrip"),
+      );
+      assert.match(
+        loadJson,
+        /instance\.Instructions != "some \\npersonal\\ncontent"/,
+      );
+      assert.match(
+        loadYaml,
+        /instance\.Instructions != "some\\npersonal\\ncontent"/,
+      );
+      assert.match(
+        fromYaml,
+        /instance\.Instructions != "some\\npersonal\\ncontent"/,
+      );
+
       const blockValue = "some\npersonal\ncontent";
       instructions.samples = [{ sample: { instructions: blockValue }, description: "" }];
       const blockContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
