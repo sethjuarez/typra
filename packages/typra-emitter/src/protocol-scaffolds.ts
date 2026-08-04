@@ -535,41 +535,11 @@ function csharpType(typeName: string): string {
   return map[typeName] || typeName;
 }
 
-function isCSharpUnknownRecordType(typeName: string): boolean {
-  const requiredType = typeName.endsWith("?") ? typeName.slice(0, -1) : typeName;
-  return requiredType === "Record<unknown>" || requiredType === "dictionary";
-}
-
 function renderCSharpProtocolParameters(params: Record<string, string>, runtimeCancellable: boolean | undefined): string {
-  const entries = Object.entries(params);
-  const hasUnknownRecord = entries.some(([, typeName]) => isCSharpUnknownRecordType(typeName));
-  if (!hasUnknownRecord) {
-    return entries
-      .map(([name, typeName]) => `${csharpType(typeName)} ${csharpIdentifier(name)}`)
-      .concat(runtimeCancellable ? ["CancellationToken cancellationToken = default"] : [])
-      .join(", ");
-  }
-
-  const rendered: string[] = [];
-  const parameterCount = entries.length + (runtimeCancellable ? 1 : 0);
-  let parameterIndex = 0;
-  for (const [name, typeName] of entries) {
-    const comma = ++parameterIndex < parameterCount ? "," : "";
-    if (isCSharpUnknownRecordType(typeName)) {
-      const attribute = typeName.endsWith("?")
-        ? "global::System.Diagnostics.CodeAnalysis.AllowNull"
-        : "global::System.Diagnostics.CodeAnalysis.DisallowNull";
-      rendered.push("#nullable disable annotations");
-      rendered.push(`        [${attribute}] IDictionary<string, object> ${csharpIdentifier(name)}${comma}`);
-      rendered.push("#nullable restore annotations");
-    } else {
-      rendered.push(`        ${csharpType(typeName)} ${csharpIdentifier(name)}${comma}`);
-    }
-  }
-  if (runtimeCancellable) {
-    rendered.push("        CancellationToken cancellationToken = default");
-  }
-  return `\n${rendered.join("\n")}\n    `;
+  return Object.entries(params)
+    .map(([name, typeName]) => `${csharpType(typeName)} ${csharpIdentifier(name)}`)
+    .concat(runtimeCancellable ? ["CancellationToken cancellationToken = default"] : [])
+    .join(", ");
 }
 
 function rustType(typeName: string): string {

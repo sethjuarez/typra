@@ -78,7 +78,7 @@ describe("C# emitter guarded scalar loads", () => {
     assert.doesNotMatch(source, /messageValue\?\.ToString/);
   });
 
-  it("permits null values in dictionary fields and initializers", () => {
+  it("emits nullable values only for Record<unknown> dictionaries", () => {
     const category = { kind: "dict" as const };
     const field = {
       name: "metadata",
@@ -157,10 +157,58 @@ describe("C# emitter guarded scalar loads", () => {
       () => undefined,
     );
 
-    assert.match(source, /#nullable disable annotations\n    \[global::System\.Diagnostics\.CodeAnalysis\.NotNull, global::System\.Diagnostics\.CodeAnalysis\.DisallowNull\]\n    public IDictionary<string, object> Metadata \{ get; set; \} = new Dictionary<string, object>\(\);\n#nullable restore annotations/);
-    assert.match(source, /#nullable disable annotations\n    \[global::System\.Diagnostics\.CodeAnalysis\.MaybeNull, global::System\.Diagnostics\.CodeAnalysis\.AllowNull\]\n    public IDictionary<string, object> OptionalMetadata \{ get; set; \}\n#nullable restore annotations/);
+    assert.match(source, /public IDictionary<string, object\?> Metadata \{ get; set; \} = new Dictionary<string, object\?>\(\);/);
+    assert.match(source, /public IDictionary<string, object\?>\? OptionalMetadata \{ get; set; \}/);
     assert.match(source, /public IDictionary<string, FixtureOwner> Owners \{ get; set; \} = new Dictionary<string, FixtureOwner>\(\);/);
-    assert.doesNotMatch(source, /CodeAnalysis\.(?:NotNull|MaybeNull)[^\n]*\n    public IDictionary<string, FixtureOwner>/);
-    assert.doesNotMatch(source, /public IDictionary<string, object\?>/);
+    assert.doesNotMatch(source, /IDictionary<string, FixtureOwner\?>/);
+  });
+
+  it("emits nullable Record<unknown> values in protocol parameters", () => {
+    const protocol: TypeDecl = {
+      typeName: { namespace: "Test", name: "CheckpointStore" },
+      base: null,
+      isAbstract: false,
+      isProtocol: true,
+      description: "",
+      fields: [],
+      coercionProperty: null,
+      load: {
+        coercions: [],
+        assignments: [],
+        hasPolymorphicDispatch: false,
+        hasContextHooks: false,
+      },
+      save: {
+        assignments: [],
+        hasBase: false,
+        hasContextHooks: false,
+      },
+      factories: [],
+      collectionHelpers: [],
+      polymorphicDispatch: null,
+      methods: [{
+        name: "save",
+        returns: "void",
+        description: "",
+        params: {
+          requiredState: "Record<unknown>",
+          optionalState: "Record<unknown>?",
+        },
+        optional: false,
+        sync: true,
+      }],
+      wire: null,
+    };
+
+    const source = emitCSharpClass(
+      protocol,
+      "Test",
+      new CSharpExprVisitor(),
+      [protocol],
+      () => undefined,
+    );
+
+    assert.match(source, /void Save\(Dictionary<string, object\?> requiredState, Dictionary<string, object\?>\? optionalState\);/);
+    assert.doesNotMatch(source, /#nullable disable annotations|IDictionary<string, object>/);
   });
 });
