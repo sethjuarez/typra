@@ -49,6 +49,9 @@ export interface TestContextOptions {
   /** Use YAML block literals for multiline strings instead of quoted folding. */
   yamlMultilineStyle?: "block-literal";
 
+  /** Minimum encoded length at which double-quoted multiline values may be folded. */
+  yamlDoubleQuotedMinMultiLineLength?: number;
+
   /** Default scalar values for each type (used when @sample doesn't provide example) */
   scalarValues: Record<string, string>;
 
@@ -133,7 +136,9 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
     let yamlStr = doc.toString({
       indent: 2,
       lineWidth: 0,
-      doubleQuotedMinMultiLineLength: Number.POSITIVE_INFINITY,
+      ...(options.yamlDoubleQuotedMinMultiLineLength === undefined
+        ? {}
+        : { doubleQuotedMinMultiLineLength: options.yamlDoubleQuotedMinMultiLineLength }),
     });
     if (options.escapeYamlForTemplate) {
       yamlStr = options.escapeYamlForTemplate(yamlStr);
@@ -308,6 +313,7 @@ export const pythonTestOptions: TestContextOptions = {
   renderBoolean: (val: boolean) => val ? "True" : "False",
   escapeString: (str: string) => str.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),
   getDelimiter: (str: string) => str.includes('\n') ? '"""' : '"',
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   scalarValues: {
     "boolean": "False",
     "float": "3.14",

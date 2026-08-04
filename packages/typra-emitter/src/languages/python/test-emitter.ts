@@ -50,7 +50,7 @@ function renderValidation(v: PropertyValidation, varName: string): string {
   } else if (v.value === "False") {
     return `    assert not ${varName}.${v.key}`;
   } else {
-    const expected = v.delimiter === '"""' && typeof v.value === "string"
+    const expected = typeof v.value === "string" && /[\r\n\t]/.test(v.value)
       ? `"${v.value.replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t")}"`
       : `${v.delimiter}${v.value}${v.delimiter}`;
     return `    assert ${varName}.${v.key} == ${expected}`;
