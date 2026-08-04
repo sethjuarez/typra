@@ -704,38 +704,58 @@ describe("lowerFile", () => {
       assert.doesNotMatch(code, /if instance\.Instructions != /);
     });
 
-    it("keeps whitespace-sensitive multiline YAML trim-proof", () => {
+    it("emits multiline YAML samples as block literals", () => {
       const instructions = makeProp("instructions", "string", { isScalar: true });
-      const expected = "some \npersonal\ncontent";
+      const expected = "some\npersonal\ncontent";
       instructions.samples = [{ sample: { instructions: expected }, description: "" }];
       const prompty = makeType("Prompty", [instructions]);
+
       const context = buildBaseTestContext(prompty, "prompty", goTestOptions);
 
       assert.deepEqual(context.examples[0].yaml, [
-        'instructions: "some\\ \\npersonal\\ncontent"',
-        "",
-      ]);
-      assert.equal(context.examples[0].sample.instructions, expected);
-
-      const blockValue = "some\npersonal\ncontent";
-      instructions.samples = [{ sample: { instructions: blockValue }, description: "" }];
-      const blockContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
-      assert.deepEqual(blockContext.examples[0].yaml, [
         "instructions: |-",
         "  some",
         "  personal",
         "  content",
         "",
       ]);
-      assert.equal(blockContext.examples[0].sample.instructions, blockValue);
+      assert.equal(context.examples[0].sample.instructions, expected);
 
-      const trailingValue = "some\npersonal\ncontent\u00a0";
-      instructions.samples = [{ sample: { instructions: trailingValue }, description: "" }];
-      const trailingContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
-      assert.deepEqual(trailingContext.examples[0].yaml, [
-        `instructions: "some\\npersonal\\ncontent${"\u00a0"}"`,
-        "",
-      ]);
+      const trailingSpace = makeProp("value", "string", { isScalar: true });
+      trailingSpace.samples = [{
+        sample: { value: "first line with trailing space \nsecond line\n" },
+        description: "",
+      }];
+      const trailingSpaceContext = buildBaseTestContext(
+        makeType("TrailingSpace", [trailingSpace]),
+        "prompty",
+        goTestOptions,
+      );
+      assert.deepEqual(
+        trailingSpaceContext.examples[0].yaml,
+        ['value: "first line with trailing space \\nsecond line\\n"', ""],
+      );
+
+      const whitespace = makeProp("value", "string", { isScalar: true });
+      whitespace.samples = [{ sample: { value: "\n" }, description: "" }];
+      const whitespaceContext = buildBaseTestContext(
+        makeType("Whitespace", [whitespace]),
+        "prompty",
+        goTestOptions,
+      );
+      assert.deepEqual(whitespaceContext.examples[0].yaml, ['value: "\\n"', ""]);
+
+      const unicodeSeparator = makeProp("value", "string", { isScalar: true });
+      unicodeSeparator.samples = [{
+        sample: { value: "first\u2028second\nthird" },
+        description: "",
+      }];
+      const unicodeContext = buildBaseTestContext(
+        makeType("UnicodeSeparator", [unicodeSeparator]),
+        "prompty",
+        goTestOptions,
+      );
+      assert.doesNotMatch(unicodeContext.examples[0].yaml.join("\n"), /\|[-+]?/);
     });
   });
 
