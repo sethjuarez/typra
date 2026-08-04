@@ -82,7 +82,7 @@ function addStringField(type: TypeDecl, name: string, isOptional = false, defaul
 }
 
 describe("Swift polymorphic enums", () => {
-  it("declares and saves wildcard fallback cases", () => {
+  it("uses the concrete wildcard child without declaring an unreachable unknown case", () => {
     const tool = typeDecl("Tool");
     tool.isAbstract = true;
     tool.polymorphicDispatch = {
@@ -94,14 +94,31 @@ describe("Swift polymorphic enums", () => {
       },
       isAbstract: true,
     };
+    const customTool = typeDecl("CustomTool");
+    const holder = typeDecl("ToolHolder");
+    holder.fields = [{
+      name: "tool",
+      typeName: tool.typeName,
+      category: { kind: "complex", typeName: "Tool" },
+      isOptional: false,
+      defaultValue: null,
+      allowedValues: [],
+      parseAliases: {},
+      enumName: null,
+      isOpenEnum: false,
+      description: "",
+      knownAs: {},
+    }];
 
-    const source = emitSwiftFile(fileDecl(tool), new SwiftExprVisitor(), new Set(["Tool"]));
+    const file = fileDecl(tool);
+    file.types.push(customTool, holder);
+    const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set(["Tool"]));
     assert.match(source, /public enum Tool: TypraModel/);
     assert.match(source, /case customTool\(CustomTool\)/);
-    assert.match(source, /case unknown\(\[String: Any\]\)/);
     assert.match(source, /default: return \.customTool\(try CustomTool\.load/);
     assert.match(source, /case \.customTool\(let value\): return try value\.save/);
-    assert.match(source, /case \.unknown\(let value\): return value/);
+    assert.doesNotMatch(source, /case unknown\(\[String: Any\]\)|case \.unknown/);
+    assert.match(source, /public var tool: Tool = \.customTool\(CustomTool\(\)\)/);
   });
 
   it("keeps self-reference fallbacks consistent through unknown", () => {
@@ -186,7 +203,6 @@ describe("Swift polymorphic enums", () => {
     }];
 
     const binding = typeDecl("Binding");
-    addStringField(binding, "name");
     addStringField(binding, "source");
     binding.load.coercions = [{
       scalarType: "string",
@@ -201,9 +217,10 @@ describe("Swift polymorphic enums", () => {
     assert.match(source, /instance\.bindings = try loadBindings\(value, context: context\)/);
     assert.match(source, /if let values = data as\? \[Any\] \{\s+return try values\.map \{ try Binding\.load\(\$0, context: context\) \}/);
     assert.match(source, /let values = try TypraRuntime\.dictionary\(data, field: "bindings"\)/);
-    assert.match(source, /return try values\.sorted \{ \$0\.key < \$1\.key \}\.map \{ entry in/);
-    assert.match(source, /var item = try Binding\.load\(entry\.value, context: context\)/);
-    assert.match(source, /item\.name = entry\.key\s+return item/);
+    assert.match(source, /values\.sorted \{ \$0\.key < \$1\.key \}\.map \{ entry -> Binding in/);
+    assert.match(source, /let name = entry\.key\s+let value = entry\.value/);
+    assert.match(source, /var item = try Binding\.load\(value, context: context\)/);
+    assert.match(source, /item\.name = name\s+return item/);
     assert.match(source, /private static func saveBindings/);
     assert.match(source, /let value = itemData\["source"\]/);
     assert.match(source, /if let scalar = data as\? String \{\s+var instance = Binding\(\)\s+instance\.source = try TypraRuntime\.string\(scalar, field: "source"\)/);
@@ -292,7 +309,6 @@ describe("Swift inherited model fields", () => {
     const functionTool = typeDecl("FunctionTool");
     functionTool.base = tool.typeName;
     const binding = typeDecl("Binding");
-    addStringField(binding, "name");
     addStringField(binding, "input");
     const file = fileDecl(tool);
     file.types.push(functionTool, binding);
