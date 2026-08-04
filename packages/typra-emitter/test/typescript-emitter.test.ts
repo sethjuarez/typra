@@ -199,3 +199,41 @@ describe("TypeScript optional collection defaults", () => {
     assert.deepEqual(CollectionModel.load({ outputModalities: [] }).outputModalities, []);
   });
 });
+
+describe("TypeScript open polymorphic preservation", () => {
+  it("preserves exact unknown discriminators and payloads without case folding", () => {
+    const connection = typeDecl([
+      field("kind", { kind: "scalar", scalarType: "string" }, false),
+      field("name", { kind: "scalar", scalarType: "string" }, true),
+    ]);
+    connection.typeName = { namespace: "Test", name: "Connection" };
+    connection.load.hasPolymorphicDispatch = true;
+    connection.polymorphicDispatch = {
+      discriminatorField: "kind",
+      variants: [{
+        value: "reference",
+        typeName: { namespace: "Test", name: "ReferenceConnection" },
+      }],
+      defaultVariant: {
+        typeName: { namespace: "Test", name: "Connection" },
+        isSelfReference: true,
+      },
+      isClosed: false,
+      isAbstract: false,
+    };
+
+    const source = emitTypeScriptFile(fileDecl(connection), new TypeScriptExprVisitor());
+
+    assert.match(source, /private raw: Record<string, unknown> = \{\};/);
+    assert.match(source, /private static cloneRawValue\(value: unknown\): unknown/);
+    assert.match(source, /const discriminator = String\(discriminatorValue\);/);
+    assert.doesNotMatch(source, /discriminatorValue\)\.toLowerCase\(\)/);
+    assert.match(source, /if \(instance\.constructor === Connection\) \{/);
+    assert.match(source, /instance\.raw = Connection\.cloneRawValue\(data\) as Record<string, unknown>;/);
+    assert.match(source, /const result = Connection\.cloneRawValue\(obj\.raw\) as Record<string, unknown>;/);
+    assert.ok(
+      source.indexOf("const result = Connection.cloneRawValue(obj.raw)") < source.indexOf('result["kind"] = obj.kind'),
+      "modeled fields must overwrite retained raw payload",
+    );
+  });
+});

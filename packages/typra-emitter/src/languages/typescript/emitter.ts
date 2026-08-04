@@ -250,7 +250,14 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
       lines.push(`  ${field.name}: ${annotation}${defaultVal};`);
     }
   }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("  private raw: Record<string, unknown> = {};");
+  }
   lines.push("");
+
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    emitRawCloneMethod(lines);
+  }
 
   // Constructor
   emitConstructor(type, lines);
@@ -265,6 +272,23 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
   // Polymorphic dispatch
   if (type.polymorphicDispatch) {
     emitPolymorphicDispatch(name, type.polymorphicDispatch, lines);
+  }
+
+  function emitRawCloneMethod(lines: string[]): void {
+    lines.push("  private static cloneRawValue(value: unknown): unknown {");
+    lines.push("    if (Array.isArray(value)) {");
+    lines.push("      return value.map(item => this.cloneRawValue(item));");
+    lines.push("    }");
+    lines.push('    if (value !== null && typeof value === "object") {');
+    lines.push("      const result: Record<string, unknown> = {};");
+    lines.push("      for (const [key, item] of Object.entries(value as Record<string, unknown>)) {");
+    lines.push("        result[key] = this.cloneRawValue(item);");
+    lines.push("      }");
+    lines.push("      return result;");
+    lines.push("    }");
+    lines.push("    return value;");
+    lines.push("  }");
+    lines.push("");
   }
 
   // Collection helpers
@@ -625,6 +649,12 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
     lines.push(`      ${emitLoadAssignment(a)}`);
     lines.push("    }");
   }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("");
+    lines.push(`    if (instance.constructor === ${name}) {`);
+    lines.push(`      instance.raw = ${name}.cloneRawValue(data) as Record<string, unknown>;`);
+    lines.push("    }");
+  }
 
   // Context post-processing
   lines.push("");
@@ -807,7 +837,7 @@ function emitPolymorphicDispatch(
   lines.push(`  private static loadKind(data: Record<string, unknown>, context?: LoadContext): ${parentName} {`);
   lines.push(`    const discriminatorValue = data["${dispatch.discriminatorField}"];`);
   lines.push("    if (discriminatorValue !== undefined && discriminatorValue !== null) {");
-  lines.push(`      const discriminator = String(discriminatorValue)${isClosed ? "" : ".toLowerCase()"};`);
+  lines.push("      const discriminator = String(discriminatorValue);");
   lines.push("      switch (discriminator) {");
 
   for (const v of dispatch.variants) {
@@ -943,6 +973,8 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
   if (type.save.hasBase) {
     lines.push("    // Start with parent class properties");
     lines.push("    const result = super.save(context);");
+  } else if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push(`    const result = ${name}.cloneRawValue(obj.raw) as Record<string, unknown>;`);
   } else {
     lines.push("    const result: Record<string, unknown> = {};");
   }
