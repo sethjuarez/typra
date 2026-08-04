@@ -127,7 +127,9 @@ export const generatePython = async (
     if (!n.base) {
       const group = n.group || "";
       const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
-      const fileContent = emitPythonFileDecl(fileDecl, visitor, group);
+      const fileContent = emitPythonFileDecl(fileDecl, visitor, group, {
+        cancellationTokenPath: emitTarget["cancellation-token-path"],
+      });
       const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
       await emitPythonFile(context, `_${n.typeName.name}.py`, fileContent, outDir, emitTarget["output-dir"]);
     }
@@ -142,7 +144,11 @@ export const generatePython = async (
   }
 
   if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
-    const scaffoldContent = emitPythonProtocolScaffolds(collectProtocolNodes(nodes), importPath);
+    const scaffoldContent = emitPythonProtocolScaffolds(
+      collectProtocolNodes(nodes),
+      importPath,
+      emitTarget["cancellation-token-path"],
+    );
     await emitPythonFile(context, "test_protocol_scaffolds.py", scaffoldContent, emitTarget["test-dir"], emitTarget["test-dir"]);
   }
 

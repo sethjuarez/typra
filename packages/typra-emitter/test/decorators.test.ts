@@ -133,7 +133,17 @@ describe("TypeSpec decorators", () => {
     const target = { kind: "Model", name: "FixtureReference" } as Type;
 
     $factory(context, target as never, "named", { id: "{id}" }, { id: "string" });
-    $method(context, target as never, "display", "string", "Render label", { prefix: "string" }, true, true);
+    $method(
+      context,
+      target as never,
+      "display",
+      "string",
+      "Render label",
+      { prefix: "string" },
+      true,
+      true,
+      { runtimeCancellable: true, atomic: true, nonFatal: true },
+    );
 
     assert.deepEqual(getStateValue(program, StateKeys.factories, target), [
       { name: "named", sets: { id: "{id}" }, params: { id: "string" } },
@@ -146,6 +156,9 @@ describe("TypeSpec decorators", () => {
         params: { prefix: "string" },
         optional: true,
         sync: true,
+        runtimeCancellable: true,
+        atomic: true,
+        nonFatal: true,
       },
     ]);
   });

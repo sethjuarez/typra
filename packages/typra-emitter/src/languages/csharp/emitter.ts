@@ -250,6 +250,9 @@ function emitCSharpInterface(type: TypeDecl, namespace: string, lines: string[])
   lines.push("// Copyright (c) Microsoft. All rights reserved.");
   lines.push("#nullable enable");
   lines.push("");
+  lines.push("using System.Threading;");
+  lines.push("using System.Threading.Tasks;");
+  lines.push("");
   lines.push("#pragma warning disable IDE0130");
   lines.push(`namespace ${namespace};`);
   lines.push("#pragma warning restore IDE0130");
@@ -268,6 +271,7 @@ function emitCSharpInterface(type: TypeDecl, namespace: string, lines: string[])
     }
     const params = Object.entries(method.params)
       .map(([pName, pType]) => `${protocolCSharpType(pType)} ${csharpIdentifier(pName)}`)
+      .concat(method.runtimeCancellable ? ["CancellationToken cancellationToken = default"] : [])
       .join(", ");
     const ret = protocolCSharpType(method.returns);
 
@@ -312,6 +316,7 @@ function emitHeader(lines: string[], namespace: string): void {
   lines.push("#nullable enable");
   lines.push("");
   lines.push("using System.Text.Json;");
+  lines.push("using System.Threading;");
   lines.push("using YamlDotNet.Serialization;");
   lines.push("");
   lines.push("#pragma warning disable IDE0130");
@@ -1370,12 +1375,13 @@ function emitHelperInterface(type: TypeDecl, lines: string[]): void {
       emitXmlDocComment(m.description, "    ", lines);
     }
     const paramEntries = Object.entries(m.params);
-    if (paramEntries.length === 0 && !isMethodStyle(m.name)) {
+    if (paramEntries.length === 0 && !m.runtimeCancellable && !isMethodStyle(m.name)) {
       // Property-style: ``T Foo { get; }``
       lines.push(`    ${ret} ${pascalName} { get; }`);
     } else {
       const params = paramEntries
         .map(([pName, pType]) => `${protocolCSharpType(pType)} ${csharpIdentifier(pName)}`)
+        .concat(m.runtimeCancellable ? ["CancellationToken cancellationToken = default"] : [])
         .join(", ");
       lines.push(`    ${ret} ${pascalName}(${params});`);
     }

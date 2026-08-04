@@ -54,6 +54,7 @@ import { toSnakeCase } from "../../ir/utilities.js";
 
 export interface RustEmitterOptions {
   enumParsing?: "case-sensitive" | "case-insensitive";
+  cancellationTokenPath?: string;
 }
 
 /**
@@ -257,6 +258,9 @@ export function emitRustFile(
 ): string {
   const lines: string[] = [];
   const hasNonProtocol = file.types.some(t => !t.isProtocol);
+  const hasRuntimeCancellation = file.types.some(type =>
+    type.methods.some(method => method.runtimeCancellable),
+  );
   const group = file.group || "";
 
   // Header
@@ -269,6 +273,17 @@ export function emitRustFile(
     // From inside a group subfolder, we need to go up two levels: group → model root.
     const contextPath = group ? "super::super::context" : "super::context";
     lines.push(`use ${contextPath}::{LoadContext, SaveContext};`);
+  }
+  if (hasRuntimeCancellation) {
+    lines.push(rustCancellationTokenImport(
+      options.cancellationTokenPath ?? "crate::engine::CancellationToken",
+    ));
+  }
+
+  function rustCancellationTokenImport(path: string): string {
+    return path.endsWith("::CancellationToken")
+      ? `use ${path};`
+      : `use ${path} as CancellationToken;`;
   }
 
   // Imports — post-process for Rust specifics
@@ -1343,8 +1358,10 @@ function emitMethodTrait(type: TypeDecl, lines: string[]): void {
     }
     const params = Object.entries(method.params)
       .map(([pName, pType]) => `${toSnakeCase(pName)}: &${protocolRustType(pType)}`)
-      .join(", ");
-    const signatureParams = params ? `, ${params}` : "";
+    if (method.runtimeCancellable) {
+      params.push("cancellation: &CancellationToken");
+    }
+    const signatureParams = params.length > 0 ? `, ${params.join(", ")}` : "";
     lines.push(`    fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> ${methodReturnType(method)};`);
   }
   lines.push("}");
@@ -1396,28 +1413,31 @@ function emitProtocolTrait(type: TypeDecl, lines: string[]): void {
     }
     const params = Object.entries(method.params)
       .map(([pName, pType]) => `${toSnakeCase(pName)}: &${protocolRustType(pType)}`)
-      .join(", ");
+    if (method.runtimeCancellable) {
+      params.push("cancellation: &CancellationToken");
+    }
+    const signatureParams = params.length > 0 ? `, ${params.join(", ")}` : "";
     const ret = protocolRustType(method.returns);
 
     if (method.sync) {
       // Synchronous method
       if (method.optional) {
         // Return type already includes nullability from ? suffix — don't double-wrap
-        lines.push(`    fn ${toSnakeCase(method.name)}(&self, ${params}) -> ${ret} {`);
+        lines.push(`    fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> ${ret} {`);
         lines.push(ret === "()" ? "        ()" : "        None");
         lines.push("    }");
       } else {
-        lines.push(`    fn ${toSnakeCase(method.name)}(&self, ${params}) -> ${ret};`);
+        lines.push(`    fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> ${ret};`);
       }
     } else {
       // Async method
       if (method.optional) {
         // Default implementation returns an error — providers override with real streaming
-        lines.push(`    async fn ${toSnakeCase(method.name)}(&self, ${params}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>> {`);
+        lines.push(`    async fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>> {`);
         lines.push(`        Err("not supported".into())`);
         lines.push("    }");
       } else {
-        lines.push(`    async fn ${toSnakeCase(method.name)}(&self, ${params}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>>;`);
+        lines.push(`    async fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>>;`);
       }
     }
   }

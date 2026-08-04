@@ -395,6 +395,12 @@ export interface MethodStubDecl {
   optional: boolean;
   /** Whether this method is synchronous (not wrapped in async/Promise/Task) */
   sync: boolean;
+  /** Whether runtimes expose a synthetic native cancellation parameter */
+  runtimeCancellable?: boolean;
+  /** Whether the operation is atomic (metadata/documentation only) */
+  atomic?: boolean;
+  /** Whether failures are non-fatal (metadata/documentation only) */
+  nonFatal?: boolean;
 }
 
 // ============================================================================

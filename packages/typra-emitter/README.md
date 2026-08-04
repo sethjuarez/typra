@@ -70,6 +70,13 @@ import "@typra/emitter";
 namespace MyProject;
 ```
 
+`@method` accepts an optional eighth options object with
+`runtimeCancellable`, `atomic`, and `nonFatal` boolean flags. All default to
+`false`. Runtime cancellation is emitted as a native synthetic parameter and
+never becomes a model or serialized field. Set `cancellation-token-path` to the
+full runtime-native symbol path, such as `crate::engine::CancellationToken` for
+Rust or `prompty.core.cancellation.CancellationToken` for Python.
+
 Compile with TypeSpec:
 
 ```powershell

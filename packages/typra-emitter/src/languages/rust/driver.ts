@@ -128,6 +128,7 @@ export const generateRust = async (
       const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
       const fileContent = emitRustFileDecl(fileDecl, visitor, polymorphicTypeNames, childToParent, {
         enumParsing: emitTarget["enum-parsing"] ?? "case-sensitive",
+        cancellationTokenPath: emitTarget["cancellation-token-path"],
       });
       const fileName = toSnakeCase(n.typeName.name) + '.rs';
       const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
@@ -158,7 +159,11 @@ export const generateRust = async (
 
   if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
     const importPath = emitTarget["import-path"] || "crate";
-    const scaffoldContent = emitRustProtocolScaffolds(collectProtocolNodes(nodes), importPath);
+    const scaffoldContent = emitRustProtocolScaffolds(
+      collectProtocolNodes(nodes),
+      importPath,
+      emitTarget["cancellation-token-path"],
+    );
     await emitRustFile(context, "protocol_scaffolds_test.rs", scaffoldContent, emitTarget["test-dir"], emitTarget["test-dir"]);
     if (!testGroupModuleNames.has("")) testGroupModuleNames.set("", []);
     testGroupModuleNames.get("")!.push("protocol_scaffolds_test");

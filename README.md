@@ -178,7 +178,7 @@ The root emitter options are:
 
 Each `emit-targets` entry has a required `type` and can set `output-dir`,
 `test-dir`, `format`, `import-path`, `package-name`, `namespace`, `alias`,
-`enum-parsing`, and `protocol-scaffolds`.
+`enum-parsing`, `protocol-scaffolds`, and `cancellation-token-path`.
 
 `protocol-scaffolds: "compile-only"` emits test-dir-only implementations that
 prove generated `@@protocol`/`@@method` contracts compile. They intentionally
@@ -192,6 +192,30 @@ emit-targets:
     output-dir: "generated/rust"
     enum-parsing: "case-insensitive"
 ```
+
+Methods can attach runtime effect metadata through the backward-compatible
+eighth `@method` argument:
+
+```typespec
+@@method(
+  EnginePermissionPort,
+  "authorize",
+  "Decision",
+  "Authorize one request",
+  #{ request: "Request" },
+  false,
+  false,
+  #{ runtimeCancellable: true, atomic: false, nonFatal: false }
+);
+```
+
+`runtimeCancellable` adds only a native runtime parameter (C#
+`CancellationToken`, Go `context.Context`, TypeScript `AbortSignal`, Rust or
+Python `CancellationToken`). It is not a TypeSpec model field or serialized
+value. `atomic` and `nonFatal` are metadata/documentation flags only. Set
+`cancellation-token-path` to the full runtime-native symbol path, for example
+`crate::engine::CancellationToken` for Rust or
+`prompty.core.cancellation.CancellationToken` for Python.
 
 ## Language support
 

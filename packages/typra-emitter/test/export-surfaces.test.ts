@@ -88,6 +88,9 @@ describe("export surface scaffolding", () => {
       params: { checkpoint: "Checkpoint" },
       optional: false,
       sync: false,
+      runtimeCancellable: false,
+      atomic: false,
+      nonFatal: false,
     },
   ]);
   const baseTypes = [contentPart, checkpoint, hostToolRequest, eventSink, checkpointStore];
@@ -152,6 +155,9 @@ describe("export surface scaffolding", () => {
         params: { checkpoint: "Checkpoint" },
         optional: false,
         sync: false,
+        runtimeCancellable: false,
+        atomic: false,
+        nonFatal: false,
       },
     ]);
     const registry = TypeRegistry.fromTypeGraph([checkpoint, checkpointStoreWithSave]);
@@ -233,6 +239,9 @@ describe("export surface scaffolding", () => {
             params: { checkpoint: "Checkpoint" },
             optional: false,
             sync: false,
+            runtimeCancellable: false,
+            atomic: false,
+            nonFatal: false,
           },
         ],
       },
@@ -248,6 +257,9 @@ describe("export surface scaffolding", () => {
             params: { event: "unknown" },
             optional: false,
             sync: true,
+            runtimeCancellable: false,
+            atomic: false,
+            nonFatal: false,
           },
         ],
       },

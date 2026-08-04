@@ -83,7 +83,16 @@ function returnType(typeStr: string): string {
 /**
  * Emit a complete Python file from a FileDecl.
  */
-export function emitPythonFile(decl: FileDecl, visitor: ExprVisitor, group: string = ""): string {
+export interface PythonEmitterOptions {
+  cancellationTokenPath?: string;
+}
+
+export function emitPythonFile(
+  decl: FileDecl,
+  visitor: ExprVisitor,
+  group: string = "",
+  options: PythonEmitterOptions = {},
+): string {
   const lines: string[] = [];
 
   // 1. Header
@@ -101,6 +110,9 @@ export function emitPythonFile(decl: FileDecl, visitor: ExprVisitor, group: stri
   const hasProtocol = decl.types.some(t => t.isProtocol);
   const hasNonProtocol = decl.types.some(t => !t.isProtocol);
   const hasMethodHelpers = decl.types.some(t => !t.isProtocol && t.methods.length > 0);
+  const hasRuntimeCancellation = decl.types.some(type =>
+    type.methods.some(method => method.runtimeCancellable),
+  );
 
   if (decl.containsAbstract) {
     stdlibImports.push("from abc import ABC");
@@ -114,6 +126,24 @@ export function emitPythonFile(decl: FileDecl, visitor: ExprVisitor, group: stri
   if (hasProtocol || hasMethodHelpers) typingImports.push("Protocol", "runtime_checkable");
   typingImports.sort();
   stdlibImports.push(`from typing import ${typingImports.join(", ")}`);
+  if (hasRuntimeCancellation) {
+    localImports.push(
+      pythonCancellationTokenImport(
+        options.cancellationTokenPath ?? "prompty.core.cancellation.CancellationToken",
+      ),
+    );
+  }
+
+  function pythonCancellationTokenImport(path: string): string {
+    const separator = path.lastIndexOf(".");
+    if (separator < 1 || separator === path.length - 1) {
+      throw new Error(`Invalid Python cancellation-token-path: ${path}`);
+    }
+    const moduleName = path.slice(0, separator);
+    const symbolName = path.slice(separator + 1);
+    const alias = symbolName === "CancellationToken" ? "" : " as CancellationToken";
+    return `from ${moduleName} import ${symbolName}${alias}`;
+  }
 
   // Context import — go up one level when inside a group subfolder
   if (hasNonProtocol) {
@@ -337,8 +367,10 @@ function emitMethodHelpersProtocol(type: TypeDecl, lines: string[]): void {
   for (const m of type.methods) {
     const params = Object.entries(m.params)
       .map(([pName, pType]) => `${toSnakeCase(pName)}: ${protocolType(pType)}`)
-      .join(", ");
-    const paramList = params ? `, ${params}` : "";
+    if (m.runtimeCancellable) {
+      params.push("cancellation: CancellationToken | None = None");
+    }
+    const paramList = params.length > 0 ? `, ${params.join(", ")}` : "";
     const ret = protocolType(m.returns);
     const snakeName = toSnakeCase(m.name);
     // Zero-param, non-verb methods are emitted as @property — idiomatic Python
@@ -436,13 +468,16 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
   for (const method of type.methods) {
     const params = Object.entries(method.params)
       .map(([pName, pType]) => `${toSnakeCase(pName)}: ${protocolType(pType)}`)
-      .join(", ");
+    if (method.runtimeCancellable) {
+      params.push("cancellation: CancellationToken | None = None");
+    }
+    const paramList = params.length > 0 ? `, ${params.join(", ")}` : "";
     const ret = protocolType(method.returns);
 
     // Sync method
     lines.push("");
     if (method.description) {
-      lines.push(`    def ${toSnakeCase(method.name)}(self, ${params}) -> ${ret}:`);
+      lines.push(`    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`);
       lines.push(`        """${method.description}"""`);
       if (method.optional) {
         lines.push("        return None");
@@ -451,10 +486,10 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
       }
     } else {
       if (method.optional) {
-        lines.push(`    def ${toSnakeCase(method.name)}(self, ${params}) -> ${ret}:`);
+        lines.push(`    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`);
         lines.push("        return None");
       } else {
-        lines.push(`    def ${toSnakeCase(method.name)}(self, ${params}) -> ${ret}:`);
+        lines.push(`    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`);
         emitRequiredProtocolMethodBody(lines);
       }
     }
@@ -463,7 +498,7 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
     if (!method.sync) {
       lines.push("");
       if (method.description) {
-        lines.push(`    async def ${toSnakeCase(method.name)}_async(self, ${params}) -> ${ret}:`);
+        lines.push(`    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`);
         lines.push(`        """${method.description} (async variant)"""`);
         if (method.optional) {
           lines.push("        return None");
@@ -472,10 +507,10 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
         }
       } else {
         if (method.optional) {
-          lines.push(`    async def ${toSnakeCase(method.name)}_async(self, ${params}) -> ${ret}:`);
+          lines.push(`    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`);
           lines.push("        return None");
         } else {
-          lines.push(`    async def ${toSnakeCase(method.name)}_async(self, ${params}) -> ${ret}:`);
+          lines.push(`    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`);
           emitRequiredProtocolMethodBody(lines);
         }
       }

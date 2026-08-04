@@ -1,6 +1,7 @@
 import "@typra/emitter";
 import "./model/events/session.tsp";
 import "./model/pipeline/harness.tsp";
+import "./model/pipeline/canonical-ports.tsp";
 
 namespace Typra.Fixtures;
 

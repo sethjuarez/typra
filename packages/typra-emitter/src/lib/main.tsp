@@ -59,6 +59,7 @@ extern dec factory(
  * ```typespec
  * @@method("text", "string", "Concatenate all TextPart values joined by newline")
  * @@method("render", "string", "Render template with inputs", #{ agent: "Prompty", template: "string", inputs: "Record<unknown>" })
+ * @@method("invoke", "Result", "Invoke with native cancellation", #{ request: "Request" }, false, false, #{ runtimeCancellable: true })
  * ```
  */
 extern dec method(
@@ -68,7 +69,8 @@ extern dec method(
   description?: valueof string,
   params?: valueof unknown,
   optional?: valueof boolean,
-  sync?: valueof boolean
+  sync?: valueof boolean,
+  options?: valueof unknown
 );
 
 /**

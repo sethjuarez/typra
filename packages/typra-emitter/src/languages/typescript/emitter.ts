@@ -339,16 +339,18 @@ function emitMethodHelpersInterface(type: TypeDecl, lines: string[]): void {
     }
     const params = Object.entries(m.params)
       .map(([pName, pType]) => `${pName}: ${returnType(pType)}`)
-      .join(", ");
+    if (m.runtimeCancellable) {
+      params.push("signal?: AbortSignal");
+    }
     const ret = returnType(m.returns);
     // Zero-param non-verb methods are emitted as getter-style readonly
     // properties (matches C#/Python emitters). Callers access them without
     // parens, e.g. ``msg.text``.
-    const isGetter = Object.keys(m.params).length === 0 && !isMethodStyle(m.name);
+    const isGetter = Object.keys(m.params).length === 0 && !m.runtimeCancellable && !isMethodStyle(m.name);
     if (isGetter) {
       lines.push(`  readonly ${m.name}: ${ret};`);
     } else {
-      lines.push(`  ${m.name}(${params}): ${ret};`);
+      lines.push(`  ${m.name}(${params.join(", ")}): ${ret};`);
     }
   }
   lines.push("}");
@@ -403,14 +405,16 @@ function emitProtocolInterface(type: TypeDecl, lines: string[]): void {
     }
     const params = Object.entries(method.params)
       .map(([pName, pType]) => `${pName}: ${returnType(pType)}`)
-      .join(", ");
+    if (method.runtimeCancellable) {
+      params.push("signal?: AbortSignal");
+    }
     const ret = returnType(method.returns);
     const optMark = method.optional ? "?" : "";
 
     if (method.sync) {
-      lines.push(`  ${method.name}${optMark}(${params}): ${ret};`);
+      lines.push(`  ${method.name}${optMark}(${params.join(", ")}): ${ret};`);
     } else {
-      lines.push(`  ${method.name}${optMark}(${params}): Promise<${ret}>;`);
+      lines.push(`  ${method.name}${optMark}(${params.join(", ")}): Promise<${ret}>;`);
     }
   }
 

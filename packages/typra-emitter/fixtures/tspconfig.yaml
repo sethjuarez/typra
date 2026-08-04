@@ -18,6 +18,7 @@ options:
         import-path: "fixtures"
         format: false
         protocol-scaffolds: "compile-only"
+        cancellation-token-path: "threading.Event"
       - type: Go
         output-dir: "generated/fixtures/go"
         test-dir: "generated/fixtures/go/tests"
@@ -44,6 +45,7 @@ options:
         enum-parsing: "case-insensitive"
         format: false
         protocol-scaffolds: "compile-only"
+        cancellation-token-path: "std::sync::atomic::AtomicBool"
       - type: Swift
         output-dir: "generated/fixtures/swift"
         test-dir: "generated/fixtures/swift/Tests/TypraFixturesTests"

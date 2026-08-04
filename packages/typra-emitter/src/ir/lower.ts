@@ -433,6 +433,9 @@ function lowerMethods(node: TypeNode): MethodStubDecl[] {
     params: m.params || {},
     optional: m.optional ?? false,
     sync: m.sync ?? false,
+    runtimeCancellable: m.runtimeCancellable ?? false,
+    atomic: m.atomic ?? false,
+    nonFatal: m.nonFatal ?? false,
   }));
 }
 
