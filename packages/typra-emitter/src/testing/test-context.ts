@@ -110,18 +110,22 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
 
     // Create YAML document with proper string escaping
     const doc = new YAML.Document(sample);
+    let requiresJsonDoubleQuotes = false;
     YAML.visit(doc, {
       Scalar(key, yamlNode) {
         if (typeof yamlNode.value === 'string') {
           const str = yamlNode.value as string;
+          const hasTrailingHorizontalWhitespace = /\S[ \t]+(?:\r?\n|$)/.test(str);
           const supportsBlockLiteral = str.includes('\n')
             && /\S/.test(str)
             && !/[\u2028\u2029]/.test(str)
-            && !/\S[ \t]+(?:\r?\n|$)/.test(str);
+            && !hasTrailingHorizontalWhitespace
+            && !/(?:^|\n)[ ]*\t/.test(str);
           if (supportsBlockLiteral && options.yamlMultilineStyle === "block-literal") {
             yamlNode.type = 'BLOCK_LITERAL';
           } else if (str.includes('\n') || str.includes('\t') || str.includes('#') || str.includes(':') || str.includes('"')) {
             yamlNode.type = 'QUOTE_DOUBLE';
+            requiresJsonDoubleQuotes ||= hasTrailingHorizontalWhitespace;
           }
         }
       }
@@ -137,6 +141,7 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
     let yamlStr = doc.toString({
       indent: 2,
       lineWidth: 0,
+      doubleQuotedAsJSON: requiresJsonDoubleQuotes,
       ...(options.yamlDoubleQuotedMinMultiLineLength === undefined
         ? {}
         : { doubleQuotedMinMultiLineLength: options.yamlDoubleQuotedMinMultiLineLength }),

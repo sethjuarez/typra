@@ -586,7 +586,7 @@ export function emitJavaMethodHelper(type: TypeDecl, packageName: string): { fil
   const typeName = javaTypeName(type.typeName.name);
   const helperName = `${typeName}Methods`;
   const lines = [
-    "// <typra-editable-seam>",
+    "// <typra-extension-seam>",
     "// Typra extension seam. This file is created once and is safe to edit.",
     `package ${packageName};`,
     "",

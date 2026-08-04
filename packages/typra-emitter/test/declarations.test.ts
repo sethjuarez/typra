@@ -861,7 +861,7 @@ describe("lowerFile", () => {
       const context = buildBaseTestContext(prompty, "prompty", goTestOptions);
 
       assert.deepEqual(context.examples[0].yaml, [
-        'instructions: "some\\ \\npersonal\\ncontent"',
+        'instructions: "some \\npersonal\\ncontent"',
         "",
       ]);
       assert.equal(context.examples[0].sample.instructions, expected);
@@ -930,7 +930,22 @@ describe("lowerFile", () => {
       );
       assert.deepEqual(
         trailingSpaceContext.examples[0].yaml,
-        ['value: "first line with trailing space\\ \\nsecond line\\n"', ""],
+        ['value: "first line with trailing space \\nsecond line\\n"', ""],
+      );
+
+      const leadingTab = makeProp("value", "string", { isScalar: true });
+      leadingTab.samples = [{
+        sample: { value: "\tfirst indented\nsecond line" },
+        description: "",
+      }];
+      const leadingTabContext = buildBaseTestContext(
+        makeType("LeadingTab", [leadingTab]),
+        "prompty",
+        goTestOptions,
+      );
+      assert.deepEqual(
+        leadingTabContext.examples[0].yaml,
+        ['value: "\\tfirst indented\\nsecond line"', ""],
       );
 
       const whitespace = makeProp("value", "string", { isScalar: true });

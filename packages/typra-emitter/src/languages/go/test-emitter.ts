@@ -664,7 +664,6 @@ function emitLoadYAMLTest(
   isAbstract: boolean,
   fieldNames?: ReadonlyMap<string, string>,
 ): void {
-  const expectedSample = sample;
   lines.push(`// Test${typeName}LoadYAML${suffix} tests loading ${typeName} from YAML`);
   lines.push(`func Test${typeName}LoadYAML${suffix}(t *testing.T) {`);
   emitYamlDataBlock(lines, sample);
@@ -672,9 +671,9 @@ function emitLoadYAMLTest(
   lines.push("");
   emitLoadCall(lines, typeName, pkg, "ctx", "data", "instance");
   if (isAbstract) {
-    emitAbstractExampleValidations(lines, expectedSample.validations.length > 0);
+    emitAbstractExampleValidations(lines, sample.validations.length > 0);
   } else {
-    emitExampleValidations(lines, "instance", expectedSample, node, pkg, fieldNames);
+    emitExampleValidations(lines, "instance", sample, node, pkg, fieldNames);
   }
   lines.push("}");
 }
@@ -719,7 +718,6 @@ function emitFromYAMLTest(
   isAbstract: boolean,
   fieldNames?: ReadonlyMap<string, string>,
 ): void {
-  const expectedSample = sample;
   lines.push(`// Test${typeName}FromYAML${suffix} tests loading ${typeName} through the generated YAML helper`);
   lines.push(`func Test${typeName}FromYAML${suffix}(t *testing.T) {`);
   emitYamlDataBlock(lines, sample);
@@ -729,9 +727,9 @@ function emitFromYAMLTest(
   lines.push(`t.Fatalf("Failed to load ${typeName} from YAML helper: %v", err)`);
   lines.push(`}`);
   if (isAbstract) {
-    emitAbstractExampleValidations(lines, expectedSample.validations.length > 0);
+    emitAbstractExampleValidations(lines, sample.validations.length > 0);
   } else {
-    emitExampleValidations(lines, "instance", expectedSample, node, pkg, fieldNames);
+    emitExampleValidations(lines, "instance", sample, node, pkg, fieldNames);
   }
   lines.push("}");
 }
