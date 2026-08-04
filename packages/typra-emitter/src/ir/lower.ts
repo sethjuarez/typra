@@ -187,7 +187,9 @@ export function classifyProperty(
   polymorphicTypeNames: Set<string>,
 ): PropertyCategory {
   if (prop.isDict) {
-    return { kind: "dict" };
+    return prop.dictValueType
+      ? { kind: "dict", valueType: prop.dictValueType }
+      : { kind: "dict" };
   }
 
   if (prop.isCollection) {

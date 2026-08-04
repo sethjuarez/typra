@@ -93,41 +93,52 @@ describe("C# emitter guarded scalar loads", () => {
       description: "",
       knownAs: {},
     };
+    const optionalField = {
+      ...field,
+      name: "optionalMetadata",
+      isOptional: true,
+    };
+    const typedField = {
+      ...field,
+      name: "owners",
+      typeName: { namespace: "Test", name: "Record<FixtureOwner>" },
+      category: { kind: "dict" as const, valueType: "FixtureOwner" },
+    };
     const model: TypeDecl = {
       typeName: { namespace: "Test", name: "Envelope" },
       base: null,
       isAbstract: false,
       isProtocol: false,
       description: "",
-      fields: [field],
+      fields: [field, optionalField, typedField],
       coercionProperty: null,
       load: {
         coercions: [],
-        assignments: [{
-          sourceName: "metadata",
-          fieldName: "metadata",
-          category,
-          isOptional: false,
+        assignments: [field, optionalField, typedField].map(item => ({
+          sourceName: item.name,
+          fieldName: item.name,
+          category: item.category,
+          isOptional: item.isOptional,
           parentTypeName: "Envelope",
           enumName: null,
           allowedValues: [],
           parseAliases: {},
           defaultValue: null,
           isOpenEnum: false,
-        }],
+        })),
         hasPolymorphicDispatch: false,
         hasContextHooks: true,
       },
       save: {
-        assignments: [{
-          targetName: "metadata",
-          fieldName: "metadata",
-          category,
-          isOptional: false,
+        assignments: [field, optionalField, typedField].map(item => ({
+          targetName: item.name,
+          fieldName: item.name,
+          category: item.category,
+          isOptional: item.isOptional,
           parentTypeName: "Envelope",
           enumName: null,
           isOpenEnum: false,
-        }],
+        })),
         hasBase: false,
         hasContextHooks: true,
       },
@@ -146,8 +157,10 @@ describe("C# emitter guarded scalar loads", () => {
       () => undefined,
     );
 
-    assert.match(source, /public IDictionary<string, object\?> Metadata \{ get; set; \}/);
-    assert.match(source, /= new Dictionary<string, object\?>\(\);/);
-    assert.doesNotMatch(source, /IDictionary<string, object>/);
+    assert.match(source, /#nullable disable annotations\n    \[global::System\.Diagnostics\.CodeAnalysis\.NotNull, global::System\.Diagnostics\.CodeAnalysis\.DisallowNull\]\n    public IDictionary<string, object> Metadata \{ get; set; \} = new Dictionary<string, object>\(\);\n#nullable restore annotations/);
+    assert.match(source, /#nullable disable annotations\n    \[global::System\.Diagnostics\.CodeAnalysis\.MaybeNull, global::System\.Diagnostics\.CodeAnalysis\.AllowNull\]\n    public IDictionary<string, object> OptionalMetadata \{ get; set; \}\n#nullable restore annotations/);
+    assert.match(source, /public IDictionary<string, FixtureOwner> Owners \{ get; set; \} = new Dictionary<string, FixtureOwner>\(\);/);
+    assert.doesNotMatch(source, /CodeAnalysis\.(?:NotNull|MaybeNull)[^\n]*\n    public IDictionary<string, FixtureOwner>/);
+    assert.doesNotMatch(source, /public IDictionary<string, object\?>/);
   });
 });

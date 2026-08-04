@@ -54,6 +54,14 @@ model FixtureOwner {
   displayName?: string;
 }
 
+model FixtureUnknownRecords {
+  @sample(#{ requiredValues: #{ value: "required", nullable: null } })
+  requiredValues: Record<unknown>;
+
+  @sample(#{ optionalValues: #{ value: "optional", nullable: null } })
+  optionalValues?: Record<unknown>;
+}
+
 model FixtureToolRequest {
   @sample(#{ id: "call-a" })
   id: string;

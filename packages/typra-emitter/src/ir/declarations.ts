@@ -44,7 +44,7 @@ export type PropertyCategory =
   | { kind: "complex"; typeName: string }
   | { kind: "collection_scalar"; scalarType: string }
   | { kind: "collection_complex"; typeName: string }
-  | { kind: "dict" };
+  | { kind: "dict"; valueType?: string };
 
 // ============================================================================
 // EnumDef — a string-literal enum type
