@@ -496,6 +496,25 @@ describe("Java emitter runtime semantics", () => {
       assert.doesNotMatch(helper.source, /Code generated|auto-generated/);
     });
 
+    it("matches polymorphic discriminator wire values exactly", () => {
+      const base = typeDecl([]);
+      base.typeName = { namespace: "Test", name: "Tool" };
+      base.polymorphicDispatch = {
+        discriminatorField: "kind",
+        variants: [{
+          value: "FunctionTool",
+          typeName: { namespace: "Test", name: "FunctionTool" },
+        }],
+        defaultVariant: null,
+        isAbstract: true,
+      };
+
+      const source = emitJavaFileContent([base], "test", new JavaExprVisitor(), new Set(["Tool"]));
+      assert.match(source, /switch \(String\.valueOf\(discriminator\)\)/);
+      assert.match(source, /case "FunctionTool":/);
+      assert.doesNotMatch(source, /toLowerCase\(java\.util\.Locale\.ROOT\)/);
+    });
+
     it("delegates void methods without returning a value", () => {
       const decl = typeDecl([]);
       decl.typeName = { namespace: "Test", name: "Message" };
@@ -582,6 +601,90 @@ describe("Java emitter runtime semantics", () => {
     assert.match(source, /result\.mode = FactoryMode\.fromValue\(String\.valueOf\(data\)\)/);
     assert.match(source, /public Long count = 1L;/);
     assert.match(source, /public Double ratio = 1\.0d;/);
+  });
+
+  it("routes integral wrappers before the single broad floating-point guard", () => {
+    const kind = field("kind", "string");
+    const value = field("value", "unknown");
+    const decl = typeDecl([kind, value]);
+    decl.load.coercions = [
+      {
+        scalarType: "string",
+        assignments: [
+          { fieldName: "kind", isInput: false, literalValue: "string" },
+          { fieldName: "value", isInput: true },
+        ],
+        needsDispatch: false,
+      },
+      {
+        scalarType: "boolean",
+        assignments: [
+          { fieldName: "kind", isInput: false, literalValue: "boolean" },
+          { fieldName: "value", isInput: true },
+        ],
+        needsDispatch: false,
+      },
+      {
+        scalarType: "int32",
+        assignments: [
+          { fieldName: "kind", isInput: false, literalValue: "integer" },
+          { fieldName: "value", isInput: true },
+        ],
+        needsDispatch: false,
+      },
+      {
+        scalarType: "float32",
+        assignments: [
+          { fieldName: "kind", isInput: false, literalValue: "float" },
+          { fieldName: "value", isInput: true },
+        ],
+        needsDispatch: false,
+      },
+    ];
+
+    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+    const integralGuard = "data instanceof Integer || data instanceof Long || data instanceof Short || data instanceof Byte";
+    assert.match(source, /if \(data instanceof String\)/);
+    assert.match(source, /if \(data instanceof Boolean\)/);
+    assert.match(source, new RegExp(`if \\(\\(${integralGuard.replace(/\|\|/g, "\\|\\|")}\\)\\)`));
+    assert.match(source, /result\.kind = "integer"[\s\S]*result\.value = \(data instanceof Number n \? n\.intValue\(\)/);
+    assert.match(source, /result\.kind = "float"[\s\S]*result\.value = \(data instanceof Number n \? n\.floatValue\(\)/);
+    assert.ok(source.indexOf(integralGuard) < source.indexOf("data instanceof Number"));
+    assert.equal(source.match(/if \(data instanceof Number\)/g)?.length, 1);
+  });
+
+  it("emits direct Java coercion tests for integral and floating wrapper families", () => {
+    const node = new TypeNode({ name: "GeneratedExamples" } as Model, "");
+    node.typeName = { namespace: "Test", name: "GeneratedExamples" };
+    node.coercions = [
+      { scalar: "int32", expansion: { kind: "integer", value: "{value}" } },
+      { scalar: "float32", expansion: { kind: "float", value: "{value}" } },
+      { scalar: "boolean", expansion: { kind: "boolean", value: "{value}" } },
+      { scalar: "string", expansion: { kind: "string", value: "{value}" } },
+    ];
+
+    const source = emitJavaTest({
+      node,
+      isAbstract: false,
+      package: "test",
+      examples: [],
+      coercions: [
+        { title: "integer", scalarType: "int32", value: "7", validations: [] },
+        { title: "float", scalarType: "float32", value: "3.5", validations: [] },
+        { title: "boolean", scalarType: "boolean", value: "true", validations: [] },
+        { title: "string", scalarType: "string", value: "\"hello\"", validations: [] },
+      ],
+      factories: [],
+    });
+
+    assert.match(source, /GeneratedExamples\.load\(42, new LoadContext\(\)\)/);
+    assert.match(source, /GeneratedExamples\.load\(42L, new LoadContext\(\)\)/);
+    assert.match(source, /GeneratedExamples\.load\(3\.14, new LoadContext\(\)\)/);
+    assert.match(source, /GeneratedExamples\.load\(3\.14f, new LoadContext\(\)\)/);
+    assert.match(source, /GeneratedExamples\.load\(true, new LoadContext\(\)\)/);
+    assert.match(source, /GeneratedExamples\.load\("hello", new LoadContext\(\)\)/);
+    assert.match(source, /GeneratedExamples\.fromJson\(/);
+    assert.match(source, /GeneratedExamples\.fromYaml\(/);
   });
 
   it("preserves optional defaults and initializes required enums", () => {

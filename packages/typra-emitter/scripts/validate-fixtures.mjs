@@ -1,9 +1,29 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, readdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const packageRoot = process.cwd();
-const generatedRoot = path.join(packageRoot, "generated", "fixtures");
+const sourceGeneratedRoot = path.join(packageRoot, "generated", "fixtures");
+const validationRoot = mkdtempSync(path.join(tmpdir(), "typra-fixtures-"));
+const generatedRoot = path.join(validationRoot, "fixtures");
+const packageNodeModules = path.resolve(packageRoot, "..", "..", "node_modules");
+const scratchEntries = new Set([
+  ".build",
+  ".classes",
+  "__pycache__",
+  "bin",
+  "obj",
+  "target",
+]);
+cpSync(sourceGeneratedRoot, generatedRoot, {
+  recursive: true,
+  filter: source => !scratchEntries.has(path.basename(source)),
+});
+if (existsSync(packageNodeModules)) {
+  symlinkSync(packageNodeModules, path.join(validationRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+}
+process.on("exit", () => rmSync(validationRoot, { recursive: true, force: true }));
 const failures = [];
 const fixtureRootSample = {
   name: "fixture-root",
@@ -299,6 +319,10 @@ function findTypeScriptCli(startDir) {
   return undefined;
 }
 
+function typeScriptTypeRoots(tscCli) {
+  return [path.resolve(path.dirname(tscCli), "..", "..", "@types")];
+}
+
 function runGeneratedTypeScriptCompile() {
   const sourceDir = path.join(generatedRoot, "typescript");
   const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".ts"));
@@ -307,6 +331,8 @@ function runGeneratedTypeScriptCompile() {
     fail("No generated TypeScript files found to compile.");
     return;
   }
+  const tscCli = findTypeScriptCli(packageRoot);
+  if (!tscCli) return;
 
   const ambientPath = path.join(sourceDir, "test-globals.validate.d.ts");
   const configPath = path.join(sourceDir, "tsconfig.validate.json");
@@ -330,13 +356,11 @@ function runGeneratedTypeScriptCompile() {
       esModuleInterop: true,
       skipLibCheck: true,
       types: ["node"],
+      typeRoots: typeScriptTypeRoots(tscCli),
       lib: ["ES2022"],
     },
     files: [...sourceFiles, ambientPath],
   }, null, 2));
-
-  const tscCli = findTypeScriptCli(packageRoot);
-  if (!tscCli) return;
 
   try {
     execFileSync(
@@ -528,7 +552,7 @@ function runRustTests() {
   const cargoPath = path.join(sourceDir, "Cargo.toml");
   const lockPath = path.join(sourceDir, "Cargo.lock");
   const libPath = path.join(sourceDir, "lib.rs");
-  const targetDir = path.join(sourceDir, "target");
+  const targetDir = mkdtempSync(path.join(tmpdir(), "typra-rust-"));
   writeFileSync(cargoPath, [
     "[package]",
     'name = "fixtures"',
@@ -547,7 +571,10 @@ function runRustTests() {
   ].join("\n"));
   writeFileSync(libPath, '#[path = "mod.rs"] pub mod model;\n');
   try {
-    runCommand("Generated Rust source and tests", "cargo", ["test", "--quiet"], { cwd: sourceDir });
+    runCommand("Generated Rust source and tests", "cargo", ["test", "--quiet"], {
+      cwd: sourceDir,
+      env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+    });
   } finally {
     for (const tempPath of [cargoPath, lockPath, libPath]) {
       if (existsSync(tempPath)) {
@@ -577,7 +604,7 @@ function runSwiftTests() {
     return;
   }
 
-  const buildDir = path.join(sourceDir, ".build");
+  const buildDir = mkdtempSync(path.join(tmpdir(), "typra-swift-"));
   const inheritedPropertyTest = path.join(
     sourceDir,
     "Tests",
@@ -660,34 +687,64 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
   }
 
   func testToolBindingsLoadAndRoundTripMapAndListForms() throws {
-    let mapTool = try FixtureBindingTool.load([
+    func functionTool(_ input: [String: Any]) throws -> FixtureFunctionTool {
+      let loaded = try FixtureTool.load(input)
+      guard case .fixtureFunctionTool(let tool) = loaded else {
+        throw TypraRuntimeError.unsupported("Expected FixtureFunctionTool")
+      }
+      return tool
+    }
+
+    let mapTool = try functionTool([
       "kind": "function",
       "name": "map-tool",
+      "command": "run",
       "bindings": [
-        "input": "customer.name",
-        "output": ["source": "result.text"],
+        "zeta": ["source": "result.text"],
+        "alpha": ["source": "customer.name"],
       ],
     ])
-    XCTAssertEqual(mapTool.bindings?.first { $0.name == "input" }?.source, "customer.name")
-    XCTAssertEqual(mapTool.bindings?.first { $0.name == "output" }?.source, "result.text")
+    XCTAssertEqual(mapTool.bindings?.compactMap { $0.name }, ["alpha", "zeta"])
     let mapOutput = try mapTool.save()
     let mapBindings = mapOutput["bindings"] as? [String: Any]
-    XCTAssertEqual(mapBindings?["input"] as? String, "customer.name")
-    XCTAssertEqual(mapBindings?["output"] as? String, "result.text")
+    XCTAssertEqual(mapBindings?["alpha"] as? String, "customer.name")
+    XCTAssertEqual(mapBindings?["zeta"] as? String, "result.text")
+    let mapReloaded = try functionTool(mapOutput)
+    XCTAssertEqual(mapReloaded.bindings?.compactMap { $0.name }, ["alpha", "zeta"])
 
-    let listTool = try FixtureBindingTool.load([
+    let listTool = try functionTool([
       "kind": "function",
       "name": "list-tool",
+      "command": "run",
       "bindings": [
-        ["name": "input", "source": "customer.name"],
-        ["name": "output", "source": "result.text"],
+        ["name": "zeta", "source": "result.text"],
+        ["name": "alpha", "source": "customer.name"],
       ],
     ])
+    XCTAssertEqual(listTool.bindings?.compactMap { $0.name }, ["zeta", "alpha"])
     let listOutput = try listTool.save(SaveContext(collectionFormat: "array"))
     let listBindings = listOutput["bindings"] as? [[String: Any]]
     XCTAssertEqual(listBindings?.count, 2)
-    XCTAssertEqual(listBindings?[0]["name"] as? String, "input")
-    XCTAssertEqual(listBindings?[0]["source"] as? String, "customer.name")
+    XCTAssertEqual(listBindings?[0]["name"] as? String, "zeta")
+    XCTAssertEqual(listBindings?[0]["source"] as? String, "result.text")
+    let listReloaded = try functionTool(listOutput)
+    XCTAssertEqual(listReloaded.bindings?.compactMap { $0.name }, ["zeta", "alpha"])
+
+    let scalarTool = try functionTool([
+      "kind": "function",
+      "name": "scalar-tool",
+      "command": "run",
+      "bindings": [
+        "zeta": "result.text",
+        "alpha": "customer.name",
+      ],
+    ])
+    XCTAssertEqual(scalarTool.bindings?.compactMap { $0.name }, ["alpha", "zeta"])
+    XCTAssertEqual(scalarTool.bindings?.first { $0.name == "alpha" }?.source, "customer.name")
+    let scalarOutput = try scalarTool.save()
+    XCTAssertEqual((scalarOutput["bindings"] as? [String: Any])?["alpha"] as? String, "customer.name")
+    let scalarReloaded = try functionTool(scalarOutput)
+    XCTAssertEqual(scalarReloaded.bindings?.compactMap { $0.name }, ["alpha", "zeta"])
   }
 
   func testScalarPropertyCoercionDispatchesToTypedVariant() throws {
@@ -705,7 +762,12 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
 }
 `);
   try {
-    runCommand("Generated Swift package tests", "swift", ["test", "--package-path", sourceDir], { cwd: sourceDir, env });
+    runCommand(
+      "Generated Swift package tests",
+      "swift",
+      ["test", "--package-path", sourceDir, "--scratch-path", buildDir],
+      { cwd: sourceDir, env },
+    );
   } finally {
     if (existsSync(inheritedPropertyTest)) {
       unlinkSync(inheritedPropertyTest);
@@ -770,8 +832,9 @@ function runCSharpBuild() {
 
   const projectPath = path.join(sourceDir, "TypraFixtureValidation.csproj");
   const stubsPath = path.join(sourceDir, "TypraFixtureValidation.Stubs.cs");
-  const binDir = path.join(sourceDir, "bin");
-  const objDir = path.join(sourceDir, "obj");
+  const outputRoot = mkdtempSync(path.join(tmpdir(), "typra-csharp-"));
+  const binDir = path.join(outputRoot, "bin");
+  const objDir = path.join(outputRoot, "obj");
   writeFileSync(projectPath, [
     '<Project Sdk="Microsoft.NET.Sdk">',
     "  <PropertyGroup>",
@@ -788,17 +851,20 @@ function runCSharpBuild() {
   ].join("\n"));
   writeFileSync(stubsPath, buildCSharpValidationStubs(sourceDir));
   try {
-    runCommand("Generated C# source build", "dotnet", ["build", projectPath, "--nologo", "--verbosity", "quiet"], { cwd: sourceDir });
+    runCommand(
+      "Generated C# source build",
+      "dotnet",
+      ["build", projectPath, "--nologo", "--verbosity", "quiet", "-p:BaseOutputPath=" + `${binDir}${path.sep}`, "-p:BaseIntermediateOutputPath=" + `${objDir}${path.sep}`],
+      { cwd: sourceDir },
+    );
   } finally {
     for (const tempPath of [projectPath, stubsPath]) {
       if (existsSync(tempPath)) {
         unlinkSync(tempPath);
       }
     }
-    for (const tempDir of [binDir, objDir]) {
-      if (existsSync(tempDir)) {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
+    if (existsSync(outputRoot)) {
+      rmSync(outputRoot, { recursive: true, force: true });
     }
   }
 }
@@ -813,8 +879,9 @@ function runCSharpProtocolScaffoldBuild() {
 
   const projectPath = path.join(sourceDir, "TypraFixtureScaffoldValidation.csproj");
   const stubsPath = path.join(sourceDir, "TypraFixtureScaffoldValidation.Stubs.cs");
-  const binDir = path.join(sourceDir, "bin");
-  const objDir = path.join(sourceDir, "obj");
+  const outputRoot = mkdtempSync(path.join(tmpdir(), "typra-csharp-scaffold-"));
+  const binDir = path.join(outputRoot, "bin");
+  const objDir = path.join(outputRoot, "obj");
   writeFileSync(projectPath, [
     '<Project Sdk="Microsoft.NET.Sdk">',
     "  <PropertyGroup>",
@@ -832,17 +899,20 @@ function runCSharpProtocolScaffoldBuild() {
   ].join("\n"));
   writeFileSync(stubsPath, buildCSharpValidationStubs(sourceDir));
   try {
-    runCommand("Generated C# protocol scaffold build", "dotnet", ["build", projectPath, "--nologo", "--verbosity", "quiet"], { cwd: sourceDir });
+    runCommand(
+      "Generated C# protocol scaffold build",
+      "dotnet",
+      ["build", projectPath, "--nologo", "--verbosity", "quiet", "-p:BaseOutputPath=" + `${binDir}${path.sep}`, "-p:BaseIntermediateOutputPath=" + `${objDir}${path.sep}`],
+      { cwd: sourceDir },
+    );
   } finally {
     for (const tempPath of [projectPath, stubsPath]) {
       if (existsSync(tempPath)) {
         unlinkSync(tempPath);
       }
     }
-    for (const tempDir of [binDir, objDir]) {
-      if (existsSync(tempDir)) {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
+    if (existsSync(outputRoot)) {
+      rmSync(outputRoot, { recursive: true, force: true });
     }
   }
 }
@@ -932,6 +1002,8 @@ function runTypeScriptExecutableConformance() {
     fail("No generated TypeScript files found for executable conformance.");
     return;
   }
+  const tscCli = findTypeScriptCli(packageRoot);
+  if (!tscCli) return;
 
   const runnerPath = path.join(sourceDir, "conformance.validate.ts");
   const configPath = path.join(sourceDir, "tsconfig.conformance.json");
@@ -960,15 +1032,13 @@ function runTypeScriptExecutableConformance() {
       esModuleInterop: true,
       skipLibCheck: true,
       types: ["node"],
+      typeRoots: typeScriptTypeRoots(tscCli),
       lib: ["ES2022"],
       outDir,
       rootDir: sourceDir,
     },
     files: [...sourceFiles, runnerPath],
   }, null, 2));
-
-  const tscCli = findTypeScriptCli(packageRoot);
-  if (!tscCli) return;
 
   try {
     execFileSync(process.execPath, [tscCli, "-p", configPath], { cwd: packageRoot, stdio: "pipe" });
@@ -1253,7 +1323,7 @@ function runRustExecutableConformance() {
   const lockPath = path.join(sourceDir, "Cargo.lock");
   const libPath = path.join(sourceDir, "lib.rs");
   const runnerPath = path.join(sourceDir, "conformance_validate.rs");
-  const targetDir = path.join(sourceDir, "target");
+  const targetDir = mkdtempSync(path.join(tmpdir(), "typra-rust-conformance-"));
   if (!existsSync(sourceDir)) {
     fail("No generated Rust directory found for executable conformance.");
     return;
@@ -1327,7 +1397,12 @@ function runRustExecutableConformance() {
   ].join("\n"));
 
   try {
-    const output = execFileSync("cargo", ["run", "--quiet", "--bin", "conformance_validate"], { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    const output = execFileSync("cargo", ["run", "--quiet", "--bin", "conformance_validate"], {
+      cwd: sourceDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+    }).trim();
     assertConformanceResult("rust", output);
   } catch (error) {
     const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();

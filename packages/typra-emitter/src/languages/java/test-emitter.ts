@@ -41,7 +41,7 @@ export function emitJavaTest(ctx: BaseTestContext): string {
   }
 
   ctx.coercions.forEach((coercion, index) => {
-    emitCoercionTest(lines, typeName, coercion, index + 1);
+    emitCoercionTest(lines, typeName, coercion, index + 1, ctx.node.coercions[index]?.expansion);
   });
 
   if (ctx.node.properties.some(prop => prop.knownAs.length > 0) && ctx.examples.length > 0) {
@@ -95,18 +95,64 @@ function emitInvalidYamlTest(lines: string[], typeName: string): void {
   lines.push(`    assertThrows(() -> ${typeName}.fromYaml(":\\n  broken"), "${typeName}.fromYaml should reject malformed YAML");`);
 }
 
-function emitCoercionTest(lines: string[], typeName: string, coercion: CoercionTest, index: number): void {
-  if (coercion.scalarType !== "string") return;
+function emitCoercionTest(
+  lines: string[],
+  typeName: string,
+  coercion: CoercionTest,
+  index: number,
+  expansion: Record<string, unknown> | undefined,
+): void {
   lines.push("");
-  const coerced = `coerced${index}`;
-  lines.push(`    ${typeName} ${coerced} = ${typeName}.fromJson(${javaString(JSON.stringify(coercion.value))});`);
-  for (const validation of coercion.validations) {
-    emitValidation(lines, coerced, validation);
+  const directCases = javaDirectCoercionCases(coercion);
+  directCases.forEach((testCase, caseIndex) => {
+    const coerced = `coerced${index}_${caseIndex + 1}`;
+    lines.push(`    ${typeName} ${coerced} = ${typeName}.load(${testCase.literal}, new LoadContext());`);
+    for (const validation of coercion.validations) {
+      emitValidation(
+        lines,
+        coerced,
+        expansion?.[validation.sourceKey ?? validation.key] === "{value}"
+          ? { ...validation, value: testCase.expected, delimiter: "" }
+          : validation,
+      );
+    }
+  });
+  if (coercion.scalarType.toLowerCase() !== "string") {
+    return;
   }
+  const stringValue = JSON.parse(coercion.value) as string;
+  const coerced = `coercedJson${index}`;
+  lines.push(`    ${typeName} ${coerced} = ${typeName}.fromJson(${javaString(JSON.stringify(stringValue))});`);
+  for (const validation of coercion.validations) emitValidation(lines, coerced, validation);
   const coercedYaml = `coercedYaml${index}`;
-  lines.push(`    ${typeName} ${coercedYaml} = ${typeName}.fromYaml(${javaString(JSON.stringify(coercion.value))});`);
-  for (const validation of coercion.validations) {
-    emitValidation(lines, coercedYaml, validation);
+  lines.push(`    ${typeName} ${coercedYaml} = ${typeName}.fromYaml(${javaString(JSON.stringify(stringValue))});`);
+  for (const validation of coercion.validations) emitValidation(lines, coercedYaml, validation);
+}
+
+function javaDirectCoercionCases(
+  coercion: CoercionTest,
+): Array<{ literal: string; expected: string | number | boolean }> {
+  switch (coercion.scalarType.toLowerCase()) {
+    case "int32":
+    case "int64":
+    case "integer":
+    case "long":
+      return [
+        { literal: "42", expected: 42 },
+        { literal: "42L", expected: 42 },
+      ];
+    case "float":
+    case "float32":
+    case "float64":
+    case "double":
+    case "number":
+    case "numeric":
+      return [
+        { literal: "3.14", expected: 3.14 },
+        { literal: "3.14f", expected: 3.14 },
+      ];
+    default:
+      return [{ literal: String(coercion.value), expected: coercion.value }];
   }
 }
 
