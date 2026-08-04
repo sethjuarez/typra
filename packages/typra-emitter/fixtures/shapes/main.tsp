@@ -172,6 +172,27 @@ model FixtureBinding {
 
 @@coerce(FixtureBinding, string, #{ source: "{value}" }, "binding", "Load a binding from shorthand.", "input");
 
+model FixtureNamedPayload {
+  name?: string;
+  payload: unknown;
+}
+
+model FixtureNamedPayloadCollection {
+  items: Record<FixtureNamedPayload> | Named<FixtureNamedPayload>[];
+}
+
+model FixtureNamedProfile {
+  properties: Record<FixtureNamedPayload> | Named<FixtureNamedPayload>[];
+}
+
+model FixtureNamedInputs {
+  profile: FixtureNamedProfile;
+}
+
+model FixtureNamedRoot {
+  inputs: FixtureNamedInputs;
+}
+
 model FixtureBindingTool {
   kind: "function";
 

@@ -754,7 +754,8 @@ describe("Java emitter runtime semantics", () => {
 
     const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
     assert.match(source, /map\.get\("bindings"\) instanceof Map<\?, \?> values/);
-    assert.match(source, /Binding item = Binding\.load\(entry\.getValue\(\), ctx\);\s+item\.name = String\.valueOf\(entry\.getKey\(\)\);/);
+    assert.match(source, /if \(entry\.getValue\(\) instanceof Iterable<\?>\) \{[\s\S]*invalid named collection entry category array/);
+    assert.match(source, /itemData\.put\("name", String\.valueOf\(entry\.getKey\(\)\)\);\s+Binding item = Binding\.load\(itemData, ctx\.at\("bindings"\)\.at\(String\.valueOf\(entry\.getKey\(\)\)\)\);/);
     assert.match(source, /else if \(map\.get\("bindings"\) instanceof Iterable<\?> values\)/);
     assert.match(source, /if \("array"\.equals\(ctx\.collectionFormat\)\)/);
     assert.match(source, /ctx\.useShorthand && Binding\.SHORTHAND_PROPERTY != null/);

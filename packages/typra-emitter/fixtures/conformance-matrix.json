@@ -116,8 +116,8 @@
             "path": "generated/fixtures/swift/Sources/TypraFixtures/fixture_root.swift",
             "snippets": [
               "public var tags: [String] = []",
-              "instance.owner = try FixtureOwner.load(value, context: context)",
-              "instance.content = try FixtureContent.load(value, context: context)",
+              "instance.owner = try FixtureOwner.load(value, context: context.at(\"owner\"))",
+              "instance.content = try FixtureContent.load(value, context: context.at(\"content\"))",
               "result[\"content\"] = try self.content.save(context)"
             ]
           }
