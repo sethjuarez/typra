@@ -1092,9 +1092,11 @@ function getStructTag(fieldName: string, isOptional: boolean): string {
 }
 
 function goFieldName(name: string): string {
-  const identifier = name.replace(/^[^A-Za-z]+/, "");
-  const exported = toPascalCase(identifier || "field");
-  return /^[A-Z]/.test(exported) ? exported : `Field${exported}`;
+  const converted = toPascalCase(name);
+  const leading = converted.match(/^[^A-Za-z]+/)?.[0] ?? "";
+  const identifier = converted.slice(leading.length);
+  const prefix = "Field".repeat(leading.length);
+  return `${prefix}${identifier || "Value"}`;
 }
 
 // ============================================================================
