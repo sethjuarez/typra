@@ -34,6 +34,7 @@ import {
   WireDecl,
 } from "../../ir/declarations.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
+import { goFieldName } from "./identifiers.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
 
 // ============================================================================
@@ -1089,12 +1090,6 @@ function getStructTag(fieldName: string, isOptional: boolean): string {
   const jsonTag = isOptional ? `${fieldName},omitempty` : fieldName;
   const yamlTag = isOptional ? `${fieldName},omitempty` : fieldName;
   return `\`json:"${jsonTag}" yaml:"${yamlTag}"\``;
-}
-
-function goFieldName(name: string): string {
-  const identifier = name.replace(/^[^A-Za-z]+/, "");
-  const exported = toPascalCase(identifier || "field");
-  return /^[A-Z]/.test(exported) ? exported : `Field${exported}`;
 }
 
 // ============================================================================

@@ -17,6 +17,7 @@ import {
   TypeNode,
   PropertyNode,
 } from "../../ir/ast.js";
+import { goFieldName } from "./identifiers.js";
 
 // ============================================================================
 // Helpers
@@ -48,11 +49,6 @@ function emitValidation(lines: string[], varName: string, v: PropertyValidation)
     lines.push(`t.Errorf(\`Expected ${v.key} to be ${display}, got %v\`, ${varName}.${v.key})`);
     lines.push(`}`);
   }
-}
-
-function goFieldName(name: string): string {
-  const pascal = name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
-  return pascal.charAt(0).toUpperCase() + pascal.slice(1);
 }
 
 function goStringLiteral(value: string): string {

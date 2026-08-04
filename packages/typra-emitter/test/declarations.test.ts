@@ -23,6 +23,7 @@ import {
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 import { emitGoFileContent } from "../src/languages/go/emitter.js";
+import { goFieldName } from "../src/languages/go/identifiers.js";
 import { emitGoTest } from "../src/languages/go/test-emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
 import { emitRustFile } from "../src/languages/rust/emitter.js";
@@ -548,9 +549,9 @@ describe("lowerFile", () => {
 
     it("exports safe field identifiers while preserving leading-underscore wire keys", () => {
       const traceSpan = makeType("TraceSpan", [
-        makeProp("_Time", "string", { isScalar: true }),
-        makeProp("_Usage", "Record<unknown>", { isScalar: true }),
-        makeProp("_Frames", "string", { isScalar: true, isCollection: true }),
+        makeProp("__time", "string", { isScalar: true }),
+        makeProp("__usage", "Record<unknown>", { isScalar: true }),
+        makeProp("__frames", "string", { isScalar: true, isCollection: true }),
       ]);
       const registry = TypeRegistry.fromTypeGraph([traceSpan]);
       const file = lowerFile(traceSpan, registry);
@@ -563,12 +564,43 @@ describe("lowerFile", () => {
         file.group,
       );
 
-      assert.match(code, /Time string `json:"_Time" yaml:"_Time"`/);
-      assert.match(code, /Usage interface\{\} `json:"_Usage" yaml:"_Usage"`/);
-      assert.match(code, /Frames \[\]string `json:"_Frames" yaml:"_Frames"`/);
-      assert.match(code, /result\.Time = string\(val\.\(string\)\)/);
-      assert.match(code, /result\["_Time"\] = obj\.Time/);
+      assert.match(code, /FieldTime string `json:"__time" yaml:"__time"`/);
+      assert.match(code, /FieldUsage interface\{\} `json:"__usage" yaml:"__usage"`/);
+      assert.match(code, /FieldFrames \[\]string `json:"__frames" yaml:"__frames"`/);
+      assert.match(code, /result\.FieldTime = string\(val\.\(string\)\)/);
+      assert.match(code, /result\["__time"\] = obj\.FieldTime/);
       assert.doesNotMatch(code, /\n\s+_Time\s/);
+      assert.equal(goFieldName("__time"), "FieldTime");
+      assert.equal(
+        new GoExprVisitor(registry).visitExpr({
+          kind: "field_read",
+          objectName: "span",
+          fieldName: "__time",
+          fieldType: "string",
+          isOptional: false,
+        }),
+        "span.FieldTime",
+      );
+
+      const envelope = makeType("TraceEnvelope", [
+        makeProp("span", "TraceSpan", { type: traceSpan }),
+      ]);
+      const testCode = emitGoTest({
+        node: envelope,
+        isAbstract: false,
+        package: "fixtures",
+        importPath: "fixtures/model",
+        examples: [{
+          sample: { span: { __time: "now" } },
+          json: ['{"span":{"__time":"now"}}'],
+          yaml: ['span:', '  __time: "now"'],
+          validations: [],
+        }],
+        coercions: [],
+        factories: [],
+      });
+      assert.match(testCode, /instance\.Span\.FieldTime/);
+      assert.doesNotMatch(testCode, /instance\.Span\._Time/);
     });
 
     it("falls through self-referential defaults so base fields are loaded", () => {

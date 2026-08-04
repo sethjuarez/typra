@@ -3,7 +3,8 @@
  */
 
 import { Expr, Construct, VariantConstruct, ArrayLiteral, TypeRegistry } from "../../ir/expansion.js";
-import { ExprVisitor, toPascalCase, assertNever } from "../../ir/visitor.js";
+import { ExprVisitor, assertNever } from "../../ir/visitor.js";
+import { goFieldName } from "./identifiers.js";
 
 export class GoExprVisitor implements ExprVisitor {
   registry?: TypeRegistry;
@@ -33,7 +34,7 @@ export class GoExprVisitor implements ExprVisitor {
       case "dict":
         return `map[string]interface{}{${expr.entries.map(e => `"${e.key}": ${this.visitExpr(e.value)}`).join(", ")}}`;
       case "field_read":
-        return `${expr.objectName}.${toPascalCase(expr.fieldName)}`;
+        return `${expr.objectName}.${goFieldName(expr.fieldName)}`;
       default:
         return assertNever(expr);
     }
@@ -51,7 +52,7 @@ export class GoExprVisitor implements ExprVisitor {
       const prop = typeNode?.properties.find(p => p.name === f.propertyName);
       // Optional fields are pointers in Go — wrap scalar values with a helper
       const needsAddr = prop?.isOptional && !prop.isCollection && !prop.isDict;
-      return `${toPascalCase(f.propertyName)}: ${needsAddr ? `ptrOf(${val})` : val}`;
+      return `${goFieldName(f.propertyName)}: ${needsAddr ? `ptrOf(${val})` : val}`;
     }).join(", ");
     return `${typeName}{ ${fields} }`;
   }
@@ -60,9 +61,9 @@ export class GoExprVisitor implements ExprVisitor {
     // Go child types are full structs with an explicit discriminator field.
     const variantName = expr.variantTypeName.name;
     // Include the discriminator (e.g., Kind: "text") since Go has no default field values.
-    const discField = `${toPascalCase(expr.discriminator)}: "${expr.discriminatorValue}"`;
+    const discField = `${goFieldName(expr.discriminator)}: "${expr.discriminatorValue}"`;
     const dataFields = expr.fields.map(f =>
-      `${toPascalCase(f.propertyName)}: ${this.visitExpr(f.value)}`
+      `${goFieldName(f.propertyName)}: ${this.visitExpr(f.value)}`
     );
     const allFields = [discField, ...dataFields].join(", ");
     return `${variantName}{ ${allFields} }`;
