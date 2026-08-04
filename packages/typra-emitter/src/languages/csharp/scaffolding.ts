@@ -18,6 +18,8 @@
  */
 export function emitCSharpContext(namespace: string): string {
   return `// Copyright (c) Microsoft. All rights reserved.
+#nullable enable
+
 using System.Text.Json;
 using YamlDotNet.Serialization;
 
@@ -174,6 +176,8 @@ public class SaveContext
  */
 export function emitCSharpUtils(namespace: string): string {
   return `// Copyright (c) Microsoft. All rights reserved.
+#nullable enable
+
 using System.Collections;
 using System.Reflection;
 using System.Text.Json;

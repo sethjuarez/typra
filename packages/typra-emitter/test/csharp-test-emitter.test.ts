@@ -5,7 +5,7 @@ import { TypeNode } from "../src/ir/ast.js";
 import { emitCSharpTest } from "../src/languages/csharp/test-emitter.js";
 
 describe("C# test emitter", () => {
-  it("preserves trailing spaces before newlines in expected string literals", () => {
+  it("matches YAML trailing-space normalization while JSON preserves raw strings", () => {
     const node = {
       typeName: { namespace: "Prompty", name: "Prompty" },
       properties: [],
@@ -30,9 +30,19 @@ describe("C# test emitter", () => {
       renderCsharpFactoryTestValue: () => "default",
     });
 
+    assert.match(code, /^#nullable enable$/m);
+    const assertions = code.match(/Assert\.Equal\("[^"]+", instance\.Instructions\);/g);
+    assert.deepEqual(assertions, [
+      'Assert.Equal("first line with trailing space\\nsecond line\\u2028third line", instance.Instructions);',
+      'Assert.Equal("first line with trailing space \\nsecond line\\u2028third line", instance.Instructions);',
+    ]);
     assert.match(
       code,
-      /Assert\.Equal\("first line with trailing space \\nsecond line\\u2028third line", instance\.Instructions\);/,
+      /Assert\.Equal\("first line with trailing space \\nsecond line\\u2028third line", reloaded\.Instructions\);/,
+    );
+    assert.match(
+      code,
+      /Assert\.Equal\("first line with trailing space\\nsecond line\\u2028third line", reloaded\.Instructions\);/,
     );
     assert.doesNotMatch(code, /first line with trailing space $/m);
   });
