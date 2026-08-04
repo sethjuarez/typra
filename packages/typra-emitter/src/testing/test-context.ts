@@ -117,7 +117,8 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
           const supportsBlockLiteral = str.includes('\n')
             && /\S/.test(str)
             && !/[\u2028\u2029]/.test(str)
-            && !/\S[ \t]+(?:\r?\n|$)/.test(str);
+            && !/\S[ \t]+(?:\r?\n|$)/.test(str)
+            && !/(?:^|\n)[ ]*\t/.test(str);
           if (supportsBlockLiteral && options.yamlMultilineStyle === "block-literal") {
             yamlNode.type = 'BLOCK_LITERAL';
           } else if (str.includes('\n') || str.includes('\t') || str.includes('#') || str.includes(':') || str.includes('"')) {

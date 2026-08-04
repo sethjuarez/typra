@@ -933,6 +933,21 @@ describe("lowerFile", () => {
         ['value: "first line with trailing space\\ \\nsecond line\\n"', ""],
       );
 
+      const leadingTab = makeProp("value", "string", { isScalar: true });
+      leadingTab.samples = [{
+        sample: { value: "\tfirst indented\nsecond line" },
+        description: "",
+      }];
+      const leadingTabContext = buildBaseTestContext(
+        makeType("LeadingTab", [leadingTab]),
+        "prompty",
+        goTestOptions,
+      );
+      assert.deepEqual(
+        leadingTabContext.examples[0].yaml,
+        ['value: "\\tfirst indented\\nsecond line"', ""],
+      );
+
       const whitespace = makeProp("value", "string", { isScalar: true });
       whitespace.samples = [{ sample: { value: "\n" }, description: "" }];
       const whitespaceContext = buildBaseTestContext(
