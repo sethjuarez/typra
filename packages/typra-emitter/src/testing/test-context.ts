@@ -139,7 +139,7 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
         scalar
           .replace(/\\([ \t]*)\r?\n[ \t]*/g, "$1\\n")
           .replace(/\\ /g, " ")
-          .replace(/\r?\n[ \t]+/g, ""));
+          .replace(/\r?\n[ \t]*/g, match => match.includes("\r") ? "\\r\\n" : ""));
     }
     if (options.escapeYamlForTemplate) {
       yamlStr = options.escapeYamlForTemplate(yamlStr);
@@ -314,6 +314,7 @@ export const pythonTestOptions: TestContextOptions = {
   renderBoolean: (val: boolean) => val ? "True" : "False",
   escapeString: (str: string) => str.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),
   getDelimiter: (str: string) => str.includes('\n') ? '"""' : '"',
+  yamlTrimSensitiveScalar: true,
   scalarValues: {
     "boolean": "False",
     "float": "3.14",
