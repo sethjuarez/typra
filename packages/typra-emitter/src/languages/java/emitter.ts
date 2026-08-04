@@ -159,9 +159,7 @@ function emitType(
     lines.push(`  public ${javaFieldType(field, polymorphicTypeNames)} ${javaPropertyName(field.name)}${javaDefault(field, polymorphicTypeNames)};`);
   }
   lines.push("");
-  const inheritedDefaults = type.fields.filter(field =>
-    inheritedFields.has(field.name) && !field.isOptional && field.defaultValue !== null
-  );
+  const inheritedDefaults = type.fields.filter(field => inheritedFields.has(field.name) && field.defaultValue !== null);
   if (inheritedDefaults.length === 0) {
     lines.push(`  public ${typeName}() { }`);
   } else {
@@ -176,7 +174,6 @@ function emitType(
   emitOpenEnumAliasParsers(type.fields, lines);
   emitLoad(type, lines, polymorphicTypeNames, inheritedFields);
   emitSave(type, lines, polymorphicTypeNames, inheritedFields);
-  emitCollectionHelpers(type, lines);
   if (type.wire) {
     emitToWire(type.wire, lines);
   }
@@ -262,10 +259,10 @@ function emitLoadBaseInto(
   for (const assignment of type.load.assignments) {
     if (inheritedFields.has(assignment.fieldName)) continue;
     const field = type.fields.find(candidate => candidate.name === assignment.fieldName);
-    if (field) {
-      const helper = type.collectionHelpers.find(candidate => candidate.propertyName === field.name);
-      emitLoadField(field, lines, polymorphicTypeNames, helper);
-    }
+    const collectionHelper = type.collectionHelpers.find(helper =>
+      helper.propertyName === assignment.fieldName && helper.hasNameProperty
+    );
+    if (field) emitLoadField(field, collectionHelper, lines, polymorphicTypeNames);
   }
   lines.push("  }");
   lines.push("");
@@ -278,15 +275,8 @@ function emitCoercions(
   fields: FieldDecl[] = [],
   isAbstract = false,
 ): void {
-  const orderedCoercions = [...coercions].sort((left, right) =>
-    coercionPriority(left.scalarType) - coercionPriority(right.scalarType)
-  );
-  const numericTypes = orderedCoercions
-    .map(coercion => coercion.scalarType)
-    .filter(isNumericScalar);
-
-  for (const coercion of orderedCoercions) {
-    const check = coercionCheck("data", coercion.scalarType, numericTypes);
+  for (const coercion of coercions) {
+    const check = coercionCheck("data", coercion.scalarType);
     if (!check) continue;
     lines.push(`    if (${check}) {`);
     if (isAbstract) {
@@ -332,9 +322,9 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
 
 function emitLoadField(
   field: FieldDecl,
+  collectionHelper: CollectionHelperDecl | undefined,
   lines: string[],
   polymorphicTypeNames: Set<string>,
-  collectionHelper?: CollectionHelperDecl,
 ): void {
   const wireName = escapeJava(field.name);
   const name = javaPropertyName(field.name);
@@ -355,16 +345,22 @@ function emitLoadField(
       lines.push("      }");
       break;
     case "collection_complex":
-      if (collectionHelper) {
-        lines.push(`      result.${name} = load${capitalize(field.name)}(map.get("${wireName}"), ctx);`);
-      } else {
-        lines.push(`      result.${name} = new ArrayList<>();`);
-        lines.push(`      if (map.get("${wireName}") instanceof Iterable<?> values) {`);
-        lines.push("        for (Object item : values) {");
-        lines.push(`          result.${name}.add(${javaTypeName(field.category.typeName)}.load(item, ctx));`);
+      lines.push(`      result.${name} = new ArrayList<>();`);
+      if (collectionHelper?.hasNameProperty) {
+        lines.push(`      if (map.get("${wireName}") instanceof Map<?, ?> values) {`);
+        lines.push("        for (Map.Entry<?, ?> entry : values.entrySet()) {");
+        lines.push(`          ${javaTypeName(field.category.typeName)} item = ${javaTypeName(field.category.typeName)}.load(entry.getValue(), ctx);`);
+        lines.push("          item.name = String.valueOf(entry.getKey());");
+        lines.push(`          result.${name}.add(item);`);
         lines.push("        }");
-        lines.push("      }");
+        lines.push(`      } else if (map.get("${wireName}") instanceof Iterable<?> values) {`);
+      } else {
+        lines.push(`      if (map.get("${wireName}") instanceof Iterable<?> values) {`);
       }
+      lines.push("        for (Object item : values) {");
+      lines.push(`          result.${name}.add(${javaTypeName(field.category.typeName)}.load(item, ctx));`);
+      lines.push("        }");
+      lines.push("      }");
       break;
     case "dict":
       lines.push(`      if (map.get("${wireName}") instanceof Map<?, ?> dict) {`);
@@ -382,47 +378,49 @@ function emitSave(
   polymorphicTypeNames: Set<string>,
   inheritedFields: Set<string>,
 ): void {
-  const typeName = javaTypeName(type.typeName.name);
   lines.push("  public Map<String, Object> save(SaveContext context) {");
   lines.push("    SaveContext ctx = context == null ? new SaveContext() : context;");
-  lines.push(`    ${typeName} obj = ctx.processObject(this);`);
+  lines.push(`    ${javaTypeName(type.typeName.name)} obj = ctx.processObject(this);`);
   lines.push("    Map<String, Object> result = new LinkedHashMap<>();");
-  lines.push(`    ${typeName}.saveFieldsInto(obj, result, ctx);`);
+  lines.push("    obj.saveFields(result, ctx);");
   lines.push("    return ctx.processDict(result);");
   lines.push("  }");
   lines.push("");
-  lines.push(`  static void saveFieldsInto(${typeName} obj, Map<String, Object> result, SaveContext ctx) {`);
-  if (type.base) {
-    lines.push(`    ${javaTypeName(type.base.name)}.saveFieldsInto(obj, result, ctx);`);
-  }
+  lines.push("  protected void saveFields(Map<String, Object> result, SaveContext ctx) {");
+  if (type.base) lines.push("    super.saveFields(result, ctx);");
+  lines.push(`    ${javaTypeName(type.typeName.name)} obj = this;`);
   for (const field of type.save.assignments) {
     if (inheritedFields.has(field.fieldName)) continue;
-    const fieldDecl = type.fields.find(candidate => candidate.name === field.fieldName);
-    if (!fieldDecl) continue;
-    const helper = type.collectionHelpers.find(candidate => candidate.propertyName === field.fieldName);
-    emitSaveField(fieldDecl, lines, polymorphicTypeNames, helper);
+    const collectionHelper = type.collectionHelpers.find(helper =>
+      helper.propertyName === field.fieldName && helper.hasNameProperty
+    );
+    emitSaveField(
+      field.fieldName,
+      field.category,
+      field.isOpenEnum ? null : field.enumName,
+      collectionHelper,
+      lines,
+      polymorphicTypeNames,
+    );
   }
   lines.push("  }");
   lines.push("");
 }
 
 function emitSaveField(
-  field: FieldDecl,
+  name: string,
+  category: PropertyCategory,
+  enumName: string | null,
+  collectionHelper: CollectionHelperDecl | undefined,
   lines: string[],
   polymorphicTypeNames: Set<string>,
-  collectionHelper?: CollectionHelperDecl,
 ): void {
-  const wireName = escapeJava(field.name);
-  const propertyName = javaPropertyName(field.name);
-  const enumName = field.isOpenEnum ? null : field.enumName;
-  switch (field.category.kind) {
+  const wireName = escapeJava(name);
+  const propertyName = javaPropertyName(name);
+  switch (category.kind) {
     case "scalar":
     case "dict":
-      if (field.enumName && !field.isOpenEnum && !field.isOptional) {
-        lines.push(`    result.put("${wireName}", obj.${propertyName}.value);`);
-      } else {
-        lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", ${enumName ? `obj.${propertyName}.value` : `serializeScalar(obj.${propertyName})`});`);
-      }
+      lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", ${enumName ? `obj.${propertyName}.value` : `serializeScalar(obj.${propertyName})`});`);
       break;
     case "complex":
       lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", obj.${propertyName}.save(ctx));`);
@@ -440,97 +438,34 @@ function emitSaveField(
       break;
     case "collection_complex":
       lines.push(`    if (obj.${propertyName} != null) {`);
-      if (collectionHelper) {
-        lines.push(`      result.put("${wireName}", save${capitalize(field.name)}(obj.${propertyName}, ctx));`);
+      if (collectionHelper?.hasNameProperty) {
+        lines.push(`      if ("array".equals(ctx.collectionFormat)) {`);
+        lines.push("        List<Object> items = new ArrayList<>();");
+        lines.push(`        for (${javaTypeName(category.typeName)} item : obj.${propertyName}) items.add(item.save(ctx));`);
+        lines.push(`        result.put("${wireName}", items);`);
+        lines.push("      } else {");
+        lines.push("        Map<String, Object> items = new LinkedHashMap<>();");
+        lines.push(`        for (${javaTypeName(category.typeName)} item : obj.${propertyName}) {`);
+        lines.push("          Map<String, Object> itemData = new LinkedHashMap<>(item.save(ctx));");
+        lines.push('          Object nameValue = itemData.remove("name");');
+        lines.push('          if (!(nameValue instanceof String itemName)) throw new IllegalStateException("Cannot save named collection item without a name.");');
+        lines.push(`          if (ctx.useShorthand && ${javaTypeName(category.typeName)}.SHORTHAND_PROPERTY != null && itemData.size() == 1 && itemData.containsKey(${javaTypeName(category.typeName)}.SHORTHAND_PROPERTY)) {`);
+        lines.push(`            items.put(itemName, itemData.get(${javaTypeName(category.typeName)}.SHORTHAND_PROPERTY));`);
+        lines.push("          } else {");
+        lines.push("            items.put(itemName, itemData);");
+        lines.push("          }");
+        lines.push("        }");
+        lines.push(`        result.put("${wireName}", items);`);
+        lines.push("      }");
       } else {
         lines.push("      List<Object> items = new ArrayList<>();");
-        lines.push(`      for (${javaTypeName(field.category.typeName)} item : obj.${propertyName}) items.add(item.save(ctx));`);
+        lines.push(`      for (${javaTypeName(category.typeName)} item : obj.${propertyName}) items.add(item.save(ctx));`);
         lines.push(`      result.put("${wireName}", items);`);
       }
       lines.push("    }");
       break;
   }
   void polymorphicTypeNames;
-}
-
-function emitCollectionHelpers(type: TypeDecl, lines: string[]): void {
-  for (const helper of type.collectionHelpers) {
-    emitCollectionLoadHelper(helper, lines);
-    emitCollectionSaveHelper(helper, lines);
-  }
-}
-
-function emitCollectionLoadHelper(helper: CollectionHelperDecl, lines: string[]): void {
-  const methodName = `load${capitalize(helper.propertyName)}`;
-  const elementType = javaTypeName(helper.elementTypeName.name);
-  const firstInnerField = escapeJava(helper.innerFields[0] ?? "kind");
-
-  lines.push(`  private static List<${elementType}> ${methodName}(Object data, LoadContext ctx) {`);
-  lines.push(`    List<${elementType}> result = new ArrayList<>();`);
-  if (helper.hasNameProperty) {
-    lines.push("    if (data instanceof Map<?, ?> values) {");
-    lines.push("      for (Map.Entry<?, ?> entry : values.entrySet()) {");
-    lines.push("        Map<String, Object> itemData = new LinkedHashMap<>();");
-    lines.push("        itemData.put(\"name\", String.valueOf(entry.getKey()));");
-    lines.push("        if (entry.getValue() instanceof Map<?, ?> valueMap) {");
-    lines.push("          itemData.putAll(copyMap(valueMap));");
-    lines.push("        } else {");
-    lines.push(`          itemData.put("${firstInnerField}", entry.getValue());`);
-    lines.push("        }");
-    lines.push(`        result.add(${elementType}.load(itemData, ctx));`);
-    lines.push("      }");
-    lines.push("      return result;");
-    lines.push("    }");
-  }
-  lines.push("    if (data instanceof Iterable<?> values) {");
-  lines.push("      for (Object item : values) {");
-  lines.push(`        result.add(${elementType}.load(item, ctx));`);
-  lines.push("      }");
-  lines.push("    }");
-  lines.push("    return result;");
-  lines.push("  }");
-  lines.push("");
-}
-
-function emitCollectionSaveHelper(helper: CollectionHelperDecl, lines: string[]): void {
-  const methodName = `save${capitalize(helper.propertyName)}`;
-  const elementType = javaTypeName(helper.elementTypeName.name);
-
-  lines.push(`  private static Object ${methodName}(List<${elementType}> items, SaveContext ctx) {`);
-  if (helper.hasNameProperty) {
-    lines.push('    if ("array".equals(ctx.collectionFormat)) {');
-    lines.push("      List<Object> result = new ArrayList<>();");
-    lines.push(`      for (${elementType} item : items) result.add(item.save(ctx));`);
-    lines.push("      return result;");
-    lines.push("    }");
-    lines.push("    Map<String, Object> result = new LinkedHashMap<>();");
-    lines.push(`    for (${elementType} item : items) {`);
-    lines.push("      Map<String, Object> itemData = new LinkedHashMap<>(item.save(ctx));");
-    lines.push('      Object name = itemData.remove("name");');
-    lines.push("      if (name != null) {");
-    lines.push(`        String shorthand = ${elementType}.SHORTHAND_PROPERTY;`);
-    lines.push("        if (ctx.useShorthand && shorthand != null && itemData.size() == 1 && itemData.containsKey(shorthand)) {");
-    lines.push("          result.put(String.valueOf(name), itemData.get(shorthand));");
-    lines.push("        } else {");
-    lines.push("          result.put(String.valueOf(name), itemData);");
-    lines.push("        }");
-    lines.push("      } else {");
-    lines.push('        Object unnamed = result.computeIfAbsent("_unnamed", ignored -> new ArrayList<>());');
-    lines.push("        if (unnamed instanceof List<?> list) {");
-    lines.push("          @SuppressWarnings(\"unchecked\")");
-    lines.push("          List<Object> values = (List<Object>) list;");
-    lines.push("          values.add(itemData);");
-    lines.push("        }");
-    lines.push("      }");
-    lines.push("    }");
-    lines.push("    return result;");
-  } else {
-    lines.push("    List<Object> result = new ArrayList<>();");
-    lines.push(`    for (${elementType} item : items) result.add(item.save(ctx));`);
-    lines.push("    return result;");
-  }
-  lines.push("  }");
-  lines.push("");
 }
 
 function emitClassHelpers(lines: string[]): void {
@@ -674,23 +609,17 @@ function javaScalarType(typeName: string): string {
 }
 
 function javaDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): string {
-  if (
-    field.hasExplicitDefault &&
-    (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex")
-  ) {
-    return " = new ArrayList<>()";
+  if (field.defaultValue !== null) {
+    return ` = ${javaLiteral(field.defaultValue, field.enumName, scalarTypeOf(field))}`;
   }
   if (field.isOptional) {
     return " = null";
   }
-  if (field.defaultValue !== null) {
-    return ` = ${javaLiteral(field.defaultValue, field.enumName, scalarTypeOf(field))}`;
+  if (field.enumName && !field.isOpenEnum && field.allowedValues.length > 0) {
+    return ` = ${javaEnumTypeName(field.enumName)}.fromValue("${escapeJava(field.allowedValues[0])}")`;
   }
   switch (field.category.kind) {
     case "scalar":
-      if (field.enumName && !field.isOpenEnum && field.allowedValues.length > 0) {
-        return ` = ${javaEnumTypeName(field.enumName)}.${javaEnumMemberName(field.allowedValues[0])}`;
-      }
       if (field.category.scalarType === "string") return ' = ""';
       if (field.category.scalarType === "boolean") return " = false";
       return ` = ${javaNumericLiteral(0, field.category.scalarType)}`;
@@ -741,60 +670,24 @@ function loadScalar(valueExpr: string, scalarType: string, enumName: string | nu
   }
 }
 
-function coercionCheck(valueExpr: string, scalarType: string, numericTypes: string[]): string | null {
+function coercionCheck(valueExpr: string, scalarType: string): string | null {
   switch (scalarType) {
     case "string":
       return `${valueExpr} instanceof String`;
     case "boolean":
       return `${valueExpr} instanceof Boolean`;
     case "int32":
-    case "integer":
-      return `(${valueExpr} instanceof Byte || ${valueExpr} instanceof Short || ${valueExpr} instanceof Integer)`;
     case "int64":
-      if (numericTypes.some(type => type === "int32" || type === "integer")) {
-        return `${valueExpr} instanceof Long`;
-      }
-      return `(${valueExpr} instanceof Byte || ${valueExpr} instanceof Short || ${valueExpr} instanceof Integer || ${valueExpr} instanceof Long)`;
-    case "float32":
-      return `${valueExpr} instanceof Float`;
+    case "integer":
     case "number":
     case "float":
     case "numeric":
+    case "float32":
     case "float64":
       return `${valueExpr} instanceof Number`;
     default:
       return null;
   }
-}
-
-function coercionPriority(scalarType: string): number {
-  switch (scalarType) {
-    case "string":
-    case "boolean":
-      return 0;
-    case "int32":
-    case "integer":
-      return 1;
-    case "int64":
-      return 2;
-    case "float32":
-      return 3;
-    default:
-      return 4;
-  }
-}
-
-function isNumericScalar(scalarType: string): boolean {
-  return [
-    "int32",
-    "int64",
-    "integer",
-    "number",
-    "float",
-    "numeric",
-    "float32",
-    "float64",
-  ].includes(scalarType);
 }
 
 function coercionValue(assignment: CoercionAssignment, scalarType: string, field?: FieldDecl): string {
@@ -844,8 +737,4 @@ function javaNumericLiteral(value: number, scalarType: string): string {
 
 function escapeJava(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\r/g, "\\r").replace(/\n/g, "\\n");
-}
-
-function capitalize(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
