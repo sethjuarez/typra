@@ -16,6 +16,7 @@ import { emitRustFile } from "../src/languages/rust/emitter.js";
 import { RustExprVisitor } from "../src/languages/rust/visitor.js";
 import { emitTypeScriptFile } from "../src/languages/typescript/emitter.js";
 import { TypeScriptExprVisitor } from "../src/languages/typescript/visitor.js";
+import { markdownMethodRuntimeShape } from "../src/languages/markdown/driver.js";
 
 function model(name: string): TypeNode {
   const node = new TypeNode({} as Model, "");
@@ -82,7 +83,7 @@ function canonicalPort(): { port: TypeNode; types: TypeNode[] } {
       name: "format",
       returns: "Message[]",
       description: "",
-      params: { value: "unknown" },
+      params: { messages: "Message[]" },
       optional: false,
       sync: true,
       runtimeCancellable: false,
@@ -111,21 +112,21 @@ describe("@method effect metadata", () => {
     assert.match(csharp, /Task AppendAsync\(Event @event\);/);
     assert.match(csharp, /Task AppendWithCheckpointAsync\(List<Event> events, Checkpoint checkpoint\);/);
     assert.match(csharp, /Task AfterCommitAsync\(string effectId, Commit commit, CancellationToken cancellationToken = default\);/);
-    assert.match(csharp, /List<Message> Format\(object value\);/);
+    assert.match(csharp, /List<Message> Format\(List<Message> messages\);/);
 
     const go = emitGoFileContent(file.types, "fixtures", new GoExprVisitor(registry), new Set());
     assert.match(go, /Authorize\(ctx context\.Context, request Request\) \(Decision, error\)/);
     assert.match(go, /Append\(event Event\) error/);
     assert.match(go, /AppendWithCheckpoint\(events \[\]Event, checkpoint Checkpoint\) error/);
     assert.match(go, /AfterCommit\(ctx context\.Context, effectId string, commit Commit\) error/);
-    assert.match(go, /Format\(value interface\{\}\) \(\[\]Message, error\)/);
+    assert.match(go, /Format\(messages \[\]Message\) \(\[\]Message, error\)/);
 
     const typeScript = emitTypeScriptFile(file, new TypeScriptExprVisitor(registry));
     assert.match(typeScript, /authorize\(request: Request, signal\?: AbortSignal\): Promise<Decision>;/);
     assert.match(typeScript, /append\(event: Event\): Promise<void>;/);
     assert.match(typeScript, /appendWithCheckpoint\(events: Event\[\], checkpoint: Checkpoint\): Promise<void>;/);
     assert.match(typeScript, /afterCommit\(effectId: string, commit: Commit, signal\?: AbortSignal\): Promise<void>;/);
-    assert.match(typeScript, /format\(value: unknown\): Message\[\];/);
+    assert.match(typeScript, /format\(messages: Message\[\]\): Message\[\];/);
 
     const rust = emitRustFile(file, new RustExprVisitor(registry), new Set(), new Map(), {
       cancellationTokenPath: "crate::engine::CancellationToken",
@@ -134,7 +135,7 @@ describe("@method effect metadata", () => {
     assert.match(rust, /async fn append\(&self, event: &Event\) -> Result<\(\), Box<dyn std::error::Error \+ Send \+ Sync>>;/);
     assert.match(rust, /async fn append_with_checkpoint\(&self, events: &Vec<Event>, checkpoint: &Checkpoint\) -> Result<\(\), Box<dyn std::error::Error \+ Send \+ Sync>>;/);
     assert.match(rust, /async fn after_commit\(&self, effect_id: &String, commit: &Commit, cancellation: &CancellationToken\) -> Result<\(\), Box<dyn std::error::Error \+ Send \+ Sync>>;/);
-    assert.match(rust, /fn format\(&self, value: &serde_json::Value\) -> Vec<Message>;/);
+    assert.match(rust, /fn format\(&self, messages: &Vec<Message>\) -> Vec<Message>;/);
     assert.doesNotMatch(rust, /PortError/);
 
     const python = emitPythonFile(file, new PythonExprVisitor(registry), "pipeline", {
@@ -147,7 +148,7 @@ describe("@method effect metadata", () => {
     assert.match(python, /def append_with_checkpoint\(self, events: list\[Event\], checkpoint: Checkpoint\) -> None:/);
     assert.match(python, /def after_commit\(self, effect_id: str, commit: Commit, cancellation: CancellationToken \| None = None\) -> None:/);
     assert.match(python, /async def after_commit_async\(self, effect_id: str, commit: Commit, cancellation: CancellationToken \| None = None\) -> None:/);
-    assert.match(python, /def format\(self, value: Any\) -> list\[Message\]:/);
+    assert.match(python, /def format\(self, messages: list\[Message\]\) -> list\[Message\]:/);
   });
 
   it("exports effect flags while keeping cancellation out of logical parameters and model properties", () => {
@@ -215,5 +216,17 @@ describe("@method effect metadata", () => {
 
     assert.match(python, /def status\(self, cancellation: CancellationToken \| None = None\) -> str:/);
     assert.doesNotMatch(python, /@property\s+def status/);
+  });
+
+  it("renders method effects as explicit Markdown runtime semantics", () => {
+    const { port } = canonicalPort();
+    assert.equal(
+      markdownMethodRuntimeShape(port.methods.find(method => method.name === "afterCommit")!),
+      "async-capable, runtime-cancellable, non-fatal",
+    );
+    assert.equal(
+      markdownMethodRuntimeShape(port.methods.find(method => method.name === "appendWithCheckpoint")!),
+      "async-capable, atomic",
+    );
   });
 });

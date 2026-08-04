@@ -65,8 +65,8 @@ model Message {
   CanonicalEnginePort,
   "format",
   "Message[]",
-  "Format a value as messages.",
-  #{ value: "unknown" },
+  "Format messages.",
+  #{ messages: "Message[]" },
   false,
   true
 );

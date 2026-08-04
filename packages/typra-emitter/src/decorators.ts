@@ -139,7 +139,16 @@ export interface FactoryEntry {
   params: Record<string, string>;
 }
 
-export interface MethodEntry {
+export interface MethodOptions {
+  /** Whether runtimes expose a synthetic native cancellation parameter */
+  runtimeCancellable?: boolean;
+  /** Whether the operation is atomic (metadata/documentation only) */
+  atomic?: boolean;
+  /** Whether failures are non-fatal (metadata/documentation only) */
+  nonFatal?: boolean;
+}
+
+export interface MethodEntry extends MethodOptions {
   /** Method name (e.g., "text") */
   name: string;
   /** Return type as a string (e.g., "string") */
@@ -152,12 +161,6 @@ export interface MethodEntry {
   optional: boolean;
   /** Whether this method is synchronous (not wrapped in async/Promise/Task) */
   sync: boolean;
-  /** Whether runtimes expose a synthetic native cancellation parameter */
-  runtimeCancellable?: boolean;
-  /** Whether the operation is atomic (metadata/documentation only) */
-  atomic?: boolean;
-  /** Whether failures are non-fatal (metadata/documentation only) */
-  nonFatal?: boolean;
 }
 
 function deserializeValue(value: unknown): any {
@@ -201,7 +204,7 @@ export function $method(
   const paramsValue = params ? deserializeValue(params) as Record<string, string> : {};
   const optionalValue = typeof optional === 'object' && optional !== null && 'value' in optional ? (optional as { value: boolean }).value : optional ?? false;
   const syncValue = typeof sync === 'object' && sync !== null && 'value' in sync ? (sync as { value: boolean }).value : sync ?? false;
-  const optionsValue = options ? deserializeValue(options) as Record<string, unknown> : {};
+  const optionsValue = options ? deserializeValue(options) as MethodOptions : {};
 
   const entry: MethodEntry = {
     name: nameValue,

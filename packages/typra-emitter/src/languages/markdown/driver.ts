@@ -21,6 +21,15 @@ function deepMerge<T extends Record<string, any>>(...objects: T[]): T {
   }, {} as T);
 }
 
+export function markdownMethodRuntimeShape(method: TypeNode["methods"][number]): string {
+  const labels = [method.sync ? "sync" : "async-capable"];
+  if (method.runtimeCancellable) labels.push("runtime-cancellable");
+  if (method.atomic) labels.push("atomic");
+  if (method.nonFatal) labels.push("non-fatal");
+  if (method.optional) labels.push("optional default");
+  return labels.join(", ");
+}
+
 function emitIndexMarkdown(
   types: TypeNode[],
   rootObject: string,
@@ -32,8 +41,7 @@ function emitIndexMarkdown(
     const params = Object.entries(method.params)
       .map(([name, type]) => `${name}: ${type}`)
       .join(", ");
-    const mode = method.sync ? "sync" : "async-capable";
-    return `+${method.name}(${params}) ${method.returns} [${mode}]`;
+    return `+${method.name}(${params}) ${method.returns} [${markdownMethodRuntimeShape(method)}]`;
   };
   const renderClass = (typeName: string): string => {
     const type = typeMap.get(typeName);
@@ -199,8 +207,7 @@ function emitFileMarkdown(
     const params = Object.entries(method.params)
       .map(([name, type]) => `${name}: ${type}`)
       .join(", ");
-    const mode = method.sync ? "sync" : "async-capable";
-    return `+${method.name}(${params}) ${method.returns} [${mode}]`;
+    return `+${method.name}(${params}) ${method.returns} [${markdownMethodRuntimeShape(method)}]`;
   };
   const renderDiagramClass = (type: TypeNode): string => {
     let result = `\n    class ${type.typeName.name} {`;
@@ -282,9 +289,7 @@ classDiagram`;
         .map(([n, t]) => `${n}: ${t}`)
         .join(", ");
       const sig = `${method.name}(${paramList}) -> ${method.returns}`;
-      const shape = method.sync ? "sync" : "async-capable";
-      const optional = method.optional ? " _(optional default)_": "";
-      out += `\n| \`${method.name}\` | \`${sig}\` | ${shape}${optional} | ${method.description.trim()} |`;
+      out += `\n| \`${method.name}\` | \`${sig}\` | ${markdownMethodRuntimeShape(method)} | ${method.description.trim()} |`;
     }
   }
 
