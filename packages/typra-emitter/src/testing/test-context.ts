@@ -46,6 +46,12 @@ export interface TestContextOptions {
   /** Escape YAML for embedding in test template (optional - for languages that need it) */
   escapeYamlForTemplate?: (yaml: string) => string;
 
+  /** Use YAML block literals for multiline strings instead of quoted folding. */
+  yamlMultilineStyle?: "block-literal";
+
+  /** Minimum encoded length at which double-quoted multiline values may be folded. */
+  yamlDoubleQuotedMinMultiLineLength?: number;
+
   /** Default scalar values for each type (used when @sample doesn't provide example) */
   scalarValues: Record<string, string>;
 
@@ -107,7 +113,13 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
       Scalar(key, yamlNode) {
         if (typeof yamlNode.value === 'string') {
           const str = yamlNode.value as string;
-          if (str.includes('\n') || str.includes('\t') || str.includes('#') || str.includes(':') || str.includes('"')) {
+          const supportsBlockLiteral = str.includes('\n')
+            && /\S/.test(str)
+            && str.split('\n').every(line => line === line.trimEnd())
+            && !/[\u2028\u2029]/.test(str);
+          if (supportsBlockLiteral && options.yamlMultilineStyle === "block-literal") {
+            yamlNode.type = 'BLOCK_LITERAL';
+          } else if (str.includes('\n') || str.includes('\t') || str.includes('#') || str.includes(':') || str.includes('"')) {
             yamlNode.type = 'QUOTE_DOUBLE';
           }
         }
@@ -121,7 +133,13 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
     }
 
     // Generate YAML and optionally escape for embedding in template strings
-    let yamlStr = doc.toString({ indent: 2, lineWidth: 0 });
+    let yamlStr = doc.toString({
+      indent: 2,
+      lineWidth: 0,
+      ...(options.yamlDoubleQuotedMinMultiLineLength === undefined
+        ? {}
+        : { doubleQuotedMinMultiLineLength: options.yamlDoubleQuotedMinMultiLineLength }),
+    });
     if (options.escapeYamlForTemplate) {
       yamlStr = options.escapeYamlForTemplate(yamlStr);
     }
@@ -295,6 +313,7 @@ export const pythonTestOptions: TestContextOptions = {
   renderBoolean: (val: boolean) => val ? "True" : "False",
   escapeString: (str: string) => str.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),
   getDelimiter: (str: string) => str.includes('\n') ? '"""' : '"',
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   scalarValues: {
     "boolean": "False",
     "float": "3.14",
@@ -463,6 +482,8 @@ export const goTestOptions: TestContextOptions = {
     .replace(/\r/g, '\\r')
     .replace(/\t/g, '\\t'),
   getDelimiter: (str: string) => '"',
+  yamlMultilineStyle: "block-literal",
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   scalarValues: {
     "boolean": "false",
     "float": "3.14",

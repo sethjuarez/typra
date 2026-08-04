@@ -31,6 +31,7 @@ import type { RustTestContext } from "../src/languages/rust/driver.js";
 import { RustExprVisitor } from "../src/languages/rust/visitor.js";
 import { emitPythonFile } from "../src/languages/python/emitter.js";
 import { PythonExprVisitor } from "../src/languages/python/visitor.js";
+import { buildBaseTestContext, goTestOptions } from "../src/testing/test-context.js";
 
 // ============================================================================
 // Test fixtures (same as expansion.test.ts)
@@ -701,6 +702,40 @@ describe("lowerFile", () => {
 
       assert.match(code, /if instance\.Instructions == nil \|\| \*instance\.Instructions != "system:\\\\nBe helpful\." \{/);
       assert.doesNotMatch(code, /if instance\.Instructions != /);
+    });
+
+    it("keeps whitespace-sensitive multiline YAML trim-proof", () => {
+      const instructions = makeProp("instructions", "string", { isScalar: true });
+      const expected = "some \npersonal\ncontent";
+      instructions.samples = [{ sample: { instructions: expected }, description: "" }];
+      const prompty = makeType("Prompty", [instructions]);
+      const context = buildBaseTestContext(prompty, "prompty", goTestOptions);
+
+      assert.deepEqual(context.examples[0].yaml, [
+        'instructions: "some\\ \\npersonal\\ncontent"',
+        "",
+      ]);
+      assert.equal(context.examples[0].sample.instructions, expected);
+
+      const blockValue = "some\npersonal\ncontent";
+      instructions.samples = [{ sample: { instructions: blockValue }, description: "" }];
+      const blockContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
+      assert.deepEqual(blockContext.examples[0].yaml, [
+        "instructions: |-",
+        "  some",
+        "  personal",
+        "  content",
+        "",
+      ]);
+      assert.equal(blockContext.examples[0].sample.instructions, blockValue);
+
+      const trailingValue = "some\npersonal\ncontent\u00a0";
+      instructions.samples = [{ sample: { instructions: trailingValue }, description: "" }];
+      const trailingContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
+      assert.deepEqual(trailingContext.examples[0].yaml, [
+        `instructions: "some\\npersonal\\ncontent${"\u00a0"}"`,
+        "",
+      ]);
     });
   });
 
