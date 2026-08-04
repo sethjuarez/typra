@@ -279,7 +279,15 @@ function emitCoercions(
   fields: FieldDecl[] = [],
   isAbstract = false,
 ): void {
-  for (const coercion of coercions) {
+  let emittedBroadNumberGuard = false;
+  const orderedCoercions = [...coercions].sort(
+    (left, right) => numericCoercionRank(left.scalarType) - numericCoercionRank(right.scalarType),
+  );
+  for (const coercion of orderedCoercions) {
+    if (isBroadNumberCoercion(coercion.scalarType)) {
+      if (emittedBroadNumberGuard) continue;
+      emittedBroadNumberGuard = true;
+    }
     const check = coercionCheck("data", coercion.scalarType);
     if (!check) continue;
     lines.push(`    if (${check}) {`);
@@ -301,6 +309,24 @@ function emitCoercions(
     lines.push("      return ctx.processOutput(result);");
     lines.push("    }");
   }
+}
+
+function numericCoercionRank(scalarType: string): number {
+  if (isIntegralCoercion(scalarType)) return 1;
+  if (isBroadNumberCoercion(scalarType)) return 2;
+  return 0;
+}
+
+function isIntegralCoercion(scalarType: string): boolean {
+  return scalarType === "int32" || scalarType === "int64" || scalarType === "integer";
+}
+
+function isBroadNumberCoercion(scalarType: string): boolean {
+  return scalarType === "number"
+    || scalarType === "float"
+    || scalarType === "numeric"
+    || scalarType === "float32"
+    || scalarType === "float64";
 }
 
 function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatchDecl, lines: string[]): void {
@@ -694,6 +720,7 @@ function coercionCheck(valueExpr: string, scalarType: string): string | null {
     case "int32":
     case "int64":
     case "integer":
+      return `(${valueExpr} instanceof Integer || ${valueExpr} instanceof Long || ${valueExpr} instanceof Short || ${valueExpr} instanceof Byte)`;
     case "number":
     case "float":
     case "numeric":
