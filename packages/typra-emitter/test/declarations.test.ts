@@ -28,6 +28,8 @@ import { GoExprVisitor } from "../src/languages/go/visitor.js";
 import { emitRustFile } from "../src/languages/rust/emitter.js";
 import type { RustTestContext } from "../src/languages/rust/driver.js";
 import { RustExprVisitor } from "../src/languages/rust/visitor.js";
+import { emitPythonFile } from "../src/languages/python/emitter.js";
+import { PythonExprVisitor } from "../src/languages/python/visitor.js";
 
 // ============================================================================
 // Test fixtures (same as expansion.test.ts)
@@ -366,9 +368,9 @@ describe("lowerType", () => {
     assert.equal(decl.methods[0].returns, "string");
   });
 
-  it("lowers collection helper with name property detection", () => {
+  it("uses keyed serialization only for explicitly named collections", () => {
     const typeWithNamedCollection = makeType("Container", [
-      makeProp("bindings", "Binding", { isCollection: true, type: namedBinding }),
+      makeProp("bindings", "Binding", { isCollection: true, isNamedCollection: true, type: namedBinding }),
     ]);
     const decl = lowerType(typeWithNamedCollection, registry, polyNames);
     assert.equal(decl.collectionHelpers.length, 1);
@@ -376,20 +378,40 @@ describe("lowerType", () => {
     assert.deepEqual(decl.collectionHelpers[0].innerFields, ["value"]); // "name" excluded
   });
 
-  it("recovers keyed-collection detection for a 2nd same-element collection whose prop.type is unset", () => {
+  it("keeps explicit keyed-collection metadata for a 2nd same-element collection whose prop.type is unset", () => {
     // resolveModel leaves a collection property's `type` UNSET when the same element type
     // was already resolved by an earlier sibling (cycle-prevention) — e.g. Prompty.outputs
     // after inputs, both `Record<Property>|Named<..>[]`. Without registry fallback the 2nd
     // collection loses keyed-collection codegen (hasNameProperty=false) and saves/loads as a
     // degenerate array — silent data loss on map-form input. The registry lookup restores it.
-    const inputs = makeProp("inputs", "Binding", { isCollection: true, type: namedBinding });
-    const outputs = makeProp("outputs", "Binding", { isCollection: true }); // type UNSET (cycle quirk)
+    const inputs = makeProp("inputs", "Binding", { isCollection: true, isNamedCollection: true, type: namedBinding });
+    const outputs = makeProp("outputs", "Binding", { isCollection: true, isNamedCollection: true }); // type UNSET (cycle quirk)
     const holder = makeType("Holder", [inputs, outputs]);
     const holderRegistry = TypeRegistry.fromTypeGraph([holder, namedBinding]);
     const decl = lowerType(holder, holderRegistry, new Set());
     const out = decl.collectionHelpers.find(h => h.propertyName === "outputs")!;
-    assert.equal(out.hasNameProperty, true, "2nd same-element collection must still detect the keyed collection via registry");
+    assert.equal(out.hasNameProperty, true, "2nd same-element collection must retain the explicit keyed shape");
     assert.deepEqual(out.innerFields, ["value"]);
+  });
+
+  it("does not infer keyed serialization from an ordinary element name field", () => {
+    const requests = makeProp("pendingToolRequests", "Binding", { isCollection: true, type: namedBinding });
+    const checkpoint = makeType("Checkpoint", [requests]);
+    const checkpointRegistry = TypeRegistry.fromTypeGraph([checkpoint, namedBinding]);
+    const decl = lowerType(checkpoint, checkpointRegistry, new Set());
+    const helper = decl.collectionHelpers.find(h => h.propertyName === "pendingToolRequests")!;
+    assert.equal(helper.hasNameProperty, false);
+
+    const source = emitPythonFile({
+      typeName: checkpoint.typeName,
+      types: [decl],
+      imports: [],
+      containsAbstract: false,
+      enums: [],
+      group: "",
+    }, new PythonExprVisitor(checkpointRegistry));
+    assert.match(source, /The schema declares an ordered collection[\s\S]*return \[item\.save\(context\) for item in items\]/);
+    assert.doesNotMatch(source, /Object format: use name as key/);
   });
 
   it("recovers keyed-collection detection via structural isNamedCollection when the element type lacks a real name field", () => {

@@ -752,27 +752,14 @@ export function emitRustTest(ctx: RustTestContext): string {
       // navigate into sampled collections by integer index to re-assert discriminators:
       // that is redundant and, for keyed (property-bag) collections whose canonical wire is
       // a name-keyed MAP, `value[prop][0]` navigates into an object → None and mis-fails.
-      // Element type names known to carry a `name` property (i.e. keyed collections),
-      // used by the keyed-map assertion + synthesized map-input block below. Built once to
-      // work around the cycle-prevention quirk where an element's `prop.type` is unset on a
-      // later sibling of the same element type. `isNamedCollection` is the structural flag
-      // set at IR resolution for `Record<T>|Named<..>[]` bags — authoritative even when
-      // `prop.type` (the injected-`name` wrapper) was left unresolved on a later sibling.
-      const namedElementTypes = new Set<string>();
-      for (const p of node.properties) {
-        if (p.isNamedCollection || (p.type && p.type.properties.some(t => t.name === "name"))) {
-          namedElementTypes.add(p.typeName.name);
-        }
-      }
+      // Only Record<T>|Named<T>[] explicitly opts into keyed-map wire semantics.
+      // A regular list whose element happens to have a `name` field must remain an
+      // ordered array so duplicate names are not collapsed.
       const isKeyedCollection = (prop: TypeNode["properties"][number]): boolean =>
-        prop.isCollection &&
-        (prop.isNamedCollection ||
-          (prop.type?.properties.some(t => t.name === "name") ?? false) ||
-          namedElementTypes.has(prop.typeName.name));
-      // Keyed-collection canonicalization: a collection whose element model has a
-      // `name` property saves as a canonical name-keyed MAP. This is exactly the
-      // property-bag pattern (e.g. prompty's `inputs`/`outputs`/`parameters`,
-      // declared as the union `Record<T> | Named<T>[]`) that a plain
+        prop.isCollection && prop.isNamedCollection;
+      // Keyed-collection canonicalization for the explicit property-bag pattern
+      // (e.g. prompty's `inputs`/`outputs`/`parameters`, declared as the union
+      // `Record<T> | Named<T>[]`) that a plain
       // `#[derive(serde::Serialize/Deserialize)]` on a `Vec<T>` field CANNOT
       // reproduce — the derive emits/demands a JSON array and REJECTS the canonical
       // map on load with "invalid type: map, expected a sequence". Prove the manual

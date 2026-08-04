@@ -414,10 +414,9 @@ function getCollectionTypes(node: TypeNode): Array<{ prop: PropertyNode; type: s
     .map(p => ({
       prop: p,
       type: p.type?.properties.filter(t => t.name !== "name").map(t => t.name) || [],
-      // `isNamedCollection` (structural `Record<T>|Named<..>[]` flag) keeps keyed-map codegen
-      // for a 2nd same-element-typed sibling whose `p.type` was left unresolved by the cycle
-      // guard (mirrors the shared IR lowerCollectionHelpers fix).
-      hasNameProperty: p.isNamedCollection || p.type?.properties.some(t => t.name === "name") || false,
+      // Ordinary lists remain ordered arrays even when their element has a `name` field.
+      // Only Record<T>|Named<T>[] explicitly opts into name-keyed map serialization.
+      hasNameProperty: p.isNamedCollection,
     }));
 }
 

@@ -378,27 +378,14 @@ function lowerCollectionHelpers(node: TypeNode, registry: TypeRegistry): Collect
     .filter(p => p.isCollection && !p.isScalar && !p.isDict)
     .map(p => {
       // A collection property's `p.type` is UNSET when the same element type was already
-      // resolved via an earlier sibling property (cycle-prevention in resolveModel). Without
-      // recovering it, the 2nd+ same-element-typed collection loses its keyed-collection
-      // codegen (hasNameProperty=false, empty innerFields) and degrades to array-only
-      // save/load — e.g. Prompty.outputs vs inputs (identical `Record<Property>|Named<..>[]`
-      // alias) would emit divergent, lossy wire. Fall back to the registry's fully-resolved
-      // element TypeNode (same pattern as expansion.ts resolveObjectAgainstType).
+      // resolved via an earlier sibling property (cycle-prevention in resolveModel). Recover
+      // it for shorthand field metadata, but do not infer keyed wire semantics from a regular
+      // element field named `name`: ordinary lists must preserve duplicates and ordering.
       const elementType = p.type ?? registry.get(p.typeName.name);
-      // A `Named<T>`-injected keyed collection (`Record<T>|Named<..>[]`) carries its
-      // name-keyed-MAP-ness structurally (p.isNamedCollection), because the injected `name`
-      // field lives on the `Named<T>` wrapper — which is only resolved into `p.type` for the
-      // FIRST sibling of a given element type. A later same-typed sibling (`outputs` after
-      // `inputs`) has `p.type` undefined and the raw registry `T` lacks the injected `name`,
-      // so structural detection is the ONLY way to keep its keyed codegen. OR it in.
-      const hasNameProperty =
-        p.isNamedCollection ||
-        elementType?.properties.some(t => t.name === "name") ||
-        false;
-      // When `hasNameProperty` holds via the structural flag but the element type resolved to
-      // the raw `T` (no `name` field), its own fields ARE the inner fields (name-less), which
-      // is exactly what the `Named<T>` wrapper's non-name fields would be — so filtering
-      // `!== "name"` is correct in both cases.
+      // Only the explicit Record<T> | Named<T>[] schema shape opts into a name-keyed map.
+      // The structural flag survives when the Named<T> wrapper is unavailable on later
+      // same-element siblings.
+      const hasNameProperty = p.isNamedCollection;
       return {
         propertyName: p.name,
         elementTypeName: p.typeName,

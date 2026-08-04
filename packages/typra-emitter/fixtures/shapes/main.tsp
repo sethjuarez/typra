@@ -40,6 +40,9 @@ model FixtureRoot {
   @sample(#{ mode: "batch" })
   @doc("Open string union field")
   mode?: FixtureMode;
+
+  @doc("Ordered complex collection with non-unique names")
+  checkpoint?: FixtureCheckpoint;
 }
 
 model FixtureOwner {
@@ -48,6 +51,19 @@ model FixtureOwner {
 
   @sample(#{ displayName: "Fixture Owner" })
   displayName?: string;
+}
+
+model FixtureToolRequest {
+  @sample(#{ id: "call-a" })
+  id: string;
+
+  @sample(#{ name: "echo" })
+  name: string;
+}
+
+model FixtureCheckpoint {
+  @sample(#{ pendingToolRequests: #[#{ id: "call-a", name: "echo" }, #{ id: "call-b", name: "echo" }] })
+  pendingToolRequests: FixtureToolRequest[];
 }
 
 @discriminator("kind")

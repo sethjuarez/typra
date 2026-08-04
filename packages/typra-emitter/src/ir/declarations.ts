@@ -351,7 +351,7 @@ export interface CollectionHelperDecl {
   elementTypeName: TypeName;
   /** Field names on the element type (excluding "name" — used for shorthand detection) */
   innerFields: string[];
-  /** Whether the element type has a "name" property (enables dict format) */
+  /** Whether the schema explicitly opts into a name-keyed map via Record<T> | Named<T>[] */
   hasNameProperty: boolean;
 }
 

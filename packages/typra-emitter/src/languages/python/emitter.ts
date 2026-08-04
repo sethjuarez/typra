@@ -802,7 +802,7 @@ function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDe
     lines.push("        return result");
   } else {
     lines.push("");
-    lines.push("        # This type doesn't have a 'name' property, so always use array format");
+    lines.push("        # The schema declares an ordered collection, so preserve array format");
     lines.push("        return [item.save(context) for item in items]");
   }
 }
