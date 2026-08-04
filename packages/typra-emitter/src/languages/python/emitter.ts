@@ -375,7 +375,7 @@ function emitMethodHelpersProtocol(type: TypeDecl, lines: string[]): void {
     const snakeName = toSnakeCase(m.name);
     // Zero-param, non-verb methods are emitted as @property — idiomatic Python
     // for accessor-style helpers (matches the C# emitter's heuristic).
-    const isProperty = Object.keys(m.params).length === 0 && !isMethodStyle(m.name);
+    const isProperty = Object.keys(m.params).length === 0 && !m.runtimeCancellable && !isMethodStyle(m.name);
     lines.push("");
     if (isProperty) {
       lines.push("    @property");

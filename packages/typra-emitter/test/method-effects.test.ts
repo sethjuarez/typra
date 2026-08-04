@@ -191,4 +191,29 @@ describe("@method effect metadata", () => {
       ],
     );
   });
+
+  it("keeps zero-parameter cancellable Python helpers callable", () => {
+    const helper = model("StatusProvider");
+    helper.methods = [{
+      name: "status",
+      returns: "string",
+      description: "",
+      params: {},
+      optional: false,
+      sync: true,
+      runtimeCancellable: true,
+      atomic: false,
+      nonFatal: false,
+    }];
+    const registry = TypeRegistry.fromTypeGraph([helper]);
+    const python = emitPythonFile(
+      lowerFile(helper, registry),
+      new PythonExprVisitor(registry),
+      "pipeline",
+      { cancellationTokenPath: "prompty.core.cancellation.CancellationToken" },
+    );
+
+    assert.match(python, /def status\(self, cancellation: CancellationToken \| None = None\) -> str:/);
+    assert.doesNotMatch(python, /@property\s+def status/);
+  });
 });
