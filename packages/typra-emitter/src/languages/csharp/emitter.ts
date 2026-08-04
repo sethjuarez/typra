@@ -622,17 +622,17 @@ function getLoadExpression(
   // Named enum — parse from string (skip open enums — they use string)
   if (assign.enumName && !assign.isOpenEnum) {
     const csEnumName = toPascalCase(assign.enumName);
-    return `instance.${propName} = ${csEnumName}Parser.Parse(${varName}?.ToString()!);`;
+    return `instance.${propName} = ${csEnumName}Parser.Parse(${varName}.ToString()!);`;
   }
   if (assign.enumName && assign.isOpenEnum && Object.keys(assign.parseAliases).length > 0) {
-    return `instance.${propName} = ${varName}?.ToString()! switch { ${renderCSharpAliasSwitchArms(assign.parseAliases)}_ => ${varName}?.ToString()! };`;
+    return `instance.${propName} = ${varName}.ToString()! switch { ${renderCSharpAliasSwitchArms(assign.parseAliases)}_ => ${varName}.ToString()! };`;
   }
   const cat = assign.category;
   switch (cat.kind) {
     case "scalar": {
       const csType = CSHARP_TYPE_MAP[cat.scalarType] || "object";
       if (csType === "string") {
-        return `instance.${propName} = ${varName}?.ToString()!;`;
+        return `instance.${propName} = ${varName}.ToString()!;`;
       }
 
       if (NON_NULLABLE_VALUE_TYPES.has(csType)) {
