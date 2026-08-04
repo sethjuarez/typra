@@ -684,6 +684,26 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
       XCTAssertEqual(output["name"] as? String, input["name"] as? String)
       XCTAssertEqual(output["description"] as? String, input["description"] as? String)
     }
+
+    let wildcardInput: [String: Any] = [
+      "kind": "vendor",
+      "name": "vendor",
+      "description": "vendor description",
+      "config": ["enabled": true],
+    ]
+    let wildcard = try FixtureTool.load(wildcardInput)
+    guard case .fixtureCustomTool(let custom) = wildcard else {
+      throw TypraRuntimeError.unsupported("Expected FixtureCustomTool wildcard")
+    }
+    XCTAssertEqual(custom.kind, "vendor")
+    let wildcardOutput = try wildcard.save()
+    XCTAssertEqual(wildcardOutput["kind"] as? String, "vendor")
+    XCTAssertEqual(wildcardOutput["name"] as? String, "vendor")
+    let wildcardReloaded = try FixtureTool.load(wildcardOutput)
+    guard case .fixtureCustomTool(let reloadedCustom) = wildcardReloaded else {
+      throw TypraRuntimeError.unsupported("Expected reloaded FixtureCustomTool wildcard")
+    }
+    XCTAssertEqual(reloadedCustom.kind, "vendor")
   }
 
   func testToolBindingsLoadAndRoundTripMapAndListForms() throws {
