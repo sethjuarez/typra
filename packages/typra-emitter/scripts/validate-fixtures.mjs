@@ -660,34 +660,64 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
   }
 
   func testToolBindingsLoadAndRoundTripMapAndListForms() throws {
-    let mapTool = try FixtureBindingTool.load([
+    func functionTool(_ input: [String: Any]) throws -> FixtureFunctionTool {
+      let loaded = try FixtureTool.load(input)
+      guard case .fixtureFunctionTool(let tool) = loaded else {
+        throw TypraRuntimeError.unsupported("Expected FixtureFunctionTool")
+      }
+      return tool
+    }
+
+    let mapTool = try functionTool([
       "kind": "function",
       "name": "map-tool",
+      "command": "run",
       "bindings": [
-        "input": "customer.name",
-        "output": ["source": "result.text"],
+        "zeta": ["source": "result.text"],
+        "alpha": ["source": "customer.name"],
       ],
     ])
-    XCTAssertEqual(mapTool.bindings?.first { $0.name == "input" }?.source, "customer.name")
-    XCTAssertEqual(mapTool.bindings?.first { $0.name == "output" }?.source, "result.text")
+    XCTAssertEqual(mapTool.bindings?.compactMap { $0.name }, ["alpha", "zeta"])
     let mapOutput = try mapTool.save()
     let mapBindings = mapOutput["bindings"] as? [String: Any]
-    XCTAssertEqual(mapBindings?["input"] as? String, "customer.name")
-    XCTAssertEqual(mapBindings?["output"] as? String, "result.text")
+    XCTAssertEqual(mapBindings?["alpha"] as? String, "customer.name")
+    XCTAssertEqual(mapBindings?["zeta"] as? String, "result.text")
+    let mapReloaded = try functionTool(mapOutput)
+    XCTAssertEqual(mapReloaded.bindings?.compactMap { $0.name }, ["alpha", "zeta"])
 
-    let listTool = try FixtureBindingTool.load([
+    let listTool = try functionTool([
       "kind": "function",
       "name": "list-tool",
+      "command": "run",
       "bindings": [
-        ["name": "input", "source": "customer.name"],
-        ["name": "output", "source": "result.text"],
+        ["name": "zeta", "source": "result.text"],
+        ["name": "alpha", "source": "customer.name"],
       ],
     ])
+    XCTAssertEqual(listTool.bindings?.compactMap { $0.name }, ["zeta", "alpha"])
     let listOutput = try listTool.save(SaveContext(collectionFormat: "array"))
     let listBindings = listOutput["bindings"] as? [[String: Any]]
     XCTAssertEqual(listBindings?.count, 2)
-    XCTAssertEqual(listBindings?[0]["name"] as? String, "input")
-    XCTAssertEqual(listBindings?[0]["source"] as? String, "customer.name")
+    XCTAssertEqual(listBindings?[0]["name"] as? String, "zeta")
+    XCTAssertEqual(listBindings?[0]["source"] as? String, "result.text")
+    let listReloaded = try functionTool(listOutput)
+    XCTAssertEqual(listReloaded.bindings?.compactMap { $0.name }, ["zeta", "alpha"])
+
+    let scalarTool = try functionTool([
+      "kind": "function",
+      "name": "scalar-tool",
+      "command": "run",
+      "bindings": [
+        "zeta": "result.text",
+        "alpha": "customer.name",
+      ],
+    ])
+    XCTAssertEqual(scalarTool.bindings?.compactMap { $0.name }, ["alpha", "zeta"])
+    XCTAssertEqual(scalarTool.bindings?.first { $0.name == "alpha" }?.source, "customer.name")
+    let scalarOutput = try scalarTool.save()
+    XCTAssertEqual((scalarOutput["bindings"] as? [String: Any])?["alpha"] as? String, "customer.name")
+    let scalarReloaded = try functionTool(scalarOutput)
+    XCTAssertEqual(scalarReloaded.bindings?.compactMap { $0.name }, ["alpha", "zeta"])
   }
 
   func testScalarPropertyCoercionDispatchesToTypedVariant() throws {
