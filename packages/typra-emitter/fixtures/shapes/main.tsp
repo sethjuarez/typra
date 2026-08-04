@@ -181,6 +181,11 @@ model FixtureMultilineWhitespace {
   value: string;
 }
 
+model FixturePromptyWhitespace {
+  @sample(#{ value: "system:\nYou are helpful.\n\nKeep this space \nPreserve ordinary lines.\nKeep this too \nuser:{{question}}" })
+  value: string;
+}
+
 // Keyed property-bag regression (prompty's `inputs`/`outputs`/`parameters` shape): a field
 // typed as the union `Record<T> | Named<T>[]` whose CANONICAL wire form is a MAP keyed by
 // the element `name`. This exercises the `Record<T> | Named<T>[]` union-alias lowering

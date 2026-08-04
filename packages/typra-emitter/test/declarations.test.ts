@@ -733,7 +733,7 @@ describe("lowerFile", () => {
       );
       assert.deepEqual(
         trailingSpaceContext.examples[0].yaml,
-        ['value: "first line with trailing space \\nsecond line\\n"', ""],
+        ['value: "first line with trailing space\\ \\nsecond line\\n"', ""],
       );
 
       const whitespace = makeProp("value", "string", { isScalar: true });
