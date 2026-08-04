@@ -584,6 +584,57 @@ describe("Java emitter runtime semantics", () => {
     assert.match(source, /public Double ratio = 1\.0d;/);
   });
 
+  it("routes integral shorthand before the broad numeric branch", () => {
+    const kind = field("kind", "string");
+    const example = field("example", "unknown");
+    const decl = typeDecl([kind, example]);
+    decl.load.coercions = [
+      {
+        scalarType: "float64",
+        assignments: [
+          { fieldName: "kind", isInput: false, literalValue: "float" },
+          { fieldName: "example", isInput: true },
+        ],
+        needsDispatch: false,
+      },
+      {
+        scalarType: "integer",
+        assignments: [
+          { fieldName: "kind", isInput: false, literalValue: "integer" },
+          { fieldName: "example", isInput: true },
+        ],
+        needsDispatch: false,
+      },
+      {
+        scalarType: "boolean",
+        assignments: [
+          { fieldName: "kind", isInput: false, literalValue: "boolean" },
+          { fieldName: "example", isInput: true },
+        ],
+        needsDispatch: false,
+      },
+      {
+        scalarType: "string",
+        assignments: [
+          { fieldName: "kind", isInput: false, literalValue: "string" },
+          { fieldName: "example", isInput: true },
+        ],
+        needsDispatch: false,
+      },
+    ];
+
+    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+    const integralGuard =
+      "if (data instanceof Integer || data instanceof Long || data instanceof Short || data instanceof Byte)";
+    const numberGuard = "if (data instanceof Number)";
+    assert.ok(source.indexOf(integralGuard) < source.indexOf(numberGuard));
+    assert.equal(source.match(/if \(data instanceof Number\)/g)?.length, 1);
+    assert.match(source, /result\.kind = "integer";\s+result\.example = \(data instanceof Number n \? n\.intValue\(\)/);
+    assert.match(source, /result\.kind = "float";\s+result\.example = \(data instanceof Number n \? n\.doubleValue\(\)/);
+    assert.match(source, /if \(data instanceof Boolean\)/);
+    assert.match(source, /if \(data instanceof String\)/);
+  });
+
   it("preserves optional defaults and initializes required enums", () => {
     const optionalItems = field("items", "string", {
       category: { kind: "collection_scalar", scalarType: "string" },

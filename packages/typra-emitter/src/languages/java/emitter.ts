@@ -279,7 +279,14 @@ function emitCoercions(
   fields: FieldDecl[] = [],
   isAbstract = false,
 ): void {
-  for (const coercion of coercions) {
+  const orderedCoercions = coercions
+    .map((coercion, index) => ({ coercion, index }))
+    .sort((left, right) =>
+      coercionPriority(left.coercion.scalarType) - coercionPriority(right.coercion.scalarType) ||
+      left.index - right.index
+    )
+    .map(entry => entry.coercion);
+  for (const coercion of orderedCoercions) {
     const check = coercionCheck("data", coercion.scalarType);
     if (!check) continue;
     lines.push(`    if (${check}) {`);
@@ -301,6 +308,10 @@ function emitCoercions(
     lines.push("      return ctx.processOutput(result);");
     lines.push("    }");
   }
+}
+
+function coercionPriority(scalarType: string): number {
+  return ["int32", "int64", "integer"].includes(scalarType) ? 0 : 1;
 }
 
 function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatchDecl, lines: string[]): void {
@@ -695,6 +706,7 @@ function coercionCheck(valueExpr: string, scalarType: string): string | null {
     case "int32":
     case "int64":
     case "integer":
+      return `${valueExpr} instanceof Integer || ${valueExpr} instanceof Long || ${valueExpr} instanceof Short || ${valueExpr} instanceof Byte`;
     case "number":
     case "float":
     case "numeric":
