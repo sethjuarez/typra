@@ -34,7 +34,6 @@ import {
   WireDecl,
 } from "../../ir/declarations.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
-import { goFieldName } from "./identifiers.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
 
 // ============================================================================
@@ -322,7 +321,7 @@ function emitStruct(
   for (const field of type.fields) {
     const goType = getGoFieldType(field.category, field.isOptional, polymorphicTypeNames, field.enumName);
     const fieldName = goFieldName(field.name);
-    const tag = getStructTag(field.name, field.isOptional, field.hasExplicitDefault);
+    const tag = getStructTag(field.name, field.isOptional);
     lines.push(`\t${fieldName} ${goType} ${tag}`);
   }
 
@@ -356,19 +355,7 @@ function emitLoadFunction(
   // Signature
   lines.push(`func Load${typeName}(data interface{}, ctx *LoadContext) (${returnType}, error) {`);
   if (!hasTerminalDispatch) {
-    const explicitCollectionDefaults = type.fields.filter(field =>
-      field.hasExplicitDefault &&
-      (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex")
-    );
-    if (explicitCollectionDefaults.length === 0) {
-      lines.push(`\tresult := ${typeName}{}`);
-    } else {
-      lines.push(`\tresult := ${typeName}{`);
-      for (const field of explicitCollectionDefaults) {
-        lines.push(`\t\t${goFieldName(field.name)}: ${getGoFieldType(field.category, field.isOptional, polymorphicTypeNames, field.enumName)}{},`);
-      }
-      lines.push("\t}");
-    }
+    lines.push(`\tresult := ${typeName}{}`);
     lines.push("");
   }
 
@@ -892,13 +879,8 @@ function emitSaveCollectionScalar(
   fieldName: string,
   lines: string[],
 ): void {
-  if (assign.isOptional) {
-    lines.push(`\tif obj.${fieldName} != nil {`);
-    lines.push(`\t\tresult["${assign.targetName}"] = obj.${fieldName}`);
-    lines.push("\t}");
-  } else {
-    lines.push(`\tresult["${assign.targetName}"] = obj.${fieldName}`);
-  }
+  // Collection scalars are always saved directly (no nil check)
+  lines.push(`\tresult["${assign.targetName}"] = obj.${fieldName}`);
 }
 
 function emitSaveCollectionComplex(
@@ -1103,11 +1085,16 @@ function getGoFieldType(
   }
 }
 
-function getStructTag(fieldName: string, isOptional: boolean, hasExplicitDefault = false): string {
-  const omitEmpty = isOptional && !hasExplicitDefault;
-  const jsonTag = omitEmpty ? `${fieldName},omitempty` : fieldName;
-  const yamlTag = omitEmpty ? `${fieldName},omitempty` : fieldName;
+function getStructTag(fieldName: string, isOptional: boolean): string {
+  const jsonTag = isOptional ? `${fieldName},omitempty` : fieldName;
+  const yamlTag = isOptional ? `${fieldName},omitempty` : fieldName;
   return `\`json:"${jsonTag}" yaml:"${yamlTag}"\``;
+}
+
+function goFieldName(name: string): string {
+  const identifier = name.replace(/^[^A-Za-z]+/, "");
+  const exported = toPascalCase(identifier || "field");
+  return /^[A-Z]/.test(exported) ? exported : `Field${exported}`;
 }
 
 // ============================================================================
