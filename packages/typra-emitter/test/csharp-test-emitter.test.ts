@@ -33,16 +33,16 @@ describe("C# test emitter", () => {
     assert.match(code, /^#nullable enable$/m);
     const assertions = code.match(/Assert\.Equal\("[^"]+", instance\.Instructions\);/g);
     assert.deepEqual(assertions, [
-      'Assert.Equal("first line with trailing space\\nsecond line\\u2028third line", instance.Instructions);',
-      'Assert.Equal("first line with trailing space \\nsecond line\\u2028third line", instance.Instructions);',
+      'Assert.Equal("first line with trailing space\\nsecond line \\u2028third line", instance.Instructions);',
+      'Assert.Equal("first line with trailing space \\nsecond line \\u2028third line", instance.Instructions);',
     ]);
     assert.match(
       code,
-      /Assert\.Equal\("first line with trailing space \\nsecond line\\u2028third line", reloaded\.Instructions\);/,
+      /Assert\.Equal\("first line with trailing space \\nsecond line \\u2028third line", reloaded\.Instructions\);/,
     );
     assert.match(
       code,
-      /Assert\.Equal\("first line with trailing space\\nsecond line\\u2028third line", reloaded\.Instructions\);/,
+      /Assert\.Equal\("first line with trailing space\\nsecond line \\u2028third line", reloaded\.Instructions\);/,
     );
     assert.doesNotMatch(code, /first line with trailing space $/m);
   });
