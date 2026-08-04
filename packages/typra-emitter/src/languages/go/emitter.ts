@@ -100,7 +100,9 @@ export function emitGoFileContent(
   const needsContext = types.some(type => type.methods.some(method => method.runtimeCancellable));
   const needsNamedCollections = types.some(type => type.collectionHelpers.some(helper => helper.hasNameProperty));
   const needsFmt = enums.some(enumDef => hasParseAliases(enumDef) && !enumDef.isOpen) ||
-    types.some(type => type.polymorphicDispatch?.isAbstract && !type.polymorphicDispatch.defaultVariant) ||
+    types.some(type => type.polymorphicDispatch
+      && (isClosedPolymorphicDispatch(type.polymorphicDispatch) || type.polymorphicDispatch.isAbstract)
+      && !type.polymorphicDispatch.defaultVariant) ||
     needsNamedCollections;
   if (hasNonProtocol) {
     emitHeader(lines, packageName, group, needsFmt, needsContext, needsNamedCollections);
@@ -381,8 +383,9 @@ function emitLoadFunction(
 ): void {
   const typeName = type.typeName.name;
   const isPolymorphicBase = type.polymorphicDispatch !== null;
-  const hasTerminalDispatch = type.polymorphicDispatch?.isAbstract === true &&
-    !type.polymorphicDispatch.defaultVariant;
+  const hasTerminalDispatch = type.polymorphicDispatch !== null
+    && (isClosedPolymorphicDispatch(type.polymorphicDispatch) || type.polymorphicDispatch.isAbstract)
+    && !type.polymorphicDispatch.defaultVariant;
   const hasCoercions = type.load.coercions.length > 0;
   const returnType = isPolymorphicBase ? "interface{}" : typeName;
 

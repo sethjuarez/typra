@@ -128,13 +128,26 @@ describe("closed polymorphic dispatch", () => {
     ], {
       discriminator: "kind",
       childTypes: [closedText],
-      isAbstract: true,
     });
     const closedDispatch = lowerFile(closedContent, buildTestRegistry(), new Set(["ClosedContent"])).types[0].polymorphicDispatch!;
     const openDispatch = lowerFile(connectionType, buildTestRegistry(), new Set(["Connection"])).types[0].polymorphicDispatch!;
 
     assert.equal(isClosedPolymorphicDispatch(closedDispatch), true);
+    assert.equal(closedDispatch.defaultVariant, null);
     assert.equal(isClosedPolymorphicDispatch(openDispatch), false);
+
+    const closedRegistry = TypeRegistry.fromTypeGraph([closedContent, closedText]);
+    const closedFile = lowerFile(closedContent, closedRegistry, new Set(["ClosedContent"]));
+    const goSource = emitGoFileContent(
+      closedFile.types,
+      "fixtures",
+      new GoExprVisitor(closedRegistry),
+      new Set(["ClosedContent"]),
+      closedFile.enums,
+      closedFile.group,
+    );
+    assert.match(goSource, /"fmt"/);
+    assert.match(goSource, /unknown ClosedContent discriminator field 'kind' value/);
   });
 });
 

@@ -351,24 +351,28 @@ function lowerPolymorphicDispatch(
     typeName: (t.instance as TypeNode).typeName,
   }));
 
+  const discriminatorProperty = node.properties.find(property => property.name === node.discriminator);
+  const isClosed = (discriminatorProperty?.allowedValues.length ?? 0) > 0
+    && discriminatorProperty?.isOpenEnum !== true;
+
   let defaultVariant: PolymorphicDefault | null = null;
   if (polyTypes.default) {
     const defaultNode = polyTypes.default.instance as TypeNode;
-    defaultVariant = {
-      typeName: defaultNode.typeName,
-      isSelfReference: defaultNode.typeName.name === node.typeName.name,
-    };
+    const isSelfReference = defaultNode.typeName.name === node.typeName.name;
+    if (!isClosed || !isSelfReference) {
+      defaultVariant = {
+        typeName: defaultNode.typeName,
+        isSelfReference,
+      };
+    }
   }
 
-  const discriminatorProperty = node.properties.find(property => property.name === node.discriminator);
   const baseDispatch: PolymorphicDispatchDecl = {
     discriminatorField: node.discriminator!,
     variants,
     defaultVariant,
     isAbstract: node.isAbstract,
-    isClosed: defaultVariant === null
-      && (discriminatorProperty?.allowedValues.length ?? 0) > 0
-      && discriminatorProperty?.isOpenEnum !== true,
+    isClosed,
   };
 
   return baseDispatch;

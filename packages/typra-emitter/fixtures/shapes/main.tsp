@@ -75,7 +75,6 @@ model FixtureCheckpoint {
   pendingToolRequests: FixtureToolRequest[];
 }
 
-@abstract
 @discriminator("kind")
 model FixtureContent {
   kind: FixtureContentKind;
