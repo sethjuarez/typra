@@ -7,6 +7,7 @@ import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper } from "../src/languages/java/emitter.js";
 import { emitJavaSaveContext } from "../src/languages/java/scaffolding.js";
+import { emitJavaTest } from "../src/languages/java/test-emitter.js";
 import {
   javaEnumTypeName,
   javaIdentifier,
@@ -228,6 +229,63 @@ describe("Java emitter runtime semantics", () => {
     assert.match(customSource, /Tool\.loadBaseInto\(result, map, ctx\);/);
     assert.doesNotMatch(customSource, /map\.containsKey\("kind"\)/);
     assert.doesNotMatch(customSource, /result\.put\("kind"/);
+  });
+
+  describe("Java generated tests", () => {
+    it("asserts named map/list shorthand and expanded collection items", () => {
+      const item = new TypeNode({ name: "Binding" } as Model, "");
+      item.typeName = { namespace: "Test", name: "Binding" };
+      item.coercions = [
+        { scalar: "string", expansion: { value: "{value}" } },
+        { scalar: "number", expansion: { weight: "{value}" } },
+      ];
+      const name = new PropertyNode({ name: "name" } as ModelProperty, "");
+      name.typeName = { namespace: "TypeSpec", name: "string" };
+      name.isScalar = true;
+      const value = new PropertyNode({ name: "value" } as ModelProperty, "");
+      value.typeName = { namespace: "TypeSpec", name: "string" };
+      value.isScalar = true;
+      const weight = new PropertyNode({ name: "weight" } as ModelProperty, "");
+      weight.typeName = { namespace: "TypeSpec", name: "number" };
+      weight.isScalar = true;
+      item.properties = [name, value, weight];
+
+      const container = new TypeNode({ name: "Tool" } as Model, "");
+      container.typeName = { namespace: "Test", name: "Tool" };
+      const bindings = new PropertyNode({ name: "bindings" } as ModelProperty, "");
+      bindings.typeName = item.typeName;
+      bindings.type = item;
+      bindings.isCollection = true;
+      bindings.isNamedCollection = true;
+      container.properties = [bindings];
+
+      const source = emitJavaTest({
+        node: container,
+        isAbstract: false,
+        package: "test",
+        examples: [{
+          sample: {
+            bindings: {
+              alpha: "text",
+              beta: 2.5,
+              gamma: { value: "expanded", weight: 3 },
+            },
+          },
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [],
+        }],
+        coercions: [],
+        factories: [],
+      });
+
+      assert.match(source, /assertEquals\(3, instance1\.bindings\.size\(\), "Expected bindings size"\);/);
+      assert.match(source, /assertEquals\("alpha", instance1\.bindings\.get\(0\)\.name, "Expected bindings\.alpha name"\);/);
+      assert.match(source, /assertEquals\("text", instance1\.bindings\.get\(0\)\.value, "Expected bindings\.alpha\.value"\);/);
+      assert.match(source, /assertEquals\(2\.5, instance1\.bindings\.get\(1\)\.weight, "Expected bindings\.beta\.weight"\);/);
+      assert.match(source, /assertEquals\("expanded", instance1\.bindings\.get\(2\)\.value, "Expected instance1\.bindings\.get\(2\)\.value"\);/);
+      assert.match(source, /assertEquals\(3, instance1\.bindings\.get\(2\)\.weight, "Expected instance1\.bindings\.get\(2\)\.weight"\);/);
+    });
   });
 
   describe("Java method extension seams", () => {
