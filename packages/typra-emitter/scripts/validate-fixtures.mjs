@@ -1301,6 +1301,8 @@ function runRustExecutableConformance() {
     '    let image_content = FixtureContent::load_from_value(&json!({"kind": "image", "url": "https://example.com/fixture.png"}), &load_ctx);',
     '    let wire = WireOptions::load_from_value(&json!({"maxOutputTokens": 256, "temperature": 0.7}), &load_ctx);',
     '    let reference = FixtureReference::load_from_value(&json!("ref-coerced"), &load_ctx);',
+    "    let number_property = FixtureProperty::load_from_value(&json!(3.5), &load_ctx);",
+    '    assert_eq!(number_property.to_value(&save_ctx), json!({"kind": "number", "default": 3.5}));',
     "    let omitted_model_info = ModelInfo::load_from_value(&json!({}), &load_ctx);",
     "    assert!(omitted_model_info.input_modalities.is_none());",
     "    assert!(omitted_model_info.output_modalities.is_empty());",
@@ -1796,6 +1798,11 @@ function assertStaticFixtureCoverage() {
     path.join("generated", "fixtures", "rust", "fixture_reference.rs"),
     "pub fn named(",
     "fn display(&self, prefix: &String) -> String;",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust", "fixture_property.rs"),
+    "if let Some(value) = value.as_f64().map(|value| value as f32) {",
+    'kind: FixturePropertyKind::FixtureNumberProperty, default: Some(value.into())',
   );
   assertIncludes(
     path.join("generated", "fixtures", "rust", "tests", "protocol_scaffolds_test.rs"),

@@ -874,6 +874,8 @@ function rustCoercionCheck(scalarType: string): { ifLet: string } | null {
       return { ifLet: "if let Some(s) = value.as_str()" };
     case "boolean":
       return { ifLet: "if let Some(value) = value.as_bool()" };
+    case "float32":
+      return { ifLet: "if let Some(value) = value.as_f64().map(|value| value as f32)" };
     case "float64":
     case "float":
     case "number":
