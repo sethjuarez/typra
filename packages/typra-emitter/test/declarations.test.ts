@@ -1060,6 +1060,19 @@ describe("lowerFile", () => {
 describe("Rust emitter serde derives", () => {
   const registry = buildTestRegistry();
 
+  it("preserves open self-reference discriminator payloads losslessly", () => {
+    const file = lowerFile(contentPart, registry, new Set(["ContentPart"]));
+    const code = emitRustFile(file, new RustExprVisitor(registry), new Set(["ContentPart"]));
+
+    assert.match(
+      code,
+      /Custom \{\s+\/\/\/ The raw `kind` string for this unknown variant\.\s+kind_name: String,\s+\/\/\/ Unmodeled fields preserved for forward-compatible round trips\.\s+raw: serde_json::Map<String, serde_json::Value>/,
+    );
+    assert.match(code, /_ => ContentPartKind::Custom \{\s+kind_name: kind_str\.to_string\(\),\s+raw: \{/);
+    assert.match(code, /raw\.remove\("kind"\);/);
+    assert.match(code, /ContentPartKind::Custom \{ raw, \.\. \} => \{\s+for \(key, value\) in raw \{\s+if matches!\(key\.as_str\(\), "kind"\) \{ continue; \}/);
+  });
+
   it("uses concrete vectors for explicit empty defaults and options for absent defaults", () => {
     const owner = makeType("CollectionOwner", [
       makeProp("name", "string", { isScalar: true }),

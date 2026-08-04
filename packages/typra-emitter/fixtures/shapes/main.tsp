@@ -356,6 +356,8 @@ model ModelInfo {
 model FixtureConnection {
   @sample(#{ kind: "custom", endpoint: "https://example.test" })
   kind: string;
+
+  name?: string;
 }
 
 model FixtureCustomConnection extends FixtureConnection {
