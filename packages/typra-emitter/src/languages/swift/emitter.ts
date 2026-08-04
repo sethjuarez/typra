@@ -21,17 +21,15 @@ export function emitSwiftFile(
   declarationUniverse: TypeDecl[] = file.types,
 ): string {
   const augmentedUniverse = addNamedCollectionFields(declarationUniverse);
-  const polymorphicDefaults = new Map(
+  const polymorphicDefaultCases = new Map(
     augmentedUniverse
       .filter(type => type.polymorphicDispatch !== null)
       .map(type => {
         const fallback = type.polymorphicDispatch!.defaultVariant;
         return [
           type.typeName.name,
-          fallback && !fallback.isSelfReference
-            ? `.${swiftPropertyName(fallback.typeName.name)}(${swiftTypeName(fallback.typeName.name)}())`
-            : ".unknown([:])",
-        ];
+          fallback && !fallback.isSelfReference ? fallback.typeName.name : null,
+        ] as const;
       }),
   );
   const emittedKeys = new Set(file.types.map(typeKey));
@@ -49,7 +47,7 @@ export function emitSwiftFile(
   }
 
   for (const type of types) {
-    emitType(type, lines, visitor, polymorphicTypeNames, polymorphicDefaults, types);
+    emitType(type, lines, visitor, polymorphicTypeNames, types, polymorphicDefaultCases);
   }
 
   return trimBlankLines(lines).join("\n") + "\n";
@@ -60,8 +58,8 @@ function emitType(
   lines: string[],
   visitor: ExprVisitor,
   polymorphicTypeNames: Set<string>,
-  polymorphicDefaults: Map<string, string>,
   allTypes: TypeDecl[],
+  polymorphicDefaultCases: ReadonlyMap<string, string | null>,
 ): void {
   if (type.polymorphicDispatch) {
     emitPolymorphicEnum(type, lines, allTypes);
@@ -71,7 +69,7 @@ function emitType(
     emitProtocol(type, lines);
     return;
   }
-  emitStruct(type, lines, visitor, polymorphicTypeNames, polymorphicDefaults);
+  emitStruct(type, lines, visitor, polymorphicTypeNames, polymorphicDefaultCases);
 }
 
 function emitEnum(enumDef: EnumDef, lines: string[]): void {
@@ -126,6 +124,7 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
   const fallback = dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference
     ? dispatch.defaultVariant
     : null;
+  const usesUnknownFallback = fallback === null;
   for (const variant of dispatch.variants) {
     const childName = swiftTypeName(variant.typeName.name);
     lines.push(`  case ${swiftPropertyName(variant.typeName.name)}(${childName})`);
@@ -133,7 +132,7 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
   if (fallback && !dispatch.variants.some(variant => variant.typeName.name === fallback.typeName.name)) {
     lines.push(`  case ${swiftPropertyName(fallback.typeName.name)}(${swiftTypeName(fallback.typeName.name)})`);
   }
-  if (!fallback) {
+  if (usesUnknownFallback) {
     lines.push("  case unknown([String: Any])");
   }
   lines.push("");
@@ -164,7 +163,7 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
   if (fallback && !dispatch.variants.some(variant => variant.typeName.name === fallback.typeName.name)) {
     lines.push(`    case .${swiftPropertyName(fallback.typeName.name)}(let value): return try value.save(context)`);
   }
-  if (!fallback) {
+  if (usesUnknownFallback) {
     lines.push("    case .unknown(let value): return value");
   }
   lines.push("    }");
@@ -263,7 +262,7 @@ function emitStruct(
   lines: string[],
   visitor: ExprVisitor,
   polymorphicTypeNames: Set<string>,
-  polymorphicDefaults: Map<string, string>,
+  polymorphicDefaultCases: ReadonlyMap<string, string | null>,
 ): void {
   const typeName = swiftTypeName(type.typeName.name);
   if (type.description) {
@@ -274,12 +273,12 @@ function emitStruct(
   lines.push(`public struct ${typeName}: ${conformances.join(", ")} {`);
   lines.push(`  public static let shorthandProperty: String? = ${type.coercionProperty ? swiftStringLiteral(type.coercionProperty) : "nil"}`);
   for (const field of type.fields) {
-    const defaultValue = swiftFieldDefaultValue(field, polymorphicTypeNames, polymorphicDefaults);
+    const defaultValue = swiftFieldDefaultValue(field, polymorphicTypeNames, polymorphicDefaultCases);
     lines.push(`  public var ${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`);
   }
   lines.push("");
   lines.push(`  public init(${type.fields.map(field => {
-    const defaultValue = swiftFieldDefaultValue(field, polymorphicTypeNames, polymorphicDefaults);
+    const defaultValue = swiftFieldDefaultValue(field, polymorphicTypeNames, polymorphicDefaultCases);
     return `${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`;
   }).join(", ")}) {`);
   for (const field of type.fields) {
@@ -355,19 +354,21 @@ function emitNamedCollectionLoadHelper(
   lines.push(`      return try values.map { try ${elementType}.load($0, context: context) }`);
   lines.push("    }");
   lines.push(`    let values = try TypraRuntime.dictionary(data, field: ${swiftStringLiteral(helper.propertyName)})`);
-  lines.push("    return try values.sorted { $0.key < $1.key }.map { entry in");
+  lines.push(`    return try values.sorted { $0.key < $1.key }.map { entry -> ${elementType} in`);
+  lines.push("      let name = entry.key");
+  lines.push("      let value = entry.value");
   if (polymorphicTypeNames.has(helper.elementTypeName.name)) {
     lines.push("      var itemData: [String: Any]");
-    lines.push("      if let object = entry.value as? [String: Any] {");
+    lines.push("      if let object = value as? [String: Any] {");
     lines.push("        itemData = object");
     lines.push("      } else {");
-    lines.push(`        itemData = try ${elementType}.load(entry.value, context: context).save()`);
+    lines.push(`        itemData = try ${elementType}.load(value, context: context).save()`);
     lines.push("      }");
-    lines.push('      itemData["name"] = entry.key');
+    lines.push('      itemData["name"] = name');
     lines.push(`      return try ${elementType}.load(itemData, context: context)`);
   } else {
-    lines.push(`      var item = try ${elementType}.load(entry.value, context: context)`);
-    lines.push("      item.name = entry.key");
+    lines.push(`      var item = try ${elementType}.load(value, context: context)`);
+    lines.push("      item.name = name");
     lines.push("      return item");
   }
   lines.push("    }");
@@ -416,9 +417,9 @@ function typeKey(type: TypeDecl): string {
 
 function supportsNamedCollectionHelper(
   helper: CollectionHelperDecl,
-  _polymorphicTypeNames: Set<string>,
+  polymorphicTypeNames: Set<string>,
 ): boolean {
-  return helper.hasNameProperty;
+  return helper.hasNameProperty && !polymorphicTypeNames.has(helper.elementTypeName.name);
 }
 
 function addNamedCollectionFields(types: TypeDecl[]): TypeDecl[] {
@@ -614,20 +615,20 @@ function swiftCategoryType(category: PropertyCategory, enumName: string | null, 
 function swiftFieldDefaultValue(
   field: FieldDecl,
   polymorphicTypeNames: Set<string>,
-  polymorphicDefaults: Map<string, string>,
+  polymorphicDefaultCases: ReadonlyMap<string, string | null>,
 ): string {
   const materializesCollectionDefault =
     field.hasExplicitDefault &&
     (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex");
   return field.isOptional && !materializesCollectionDefault
     ? "nil"
-    : swiftDefaultValue(field, polymorphicTypeNames, polymorphicDefaults);
+    : swiftDefaultValue(field, polymorphicTypeNames, polymorphicDefaultCases);
 }
 
 function swiftDefaultValue(
   field: FieldDecl,
   polymorphicTypeNames: Set<string>,
-  polymorphicDefaults: Map<string, string>,
+  polymorphicDefaultCases: ReadonlyMap<string, string | null>,
 ): string {
   if (
     field.hasExplicitDefault &&
@@ -643,9 +644,13 @@ function swiftDefaultValue(
     case "scalar":
       return scalarDefault(field.category.scalarType);
     case "complex":
-      return polymorphicTypeNames.has(field.category.typeName)
-        ? polymorphicDefaults.get(field.category.typeName) ?? ".unknown([:])"
-        : `${swiftTypeName(field.category.typeName)}()`;
+      if (polymorphicTypeNames.has(field.category.typeName)) {
+        const fallback = polymorphicDefaultCases.get(field.category.typeName);
+        return fallback
+          ? `.${swiftPropertyName(fallback)}(${swiftTypeName(fallback)}())`
+          : ".unknown([:])";
+      }
+      return `${swiftTypeName(field.category.typeName)}()`;
     case "collection_scalar":
     case "collection_complex":
       return "[]";

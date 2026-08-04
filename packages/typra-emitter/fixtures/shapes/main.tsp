@@ -177,6 +177,29 @@ model FixtureToolbox {
 
   @sample(#{ bindingTools: #[#{ name: "binding-tool", kind: "function", command: "run", bindings: #[#{ name: "input", source: "customer.name" }] }] })
   bindingTools: FixtureBindingTool[];
+
+  @sample(#{
+    inheritedMapBindingTool: #{
+      name: "map-binding-tool",
+      kind: "function",
+      command: "run",
+      bindings: #{ zebra: "customer.id", alpha: "customer.name" }
+    }
+  })
+  inheritedMapBindingTool: FixtureTool;
+
+  @sample(#{
+    inheritedListBindingTool: #{
+      name: "list-binding-tool",
+      kind: "function",
+      command: "run",
+      bindings: #[
+        #{ name: "alpha", source: "customer.name" },
+        #{ name: "zebra", source: "customer.id" }
+      ]
+    }
+  })
+  inheritedListBindingTool: FixtureTool;
 }
 
 model FixtureShortcut {
