@@ -459,6 +459,14 @@ function emitKindEnum(
       lines.push(`        ${toSnakeCase(dispatch.discriminatorField)}_name: String,`);
       lines.push(`    },`);
     }
+  } else if (dispatch.isAbstract) {
+    lines.push(`    /// Lossless fallback for unrecognized \`${dispatch.discriminatorField}\` values.`);
+    lines.push("    Unknown {");
+    lines.push(`        /// The raw \`${dispatch.discriminatorField}\` string for this unknown variant.`);
+    lines.push(`        ${toSnakeCase(dispatch.discriminatorField)}_name: String,`);
+    lines.push("        /// Unmodeled fields preserved for forward-compatible round trips.");
+    lines.push("        raw: serde_json::Map<String, serde_json::Value>,");
+    lines.push("    },");
   }
 
   lines.push("}");
@@ -961,6 +969,17 @@ function emitPolymorphicLoad(
       lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
       lines.push(`            },`);
     }
+  } else if (dispatch.isAbstract) {
+    lines.push(`            _ => ${enumName}::Unknown {`);
+    lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
+    lines.push("                raw: {");
+    lines.push("                    let mut raw = value.as_object().cloned().unwrap_or_default();");
+    for (const fieldName of baseFieldNames) {
+      lines.push(`                    raw.remove("${fieldName}");`);
+    }
+    lines.push("                    raw");
+    lines.push("                },");
+    lines.push("            },");
   } else {
     lines.push(`            _ => ${enumName}::default(),`);
   }
@@ -1015,6 +1034,8 @@ function emitKindStr(
       ? "Custom"
       : (dispatch.defaultVariant.typeName.name.replace(type.typeName.name, "") || "Custom");
     lines.push(`            ${enumName}::${variantName} { ${discSnake}_name, .. } => ${discSnake}_name.as_str(),`);
+  } else if (dispatch.isAbstract) {
+    lines.push(`            ${enumName}::Unknown { ${discSnake}_name, .. } => ${discSnake}_name.as_str(),`);
   }
 
   lines.push("        }");
@@ -1125,6 +1146,12 @@ function emitVariantSave(
       }
       lines.push("            }");
     }
+  } else if (dispatch.isAbstract) {
+    lines.push(`            ${enumName}::Unknown { raw, .. } => {`);
+    lines.push("                for (key, value) in raw {");
+    lines.push("                    result.insert(key.clone(), value.clone());");
+    lines.push("                }");
+    lines.push("            }");
   }
 
   lines.push("        }");

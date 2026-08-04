@@ -1040,6 +1040,20 @@ describe("lowerFile", () => {
 describe("Rust emitter serde derives", () => {
   const registry = buildTestRegistry();
 
+  it("preserves unknown abstract discriminator payloads losslessly", () => {
+    const file = lowerFile(connectionType, registry, new Set(["Connection"]));
+    const code = emitRustFile(file, new RustExprVisitor(registry), new Set(["Connection"]));
+
+    assert.match(
+      code,
+      /Unknown \{\s+\/\/\/ The raw `kind` string for this unknown variant\.\s+kind_name: String,\s+\/\/\/ Unmodeled fields preserved for forward-compatible round trips\.\s+raw: serde_json::Map<String, serde_json::Value>/,
+    );
+    assert.match(code, /_ => ConnectionKind::Unknown \{\s+kind_name: kind_str\.to_string\(\),\s+raw: \{/);
+    assert.match(code, /raw\.remove\("kind"\);/);
+    assert.match(code, /ConnectionKind::Unknown \{ kind_name, \.\. \} => kind_name\.as_str\(\)/);
+    assert.match(code, /ConnectionKind::Unknown \{ raw, \.\. \} => \{\s+for \(key, value\) in raw/);
+  });
+
   it("uses concrete vectors for explicit empty defaults and options for absent defaults", () => {
     const owner = makeType("CollectionOwner", [
       makeProp("name", "string", { isScalar: true }),
