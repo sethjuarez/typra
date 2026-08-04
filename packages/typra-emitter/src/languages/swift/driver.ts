@@ -48,6 +48,7 @@ export const generateSwift = async (
       lowerFile(n, registry, polymorphicTypeNames),
     ]),
   );
+  const declarationUniverse = rootNodes.flatMap(n => lowerFile(n, registry, polymorphicTypeNames).types);
   await emitSwiftGeneratedFile(context, "Package.swift", emitSwiftPackage(moduleName, packageTestPath), outputDir, outputDir, { marker: false });
   await emitSwiftGeneratedFile(context, "TypraRuntime.swift", emitSwiftRuntime(moduleName), sourceRoot, outputDir);
 
@@ -55,7 +56,7 @@ export const generateSwift = async (
     if (!n.base) {
       const group = n.group || "";
       const fileDecl = fileDecls.get(`${n.typeName.namespace}.${n.typeName.name}`)!;
-      const content = emitSwiftFile(fileDecl, visitor, polymorphicTypeNames);
+      const content = emitSwiftFile(fileDecl, visitor, polymorphicTypeNames, declarationUniverse);
       const outDir = group ? `${sourceRoot}/${group}` : sourceRoot;
       await emitSwiftGeneratedFile(context, swiftFileName(n.typeName.name), content, outDir, outputDir);
     }

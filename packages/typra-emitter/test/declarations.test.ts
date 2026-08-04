@@ -573,7 +573,7 @@ describe("lowerFile", () => {
       assert.match(code, /result\.Time = string\(val\.\(string\)\)/);
       assert.match(code, /result\["__time"\] = obj\.Time/);
       assert.doesNotMatch(code, /\n\s+_Time\s/);
-      assert.equal(goFieldName("__time"), "FieldTime");
+      assert.equal(goFieldName("__time"), "Time");
       assert.equal(
         new GoExprVisitor(registry).visitExpr({
           kind: "field_read",
@@ -582,7 +582,7 @@ describe("lowerFile", () => {
           fieldType: "string",
           isOptional: false,
         }),
-        "span.FieldTime",
+        "span.Time",
       );
 
       const envelope = makeType("TraceEnvelope", [
@@ -602,7 +602,7 @@ describe("lowerFile", () => {
         coercions: [],
         factories: [],
       });
-      assert.match(testCode, /instance\.Span\.FieldTime/);
+      assert.match(testCode, /instance\.Span\.Time/);
       assert.doesNotMatch(testCode, /instance\.Span\._Time/);
     });
 

@@ -659,21 +659,33 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     }
   }
 
-  func testNamedToolCollectionPreservesMapKeyAsPayloadName() throws {
-    let toolbox = try FixtureToolbox.load([
-      "tools": [
-        "search": [
-          "kind": "function",
-          "description": "search description",
-          "command": "search --query",
-        ]
-      ]
+  func testToolBindingsLoadAndRoundTripMapAndListForms() throws {
+    let mapTool = try FixtureBindingTool.load([
+      "kind": "function",
+      "name": "map-tool",
+      "bindings": [
+        "input": "customer.name",
+        "output": ["source": "result.text"],
+      ],
     ])
-    let output = try toolbox.save()
-    let tools = output["tools"] as? [String: Any]
-    let search = tools?["search"] as? [String: Any]
-    XCTAssertEqual(search?["description"] as? String, "search description")
-    XCTAssertEqual(search?["command"] as? String, "search --query")
+    let mapOutput = try mapTool.save()
+    let mapBindings = mapOutput["bindings"] as? [String: Any]
+    XCTAssertEqual(mapBindings?["input"] as? String, "customer.name")
+    XCTAssertEqual((mapBindings?["output"] as? [String: Any])?["source"] as? String, "result.text")
+
+    let listTool = try FixtureBindingTool.load([
+      "kind": "function",
+      "name": "list-tool",
+      "bindings": [
+        ["name": "input", "source": "customer.name"],
+        ["name": "output", "source": "result.text"],
+      ],
+    ])
+    let listOutput = try listTool.save(SaveContext(collectionFormat: "array"))
+    let listBindings = listOutput["bindings"] as? [[String: Any]]
+    XCTAssertEqual(listBindings?.count, 2)
+    XCTAssertEqual(listBindings?[0]["name"] as? String, "input")
+    XCTAssertEqual(listBindings?[0]["source"] as? String, "customer.name")
   }
 
   func testScalarPropertyCoercionDispatchesToTypedVariant() throws {
@@ -1451,9 +1463,9 @@ function runJavaExecutableConformance() {
     "    Map<String, Object> objectBag = bag.save(new SaveContext());",
     '    require(objectBag.get("items") instanceof Map<?, ?>, "named collections must save as objects by default");',
     '    require("first".equals(((Map<?, ?>) objectBag.get("items")).get("alpha")), "default object save must use shorthand");',
-    "    Map<String, Object> expandedBag = bag.save(new SaveContext(\"object\", false));",
+    "    Map<String, Object> expandedBag = bag.save(new SaveContext(null, null, \"object\", false));",
     '    require(((Map<?, ?>) expandedBag.get("items")).get("alpha") instanceof Map<?, ?>, "useShorthand=false must preserve the item object");',
-    "    Map<String, Object> arrayBag = bag.save(new SaveContext(\"array\", true));",
+    "    Map<String, Object> arrayBag = bag.save(new SaveContext(null, null, \"array\", true));",
     '    require(arrayBag.get("items") instanceof List<?>, "collectionFormat=array must save named collections as arrays");',
     "",
     "    FixtureUnionProperty union = new FixtureUnionProperty();",
@@ -1465,8 +1477,8 @@ function runJavaExecutableConformance() {
     '    require(postSaveCount.get() == 1, "derived save must invoke postSave exactly once");',
     "",
     "    FixtureOptionalDefaults optionalDefaults = FixtureOptionalDefaults.load(Map.of(), new LoadContext());",
-    '    require(optionalDefaults.mode == null, "omitted optional defaults must remain absent");',
-    '    require(!optionalDefaults.save(new SaveContext()).containsKey("mode"), "absent optional defaults must not serialize");',
+    '    require("auto".equals(optionalDefaults.mode), "explicit optional scalar defaults must materialize");',
+    '    require("auto".equals(optionalDefaults.save(new SaveContext()).get("mode")), "explicit optional scalar defaults must serialize");',
     '    require(new FixtureRoot().status == FixtureStatus.DRAFT, "required enums must initialize to a valid constant");',
     '    require(new FixtureRoot().save(new SaveContext()).containsKey("status"), "required enums must always serialize");',
     '    require(TypraJson.parse("1") instanceof Integer, "JSON integer parsing must retain the Integer branch");',
@@ -1592,19 +1604,17 @@ function assertStaticFixtureCoverage() {
     path.join("generated", "fixtures", "go", "model_info.go"),
     "InputModalities  []string",
     "OutputModalities []string",
-    "OutputModalities: []string{}",
-    'json:"outputModalities" yaml:"outputModalities"',
+    'json:"outputModalities,omitempty" yaml:"outputModalities,omitempty"',
     "Owners           []FixtureOwner",
     "DefaultOwners    []FixtureOwner",
-    "DefaultOwners:    []FixtureOwner{}",
-    'json:"defaultOwners" yaml:"defaultOwners"',
+    'json:"defaultOwners,omitempty" yaml:"defaultOwners,omitempty"',
   );
   assertIncludes(
     path.join("generated", "fixtures", "java", "ModelInfo.java"),
     "public List<String> inputModalities = null;",
-    "public List<String> outputModalities = new ArrayList<>();",
+    "public List<String> outputModalities = null;",
     "public List<FixtureOwner> owners = null;",
-    "public List<FixtureOwner> defaultOwners = new ArrayList<>();",
+    "public List<FixtureOwner> defaultOwners = null;",
   );
   assertIncludes(
     path.join("generated", "fixtures", "csharp", "ModelInfo.cs"),
@@ -1627,9 +1637,9 @@ function assertStaticFixtureCoverage() {
   assertIncludes(
     path.join("generated", "fixtures", "swift", "Sources", "TypraFixtures", "model_info.swift"),
     "public var inputModalities: [String]? = nil",
-    "public var outputModalities: [String]? = []",
+    "public var outputModalities: [String]? = nil",
     "public var owners: [FixtureOwner]? = nil",
-    "public var defaultOwners: [FixtureOwner]? = []",
+    "public var defaultOwners: [FixtureOwner]? = nil",
   );
   assertIncludes(
     path.join("generated", "fixtures", "python", "tests", "test_protocol_scaffolds.py"),

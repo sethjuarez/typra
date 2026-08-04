@@ -119,6 +119,29 @@ model FixtureTool {
   name: string;
 
   description?: string;
+
+  bindings?: Record<FixtureBinding> | Named<FixtureBinding>[];
+
+}
+
+model FixtureBinding {
+  name?: string;
+  source: string;
+}
+
+@@coerce(FixtureBinding, string, #{ source: "{value}" }, "binding", "Load a binding from shorthand.", "input");
+
+model FixtureBindingTool {
+  kind: "function";
+
+  name: string;
+
+  description?: string;
+
+  @sample(#{ command: "search --query" })
+  command: string;
+
+  bindings?: Record<FixtureBinding> | Named<FixtureBinding>[];
 }
 
 model FixtureFunctionTool extends FixtureTool {
@@ -151,6 +174,9 @@ model FixtureCustomTool extends FixtureTool {
 model FixtureToolbox {
   @sample(#{ tools: #[#{ kind: "function", name: "search", command: "search --query" }] })
   tools: Record<FixtureTool> | Named<FixtureTool>[];
+
+  @sample(#{ bindingTools: #[#{ name: "binding-tool", kind: "function", command: "run", bindings: #[#{ name: "input", source: "customer.name" }] }] })
+  bindingTools: FixtureBindingTool[];
 }
 
 model FixtureShortcut {
