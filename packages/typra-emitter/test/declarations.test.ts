@@ -540,6 +540,35 @@ describe("lowerFile", () => {
       assert.match(code, /\t"fmt"/);
       assert.match(code, /return nil, fmt\.Errorf\("unknown ConnectionWithCoercion discriminator value: %s", discriminator\)/);
       assert.match(code, /return nil, fmt\.Errorf\("missing ConnectionWithCoercion discriminator property: kind"\)/);
+      const loadStart = code.indexOf("func LoadConnectionWithCoercion(");
+      const loadBody = code.slice(loadStart, code.indexOf("\nfunc ", loadStart + 1));
+      assert.doesNotMatch(loadBody, /\/\/ Load from map/);
+      assert.doesNotMatch(loadBody, /return result, nil/);
+    });
+
+    it("exports safe field identifiers while preserving leading-underscore wire keys", () => {
+      const traceSpan = makeType("TraceSpan", [
+        makeProp("_Time", "string", { isScalar: true }),
+        makeProp("_Usage", "Record<unknown>", { isScalar: true }),
+        makeProp("_Frames", "string", { isScalar: true, isCollection: true }),
+      ]);
+      const registry = TypeRegistry.fromTypeGraph([traceSpan]);
+      const file = lowerFile(traceSpan, registry);
+      const code = emitGoFileContent(
+        file.types,
+        "fixtures",
+        new GoExprVisitor(registry),
+        new Set(),
+        file.enums,
+        file.group,
+      );
+
+      assert.match(code, /Time string `json:"_Time" yaml:"_Time"`/);
+      assert.match(code, /Usage interface\{\} `json:"_Usage" yaml:"_Usage"`/);
+      assert.match(code, /Frames \[\]string `json:"_Frames" yaml:"_Frames"`/);
+      assert.match(code, /result\.Time = string\(val\.\(string\)\)/);
+      assert.match(code, /result\["_Time"\] = obj\.Time/);
+      assert.doesNotMatch(code, /\n\s+_Time\s/);
     });
 
     it("falls through self-referential defaults so base fields are loaded", () => {

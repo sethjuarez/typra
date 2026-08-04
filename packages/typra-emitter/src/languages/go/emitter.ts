@@ -320,7 +320,7 @@ function emitStruct(
 
   for (const field of type.fields) {
     const goType = getGoFieldType(field.category, field.isOptional, polymorphicTypeNames, field.enumName);
-    const fieldName = toPascalCase(field.name);
+    const fieldName = goFieldName(field.name);
     const tag = getStructTag(field.name, field.isOptional);
     lines.push(`\t${fieldName} ${goType} ${tag}`);
   }
@@ -341,6 +341,8 @@ function emitLoadFunction(
 ): void {
   const typeName = type.typeName.name;
   const isPolymorphicBase = type.polymorphicDispatch !== null;
+  const hasTerminalDispatch = type.polymorphicDispatch?.isAbstract === true &&
+    !type.polymorphicDispatch.defaultVariant;
   const hasCoercions = type.load.coercions.length > 0;
   const returnType = isPolymorphicBase ? "interface{}" : typeName;
 
@@ -352,8 +354,10 @@ function emitLoadFunction(
 
   // Signature
   lines.push(`func Load${typeName}(data interface{}, ctx *LoadContext) (${returnType}, error) {`);
-  lines.push(`\tresult := ${typeName}{}`);
-  lines.push("");
+  if (!hasTerminalDispatch) {
+    lines.push(`\tresult := ${typeName}{}`);
+    lines.push("");
+  }
 
   // 1. Coercions
   if (hasCoercions) {
@@ -363,6 +367,11 @@ function emitLoadFunction(
   // 2. Polymorphic dispatch
   if (type.polymorphicDispatch) {
     emitPolymorphicDispatch(typeName, type.polymorphicDispatch, lines);
+    if (hasTerminalDispatch) {
+      lines.push("}");
+      lines.push("");
+      return;
+    }
   }
 
   // 3. Map loading
@@ -464,7 +473,7 @@ function emitLoadAssignment(
   scalarCoercibleTypeNames: Set<string>,
   lines: string[],
 ): void {
-  const fieldName = toPascalCase(assign.fieldName);
+  const fieldName = goFieldName(assign.fieldName);
   const cat = assign.category;
 
   switch (cat.kind) {
@@ -771,7 +780,7 @@ function emitSaveAssignment(
   polymorphicTypeNames: Set<string>,
   lines: string[],
 ): void {
-  const fieldName = toPascalCase(assign.fieldName);
+  const fieldName = goFieldName(assign.fieldName);
   const cat = assign.category;
 
   switch (cat.kind) {
@@ -1080,6 +1089,12 @@ function getStructTag(fieldName: string, isOptional: boolean): string {
   const jsonTag = isOptional ? `${fieldName},omitempty` : fieldName;
   const yamlTag = isOptional ? `${fieldName},omitempty` : fieldName;
   return `\`json:"${jsonTag}" yaml:"${yamlTag}"\``;
+}
+
+function goFieldName(name: string): string {
+  const identifier = name.replace(/^[^A-Za-z]+/, "");
+  const exported = toPascalCase(identifier || "field");
+  return /^[A-Z]/.test(exported) ? exported : `Field${exported}`;
 }
 
 // ============================================================================
