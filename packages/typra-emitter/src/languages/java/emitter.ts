@@ -615,7 +615,12 @@ function javaDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): strin
   if (field.isOptional) {
     return " = null";
   }
-  if (field.enumName && !field.isOpenEnum && field.allowedValues.length > 0) {
+  if (
+    field.category.kind === "scalar" &&
+    field.enumName &&
+    !field.isOpenEnum &&
+    field.allowedValues.length > 0
+  ) {
     return ` = ${javaEnumTypeName(field.enumName)}.fromValue("${escapeJava(field.allowedValues[0])}")`;
   }
   switch (field.category.kind) {

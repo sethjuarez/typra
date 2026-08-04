@@ -351,12 +351,18 @@ describe("Java emitter runtime semantics", () => {
       enumName: "approvalMode",
       allowedValues: ["always", "never"],
     });
-    const decl = typeDecl([optionalItems, requiredMode]);
+    const requiredModes = field("modes", "string", {
+      category: { kind: "collection_scalar", scalarType: "string" },
+      enumName: "approvalMode",
+      allowedValues: ["always", "never"],
+    });
+    const decl = typeDecl([optionalItems, requiredMode, requiredModes]);
     addAssignments(decl);
 
     const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
     assert.match(source, /public List<String> items = null;/);
     assert.match(source, /public ApprovalMode mode = ApprovalMode\.fromValue\("always"\);/);
+    assert.match(source, /public List<ApprovalMode> modes = new ArrayList<>\(\);/);
   });
 
   it("loads and saves explicit named collection maps, lists, and shorthand", () => {
