@@ -60,6 +60,7 @@ export const generateJava = async (
   const packageName = javaPackageName(emitTarget.namespace ?? emitTarget["package-name"] ?? node.typeName.namespace);
   const polymorphicTypeNames = collectPolymorphicTypeNames(node, registry);
   const fileDecls = nodes.map(n => lowerFile(n, registry, polymorphicTypeNames));
+  const allTypeDecls = fileDecls.flatMap(fileDecl => fileDecl.types);
 
   await emitJavaFile(context, "LoadContext.java", emitJavaContext(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
   await emitJavaFile(context, "SaveContext.java", emitJavaSaveContext(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
@@ -80,7 +81,14 @@ export const generateJava = async (
   const testClassNames: string[] = [];
   for (let index = 0; index < nodes.length; index++) {
     const n = nodes[index];
-    const fileContent = emitJavaFileContent([fileDecls[index].types[0]], packageName, visitor, polymorphicTypeNames);
+    const fileContent = emitJavaFileContent(
+      [fileDecls[index].types[0]],
+      packageName,
+      visitor,
+      polymorphicTypeNames,
+      [],
+      allTypeDecls,
+    );
     await emitJavaFile(context, `${javaTypeName(n.typeName.name)}.java`, fileContent, emitTarget["output-dir"], emitTarget["output-dir"]);
 
     if (emitTarget["test-dir"] && !n.isProtocol) {
