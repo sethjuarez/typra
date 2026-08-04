@@ -490,9 +490,29 @@ describe("Java emitter runtime semantics", () => {
       assert.match(modelSource, /return MessageMethods\.text\(this, prefix\);/);
       assert.ok(helper);
       assert.equal(helper.filename, "MessageMethods.java");
+      assert.match(helper.source, /^\/\/ <typra-editable-seam>/);
       assert.match(helper.source, /public static String text\(Message self, String prefix\)/);
       assert.match(helper.source, /Implement Message\.text in MessageMethods/);
       assert.doesNotMatch(helper.source, /Code generated|auto-generated/);
+    });
+
+    it("matches polymorphic discriminator wire values exactly", () => {
+      const base = typeDecl([]);
+      base.typeName = { namespace: "Test", name: "Tool" };
+      base.polymorphicDispatch = {
+        discriminatorField: "kind",
+        variants: [{
+          value: "FunctionTool",
+          typeName: { namespace: "Test", name: "FunctionTool" },
+        }],
+        defaultVariant: null,
+        isAbstract: true,
+      };
+
+      const source = emitJavaFileContent([base], "test", new JavaExprVisitor(), new Set(["Tool"]));
+      assert.match(source, /switch \(String\.valueOf\(discriminator\)\)/);
+      assert.match(source, /case "FunctionTool":/);
+      assert.doesNotMatch(source, /toLowerCase\(java\.util\.Locale\.ROOT\)/);
     });
 
     it("delegates void methods without returning a value", () => {

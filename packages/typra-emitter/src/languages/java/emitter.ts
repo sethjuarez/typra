@@ -333,7 +333,7 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   lines.push("    if (data instanceof Map<?, ?> dispatchMap) {");
   lines.push(`      Object discriminator = dispatchMap.get("${escapeJava(dispatch.discriminatorField)}");`);
   lines.push("      if (discriminator != null) {");
-  lines.push("        switch (String.valueOf(discriminator).toLowerCase(java.util.Locale.ROOT)) {");
+  lines.push("        switch (String.valueOf(discriminator)) {");
   for (const variant of dispatch.variants) {
     lines.push(`          case "${escapeJava(variant.value)}":`);
     lines.push(`            return ${javaTypeName(variant.typeName.name)}.load(data, ctx);`);
@@ -586,6 +586,7 @@ export function emitJavaMethodHelper(type: TypeDecl, packageName: string): { fil
   const typeName = javaTypeName(type.typeName.name);
   const helperName = `${typeName}Methods`;
   const lines = [
+    "// <typra-editable-seam>",
     "// Typra extension seam. This file is created once and is safe to edit.",
     `package ${packageName};`,
     "",
