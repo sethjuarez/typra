@@ -284,12 +284,12 @@ function lowerLoad(
     fieldName: f.name,
     category: f.category,
     isOptional: f.isOptional,
+    hasExplicitDefault: f.hasExplicitDefault,
     parentTypeName: node.typeName.name,
     enumName: f.enumName,
     allowedValues: f.allowedValues,
     parseAliases: f.parseAliases,
     defaultValue: f.defaultValue,
-    hasExplicitDefault: f.hasExplicitDefault,
     isOpenEnum: f.isOpenEnum,
   }));
 
@@ -317,6 +317,7 @@ function lowerSave(
     fieldName: f.name,
     category: f.category,
     isOptional: f.isOptional,
+    hasExplicitDefault: f.hasExplicitDefault,
     parentTypeName: node.typeName.name,
     enumName: f.enumName,
     isOpenEnum: f.isOpenEnum,

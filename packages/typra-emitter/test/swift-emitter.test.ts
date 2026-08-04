@@ -9,7 +9,7 @@ import { flattenInheritance } from "../src/ir/inheritance.js";
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import { emitSwiftProtocolScaffolds, emitSwiftRuntime } from "../src/languages/swift/scaffolding.js";
 import { emitSwiftConformanceTest, emitSwiftTests } from "../src/languages/swift/test-emitter.js";
-import { swiftTestOptions } from "../src/testing/test-context.js";
+import { buildBaseTestContext, swiftTestOptions } from "../src/testing/test-context.js";
 import { swiftType } from "../src/languages/swift/types.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 
@@ -613,38 +613,30 @@ describe("Swift generated tests", () => {
     );
   });
 
-  it("normalizes trim-sensitive multiline expectations for YAML only", () => {
+  it("preserves trim-sensitive multiline values in encoded YAML", () => {
     const prompt = new TypeNode({} as Model, "");
     prompt.typeName = { namespace: "Test", name: "Prompt" };
     const instructions = new PropertyNode({} as ModelProperty, "");
     instructions.name = "instructions";
     instructions.typeName = { namespace: "", name: "string" };
     instructions.isScalar = true;
+    instructions.samples = [{
+      sample: { instructions: "some \npersonal" },
+      description: "",
+    }];
     prompt.properties = [instructions];
 
+    const context = buildBaseTestContext(prompt, undefined, swiftTestOptions);
     const source = emitSwiftTests({
-      node: prompt,
-      isAbstract: false,
-      package: undefined,
-      examples: [{
-        sample: { instructions: "some \npersonal" },
-        json: ["{}"],
-        yaml: ["instructions: |-", "  some ", "  personal"],
-        validations: [{
-          key: "instructions",
-          value: "some \\npersonal",
-          delimiter: "\"",
-          isOptional: false,
-        }],
-      }],
-      coercions: [],
-      factories: [],
+      ...context,
       moduleName: "TestModels",
     });
 
-    assert.match(source, /XCTAssertEqual\(instance\.instructions, "some \\npersonal"\)/);
-    assert.equal(source.match(/XCTAssertEqual\(instance\.instructions, "some\\npersonal"\)/g)?.length, 1);
-    assert.equal(source.match(/XCTAssertEqual\(reloaded\.instructions, "some\\npersonal"\)/g)?.length, 1);
+    assert.match(context.examples[0].yaml.join("\n"), /some \\\\npersonal/);
+    assert.equal(
+      source.match(/XCTAssertEqual\((?:instance|reloaded)\.instructions, "some \\npersonal"\)/g)?.length,
+      4,
+    );
   });
 
   it("skips unknown sample keys and compares nested enums as typed values", () => {

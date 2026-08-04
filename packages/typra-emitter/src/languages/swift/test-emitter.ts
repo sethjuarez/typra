@@ -112,11 +112,10 @@ function emitExampleTest(lines: string[], node: TypeNode, typeName: string, exam
   lines.push(`  func testYAMLRoundTrip${index + 1}() throws {`);
   lines.push(`    let yaml = ${swiftMultilineString(example.yaml.join("\n"))}`);
   lines.push(`    let instance = try ${typeName}.fromYAML(yaml)`);
-  const canonicalYamlExample = canonicalizeYamlExample(example);
-  emitValidations(lines, "instance", canonicalYamlExample, node);
+  emitValidations(lines, "instance", example, node);
   lines.push("    let reloaded = try " + typeName + ".fromYAML(try instance.toYAML())");
   const yamlReloadValidationStart = lines.length;
-  emitValidations(lines, "reloaded", canonicalYamlExample, node);
+  emitValidations(lines, "reloaded", example, node);
   if (lines.length === yamlReloadValidationStart) {
     lines.push("    _ = reloaded");
   }
@@ -379,36 +378,4 @@ function swiftDictionaryCast(value: unknown): string {
 
 function swiftMultilineString(value: string): string {
   return `"""\n${value.replace(/"""/g, "\\\"\\\"\\\"")}\n"""`;
-}
-
-function canonicalizeYamlExample(example: TestExample): TestExample {
-  return {
-    ...example,
-    sample: canonicalizeYamlValue(example.sample) as Record<string, any>,
-    validations: example.validations.map(validation => ({
-      ...validation,
-      value: typeof validation.value === "string"
-        ? validation.value
-          .replace(/[ \t]+\\r\\n/g, "\\n")
-          .replace(/[ \t]+\\n/g, "\\n")
-        : validation.value,
-    })),
-  };
-}
-
-function canonicalizeYamlValue(value: unknown): unknown {
-  if (typeof value === "string") {
-    return value
-      .replace(/[ \t]+\r\n/g, "\n")
-      .replace(/[ \t]+\n/g, "\n");
-  }
-  if (Array.isArray(value)) {
-    return value.map(canonicalizeYamlValue);
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, nested]) => [key, canonicalizeYamlValue(nested)]),
-    );
-  }
-  return value;
 }

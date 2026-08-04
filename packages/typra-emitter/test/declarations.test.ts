@@ -704,38 +704,58 @@ describe("lowerFile", () => {
       assert.doesNotMatch(code, /if instance\.Instructions != /);
     });
 
-    it("keeps whitespace-sensitive multiline YAML trim-proof", () => {
+    it("emits multiline YAML samples as block literals", () => {
       const instructions = makeProp("instructions", "string", { isScalar: true });
-      const expected = "some \npersonal\ncontent";
+      const expected = "some\npersonal\ncontent";
       instructions.samples = [{ sample: { instructions: expected }, description: "" }];
       const prompty = makeType("Prompty", [instructions]);
+
       const context = buildBaseTestContext(prompty, "prompty", goTestOptions);
 
       assert.deepEqual(context.examples[0].yaml, [
-        'instructions: "some\\ \\npersonal\\ncontent"',
-        "",
-      ]);
-      assert.equal(context.examples[0].sample.instructions, expected);
-
-      const blockValue = "some\npersonal\ncontent";
-      instructions.samples = [{ sample: { instructions: blockValue }, description: "" }];
-      const blockContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
-      assert.deepEqual(blockContext.examples[0].yaml, [
         "instructions: |-",
         "  some",
         "  personal",
         "  content",
         "",
       ]);
-      assert.equal(blockContext.examples[0].sample.instructions, blockValue);
+      assert.equal(context.examples[0].sample.instructions, expected);
 
-      const trailingValue = "some\npersonal\ncontent\u00a0";
-      instructions.samples = [{ sample: { instructions: trailingValue }, description: "" }];
-      const trailingContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
-      assert.deepEqual(trailingContext.examples[0].yaml, [
-        `instructions: "some\\npersonal\\ncontent${"\u00a0"}"`,
-        "",
-      ]);
+      const trailingSpace = makeProp("value", "string", { isScalar: true });
+      trailingSpace.samples = [{
+        sample: { value: "first line with trailing space \nsecond line\n" },
+        description: "",
+      }];
+      const trailingSpaceContext = buildBaseTestContext(
+        makeType("TrailingSpace", [trailingSpace]),
+        "prompty",
+        goTestOptions,
+      );
+      assert.deepEqual(
+        trailingSpaceContext.examples[0].yaml,
+        ['value: "first line with trailing space \\nsecond line\\n"', ""],
+      );
+
+      const whitespace = makeProp("value", "string", { isScalar: true });
+      whitespace.samples = [{ sample: { value: "\n" }, description: "" }];
+      const whitespaceContext = buildBaseTestContext(
+        makeType("Whitespace", [whitespace]),
+        "prompty",
+        goTestOptions,
+      );
+      assert.deepEqual(whitespaceContext.examples[0].yaml, ['value: "\\n"', ""]);
+
+      const unicodeSeparator = makeProp("value", "string", { isScalar: true });
+      unicodeSeparator.samples = [{
+        sample: { value: "first\u2028second\nthird" },
+        description: "",
+      }];
+      const unicodeContext = buildBaseTestContext(
+        makeType("UnicodeSeparator", [unicodeSeparator]),
+        "prompty",
+        goTestOptions,
+      );
+      assert.doesNotMatch(unicodeContext.examples[0].yaml.join("\n"), /\|[-+]?/);
     });
   });
 
@@ -909,6 +929,65 @@ describe("Rust emitter serde derives", () => {
     assert.match(code, /impl serde::Serialize for Role \{/);
     assert.match(code, /impl<'de> serde::Deserialize<'de> for Role \{/);
     assert.match(code, /serializer\.serialize_str\(self\.as_str\(\)\)/);
+  });
+
+  it("materializes explicit optional collection defaults as concrete vectors", () => {
+    const tags = makeProp("tags", "string", {
+      isScalar: true,
+      isOptional: true,
+      isCollection: true,
+    });
+    tags.hasExplicitDefault = true;
+    const messages = makeProp("messages", "Message", {
+      isOptional: true,
+      isCollection: true,
+    });
+    messages.hasExplicitDefault = true;
+    const optionalMessages = makeProp("optionalMessages", "Message", {
+      isOptional: true,
+      isCollection: true,
+    });
+    const response = makeType("Response", [tags, messages, optionalMessages]);
+    const reg = TypeRegistry.fromTypeGraph([response]);
+    const file = lowerFile(response, reg, new Set());
+    const code = emitRustFile(file, new RustExprVisitor(reg), new Set());
+
+    assert.match(code, /pub tags: Vec<String>/);
+    assert.match(code, /pub messages: Vec<Message>/);
+    assert.match(code, /pub optional_messages: Option<Vec<Message>>/);
+    assert.match(code, /tags: value\.get\("tags"\)[^\n]+\.unwrap_or_default\(\)/);
+    assert.match(code, /messages: value\.get\("messages"\)[^\n]+\.unwrap_or_default\(\)/);
+    assert.match(code, /result\.insert\("tags"\.to_string\(\), serde_json::to_value\(&self\.tags\)/);
+    assert.match(code, /result\.insert\("messages"\.to_string\(\), Self::save_messages\(&self\.messages, ctx\)\)/);
+    assert.doesNotMatch(code, /Some\(Vec::new\(\)\)/);
+  });
+
+  it("materializes explicit collection defaults inside polymorphic variants", () => {
+    const allowedTools = makeProp("allowedTools", "string", {
+      isScalar: true,
+      isOptional: true,
+      isCollection: true,
+    });
+    allowedTools.hasExplicitDefault = true;
+    const routedChoice = makeType("RoutedChoice", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "routed" }),
+      allowedTools,
+    ], { base: { namespace: "Test", name: "ToolChoice" } });
+    const toolChoice = makeType("ToolChoice", [
+      makeProp("kind", "string", { isScalar: true }),
+    ], {
+      discriminator: "kind",
+      childTypes: [routedChoice],
+    });
+    const reg = TypeRegistry.fromTypeGraph([toolChoice]);
+    const file = lowerFile(toolChoice, reg, new Set(["ToolChoice"]));
+    const code = emitRustFile(file, new RustExprVisitor(reg), new Set(["ToolChoice"]));
+
+    assert.match(code, /RoutedChoice \{[\s\S]*allowed_tools: Vec<String>/);
+    assert.match(code, /allowed_tools: value\.get\("allowedTools"\)[^\n]+\.unwrap_or_default\(\)/);
+    assert.match(code, /result\.insert\("allowedTools"\.to_string\(\), serde_json::to_value\(allowed_tools\)/);
+    assert.doesNotMatch(code, /allowed_tools: Option<Vec<String>>/);
+    assert.doesNotMatch(code, /Some\(ref items\)/);
   });
 });
 

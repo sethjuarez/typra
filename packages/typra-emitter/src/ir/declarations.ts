@@ -290,6 +290,8 @@ export interface SaveAssignment {
   category: PropertyCategory;
   /** Whether the field is optional (skip if null/None/nil) */
   isOptional: boolean;
+  /** Whether TypeSpec explicitly declared a default */
+  hasExplicitDefault?: boolean;
   /** Parent type name (for collection save helpers) */
   parentTypeName: string;
   /** Enum type name (if this field references a named enum) */

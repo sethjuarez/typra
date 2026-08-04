@@ -176,6 +176,11 @@ model FixtureStopOptions {
   stopSequences: string[];
 }
 
+model FixtureMultilineWhitespace {
+  @sample(#{ value: "first line with trailing space \nsecond line\n" })
+  value: string;
+}
+
 // Keyed property-bag regression (prompty's `inputs`/`outputs`/`parameters` shape): a field
 // typed as the union `Record<T> | Named<T>[]` whose CANONICAL wire form is a MAP keyed by
 // the element `name`. This exercises the `Record<T> | Named<T>[]` union-alias lowering
