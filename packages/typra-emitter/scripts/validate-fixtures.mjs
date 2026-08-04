@@ -684,6 +684,26 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
       XCTAssertEqual(output["name"] as? String, input["name"] as? String)
       XCTAssertEqual(output["description"] as? String, input["description"] as? String)
     }
+
+    let wildcardInput: [String: Any] = [
+      "kind": "vendor",
+      "name": "vendor",
+      "description": "vendor description",
+      "config": ["enabled": true],
+    ]
+    let wildcard = try FixtureTool.load(wildcardInput)
+    guard case .fixtureCustomTool(let custom) = wildcard else {
+      throw TypraRuntimeError.unsupported("Expected FixtureCustomTool wildcard")
+    }
+    XCTAssertEqual(custom.kind, "vendor")
+    let wildcardOutput = try wildcard.save()
+    XCTAssertEqual(wildcardOutput["kind"] as? String, "vendor")
+    XCTAssertEqual(wildcardOutput["name"] as? String, "vendor")
+    let wildcardReloaded = try FixtureTool.load(wildcardOutput)
+    guard case .fixtureCustomTool(let reloadedCustom) = wildcardReloaded else {
+      throw TypraRuntimeError.unsupported("Expected reloaded FixtureCustomTool wildcard")
+    }
+    XCTAssertEqual(reloadedCustom.kind, "vendor")
   }
 
   func testToolBindingsLoadAndRoundTripMapAndListForms() throws {
@@ -854,6 +874,7 @@ function runCSharpBuild() {
     "  <PropertyGroup>",
     "    <TargetFramework>net8.0</TargetFramework>",
     "    <Nullable>enable</Nullable>",
+    "    <WarningsAsErrors>nullable</WarningsAsErrors>",
     "    <ImplicitUsings>enable</ImplicitUsings>",
     "  </PropertyGroup>",
     "  <ItemGroup>",
@@ -867,6 +888,158 @@ function runCSharpBuild() {
   try {
     runCommand(
       "Generated C# source build",
+      "dotnet",
+      ["build", projectPath, "--nologo", "--verbosity", "quiet", "-p:BaseOutputPath=" + `${binDir}${path.sep}`, "-p:BaseIntermediateOutputPath=" + `${objDir}${path.sep}`],
+      { cwd: sourceDir },
+    );
+  } finally {
+    for (const tempPath of [projectPath, stubsPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    }
+    if (existsSync(outputRoot)) {
+      rmSync(outputRoot, { recursive: true, force: true });
+    }
+  }
+}
+
+function runCSharpConsumerNullabilityBuild() {
+  const sourceDir = path.join(generatedRoot, "csharp");
+  const libraryProjectPath = path.join(sourceDir, "TypraFixtureConsumerLibrary.csproj");
+  const stubsPath = path.join(sourceDir, "TypraFixtureConsumerLibrary.Stubs.cs");
+  const outputRoot = mkdtempSync(path.join(tmpdir(), "typra-csharp-consumer-"));
+  const libraryBinDir = path.join(outputRoot, "library-bin");
+  const libraryObjDir = path.join(outputRoot, "library-obj");
+  const consumerDir = path.join(outputRoot, "consumer");
+  const consumerProjectPath = path.join(consumerDir, "TypraFixtureConsumer.csproj");
+  const consumerProgramPath = path.join(consumerDir, "Program.cs");
+  mkdirSync(consumerDir, { recursive: true });
+
+  writeFileSync(libraryProjectPath, [
+    '<Project Sdk="Microsoft.NET.Sdk">',
+    "  <PropertyGroup>",
+    "    <TargetFramework>net8.0</TargetFramework>",
+    "    <Nullable>enable</Nullable>",
+    "    <WarningsAsErrors>nullable</WarningsAsErrors>",
+    "    <ImplicitUsings>enable</ImplicitUsings>",
+    "    <AssemblyName>TypraFixtureConsumerLibrary</AssemblyName>",
+    "  </PropertyGroup>",
+    "  <ItemGroup>",
+    '    <Compile Remove="tests/**/*.cs" />',
+    '    <PackageReference Include="YamlDotNet" Version="16.3.0" />',
+    "  </ItemGroup>",
+    "</Project>",
+    "",
+  ].join("\n"));
+  writeFileSync(stubsPath, buildCSharpValidationStubs(sourceDir));
+
+  try {
+    runCommand(
+      "Generated C# consumer library build",
+      "dotnet",
+      ["build", libraryProjectPath, "--nologo", "--verbosity", "quiet", "-p:BaseOutputPath=" + `${libraryBinDir}${path.sep}`, "-p:BaseIntermediateOutputPath=" + `${libraryObjDir}${path.sep}`],
+      { cwd: sourceDir },
+    );
+    const libraryPath = path.join(libraryBinDir, "Debug", "net8.0", "TypraFixtureConsumerLibrary.dll");
+    if (!existsSync(libraryPath)) {
+      fail(`Generated C# consumer library was not found at ${libraryPath}.`);
+      return;
+    }
+    writeFileSync(consumerProjectPath, [
+      '<Project Sdk="Microsoft.NET.Sdk">',
+      "  <PropertyGroup>",
+      "    <OutputType>Exe</OutputType>",
+      "    <TargetFramework>net8.0</TargetFramework>",
+      "    <Nullable>enable</Nullable>",
+      "    <WarningsAsErrors>nullable</WarningsAsErrors>",
+      "    <ImplicitUsings>enable</ImplicitUsings>",
+      "  </PropertyGroup>",
+      "  <ItemGroup>",
+      '    <Reference Include="TypraFixtureConsumerLibrary">',
+      `      <HintPath>${libraryPath}</HintPath>`,
+      "    </Reference>",
+      "  </ItemGroup>",
+      "</Project>",
+      "",
+    ].join("\n"));
+    writeFileSync(consumerProgramPath, [
+      "using Typra.Fixtures;",
+      "",
+      "IDictionary<string, object> nonNullableInterface = new Dictionary<string, object> { [\"value\"] = \"interface\" };",
+      "Dictionary<string, object> nonNullableConcrete = new() { [\"value\"] = \"concrete\" };",
+      "IDictionary<string, object?> nullableInterface = new Dictionary<string, object?> { [\"null\"] = null };",
+      "Dictionary<string, object?> nullableConcrete = new() { [\"null\"] = null };",
+      "var value = new FixtureUnknownRecords",
+      "{",
+      "    RequiredValues = nonNullableInterface,",
+      "    OptionalValues = nonNullableConcrete,",
+      "};",
+      "value.RequiredValues = nullableInterface;",
+      "value.OptionalValues = nullableConcrete;",
+      'value.RequiredValues["explicitNull"] = null;',
+      'value.OptionalValues["explicitNull"] = null;',
+      "value.OptionalValues = null;",
+      "_ = value.RequiredValues.Count;",
+      "_ = value.OptionalValues?.Count;",
+      "",
+    ].join("\n"));
+    runCommand(
+      "Generated C# external consumer nullability build",
+      "dotnet",
+      ["build", consumerProjectPath, "--nologo", "--verbosity", "quiet"],
+      { cwd: consumerDir },
+    );
+  } finally {
+    for (const tempPath of [libraryProjectPath, stubsPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    }
+    if (existsSync(outputRoot)) {
+      rmSync(outputRoot, { recursive: true, force: true });
+    }
+  }
+}
+
+function runCSharpNullabilityTestsBuild() {
+  const sourceDir = path.join(generatedRoot, "csharp");
+  const testPath = path.join(sourceDir, "tests", "FixtureUnknownRecordsConversionTests.cs");
+  if (!existsSync(testPath)) {
+    fail("No generated C# unknown-record nullability test found to build.");
+    return;
+  }
+
+  const projectPath = path.join(sourceDir, "TypraFixtureTestsValidation.csproj");
+  const stubsPath = path.join(sourceDir, "TypraFixtureTestsValidation.Stubs.cs");
+  const outputRoot = mkdtempSync(path.join(tmpdir(), "typra-csharp-tests-"));
+  const binDir = path.join(outputRoot, "bin");
+  const objDir = path.join(outputRoot, "obj");
+  writeFileSync(projectPath, [
+    '<Project Sdk="Microsoft.NET.Sdk">',
+    "  <PropertyGroup>",
+    "    <TargetFramework>net8.0</TargetFramework>",
+    "    <Nullable>enable</Nullable>",
+    "    <WarningsAsErrors>nullable</WarningsAsErrors>",
+    "    <ImplicitUsings>enable</ImplicitUsings>",
+    "    <IsTestProject>true</IsTestProject>",
+    "    <IsPackable>false</IsPackable>",
+    "  </PropertyGroup>",
+    "  <ItemGroup>",
+    '    <Compile Remove="tests/**/*.cs" />',
+    '    <Compile Include="tests/FixtureUnknownRecordsConversionTests.cs" />',
+    '    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />',
+    '    <PackageReference Include="xunit" Version="2.9.3" />',
+    '    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />',
+    '    <PackageReference Include="YamlDotNet" Version="16.3.0" />',
+    "  </ItemGroup>",
+    "</Project>",
+    "",
+  ].join("\n"));
+  writeFileSync(stubsPath, buildCSharpValidationStubs(sourceDir));
+  try {
+    runCommand(
+      "Generated C# nullability tests build",
       "dotnet",
       ["build", projectPath, "--nologo", "--verbosity", "quiet", "-p:BaseOutputPath=" + `${binDir}${path.sep}`, "-p:BaseIntermediateOutputPath=" + `${objDir}${path.sep}`],
       { cwd: sourceDir },
@@ -901,6 +1074,7 @@ function runCSharpProtocolScaffoldBuild() {
     "  <PropertyGroup>",
     "    <TargetFramework>net8.0</TargetFramework>",
     "    <Nullable>enable</Nullable>",
+    "    <WarningsAsErrors>nullable</WarningsAsErrors>",
     "    <ImplicitUsings>enable</ImplicitUsings>",
     "  </PropertyGroup>",
     "  <ItemGroup>",
@@ -1602,6 +1776,7 @@ function runCSharpExecutableConformance() {
     "    <OutputType>Exe</OutputType>",
     "    <TargetFramework>net8.0</TargetFramework>",
     "    <Nullable>enable</Nullable>",
+    "    <WarningsAsErrors>nullable</WarningsAsErrors>",
     "    <ImplicitUsings>enable</ImplicitUsings>",
     "  </PropertyGroup>",
     "  <ItemGroup>",
@@ -1634,6 +1809,21 @@ function runCSharpExecutableConformance() {
     "var reloadedRoot = FixtureRoot.Load(savedRoot);",
     'if (reloadedRoot.Metadata is null || !reloadedRoot.Metadata.ContainsKey("nullable") || reloadedRoot.Metadata["nullable"] is not null) throw new InvalidOperationException("Record<unknown> must preserve explicit null values after reload");',
     'root.Metadata.Remove("nullable");',
+    "IDictionary<string, object> nonNullableValues = new Dictionary<string, object> { [\"value\"] = \"non-null\" };",
+    "IDictionary<string, object?> nullableValues = new Dictionary<string, object?> { [\"value\"] = \"nullable\", [\"null\"] = null };",
+    "var unknownRecords = new FixtureUnknownRecords { RequiredValues = nonNullableValues, OptionalValues = nonNullableValues };",
+    "unknownRecords.RequiredValues = nullableValues;",
+    "unknownRecords.OptionalValues = nullableValues;",
+    'if (unknownRecords.RequiredValues["null"] is not null || unknownRecords.OptionalValues["null"] is not null) throw new InvalidOperationException("Record<unknown> API must accept nullable-valued dictionaries");',
+    "var unknownRecordData = new Dictionary<string, object?>",
+    "{",
+    '    ["requiredValues"] = new Dictionary<string, object?> { ["null"] = null },',
+    '    ["optionalValues"] = new Dictionary<string, object?> { ["null"] = null },',
+    "};",
+    "var reloadedUnknownRecords = FixtureUnknownRecords.Load(FixtureUnknownRecords.Load(unknownRecordData).Save());",
+    'if (reloadedUnknownRecords.RequiredValues["null"] is not null || reloadedUnknownRecords.OptionalValues?["null"] is not null) throw new InvalidOperationException("Record<unknown> null values must survive load/save/reload");',
+    "unknownRecords.OptionalValues = null;",
+    'if (unknownRecords.OptionalValues is not null) throw new InvalidOperationException("optional Record<unknown> must accept an absent dictionary");',
     'var wire = WireOptions.Load(new Dictionary<string, object?> { ["maxOutputTokens"] = 256, ["temperature"] = 0.7 });',
     'var imageContent = FixtureContent.Load(new Dictionary<string, object?> { ["kind"] = "image", ["url"] = "https://example.com/fixture.png" });',
     'var knownContent = FixtureContent.Load(new Dictionary<string, object?> { ["kind"] = "text", ["value"] = "hello" }).Save();',
@@ -1938,6 +2128,13 @@ function assertStaticFixtureCoverage() {
     "public IList<string>? OutputModalities { get; set; } = [];",
     "public IList<FixtureOwner>? Owners { get; set; }",
     "public IList<FixtureOwner>? DefaultOwners { get; set; } = [];",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "csharp", "FixtureUnknownRecords.cs"),
+    "[global::System.Diagnostics.CodeAnalysis.NotNull, global::System.Diagnostics.CodeAnalysis.DisallowNull]",
+    "public IDictionary<string, object> RequiredValues { get; set; } = new Dictionary<string, object>();",
+    "[global::System.Diagnostics.CodeAnalysis.MaybeNull, global::System.Diagnostics.CodeAnalysis.AllowNull]",
+    "public IDictionary<string, object> OptionalValues { get; set; }",
   );
   assertIncludes(
     path.join("generated", "fixtures", "rust", "model_info.rs"),
@@ -2397,6 +2594,8 @@ runGoTests();
 runRustTests();
 runSwiftTests();
 runCSharpBuild();
+runCSharpConsumerNullabilityBuild();
+runCSharpNullabilityTestsBuild();
 runCSharpProtocolScaffoldBuild();
 runJavaBuild();
 runJavaGeneratedTests();

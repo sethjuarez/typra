@@ -286,24 +286,20 @@ export function emitCSharpProtocolScaffolds(protocols: TypeNode[], namespace: st
     lines.push(`internal sealed class ${className} : I${protocolName}`);
     lines.push("{");
     for (const method of protocol.methods) {
-      const params = Object.entries(method.params)
-        .map(([name, typeName]) => `${csharpType(typeName)} ${csharpIdentifier(name)}`)
-      if (method.runtimeCancellable) {
-        params.push("CancellationToken cancellationToken = default");
-      }
+      const params = renderCSharpProtocolParameters(method.params, method.runtimeCancellable);
       const methodName = method.sync ? toPascalCase(method.name) : `${toPascalCase(method.name)}Async`;
       const ret = csharpType(method.returns);
       const message = `${protocolName}.${method.name} is a compile-only protocol scaffold.`;
       if (method.sync) {
-        lines.push(`    public ${ret} ${methodName}(${params.join(", ")})`);
+        lines.push(`    public ${ret} ${methodName}(${params})`);
         lines.push("    {");
         lines.push(`        throw new NotSupportedException("${message}");`);
         lines.push("    }");
       } else if (ret === "void") {
-        lines.push(`    public Task ${methodName}(${params.join(", ")}) =>`);
+        lines.push(`    public Task ${methodName}(${params}) =>`);
         lines.push(`        Task.FromException(new NotSupportedException("${message}"));`);
       } else {
-        lines.push(`    public Task<${ret}> ${methodName}(${params.join(", ")}) =>`);
+        lines.push(`    public Task<${ret}> ${methodName}(${params}) =>`);
         lines.push(`        Task.FromException<${ret}>(new NotSupportedException("${message}"));`);
       }
       lines.push("");
@@ -537,6 +533,43 @@ function csharpType(typeName: string): string {
     string: "string",
   };
   return map[typeName] || typeName;
+}
+
+function isCSharpUnknownRecordType(typeName: string): boolean {
+  const requiredType = typeName.endsWith("?") ? typeName.slice(0, -1) : typeName;
+  return requiredType === "Record<unknown>" || requiredType === "dictionary";
+}
+
+function renderCSharpProtocolParameters(params: Record<string, string>, runtimeCancellable: boolean | undefined): string {
+  const entries = Object.entries(params);
+  const hasUnknownRecord = entries.some(([, typeName]) => isCSharpUnknownRecordType(typeName));
+  if (!hasUnknownRecord) {
+    return entries
+      .map(([name, typeName]) => `${csharpType(typeName)} ${csharpIdentifier(name)}`)
+      .concat(runtimeCancellable ? ["CancellationToken cancellationToken = default"] : [])
+      .join(", ");
+  }
+
+  const rendered: string[] = [];
+  const parameterCount = entries.length + (runtimeCancellable ? 1 : 0);
+  let parameterIndex = 0;
+  for (const [name, typeName] of entries) {
+    const comma = ++parameterIndex < parameterCount ? "," : "";
+    if (isCSharpUnknownRecordType(typeName)) {
+      const attribute = typeName.endsWith("?")
+        ? "global::System.Diagnostics.CodeAnalysis.AllowNull"
+        : "global::System.Diagnostics.CodeAnalysis.DisallowNull";
+      rendered.push("#nullable disable annotations");
+      rendered.push(`        [${attribute}] IDictionary<string, object> ${csharpIdentifier(name)}${comma}`);
+      rendered.push("#nullable restore annotations");
+    } else {
+      rendered.push(`        ${csharpType(typeName)} ${csharpIdentifier(name)}${comma}`);
+    }
+  }
+  if (runtimeCancellable) {
+    rendered.push("        CancellationToken cancellationToken = default");
+  }
+  return `\n${rendered.join("\n")}\n    `;
 }
 
 function rustType(typeName: string): string {

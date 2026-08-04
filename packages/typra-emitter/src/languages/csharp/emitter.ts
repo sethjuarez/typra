@@ -241,6 +241,48 @@ function protocolCSharpType(typeStr: string): string {
   return CSHARP_TYPE_MAP[typeStr] || typeStr;
 }
 
+function isUnknownRecordType(typeStr: string): boolean {
+  const requiredType = typeStr.endsWith("?") ? typeStr.slice(0, -1) : typeStr;
+  return requiredType === "Record<unknown>" || requiredType === "dictionary";
+}
+
+function renderProtocolParameters(
+  params: Record<string, string>,
+  runtimeCancellable: boolean | undefined,
+  parameterIndent: string,
+  closingIndent: string,
+): string {
+  const entries = Object.entries(params);
+  const hasUnknownRecord = entries.some(([, typeName]) => isUnknownRecordType(typeName));
+  if (!hasUnknownRecord) {
+    return entries
+      .map(([name, typeName]) => `${protocolCSharpType(typeName)} ${csharpIdentifier(name)}`)
+      .concat(runtimeCancellable ? ["CancellationToken cancellationToken = default"] : [])
+      .join(", ");
+  }
+
+  const rendered: string[] = [];
+  const parameterCount = entries.length + (runtimeCancellable ? 1 : 0);
+  let parameterIndex = 0;
+  for (const [name, typeName] of entries) {
+    const comma = ++parameterIndex < parameterCount ? "," : "";
+    if (isUnknownRecordType(typeName)) {
+      const attribute = typeName.endsWith("?")
+        ? "global::System.Diagnostics.CodeAnalysis.AllowNull"
+        : "global::System.Diagnostics.CodeAnalysis.DisallowNull";
+      rendered.push("#nullable disable annotations");
+      rendered.push(`[${attribute}] IDictionary<string, object> ${csharpIdentifier(name)}${comma}`);
+      rendered.push("#nullable restore annotations");
+    } else {
+      rendered.push(`${protocolCSharpType(typeName)} ${csharpIdentifier(name)}${comma}`);
+    }
+  }
+  if (runtimeCancellable) {
+    rendered.push("CancellationToken cancellationToken = default");
+  }
+  return `\n${rendered.map(line => `${parameterIndent}${line}`).join("\n")}\n${closingIndent}`;
+}
+
 /**
  * Emit a C# interface for a protocol type.
  */
@@ -270,10 +312,7 @@ function emitCSharpInterface(type: TypeDecl, namespace: string, lines: string[])
     if (method.description) {
       emitXmlDocComment(method.description, "        ", lines);
     }
-    const params = Object.entries(method.params)
-      .map(([pName, pType]) => `${protocolCSharpType(pType)} ${csharpIdentifier(pName)}`)
-      .concat(method.runtimeCancellable ? ["CancellationToken cancellationToken = default"] : [])
-      .join(", ");
+    const params = renderProtocolParameters(method.params, method.runtimeCancellable, "            ", "        ");
     const ret = protocolCSharpType(method.returns);
 
     if (method.sync) {
@@ -396,12 +435,27 @@ function emitConstructor(type: TypeDecl, lines: string[]): void {
 function emitProperties(type: TypeDecl, allTypes: TypeDecl[], findType: (name: string) => TypeDecl | undefined, lines: string[]): void {
   for (const field of type.fields) {
     const modifier = getPropertyModifier(field, type, allTypes, findType);
-    const csType = getCSharpType(field.category, field.isOptional, field.enumName, field.isOpenEnum);
+    const isUnknownDictionary = isUnknownDictionaryCategory(field.category);
+    const csType = getCSharpType(
+      field.category,
+      isUnknownDictionary ? false : field.isOptional,
+      field.enumName,
+      field.isOpenEnum,
+    );
     const propName = toPascalCase(field.name);
     const default_ = getPropertyDefault(field);
 
     emitXmlDocComment(field.description || propName, "    ", lines);
+    if (isUnknownDictionary) {
+      lines.push("#nullable disable annotations");
+      lines.push(field.isOptional
+        ? "    [global::System.Diagnostics.CodeAnalysis.MaybeNull, global::System.Diagnostics.CodeAnalysis.AllowNull]"
+        : "    [global::System.Diagnostics.CodeAnalysis.NotNull, global::System.Diagnostics.CodeAnalysis.DisallowNull]");
+    }
     lines.push(`    public ${modifier}${csType} ${propName} { get; set; }${default_}`);
+    if (isUnknownDictionary) {
+      lines.push("#nullable restore annotations");
+    }
     lines.push("");
   }
   lines.push("");
@@ -456,7 +510,7 @@ function getCSharpType(category: PropertyCategory, isOptional: boolean, enumName
       baseType = `IList<${category.typeName}>`;
       break;
     case "dict":
-      baseType = "IDictionary<string, object?>";
+      baseType = `IDictionary<string, ${getCSharpDictionaryValueType(category)}>`;
       break;
   }
   return isOptional ? `${baseType}?` : baseType;
@@ -489,13 +543,14 @@ function getPropertyDefault(field: FieldDecl): string {
     case "collection_complex":
       return " = [];";
     case "dict":
-      return " = new Dictionary<string, object?>();";
+      return ` = new Dictionary<string, ${getCSharpDictionaryValueType(cat)}>();`;
     case "scalar": {
       const csType = CSHARP_TYPE_MAP[cat.scalarType] || "object";
       if (csType === "string") {
         if (field.defaultValue && field.defaultValue !== "*") {
           return ` = "${field.defaultValue}";`;
         }
+
         return " = string.Empty;";
       }
       if (csType === "bool") {
@@ -513,6 +568,15 @@ function getPropertyDefault(field: FieldDecl): string {
     case "complex":
       return "";
   }
+}
+
+function isUnknownDictionaryCategory(category: PropertyCategory): boolean {
+  return category.kind === "dict" && (!category.valueType || category.valueType === "unknown");
+}
+
+function getCSharpDictionaryValueType(category: Extract<PropertyCategory, { kind: "dict" }>): string {
+  if (!category.valueType || category.valueType === "unknown") return "object";
+  return CSHARP_TYPE_MAP[category.valueType] || category.valueType;
 }
 
 // ============================================================================
@@ -1389,10 +1453,7 @@ function emitHelperInterface(type: TypeDecl, lines: string[]): void {
       // Property-style: ``T Foo { get; }``
       lines.push(`    ${ret} ${pascalName} { get; }`);
     } else {
-      const params = paramEntries
-        .map(([pName, pType]) => `${protocolCSharpType(pType)} ${csharpIdentifier(pName)}`)
-        .concat(m.runtimeCancellable ? ["CancellationToken cancellationToken = default"] : [])
-        .join(", ");
+      const params = renderProtocolParameters(m.params, m.runtimeCancellable, "        ", "    ");
       lines.push(`    ${ret} ${pascalName}(${params});`);
     }
   }

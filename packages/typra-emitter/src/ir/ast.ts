@@ -181,6 +181,7 @@ export class PropertyNode {
   public isCollection: boolean = false;
   public isAny: boolean = false;
   public isDict: boolean = false;
+  public dictValueType: string | null = null;
 
   public defaultValue: string | number | boolean | null = null;
   public hasExplicitDefault: boolean = false;
@@ -225,6 +226,7 @@ export class PropertyNode {
       isCollection: this.isCollection,
       isAny: this.isAny,
       isDict: this.isDict,
+      dictValueType: this.dictValueType,
 
       defaultValue: this.defaultValue || "null",
       hasExplicitDefault: this.hasExplicitDefault,
@@ -478,11 +480,17 @@ export const resolveModelProperty = (program: Program, property: ModelProperty, 
 
       if (innerModel.name === "Record") {
         // Record situation -> treat as array of dictionary
+        const recordValueType = getTemplateType(innerModel);
         prop.isScalar = false;
         prop.isAny = false;
         prop.isOptional = property.optional;
         prop.isCollection = true;
         prop.isDict = true;
+        prop.dictValueType = recordValueType?.kind === "Model"
+          ? getModelType(recordValueType, rootNamespace, rootAlias).name
+          : recordValueType
+            ? getTypeName(recordValueType)
+            : "unknown";
         prop.typeName = {
           namespace: "",
           name: "dictionary"
@@ -537,6 +545,7 @@ export const resolveModelProperty = (program: Program, property: ModelProperty, 
     if (prop.typeName.name === "Record<unknown>") {
       prop.isScalar = true;
       prop.isDict = true;
+      prop.dictValueType = "unknown";
       prop.typeName = {
         namespace: "",
         name: "dictionary"
