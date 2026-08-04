@@ -1,5 +1,6 @@
 import { TypeNode } from "../../ir/ast.js";
 import { swiftFunctionName, swiftModuleName, swiftPropertyName, swiftStringLiteral, swiftTypeName } from "./identifiers.js";
+import { swiftType } from "./types.js";
 
 export function emitSwiftRuntime(moduleName: string): string {
   return [
@@ -192,10 +193,10 @@ export function emitSwiftProtocolScaffolds(protocols: TypeNode[], moduleName: st
     lines.push(`    final class ${className}: ${protocolName} {`);
     for (const method of protocol.methods) {
       const params = Object.entries(method.params)
-        .map(([name, typeName]) => `${swiftPropertyName(name)}: ${swiftProtocolType(typeName)}`)
+        .map(([name, typeName]) => `${swiftPropertyName(name)}: ${swiftType(typeName)}`)
         .join(", ");
       const asyncToken = method.sync ? "" : " async";
-      const returnType = swiftProtocolType(method.returns);
+      const returnType = swiftType(method.returns);
       lines.push(`      func ${swiftFunctionName(method.name)}(${params})${asyncToken} throws${returnType === "Void" ? "" : ` -> ${returnType}`} {`);
       if (returnType !== "Void") {
         lines.push(`        throw TypraRuntimeError.unsupported(${swiftStringLiteral(`${protocolName}.${method.name} is a compile-only protocol scaffold.`)})`);
@@ -212,26 +213,6 @@ export function emitSwiftProtocolScaffolds(protocols: TypeNode[], moduleName: st
   lines.push("}");
   lines.push("");
   return lines.join("\n");
-}
-
-function swiftProtocolType(typeName: string): string {
-  const lower = typeName.toLowerCase();
-  switch (lower) {
-    case "void": return "Void";
-    case "unknown":
-    case "any": return "Any";
-    case "string": return "String";
-    case "boolean": return "Bool";
-    case "int32": return "Int32";
-    case "int64": return "Int64";
-    case "integer": return "Int";
-    case "float32": return "Float";
-    case "float64":
-    case "float":
-    case "number":
-    case "numeric": return "Double";
-    default: return swiftTypeName(typeName);
-  }
 }
 
 export { swiftModuleName };

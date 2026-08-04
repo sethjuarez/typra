@@ -14,24 +14,9 @@ import { SwiftExprVisitor } from "./visitor.js";
 import { emitSwiftConformanceTest, emitSwiftTests } from "./test-emitter.js";
 import { emitSwiftPackage, emitSwiftProtocolScaffolds, emitSwiftRuntime, swiftModuleName } from "./scaffolding.js";
 import { swiftFileName } from "./identifiers.js";
+import { SWIFT_TYPE_MAP } from "./types.js";
 
-export const swiftTypeMapper: Record<string, string> = {
-  "string": "String",
-  "number": "Double",
-  "array": "[Any]",
-  "object": "[String: Any]",
-  "boolean": "Bool",
-  "int64": "Int64",
-  "int32": "Int32",
-  "float64": "Double",
-  "float32": "Float",
-  "integer": "Int",
-  "float": "Double",
-  "numeric": "Double",
-  "any": "Any",
-  "dictionary": "[String: Any]",
-  "unknown": "Any",
-};
+export const swiftTypeMapper: Record<string, string> = SWIFT_TYPE_MAP;
 
 export const generateSwift = async (
   context: EmitContext<TypraEmitterOptions>,

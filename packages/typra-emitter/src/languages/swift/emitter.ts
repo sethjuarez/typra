@@ -10,24 +10,7 @@ import {
 } from "../../ir/declarations.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { swiftFunctionName, swiftPropertyName, swiftStringLiteral, swiftTypeName } from "./identifiers.js";
-
-const SWIFT_TYPE_MAP: Record<string, string> = {
-  string: "String",
-  boolean: "Bool",
-  int32: "Int32",
-  int64: "Int64",
-  integer: "Int",
-  float32: "Float",
-  float64: "Double",
-  float: "Double",
-  number: "Double",
-  numeric: "Double",
-  any: "Any",
-  unknown: "Any",
-  object: "[String: Any]",
-  dictionary: "[String: Any]",
-  array: "[Any]",
-};
+import { swiftType } from "./types.js";
 
 export function emitSwiftFile(file: FileDecl, visitor: ExprVisitor, polymorphicTypeNames: Set<string>): string {
   const lines: string[] = [
@@ -42,15 +25,21 @@ export function emitSwiftFile(file: FileDecl, visitor: ExprVisitor, polymorphicT
   }
 
   for (const type of file.types) {
-    emitType(type, lines, visitor, polymorphicTypeNames);
+    emitType(type, lines, visitor, polymorphicTypeNames, file.types);
   }
 
   return trimBlankLines(lines).join("\n") + "\n";
 }
 
-function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor, polymorphicTypeNames: Set<string>): void {
+function emitType(
+  type: TypeDecl,
+  lines: string[],
+  visitor: ExprVisitor,
+  polymorphicTypeNames: Set<string>,
+  allTypes: TypeDecl[],
+): void {
   if (type.polymorphicDispatch) {
-    emitPolymorphicEnum(type, lines);
+    emitPolymorphicEnum(type, lines, allTypes);
     return;
   }
   if (type.isProtocol) {
@@ -104,13 +93,20 @@ function emitEnumParseMethod(enumDef: EnumDef, lines: string[], typeName: string
   lines.push("  }");
 }
 
-function emitPolymorphicEnum(type: TypeDecl, lines: string[]): void {
+function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl[]): void {
   const typeName = swiftTypeName(type.typeName.name);
   const dispatch = type.polymorphicDispatch!;
-  lines.push(`public enum ${typeName}: TypraModel {`);
+  const indirect = isRecursivePolymorphicEnum(type, allTypes) ? "indirect " : "";
+  lines.push(`public ${indirect}enum ${typeName}: TypraModel {`);
+  const fallback = dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference
+    ? dispatch.defaultVariant
+    : null;
   for (const variant of dispatch.variants) {
     const childName = swiftTypeName(variant.typeName.name);
     lines.push(`  case ${swiftPropertyName(variant.typeName.name)}(${childName})`);
+  }
+  if (fallback && !dispatch.variants.some(variant => variant.typeName.name === fallback.typeName.name)) {
+    lines.push(`  case ${swiftPropertyName(fallback.typeName.name)}(${swiftTypeName(fallback.typeName.name)})`);
   }
   if (!dispatch.isAbstract) {
     lines.push("  case unknown([String: Any])");
@@ -123,8 +119,8 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[]): void {
   for (const variant of dispatch.variants) {
     lines.push(`    case ${swiftStringLiteral(variant.value)}: return .${swiftPropertyName(variant.typeName.name)}(try ${swiftTypeName(variant.typeName.name)}.load(data, context: context))`);
   }
-  if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
-    lines.push(`    default: return .${swiftPropertyName(dispatch.defaultVariant.typeName.name)}(try ${swiftTypeName(dispatch.defaultVariant.typeName.name)}.load(data, context: context))`);
+  if (fallback) {
+    lines.push(`    default: return .${swiftPropertyName(fallback.typeName.name)}(try ${swiftTypeName(fallback.typeName.name)}.load(data, context: context))`);
   } else if (!dispatch.isAbstract) {
     lines.push("    default: return .unknown(object)");
   } else {
@@ -138,6 +134,9 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[]): void {
   for (const variant of dispatch.variants) {
     lines.push(`    case .${swiftPropertyName(variant.typeName.name)}(let value): return try value.save(context)`);
   }
+  if (fallback && !dispatch.variants.some(variant => variant.typeName.name === fallback.typeName.name)) {
+    lines.push(`    case .${swiftPropertyName(fallback.typeName.name)}(let value): return try value.save(context)`);
+  }
   if (!dispatch.isAbstract) {
     lines.push("    case .unknown(let value): return value");
   }
@@ -148,15 +147,42 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[]): void {
   lines.push("");
 }
 
+function isRecursivePolymorphicEnum(type: TypeDecl, allTypes: TypeDecl[]): boolean {
+  const targetName = type.typeName.name;
+  const byName = new Map(allTypes.map(candidate => [candidate.typeName.name, candidate]));
+  const visited = new Set<string>();
+
+  function referencesTarget(typeName: string): boolean {
+    if (typeName === targetName) return true;
+    if (visited.has(typeName)) return false;
+    visited.add(typeName);
+    const candidate = byName.get(typeName);
+    if (!candidate) return false;
+    return candidate.fields.some(field => {
+      if (field.category.kind !== "complex" && field.category.kind !== "collection_complex") return false;
+      return referencesTarget(field.category.typeName);
+    });
+  }
+
+  const relatedTypes = [
+    ...type.polymorphicDispatch!.variants.map(variant => variant.typeName.name),
+    ...(type.polymorphicDispatch!.defaultVariant &&
+      !type.polymorphicDispatch!.defaultVariant.isSelfReference
+      ? [type.polymorphicDispatch!.defaultVariant.typeName.name]
+      : []),
+  ];
+  return relatedTypes.some(referencesTarget);
+}
+
 function emitProtocol(type: TypeDecl, lines: string[]): void {
   const typeName = swiftTypeName(type.typeName.name);
   lines.push(`public protocol ${typeName} {`);
   for (const method of type.methods) {
     const params = Object.entries(method.params)
-      .map(([name, typeName]) => `${swiftPropertyName(name)}: ${swiftProtocolType(typeName)}`)
+      .map(([name, typeName]) => `${swiftPropertyName(name)}: ${swiftType(typeName)}`)
       .join(", ");
     const asyncToken = method.sync ? "" : " async";
-    const returnType = swiftProtocolType(method.returns);
+    const returnType = swiftType(method.returns);
     lines.push(`  func ${swiftFunctionName(method.name)}(${params})${asyncToken} throws${returnType === "Void" ? "" : ` -> ${returnType}`}`);
   }
   lines.push("}");
@@ -190,7 +216,7 @@ function emitStruct(type: TypeDecl, lines: string[], visitor: ExprVisitor, polym
   emitJsonYamlMethods(typeName, lines);
   for (const factory of type.factories) {
     lines.push("");
-    const params = Object.entries(factory.params).map(([name, paramType]) => `${swiftPropertyName(name)}: ${swiftScalarType(paramType)}`).join(", ");
+    const params = Object.entries(factory.params).map(([name, paramType]) => `${swiftPropertyName(name)}: ${swiftType(paramType)}`).join(", ");
     lines.push(`  public static func ${swiftFunctionName(factory.name)}(${params}) -> ${typeName} {`);
     lines.push(`    return ${visitor.visitExpr(factory.body)}`);
     lines.push("  }");
@@ -307,9 +333,9 @@ function emitJsonYamlMethods(typeName: string, lines: string[]): void {
 }
 
 function emitMethodStub(method: MethodStubDecl, lines: string[]): void {
-  const params = Object.entries(method.params).map(([name, typeName]) => `${swiftPropertyName(name)}: ${swiftProtocolType(typeName)}`).join(", ");
+  const params = Object.entries(method.params).map(([name, typeName]) => `${swiftPropertyName(name)}: ${swiftType(typeName)}`).join(", ");
   const asyncToken = method.sync ? "" : " async";
-  const returnType = swiftProtocolType(method.returns);
+  const returnType = swiftType(method.returns);
   lines.push("");
   lines.push(`  public func ${swiftFunctionName(method.name)}(${params})${asyncToken} throws${returnType === "Void" ? "" : ` -> ${returnType}`} {`);
   lines.push(`    throw TypraRuntimeError.unsupported(${swiftStringLiteral(`${method.name} must be implemented by hand-authored code.`)})`);
@@ -324,20 +350,16 @@ function swiftFieldType(field: FieldDecl, polymorphicTypeNames: Set<string>): st
 function swiftCategoryType(category: PropertyCategory, enumName: string | null, polymorphicTypeNames: Set<string>): string {
   switch (category.kind) {
     case "scalar":
-      return enumName ? swiftTypeName(enumName) : swiftScalarType(category.scalarType);
+      return enumName ? swiftTypeName(enumName) : swiftType(category.scalarType);
     case "complex":
       return swiftTypeName(category.typeName);
     case "collection_scalar":
-      return `[${swiftScalarType(category.scalarType)}]`;
+      return `[${swiftType(category.scalarType)}]`;
     case "collection_complex":
       return `[${swiftTypeName(category.typeName)}]`;
     case "dict":
       return "[String: Any]";
   }
-}
-
-function swiftScalarType(typeName: string): string {
-  return SWIFT_TYPE_MAP[typeName] ?? swiftTypeName(typeName);
 }
 
 function swiftDefaultValue(field: FieldDecl, polymorphicTypeNames: Set<string>): string {
@@ -455,12 +477,6 @@ function swiftCoercionCheck(scalarType: string): string | undefined {
     case "numeric": return "data as? Double";
     default: return undefined;
   }
-}
-
-function swiftProtocolType(typeName: string): string {
-  const lower = typeName.toLowerCase();
-  if (lower === "void") return "Void";
-  return swiftScalarType(lower === "unknown" ? "any" : typeName);
 }
 
 function trimBlankLines(lines: string[]): string[] {
