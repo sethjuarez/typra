@@ -470,7 +470,15 @@ describe("Java generated tests", () => {
     note.name = "note";
     note.isScalar = true;
     note.typeName = { namespace: "TypeSpec", name: "string" };
-    item.properties = [name, note];
+    const weight = new PropertyNode({} as ModelProperty, "");
+    weight.name = "weight";
+    weight.isScalar = true;
+    weight.typeName = { namespace: "TypeSpec", name: "float64" };
+    item.properties = [name, note, weight];
+    item.coercions = [
+      { scalar: "string", expansion: { note: "{value}" } },
+      { scalar: "float64", expansion: { weight: "{value}" } },
+    ];
 
     const bag = new TypeNode({} as Model, "");
     bag.typeName = { namespace: "Test", name: "FixtureBag" };
@@ -486,8 +494,14 @@ describe("Java generated tests", () => {
       isAbstract: false,
       package: "test",
       examples: [{
-        sample: { items: { alpha: { note: "first" } } },
-        json: ['{"items":{"alpha":{"note":"first"}}}'],
+        sample: {
+          items: {
+            alpha: "first",
+            beta: 2.5,
+            gamma: { note: "expanded", weight: 3 },
+          },
+        },
+        json: ['{"items":{"alpha":"first","beta":2.5,"gamma":{"note":"expanded","weight":3}}}'],
         yaml: [],
         validations: [],
       }],
@@ -497,7 +511,90 @@ describe("Java generated tests", () => {
 
     assert.match(source, /instance1\.items\.size\(\)/);
     assert.match(source, /instance1\.items\.get\(0\)\.name/);
+    assert.match(source, /instance1\.items\.get\(0\)\.note/);
+    assert.match(source, /instance1\.items\.get\(1\)\.weight/);
+    assert.match(source, /instance1\.items\.get\(2\)\.note/);
     assert.doesNotMatch(source, /instance1\.items\.get\("alpha"\)/);
+  });
+
+  it("validates scalar shorthand in array-form complex collections", () => {
+    const item = new TypeNode({} as Model, "");
+    item.typeName = { namespace: "Test", name: "FixtureBagItem" };
+    const note = new PropertyNode({} as ModelProperty, "");
+    note.name = "note";
+    note.isScalar = true;
+    note.typeName = { namespace: "TypeSpec", name: "string" };
+    item.properties = [note];
+    item.coercions = [{ scalar: "string", expansion: { note: "{value}" } }];
+
+    const bag = new TypeNode({} as Model, "");
+    bag.typeName = { namespace: "Test", name: "FixtureBag" };
+    const items = new PropertyNode({} as ModelProperty, "");
+    items.name = "items";
+    items.typeName = item.typeName;
+    items.isCollection = true;
+    items.type = item;
+    bag.properties = [items];
+
+    const source = emitJavaTest({
+      node: bag,
+      isAbstract: false,
+      package: "test",
+      examples: [{
+        sample: { items: ["first"] },
+        json: ['{"items":["first"]}'],
+        yaml: [],
+        validations: [],
+      }],
+      coercions: [],
+      factories: [],
+    });
+
+    assert.match(source, /assertEquals\("first", instance1\.items\.get\(0\)\.note/);
+  });
+
+  it("matches integer and floating shorthand to their runtime coercion branches", () => {
+    const item = new TypeNode({} as Model, "");
+    item.typeName = { namespace: "Test", name: "NumericItem" };
+    const count = new PropertyNode({} as ModelProperty, "");
+    count.name = "count";
+    count.isScalar = true;
+    count.typeName = { namespace: "TypeSpec", name: "int32" };
+    const amount = new PropertyNode({} as ModelProperty, "");
+    amount.name = "amount";
+    amount.isScalar = true;
+    amount.typeName = { namespace: "TypeSpec", name: "float64" };
+    item.properties = [count, amount];
+    item.coercions = [
+      { scalar: "float64", expansion: { amount: "{value}" } },
+      { scalar: "int32", expansion: { count: "{value}" } },
+    ];
+
+    const bag = new TypeNode({} as Model, "");
+    bag.typeName = { namespace: "Test", name: "NumericBag" };
+    const items = new PropertyNode({} as ModelProperty, "");
+    items.name = "items";
+    items.typeName = item.typeName;
+    items.isCollection = true;
+    items.type = item;
+    bag.properties = [items];
+
+    const source = emitJavaTest({
+      node: bag,
+      isAbstract: false,
+      package: "test",
+      examples: [{
+        sample: { items: [3, 2.5] },
+        json: ['{"items":[3,2.5]}'],
+        yaml: [],
+        validations: [],
+      }],
+      coercions: [],
+      factories: [],
+    });
+
+    assert.match(source, /assertEquals\(3, instance1\.items\.get\(0\)\.count/);
+    assert.match(source, /assertEquals\(2\.5, instance1\.items\.get\(1\)\.amount/);
   });
 
   it("uses canonical Java string literals and typed nested comparisons", () => {

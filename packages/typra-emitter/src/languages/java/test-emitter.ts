@@ -248,8 +248,12 @@ function emitCollectionValidation(
   if (!itemType) return;
 
   values.forEach((item, index) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return;
     const itemExpr = `${expr}.get(${index})`;
+    if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+      emitShorthandObjectValidation(lines, itemExpr, `${propName}[${index}]`, item, itemType);
+      return;
+    }
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
     const child = findSampleChildType(prop, item, itemType);
     if (child) {
       const local = `${localIdentifier(expr)}${index}Value`;
@@ -286,15 +290,15 @@ function emitShorthandObjectValidation(
   lines: string[],
   expr: string,
   propName: string,
-  expected: string,
+  expected: string | number | boolean,
   node: TypeNode,
 ): void {
   if (node.childTypes.length > 0) return;
 
-  const shorthandField = findStringCoercionField(node);
+  const shorthandField = findScalarCoercionField(node, expected);
   if (!shorthandField) return;
 
-  lines.push(`    assertEquals(${javaString(expected)}, ${expr}.${shorthandField}, "Expected ${propName}.${shorthandField}");`);
+  lines.push(`    assertEquals(${javaLiteral(expected)}, ${expr}.${javaPropertyName(shorthandField)}, "Expected ${propName}.${shorthandField}");`);
 }
 
 function emitScalarSampleValidation(
@@ -327,7 +331,12 @@ function collectionSampleValues(
     if (item && typeof item === "object" && !Array.isArray(item)) {
       return { name, ...item as Record<string, unknown> };
     }
-    return { name, [firstInnerField]: item };
+    const shorthandField = itemType && (
+      typeof item === "string" || typeof item === "number" || typeof item === "boolean"
+    )
+      ? findScalarCoercionField(itemType, item)
+      : undefined;
+    return { name, [shorthandField ?? firstInnerField]: item };
   });
 }
 
@@ -369,8 +378,24 @@ function findTypeByName(node: TypeNode, typeName: string, visited = new Set<Type
   return undefined;
 }
 
-function findStringCoercionField(node: TypeNode): string | undefined {
-  const coercion = node.coercions.find(entry => entry.scalar === "string");
+function findScalarCoercionField(node: TypeNode, value: string | number | boolean): string | undefined {
+  let coercion;
+  if (typeof value === "number") {
+    const byScalar = (scalars: string[]) =>
+      scalars.map(scalar => node.coercions.find(entry => entry.scalar === scalar)).find(Boolean);
+    const fitsInt32 = value >= -2147483648 && value <= 2147483647;
+    if (Number.isInteger(value)) {
+      coercion = (fitsInt32 ? byScalar(["int32", "integer"]) : undefined)
+        ?? byScalar(["int64"])
+        ?? byScalar(["number", "float", "numeric", "float64", "float32"]);
+    } else {
+      coercion = byScalar(["number", "float", "numeric", "float64"])
+        ?? byScalar(["float32"])
+        ?? byScalar(["int32", "integer", "int64"]);
+    }
+  } else {
+    coercion = node.coercions.find(entry => entry.scalar === typeof value);
+  }
   if (!coercion) return undefined;
 
   for (const [key, value] of Object.entries(coercion.expansion)) {
