@@ -1553,6 +1553,22 @@ function runJavaExecutableConformance() {
     '    wireData.put("temperature", 0.7);',
     "    FixtureRoot root = FixtureRoot.fromYaml(TypraYaml.stringify(rootData));",
     "    FixtureContent imageContent = FixtureContent.fromYaml(TypraYaml.stringify(imageContentData));",
+    "    Map<String, Object> exactCaseContentData = new LinkedHashMap<>();",
+    '    exactCaseContentData.put("kind", "text");',
+    '    exactCaseContentData.put("text", "exact-case discriminator");',
+    "    FixtureAbstractContent exactCaseContent = FixtureAbstractContent.load(exactCaseContentData, new LoadContext());",
+    '    require(exactCaseContent instanceof FixtureAbstractTextContent, "exact discriminator must dispatch to its abstract variant");',
+    '    require("exact-case discriminator".equals(((FixtureAbstractTextContent) exactCaseContent).text), "abstract discriminator dispatch must load variant fields");',
+    "    Map<String, Object> wrongCaseContentData = new LinkedHashMap<>();",
+    '    wrongCaseContentData.put("kind", "Text");',
+    '    wrongCaseContentData.put("text", "wrong-case discriminator");',
+    "    boolean wrongCaseRejected = false;",
+    "    try {",
+    "      FixtureAbstractContent.load(wrongCaseContentData, new LoadContext());",
+    "    } catch (IllegalArgumentException expected) {",
+    "      wrongCaseRejected = true;",
+    "    }",
+    '    require(wrongCaseRejected, "polymorphic discriminator dispatch must be case-sensitive");',
     "    WireOptions wire = WireOptions.load(wireData, new LoadContext());",
     '    FixtureReference reference = FixtureReference.fromYaml("\\"ref-coerced\\"");',
     "    FixtureRoot reloadedRoot = FixtureRoot.fromYaml(root.toYaml());",
@@ -1831,7 +1847,8 @@ function assertStaticFixtureCoverage() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "java", "FixtureReferenceMethods.java"),
-    "Typra extension seam. This file is created once and is safe to edit.",
+    "// <typra-editable-seam>",
+    "Typra editable seam. This file is created once and is safe to edit.",
     "public static String display(FixtureReference self, String prefix)",
   );
   assertExcludes(

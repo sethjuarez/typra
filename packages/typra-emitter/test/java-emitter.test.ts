@@ -490,7 +490,8 @@ describe("Java emitter runtime semantics", () => {
       assert.match(modelSource, /return MessageMethods\.text\(this, prefix\);/);
       assert.ok(helper);
       assert.equal(helper.filename, "MessageMethods.java");
-      assert.match(helper.source, /^\/\/ <typra-extension-seam>\n/);
+      assert.match(helper.source, /^\/\/ <typra-editable-seam>\n/);
+      assert.match(helper.source, /Typra editable seam\. This file is created once and is safe to edit\./);
       assert.match(helper.source, /public static String text\(Message self, String prefix\)/);
       assert.match(helper.source, /Implement Message\.text in MessageMethods/);
       assert.doesNotMatch(helper.source, /Code generated|auto-generated/);

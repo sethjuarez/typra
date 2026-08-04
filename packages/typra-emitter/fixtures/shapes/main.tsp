@@ -86,6 +86,17 @@ model ImageContent extends FixtureContent {
   url: string;
 }
 
+@abstract
+@discriminator("kind")
+model FixtureAbstractContent {
+  kind: string;
+}
+
+model FixtureAbstractTextContent extends FixtureAbstractContent {
+  kind: "text";
+  text: string;
+}
+
 @parseAlias("ready", #["complete"])
 union FixtureStatus {
   draft: "draft";
