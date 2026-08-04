@@ -1,4 +1,5 @@
 import {
+  CollectionHelperDecl,
   CoercionDecl,
   EnumDef,
   FieldDecl,
@@ -110,9 +111,7 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
   if (fallback && !dispatch.variants.some(variant => variant.typeName.name === fallback.typeName.name)) {
     lines.push(`  case ${swiftPropertyName(fallback.typeName.name)}(${swiftTypeName(fallback.typeName.name)})`);
   }
-  if (!dispatch.isAbstract) {
-    lines.push("  case unknown([String: Any])");
-  }
+  lines.push("  case unknown([String: Any])");
   lines.push("");
   lines.push(`  public static func load(_ data: Any, context: LoadContext = LoadContext()) throws -> ${typeName} {`);
   lines.push(`    let object = try TypraRuntime.object(data, typeName: ${swiftStringLiteral(typeName)})`);
@@ -139,9 +138,7 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
   if (fallback && !dispatch.variants.some(variant => variant.typeName.name === fallback.typeName.name)) {
     lines.push(`    case .${swiftPropertyName(fallback.typeName.name)}(let value): return try value.save(context)`);
   }
-  if (!dispatch.isAbstract) {
-    lines.push("    case .unknown(let value): return value");
-  }
+  lines.push("    case .unknown(let value): return value");
   lines.push("    }");
   lines.push("  }");
   emitJsonYamlMethods(typeName, lines);
@@ -198,6 +195,7 @@ function emitStruct(type: TypeDecl, lines: string[], visitor: ExprVisitor, polym
   }
   const conformances = ["TypraModel"];
   lines.push(`public struct ${typeName}: ${conformances.join(", ")} {`);
+  lines.push(`  public static let shorthandProperty: String? = ${type.coercionProperty ? swiftStringLiteral(type.coercionProperty) : "nil"}`);
   for (const field of type.fields) {
     lines.push(`  public var ${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)}${field.isOptional ? " = nil" : ` = ${swiftDefaultValue(field, polymorphicTypeNames)}`}`);
   }
@@ -209,6 +207,14 @@ function emitStruct(type: TypeDecl, lines: string[], visitor: ExprVisitor, polym
   lines.push("  }");
   lines.push("");
   emitLoad(type, lines, polymorphicTypeNames);
+  for (const helper of type.collectionHelpers) {
+    if (helper.hasNameProperty) {
+      lines.push("");
+      emitNamedCollectionLoadHelper(helper, lines);
+      lines.push("");
+      emitNamedCollectionSaveHelper(helper, lines);
+    }
+  }
   lines.push("");
   emitSave(type, lines, polymorphicTypeNames);
   if (type.wire) {
@@ -240,8 +246,11 @@ function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
   lines.push(`    var instance = ${typeName}()`);
   for (const assignment of type.load.assignments) {
     const field = type.fields.find(f => f.name === assignment.fieldName);
+    const collectionHelper = type.collectionHelpers.find(helper =>
+      helper.propertyName === assignment.fieldName && helper.hasNameProperty
+    );
     lines.push(`    if let value = object[${swiftStringLiteral(assignment.sourceName)}] {`);
-    lines.push(`      instance.${swiftPropertyName(assignment.fieldName)} = ${swiftLoadExpression(assignment.category, assignment.enumName, assignment.fieldName, "value", polymorphicTypeNames)}`);
+    lines.push(`      instance.${swiftPropertyName(assignment.fieldName)} = ${swiftLoadExpression(assignment.category, assignment.enumName, assignment.fieldName, "value", polymorphicTypeNames, collectionHelper)}`);
     lines.push("    }");
     if (field?.defaultValue !== null && field?.defaultValue !== undefined && !field.isOptional) {
       lines.push("    else {");
@@ -250,6 +259,45 @@ function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
     }
   }
   lines.push("    return instance");
+  lines.push("  }");
+}
+
+function emitNamedCollectionLoadHelper(helper: CollectionHelperDecl, lines: string[]): void {
+  const methodName = `load${swiftTypeName(helper.propertyName)}`;
+  const elementType = swiftTypeName(helper.elementTypeName.name);
+  lines.push(`  private static func ${methodName}(_ data: Any, context: LoadContext) throws -> [${elementType}] {`);
+  lines.push("    if let values = data as? [Any] {");
+  lines.push(`      return try values.map { try ${elementType}.load($0, context: context) }`);
+  lines.push("    }");
+  lines.push(`    let values = try TypraRuntime.dictionary(data, field: ${swiftStringLiteral(helper.propertyName)})`);
+  lines.push("    return try values.map { name, value in");
+  lines.push(`      var item = try ${elementType}.load(value, context: context)`);
+  lines.push("      item.name = name");
+  lines.push("      return item");
+  lines.push("    }");
+  lines.push("  }");
+}
+
+function emitNamedCollectionSaveHelper(helper: CollectionHelperDecl, lines: string[]): void {
+  const methodName = `save${swiftTypeName(helper.propertyName)}`;
+  const elementType = swiftTypeName(helper.elementTypeName.name);
+  lines.push(`  private static func ${methodName}(_ items: [${elementType}], context: SaveContext) throws -> Any {`);
+  lines.push('    if context.collectionFormat == "array" {');
+  lines.push("      return try items.map { try $0.save(context) }");
+  lines.push("    }");
+  lines.push("    var result: [String: Any] = [:]");
+  lines.push("    for item in items {");
+  lines.push("      var itemData = try item.save(context)");
+  lines.push('      guard let name = itemData.removeValue(forKey: "name") as? String else {');
+  lines.push(`        throw TypraRuntimeError.unsupported("Cannot save named ${helper.propertyName} item without a name.")`);
+  lines.push("      }");
+  lines.push(`      if context.useShorthand, let shorthand = ${elementType}.shorthandProperty, itemData.count == 1, let value = itemData[shorthand] {`);
+  lines.push("        result[name] = value");
+  lines.push("      } else {");
+  lines.push("        result[name] = itemData");
+  lines.push("      }");
+  lines.push("    }");
+  lines.push("    return result");
   lines.push("  }");
 }
 
@@ -275,10 +323,13 @@ function emitSave(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
   lines.push("    var result: [String: Any] = [:]");
   for (const assignment of type.save.assignments) {
     const prop = `self.${swiftPropertyName(assignment.fieldName)}`;
-    const serialized = swiftSaveExpression(assignment.category, assignment.enumName, prop, polymorphicTypeNames);
+    const helper = type.collectionHelpers.find(candidate =>
+      candidate.propertyName === assignment.fieldName && candidate.hasNameProperty
+    );
+    const serialized = swiftSaveExpression(assignment.category, assignment.enumName, prop, polymorphicTypeNames, helper);
     if (assignment.isOptional) {
       lines.push(`    if let value = ${prop} {`);
-      lines.push(`      result[${swiftStringLiteral(assignment.targetName)}] = ${swiftSaveExpression(assignment.category, assignment.enumName, "value", polymorphicTypeNames)}`);
+      lines.push(`      result[${swiftStringLiteral(assignment.targetName)}] = ${swiftSaveExpression(assignment.category, assignment.enumName, "value", polymorphicTypeNames, helper)}`);
       lines.push("    }");
     } else {
       lines.push(`    result[${swiftStringLiteral(assignment.targetName)}] = ${serialized}`);
@@ -292,13 +343,21 @@ function emitToWire(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<s
   lines.push("  public func toWire(_ provider: String, context: SaveContext = SaveContext()) throws -> [String: Any] {");
   lines.push("    var result: [String: Any] = [:]");
   for (const mapping of type.wire!.mappings) {
-    emitWireField(mapping, lines, polymorphicTypeNames);
+    const helper = type.collectionHelpers.find(candidate =>
+      candidate.propertyName === mapping.fieldName && candidate.hasNameProperty
+    );
+    emitWireField(mapping, lines, polymorphicTypeNames, helper);
   }
   lines.push("    return result");
   lines.push("  }");
 }
 
-function emitWireField(mapping: WireFieldMapping, lines: string[], polymorphicTypeNames: Set<string>): void {
+function emitWireField(
+  mapping: WireFieldMapping,
+  lines: string[],
+  polymorphicTypeNames: Set<string>,
+  collectionHelper?: CollectionHelperDecl,
+): void {
   const source = `self.${swiftPropertyName(mapping.fieldName)}`;
   const target = `wireName${swiftTypeName(mapping.fieldName)}`;
   lines.push(`    let ${target}: String`);
@@ -309,9 +368,9 @@ function emitWireField(mapping: WireFieldMapping, lines: string[], polymorphicTy
   lines.push(`    default: ${target} = ${swiftStringLiteral(mapping.fieldName)}`);
   lines.push("    }");
   if (mapping.isOptional) {
-    lines.push(`    if let value = ${source} { result[${target}] = ${swiftSaveExpression(mapping.category, null, "value", polymorphicTypeNames)} }`);
+    lines.push(`    if let value = ${source} { result[${target}] = ${swiftSaveExpression(mapping.category, null, "value", polymorphicTypeNames, collectionHelper)} }`);
   } else {
-    lines.push(`    result[${target}] = ${swiftSaveExpression(mapping.category, null, source, polymorphicTypeNames)}`);
+    lines.push(`    result[${target}] = ${swiftSaveExpression(mapping.category, null, source, polymorphicTypeNames, collectionHelper)}`);
   }
 }
 
@@ -415,7 +474,14 @@ function scalarDefault(typeName: string): string {
   }
 }
 
-function swiftLoadExpression(category: PropertyCategory, enumName: string | null, fieldName: string, valueExpr: string, polymorphicTypeNames: Set<string>): string {
+function swiftLoadExpression(
+  category: PropertyCategory,
+  enumName: string | null,
+  fieldName: string,
+  valueExpr: string,
+  polymorphicTypeNames: Set<string>,
+  collectionHelper?: CollectionHelperDecl,
+): string {
   switch (category.kind) {
     case "scalar":
       if (enumName) return `try ${swiftTypeName(enumName)}.parse(try TypraRuntime.string(${valueExpr}, field: ${swiftStringLiteral(fieldName)}))`;
@@ -425,6 +491,9 @@ function swiftLoadExpression(category: PropertyCategory, enumName: string | null
     case "collection_scalar":
       return `try TypraRuntime.array(${valueExpr}, field: ${swiftStringLiteral(fieldName)}).map { ${scalarLoadExpression(category.scalarType, "$0", fieldName)} }`;
     case "collection_complex":
+      if (collectionHelper?.hasNameProperty) {
+        return `try load${swiftTypeName(collectionHelper.propertyName)}(${valueExpr}, context: context)`;
+      }
       return `try TypraRuntime.array(${valueExpr}, field: ${swiftStringLiteral(fieldName)}).map { try ${swiftTypeName(category.typeName)}.load($0, context: context) }`;
     case "dict":
       return `try TypraRuntime.dictionary(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
@@ -450,7 +519,13 @@ function scalarLoadExpression(scalarType: string, valueExpr: string, fieldName: 
   }
 }
 
-function swiftSaveExpression(category: PropertyCategory, enumName: string | null, valueExpr: string, polymorphicTypeNames: Set<string>): string {
+function swiftSaveExpression(
+  category: PropertyCategory,
+  enumName: string | null,
+  valueExpr: string,
+  polymorphicTypeNames: Set<string>,
+  collectionHelper?: CollectionHelperDecl,
+): string {
   switch (category.kind) {
     case "scalar":
       return enumName ? `${valueExpr}.rawValue` : valueExpr;
@@ -459,6 +534,9 @@ function swiftSaveExpression(category: PropertyCategory, enumName: string | null
     case "collection_scalar":
       return valueExpr;
     case "collection_complex":
+      if (collectionHelper?.hasNameProperty) {
+        return `try Self.save${swiftTypeName(collectionHelper.propertyName)}(${valueExpr}, context: context)`;
+      }
       return `try ${valueExpr}.map { try $0.save(context) }`;
     case "dict":
       return valueExpr;

@@ -6,7 +6,7 @@ import type { FileDecl, TypeDecl } from "../src/ir/declarations.js";
 import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
-import { emitSwiftProtocolScaffolds } from "../src/languages/swift/scaffolding.js";
+import { emitSwiftProtocolScaffolds, emitSwiftRuntime } from "../src/languages/swift/scaffolding.js";
 import { emitSwiftConformanceTest, emitSwiftTests } from "../src/languages/swift/test-emitter.js";
 import { swiftType } from "../src/languages/swift/types.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
@@ -96,8 +96,10 @@ describe("Swift polymorphic enums", () => {
     const source = emitSwiftFile(fileDecl(tool), new SwiftExprVisitor(), new Set(["Tool"]));
     assert.match(source, /public enum Tool: TypraModel/);
     assert.match(source, /case customTool\(CustomTool\)/);
+    assert.match(source, /case unknown\(\[String: Any\]\)/);
     assert.match(source, /default: return \.customTool\(try CustomTool\.load/);
     assert.match(source, /case \.customTool\(let value\): return try value\.save/);
+    assert.match(source, /case \.unknown\(let value\): return value/);
   });
 
   it("keeps self-reference fallbacks consistent through unknown", () => {
@@ -145,6 +147,79 @@ describe("Swift polymorphic enums", () => {
 
     const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set(["Property"]));
     assert.match(source, /public indirect enum Property: TypraModel/);
+  });
+
+  it("loads explicit named collections from maps, lists, and scalar shorthand", () => {
+    const tool = typeDecl("Tool");
+    tool.fields = [{
+      name: "bindings",
+      typeName: { namespace: "Test", name: "Binding" },
+      category: { kind: "collection_complex", typeName: "Binding" },
+      isOptional: false,
+      defaultValue: null,
+      allowedValues: [],
+      parseAliases: {},
+      enumName: null,
+      isOpenEnum: false,
+      description: "",
+      knownAs: {},
+    }];
+    tool.load.assignments = [{
+      sourceName: "bindings",
+      fieldName: "bindings",
+      category: tool.fields[0].category,
+      isOptional: false,
+      parentTypeName: "Tool",
+      enumName: null,
+      allowedValues: [],
+      parseAliases: {},
+      defaultValue: null,
+      isOpenEnum: false,
+    }];
+    tool.save.assignments = [{
+      targetName: "bindings",
+      fieldName: "bindings",
+      category: tool.fields[0].category,
+      isOptional: false,
+      parentTypeName: "Tool",
+      enumName: null,
+      isOpenEnum: false,
+    }];
+    tool.collectionHelpers = [{
+      propertyName: "bindings",
+      elementTypeName: { namespace: "Test", name: "Binding" },
+      innerFields: ["source"],
+      hasNameProperty: true,
+    }];
+
+    const binding = typeDecl("Binding");
+    binding.coercionProperty = "source";
+    addStringField(binding, "name");
+    addStringField(binding, "source");
+    binding.load.coercions = [{
+      scalarType: "string",
+      assignments: [{ fieldName: "source", isInput: true }],
+      needsDispatch: false,
+    }];
+
+    const file = fileDecl(tool);
+    file.types.push(binding);
+    const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set());
+
+    assert.match(source, /instance\.bindings = try loadBindings\(value, context: context\)/);
+    assert.match(source, /if let values = data as\? \[Any\] \{\s+return try values\.map \{ try Binding\.load\(\$0, context: context\) \}/);
+    assert.match(source, /let values = try TypraRuntime\.dictionary\(data, field: "bindings"\)/);
+    assert.match(source, /var item = try Binding\.load\(value, context: context\)\s+item\.name = name/);
+    assert.match(source, /if let scalar = data as\? String \{\s+var instance = Binding\(\)\s+instance\.source = try TypraRuntime\.string\(scalar, field: "source"\)/);
+    assert.match(source, /result\["bindings"\] = try Self\.saveBindings\(self\.bindings, context: context\)/);
+    assert.match(source, /if context\.collectionFormat == "array"/);
+    assert.match(source, /let shorthand = Binding\.shorthandProperty/);
+    assert.match(source, /public static let shorthandProperty: String\? = "source"/);
+
+    const runtime = emitSwiftRuntime("Test");
+    assert.match(runtime, /public let collectionFormat: String/);
+    assert.match(runtime, /public let useShorthand: Bool/);
+    assert.match(runtime, /public init\(collectionFormat: String = "object", useShorthand: Bool = true\)/);
   });
 });
 
