@@ -18,17 +18,21 @@ function mergeInheritedByKey<T>(groups: T[][], key: (item: T) => string): T[] {
  * Derived declarations override inherited members with the same name while retaining
  * the ancestor-defined field order.
  */
-export function flattenInheritance(types: TypeDecl[]): TypeDecl[] {
-  const byName = new Map(types.map(type => [type.typeName.name, type]));
+export function flattenInheritance(types: TypeDecl[], declarationUniverse: TypeDecl[] = types): TypeDecl[] {
+  const typeKey = (typeName: TypeDecl["typeName"]): string =>
+    `${typeName.namespace}.${typeName.name}`;
+  const byName = new Map(
+    declarationUniverse.map(type => [typeKey(type.typeName), type]),
+  );
 
   function ancestorChain(type: TypeDecl): TypeDecl[] {
     const chain: TypeDecl[] = [];
-    const visited = new Set<string>([type.typeName.name]);
-    let current = type.base ? byName.get(type.base.name) : undefined;
-    while (current && !visited.has(current.typeName.name)) {
-      visited.add(current.typeName.name);
+    const visited = new Set<string>([typeKey(type.typeName)]);
+    let current = type.base ? byName.get(typeKey(type.base)) : undefined;
+    while (current && !visited.has(typeKey(current.typeName))) {
+      visited.add(typeKey(current.typeName));
       chain.unshift(current);
-      current = current.base ? byName.get(current.base.name) : undefined;
+      current = current.base ? byName.get(typeKey(current.base)) : undefined;
     }
     return chain;
   }

@@ -41,6 +41,14 @@ export const generateSwift = async (
   const sourceRoot = `${outputDir}/Sources/${moduleName}`;
   const testRoot = emitTarget["test-dir"];
   const packageTestPath = testRoot ? toSwiftPackagePath(relative(outputDir, testRoot)) : undefined;
+  const rootNodes = nodes.filter(n => !n.base);
+  const fileDecls = new Map(
+    rootNodes.map(n => [
+      `${n.typeName.namespace}.${n.typeName.name}`,
+      lowerFile(n, registry, polymorphicTypeNames),
+    ]),
+  );
+  const declarationUniverse = Array.from(fileDecls.values()).flatMap(file => file.types);
 
   await emitSwiftGeneratedFile(context, "Package.swift", emitSwiftPackage(moduleName, packageTestPath), outputDir, outputDir, { marker: false });
   await emitSwiftGeneratedFile(context, "TypraRuntime.swift", emitSwiftRuntime(moduleName), sourceRoot, outputDir);
@@ -48,8 +56,8 @@ export const generateSwift = async (
   for (const n of nodes) {
     if (!n.base) {
       const group = n.group || "";
-      const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
-      const content = emitSwiftFile(fileDecl, visitor, polymorphicTypeNames);
+      const fileDecl = fileDecls.get(`${n.typeName.namespace}.${n.typeName.name}`)!;
+      const content = emitSwiftFile(fileDecl, visitor, polymorphicTypeNames, declarationUniverse);
       const outDir = group ? `${sourceRoot}/${group}` : sourceRoot;
       await emitSwiftGeneratedFile(context, swiftFileName(n.typeName.name), content, outDir, outputDir);
     }

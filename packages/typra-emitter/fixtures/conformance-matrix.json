@@ -219,8 +219,8 @@
           {
             "path": "generated/fixtures/swift/Sources/TypraFixtures/fixture_content.swift",
             "snippets": [
-              "case \"text\": return .textContent(try TextContent.load(data, context: context))",
-              "case \"image\": return .imageContent(try ImageContent.load(data, context: context))",
+              "case \"text\": return .textContent(try TextContent.load(normalizedData, context: context))",
+              "case \"image\": return .imageContent(try ImageContent.load(normalizedData, context: context))",
               "case .textContent(let value): return try value.save(context)"
             ]
           }

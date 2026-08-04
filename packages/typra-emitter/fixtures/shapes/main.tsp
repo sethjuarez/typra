@@ -111,16 +111,45 @@ model FixtureReference {
   label?: string;
 }
 
+@discriminator("kind")
 model FixtureTool {
+  kind: string;
+
   @sample(#{ name: "search" })
   name: string;
+
+  description?: string;
+}
+
+model FixtureFunctionTool extends FixtureTool {
+  kind: "function";
 
   @sample(#{ command: "search --query" })
   command: string;
 }
 
+model FixturePromptTool extends FixtureTool {
+  kind: "prompt";
+  prompt: string;
+}
+
+model FixtureMcpTool extends FixtureTool {
+  kind: "mcp";
+  server: string;
+}
+
+model FixtureHttpTool extends FixtureTool {
+  kind: "http";
+  endpoint: string;
+}
+
+model FixtureCustomTool extends FixtureTool {
+  kind: "custom";
+  config?: Record<unknown>;
+}
+
 model FixtureToolbox {
-  @sample(#{ tools: #[#{ name: "search", command: "search --query" }] })
+  @sample(#{ tools: #[#{ kind: "function", name: "search", command: "search --query" }] })
   tools: FixtureTool[];
 }
 
@@ -243,6 +272,7 @@ model McpApprovalMode {
   config: McpApprovalConfig;
 }
 
+@@coerce(FixtureProperty, string, #{ kind: "string", default: "{value}" }, "property", "Load a string property from its default value.", "hello");
 @discriminator("kind")
 model FixtureProperty {
   kind: string;
@@ -260,6 +290,10 @@ model FixtureProperty {
   example?: unknown;
 
   enumValues?: unknown[];
+}
+
+model FixtureStringProperty extends FixtureProperty {
+  kind: "string";
 }
 
 model FixtureArrayProperty extends FixtureProperty {

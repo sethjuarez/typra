@@ -19,16 +19,40 @@ export function emitSwiftTests(ctx: BaseTestContext & { moduleName: string }): s
   ctx.coercions.forEach((coercion, index) => {
     lines.push(`  func testScalarCoercion${index + 1}() throws {`);
     lines.push(`    let instance = try ${typeName}.load(${coercion.value})`);
-    for (const validation of coercion.validations) {
-      const expected = validation.delimiter ? `${validation.delimiter}${validation.value}${validation.delimiter}` : String(validation.value);
-      const prop = findProperty(ctx.node, validation.key);
-      emitPropertyAssertion(
-        lines,
-        `instance.${swiftPropertyName(validation.key)}`,
-        expected,
-        prop,
-        "    ",
-      );
+    const expansion = ctx.node.coercions[index]?.expansion;
+    const child = expansion && ctx.node.discriminator
+      ? matchingPolymorphicChild(ctx.node, expansion)
+      : undefined;
+    if (child) {
+      lines.push(`    if case .${swiftPropertyName(child.typeName.name)}(let concrete) = instance {`);
+      for (const validation of coercion.validations) {
+        if (validation.key === ctx.node.discriminator) continue;
+        const expected = validation.delimiter ? `${validation.delimiter}${validation.value}${validation.delimiter}` : String(validation.value);
+        const prop = child.properties.find(candidate => candidate.name === validation.key)
+          ?? findProperty(ctx.node, validation.key);
+        emitPropertyAssertion(
+          lines,
+          `concrete.${swiftPropertyName(validation.key)}`,
+          expected,
+          prop,
+          "      ",
+        );
+      }
+      lines.push("    } else {");
+      lines.push(`      XCTFail("Expected ${swiftTypeName(child.typeName.name)}")`);
+      lines.push("    }");
+    } else {
+      for (const validation of coercion.validations) {
+        const expected = validation.delimiter ? `${validation.delimiter}${validation.value}${validation.delimiter}` : String(validation.value);
+        const prop = findProperty(ctx.node, validation.key);
+        emitPropertyAssertion(
+          lines,
+          `instance.${swiftPropertyName(validation.key)}`,
+          expected,
+          prop,
+          "    ",
+        );
+      }
     }
     lines.push("  }");
     lines.push("");

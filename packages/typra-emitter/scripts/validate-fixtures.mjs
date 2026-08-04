@@ -643,6 +643,34 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     assertMetadata(value, name: "union")
     XCTAssertEqual((value["anyOf"] as? [[String: Any]])?.count, 2)
   }
+
+  func testAllToolVariantsRetainInheritedMetadata() throws {
+    let variants: [[String: Any]] = [
+      ["kind": "function", "name": "function", "description": "function description", "command": "run"],
+      ["kind": "prompt", "name": "prompt", "description": "prompt description", "prompt": "hello"],
+      ["kind": "mcp", "name": "mcp", "description": "mcp description", "server": "local"],
+      ["kind": "http", "name": "http", "description": "http description", "endpoint": "https://example.test"],
+      ["kind": "custom", "name": "custom", "description": "custom description", "config": ["enabled": true]],
+    ]
+    for input in variants {
+      let output = try FixtureTool.load(input).save()
+      XCTAssertEqual(output["name"] as? String, input["name"] as? String)
+      XCTAssertEqual(output["description"] as? String, input["description"] as? String)
+    }
+  }
+
+  func testScalarPropertyCoercionDispatchesToTypedVariant() throws {
+    let output = try FixtureProperty.load("hello").save()
+    XCTAssertEqual(output["kind"] as? String, "string")
+    XCTAssertEqual(output["default"] as? String, "hello")
+  }
+
+  func testUnknownConnectionDiscriminatorIsLossless() throws {
+    let input: [String: Any] = ["kind": "future", "endpoint": "https://future.test"]
+    let output = try FixtureConnection.load(input).save()
+    XCTAssertEqual(output["kind"] as? String, "future")
+    XCTAssertEqual(output["endpoint"] as? String, "https://future.test")
+  }
 }
 `);
   try {
@@ -1072,8 +1100,14 @@ function runGoExecutableConformance() {
     '\t\tpanic("FixtureUnionProperty did not load anyOf branches")',
     "\t}",
     "\tfor _, branch := range loadedUnion.AnyOf {",
-    "\t\tbase, ok := branch.(fixtures.FixtureProperty)",
-    "\t\tif !ok || base.Kind == \"\" || base.Description == nil {",
+    "\t\tsavable, ok := branch.(interface {",
+    "\t\t\tSave(*fixtures.SaveContext) map[string]interface{}",
+    "\t\t})",
+    "\t\tif !ok {",
+    '\t\t\tpanic("FixtureUnionProperty anyOf branch is not savable")',
+    "\t\t}",
+    "\t\tbase := savable.Save(saveCtx)",
+    "\t\tif base[\"kind\"] == \"\" || base[\"description\"] == nil {",
     '\t\t\tpanic("FixtureUnionProperty anyOf scalar branch did not load base fields")',
     "\t\t}",
     "\t}",

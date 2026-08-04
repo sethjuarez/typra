@@ -120,6 +120,46 @@ describe("Swift polymorphic enums", () => {
     assert.match(source, /case \.unknown\(let value\): return value/);
   });
 
+  it("preserves unknown discriminators for abstract enums without a wildcard model", () => {
+    const connection = typeDecl("Connection");
+    connection.isAbstract = true;
+    connection.polymorphicDispatch = {
+      discriminatorField: "kind",
+      variants: [{ value: "remote", typeName: { namespace: "Test", name: "RemoteConnection" } }],
+      defaultVariant: null,
+      isAbstract: true,
+    };
+
+    const source = emitSwiftFile(fileDecl(connection), new SwiftExprVisitor(), new Set(["Connection"]));
+    assert.match(source, /default: return \.unknown\(object\)/);
+    assert.doesNotMatch(source, /unknownDiscriminator/);
+  });
+
+  it("normalizes scalar coercions before discriminator dispatch", () => {
+    const property = typeDecl("Property");
+    addStringField(property, "kind");
+    addStringField(property, "default");
+    property.polymorphicDispatch = {
+      discriminatorField: "kind",
+      variants: [{ value: "string", typeName: { namespace: "Test", name: "StringProperty" } }],
+      defaultVariant: { typeName: property.typeName, isSelfReference: true },
+      isAbstract: false,
+    };
+    property.load.coercions = [{
+      scalarType: "string",
+      assignments: [
+        { fieldName: "kind", isInput: false, literalValue: "string" },
+        { fieldName: "default", isInput: true },
+      ],
+      needsDispatch: false,
+    }];
+
+    const source = emitSwiftFile(fileDecl(property), new SwiftExprVisitor(), new Set(["Property"]));
+    assert.match(source, /var normalizedData: Any = data/);
+    assert.match(source, /if let scalar = normalizedData as\? String \{\s+normalizedData = \["kind": "string", "default": scalar\]/);
+    assert.match(source, /case "string": return \.stringProperty\(try StringProperty\.load\(normalizedData, context: context\)\)/);
+  });
+
   it("marks recursive polymorphic enums indirect", () => {
     const property = typeDecl("Property");
     property.polymorphicDispatch = {
@@ -245,6 +285,49 @@ describe("Swift inherited model fields", () => {
     assert.match(source, /if let value = self\.name \{\s+result\["name"\] = value/);
     assert.match(source, /if let value = self\.description \{\s+result\["description"\] = value/);
   });
+
+  it("resolves inherited fields from declarations emitted in another file", () => {
+    const tool = typeDecl("Tool");
+    addStringField(tool, "name");
+    addStringField(tool, "description", true);
+
+    const functionTool = typeDecl("FunctionTool");
+    functionTool.base = tool.typeName;
+    addStringField(functionTool, "kind", false, "function");
+    addStringField(functionTool, "function");
+
+    const source = emitSwiftFile(
+      fileDecl(functionTool),
+      new SwiftExprVisitor(),
+      new Set(),
+      [tool, functionTool],
+    );
+
+    assert.match(source, /public struct FunctionTool: TypraModel \{[\s\S]*public var name: String[\s\S]*public var description: String\? = nil[\s\S]*public var kind: String = "function"[\s\S]*public var function: String/);
+    assert.match(source, /instance\.name = try TypraRuntime\.string\(value, field: "name"\)/);
+    assert.match(source, /result\["name"\] = self\.name/);
+  });
+
+  it("distinguishes same-named ancestors across namespaces", () => {
+    const baseTool = typeDecl("Tool");
+    baseTool.typeName.namespace = "Base";
+    addStringField(baseTool, "name");
+
+    const derivedTool = typeDecl("Tool");
+    derivedTool.typeName.namespace = "Extension";
+    derivedTool.base = baseTool.typeName;
+    addStringField(derivedTool, "command");
+
+    const source = emitSwiftFile(
+      fileDecl(derivedTool),
+      new SwiftExprVisitor(),
+      new Set(),
+      [baseTool, derivedTool],
+    );
+
+    assert.match(source, /public var name: String/);
+    assert.match(source, /public var command: String/);
+  });
 });
 
 describe("Swift typed factory expressions", () => {
@@ -350,6 +433,7 @@ describe("Swift protocol type mapping", () => {
     }];
 
     const source = emitSwiftFile(fileDecl(parser), new SwiftExprVisitor(), new Set());
+    assert.match(source, /public protocol Parser: Sendable/);
     assert.match(source, /func parse\(data: Any\?, context: \[String: Any\]\?\) async throws -> \[Message\]/);
 
     const protocolNode = new TypeNode({} as Model, "");
@@ -492,6 +576,61 @@ describe("Swift generated tests", () => {
     assert.match(source, /if case \.fallbackConnection\(let concrete\) = instance/);
     assert.match(source, /XCTAssertEqual\(concrete\.endpoint, "https:\/\/vendor\.example\.test"\)/);
     assert.doesNotMatch(source, /instance\.kind|\.unknown/);
+  });
+
+  it("pattern-matches scalar coercions that dispatch to polymorphic payloads", () => {
+    const property = new TypeNode({} as Model, "");
+    property.typeName = { namespace: "Test", name: "Property" };
+    property.discriminator = "kind";
+    property.coercions = [{
+      scalar: "string",
+      expansion: { kind: "string", default: "{value}" },
+      title: "property",
+      description: "",
+      example: "hello",
+    }];
+    const kind = new PropertyNode({} as ModelProperty, "");
+    kind.name = "kind";
+    kind.typeName = { namespace: "", name: "string" };
+    kind.isScalar = true;
+    const defaultValue = new PropertyNode({} as ModelProperty, "");
+    defaultValue.name = "default";
+    defaultValue.typeName = { namespace: "", name: "unknown" };
+    defaultValue.isScalar = true;
+    defaultValue.isOptional = true;
+    property.properties = [kind, defaultValue];
+
+    const stringProperty = new TypeNode({} as Model, "");
+    stringProperty.typeName = { namespace: "Test", name: "StringProperty" };
+    const stringKind = new PropertyNode({} as ModelProperty, "");
+    stringKind.name = "kind";
+    stringKind.typeName = kind.typeName;
+    stringKind.isScalar = true;
+    stringKind.defaultValue = "string";
+    stringProperty.properties = [stringKind];
+    property.childTypes = [stringProperty];
+
+    const source = emitSwiftTests({
+      node: property,
+      isAbstract: false,
+      package: undefined,
+      examples: [],
+      coercions: [{
+        title: "property",
+        scalarType: "String",
+        value: "\"hello\"",
+        validations: [
+          { key: "kind", value: "string", delimiter: "\"", isOptional: false },
+          { key: "default", value: "hello", delimiter: "\"", isOptional: true },
+        ],
+      }],
+      factories: [],
+      moduleName: "TestModels",
+    });
+
+    assert.match(source, /if case \.stringProperty\(let concrete\) = instance/);
+    assert.match(source, /XCTAssertEqual\(try XCTUnwrap\(concrete\.`default` as\? String\), "hello"\)/);
+    assert.doesNotMatch(source, /instance\.kind|instance\.`default`/);
   });
 
   it("validates compound coercion values through their typed nested field", () => {
