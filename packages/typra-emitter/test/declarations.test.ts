@@ -888,11 +888,11 @@ describe("lowerFile", () => {
       );
       assert.match(
         loadYaml,
-        /instance\.Instructions != "some\\npersonal\\ncontent"/,
+        /instance\.Instructions != "some \\npersonal\\ncontent"/,
       );
       assert.match(
         fromYaml,
-        /instance\.Instructions != "some\\npersonal\\ncontent"/,
+        /instance\.Instructions != "some \\npersonal\\ncontent"/,
       );
 
       const blockValue = "some\npersonal\ncontent";
