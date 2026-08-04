@@ -35,6 +35,7 @@ export function emitSwiftTests(ctx: BaseTestContext & { moduleName: string }): s
           expected,
           prop,
           "      ",
+          validationCast(validation),
         );
       }
       lines.push("    } else {");
@@ -258,6 +259,7 @@ function emitPropertyAssertion(
   expected: string,
   prop: PropertyNode | undefined,
   indent: string,
+  unknownCast = "String",
 ): void {
   if (prop?.enumName) {
     const valueAccessor = requiredAccessor(accessor, prop.isOptional);
@@ -274,7 +276,7 @@ function emitPropertyAssertion(
   }
 
   if (prop?.typeName.name === "unknown" || prop?.typeName.name === "any") {
-    const castAccessor = `${accessor} as? String`;
+    const castAccessor = `${accessor} as? ${unknownCast}`;
     lines.push(`${
       indent
     }XCTAssertEqual(${prop.isOptional ? `try XCTUnwrap(${castAccessor})` : castAccessor}, ${expected})`);

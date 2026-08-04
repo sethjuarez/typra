@@ -320,6 +320,9 @@ model McpApprovalMode {
 }
 
 @@coerce(FixtureProperty, string, #{ kind: "string", default: "{value}" }, "property", "Load a string property from its default value.", "hello");
+@@coerce(FixtureProperty, boolean, #{ kind: "boolean", default: "{value}" }, "property", "Load a boolean property from its default value.", true);
+@@coerce(FixtureProperty, int32, #{ kind: "integer", default: "{value}" }, "property", "Load an integer property from its default value.", 7);
+@@coerce(FixtureProperty, float64, #{ kind: "number", default: "{value}" }, "property", "Load a number property from its default value.", 3.5);
 @discriminator("kind")
 model FixtureProperty {
   kind: string;
@@ -341,6 +344,18 @@ model FixtureProperty {
 
 model FixtureStringProperty extends FixtureProperty {
   kind: "string";
+}
+
+model FixtureBooleanProperty extends FixtureProperty {
+  kind: "boolean";
+}
+
+model FixtureIntegerProperty extends FixtureProperty {
+  kind: "integer";
+}
+
+model FixtureNumberProperty extends FixtureProperty {
+  kind: "number";
 }
 
 model FixtureArrayProperty extends FixtureProperty {
