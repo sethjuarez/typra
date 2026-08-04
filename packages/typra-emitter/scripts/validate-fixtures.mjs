@@ -1399,13 +1399,17 @@ function assertStaticFixtureCoverage() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "java", "FixtureRoot.java"),
-    "fromValue(String value)",
     "return fromJson(json, new LoadContext());",
     "return fromYaml(yaml, new LoadContext());",
     "public String toYaml()",
     "result.status = FixtureStatus.fromValue",
-    "case \"complete\":",
     "result.put(\"status\", obj.status.value)",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "java", "FixtureStatus.java"),
+    "public enum FixtureStatus",
+    "fromValue(String value)",
+    "case \"complete\":",
   );
   assertIncludes(
     path.join("generated", "fixtures", "java", "TypraJson.java"),

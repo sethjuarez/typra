@@ -1,5 +1,6 @@
 import { ArrayLiteral, Construct, Expr, TypeRegistry, VariantConstruct } from "../../ir/expansion.js";
-import { assertNever, ExprVisitor, toPascalCase } from "../../ir/visitor.js";
+import { assertNever, ExprVisitor } from "../../ir/visitor.js";
+import { javaPropertyName, javaTypeName } from "./identifiers.js";
 
 export class JavaExprVisitor implements ExprVisitor {
   registry?: TypeRegistry;
@@ -19,7 +20,7 @@ export class JavaExprVisitor implements ExprVisitor {
       case "null":
         return "null";
       case "param":
-        return expr.name;
+        return javaPropertyName(expr.name);
       case "construct":
         return this.visitConstruct(expr);
       case "variant":
@@ -29,25 +30,25 @@ export class JavaExprVisitor implements ExprVisitor {
       case "dict":
         return `TypraMaps.mapOf(${expr.entries.map(e => `"${e.key}", ${this.visitExpr(e.value)}`).join(", ")})`;
       case "field_read":
-        return `${expr.objectName}.${expr.fieldName}`;
+        return `${javaPropertyName(expr.objectName)}.${javaPropertyName(expr.fieldName)}`;
       default:
         return assertNever(expr);
     }
   }
 
   private visitConstruct(expr: Construct): string {
-    return this.constructWithFields(expr.typeName.name, expr.fields);
+    return this.constructWithFields(javaTypeName(expr.typeName.name), expr.fields);
   }
 
   private visitVariant(expr: VariantConstruct): string {
-    return this.constructWithFields(expr.variantTypeName.name, expr.fields);
+    return this.constructWithFields(javaTypeName(expr.variantTypeName.name), expr.fields);
   }
 
   private constructWithFields(typeName: string, fields: Construct["fields"]): string {
     if (fields.length === 0) {
       return `new ${typeName}()`;
     }
-    return `new ${typeName}() {{ ${fields.map(f => `this.${f.propertyName} = ${this.visitExpr(f.value)};`).join(" ")} }}`;
+    return `new ${typeName}() {{ ${fields.map(f => `this.${javaPropertyName(f.propertyName)} = ${this.visitExpr(f.value)};`).join(" ")} }}`;
   }
 
   private visitArray(expr: ArrayLiteral): string {
@@ -58,4 +59,3 @@ export class JavaExprVisitor implements ExprVisitor {
     return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\n/g, "\\n");
   }
 }
-
