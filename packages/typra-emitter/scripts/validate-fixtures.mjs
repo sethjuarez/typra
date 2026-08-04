@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, readdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -7,6 +7,7 @@ const packageRoot = process.cwd();
 const sourceGeneratedRoot = path.join(packageRoot, "generated", "fixtures");
 const validationRoot = mkdtempSync(path.join(tmpdir(), "typra-fixtures-"));
 const generatedRoot = path.join(validationRoot, "fixtures");
+const packageNodeModules = path.resolve(packageRoot, "..", "..", "node_modules");
 const scratchEntries = new Set([
   ".build",
   ".classes",
@@ -19,6 +20,9 @@ cpSync(sourceGeneratedRoot, generatedRoot, {
   recursive: true,
   filter: source => !scratchEntries.has(path.basename(source)),
 });
+if (existsSync(packageNodeModules)) {
+  symlinkSync(packageNodeModules, path.join(validationRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+}
 process.on("exit", () => rmSync(validationRoot, { recursive: true, force: true }));
 const failures = [];
 const fixtureRootSample = {
@@ -315,6 +319,10 @@ function findTypeScriptCli(startDir) {
   return undefined;
 }
 
+function typeScriptTypeRoots(tscCli) {
+  return [path.resolve(path.dirname(tscCli), "..", "..", "@types")];
+}
+
 function runGeneratedTypeScriptCompile() {
   const sourceDir = path.join(generatedRoot, "typescript");
   const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".ts"));
@@ -323,6 +331,8 @@ function runGeneratedTypeScriptCompile() {
     fail("No generated TypeScript files found to compile.");
     return;
   }
+  const tscCli = findTypeScriptCli(packageRoot);
+  if (!tscCli) return;
 
   const ambientPath = path.join(sourceDir, "test-globals.validate.d.ts");
   const configPath = path.join(sourceDir, "tsconfig.validate.json");
@@ -346,13 +356,11 @@ function runGeneratedTypeScriptCompile() {
       esModuleInterop: true,
       skipLibCheck: true,
       types: ["node"],
+      typeRoots: typeScriptTypeRoots(tscCli),
       lib: ["ES2022"],
     },
     files: [...sourceFiles, ambientPath],
   }, null, 2));
-
-  const tscCli = findTypeScriptCli(packageRoot);
-  if (!tscCli) return;
 
   try {
     execFileSync(
@@ -994,6 +1002,8 @@ function runTypeScriptExecutableConformance() {
     fail("No generated TypeScript files found for executable conformance.");
     return;
   }
+  const tscCli = findTypeScriptCli(packageRoot);
+  if (!tscCli) return;
 
   const runnerPath = path.join(sourceDir, "conformance.validate.ts");
   const configPath = path.join(sourceDir, "tsconfig.conformance.json");
@@ -1022,15 +1032,13 @@ function runTypeScriptExecutableConformance() {
       esModuleInterop: true,
       skipLibCheck: true,
       types: ["node"],
+      typeRoots: typeScriptTypeRoots(tscCli),
       lib: ["ES2022"],
       outDir,
       rootDir: sourceDir,
     },
     files: [...sourceFiles, runnerPath],
   }, null, 2));
-
-  const tscCli = findTypeScriptCli(packageRoot);
-  if (!tscCli) return;
 
   try {
     execFileSync(process.execPath, [tscCli, "-p", configPath], { cwd: packageRoot, stdio: "pipe" });

@@ -277,7 +277,7 @@ describe("Swift polymorphic enums", () => {
 
     const source = emitSwiftFile(fileDecl(toolbox), new SwiftExprVisitor(), new Set(["Tool"]));
     assert.match(source, /private static func loadTools\(_ data: Any, context: LoadContext\) throws -> \[Tool\]/);
-    assert.match(source, /return try values\.keys\.sorted\(\)\.map \{ name in[\s\S]*itemData\["name"\] = name[\s\S]*return try Tool\.load\(itemData, context: context\)/);
+    assert.match(source, /return try values\.sorted \{ \$0\.key < \$1\.key \}\.map \{ entry in[\s\S]*itemData\["name"\] = entry\.key[\s\S]*return try Tool\.load\(itemData, context: context\)/);
   });
 
   it("applies scalar coercions before polymorphic dispatch", () => {

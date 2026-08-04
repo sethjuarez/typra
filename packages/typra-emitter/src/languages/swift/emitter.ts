@@ -291,7 +291,7 @@ function emitStruct(
   for (const helper of type.collectionHelpers) {
     if (supportsNamedCollectionHelper(helper, polymorphicTypeNames)) {
       lines.push("");
-      emitNamedCollectionLoadHelper(helper, lines);
+      emitNamedCollectionLoadHelper(helper, lines, polymorphicTypeNames);
       lines.push("");
       emitNamedCollectionSaveHelper(helper, lines, polymorphicTypeNames);
     }
@@ -346,6 +346,7 @@ function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
 function emitNamedCollectionLoadHelper(
   helper: CollectionHelperDecl,
   lines: string[],
+  polymorphicTypeNames: Set<string>,
 ): void {
   const methodName = `load${swiftTypeName(helper.propertyName)}`;
   const elementType = swiftTypeName(helper.elementTypeName.name);
