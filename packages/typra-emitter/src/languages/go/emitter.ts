@@ -250,6 +250,9 @@ function emitTypeBlock(
 
   // Struct definition
   emitStruct(type, lines, polymorphicTypeNames, fieldNames);
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    emitRawCloneHelper(typeName, lines);
+  }
 
   // Load function
   emitLoadFunction(type, lines, polymorphicTypeNames, scalarCoercibleTypeNames, fieldNames);
@@ -316,6 +319,28 @@ function emitDescriptionComment(typeName: string, description: string, lines: st
   }
 }
 
+function emitRawCloneHelper(typeName: string, lines: string[]): void {
+  lines.push(`func clone${typeName}RawValue(value interface{}) interface{} {`);
+  lines.push("\tswitch value := value.(type) {");
+  lines.push("\tcase map[string]interface{}:");
+  lines.push("\t\tresult := make(map[string]interface{}, len(value))");
+  lines.push("\t\tfor key, item := range value {");
+  lines.push(`\t\t\tresult[key] = clone${typeName}RawValue(item)`);
+  lines.push("\t\t}");
+  lines.push("\t\treturn result");
+  lines.push("\tcase []interface{}:");
+  lines.push("\t\tresult := make([]interface{}, len(value))");
+  lines.push("\t\tfor index, item := range value {");
+  lines.push(`\t\t\tresult[index] = clone${typeName}RawValue(item)`);
+  lines.push("\t\t}");
+  lines.push("\t\treturn result");
+  lines.push("\tdefault:");
+  lines.push("\t\treturn value");
+  lines.push("\t}");
+  lines.push("}");
+  lines.push("");
+}
+
 // ============================================================================
 // Struct definition
 // ============================================================================
@@ -334,6 +359,9 @@ function emitStruct(
     const fieldName = fieldNames.get(field.name) ?? goFieldName(field.name);
     const tag = getStructTag(field.name, field.isOptional, field.hasExplicitDefault);
     lines.push(`\t${fieldName} ${goType} ${tag}`);
+  }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("\traw map[string]interface{}");
   }
 
   lines.push("}");
@@ -408,6 +436,15 @@ function emitLoadFunction(
   for (const assign of type.load.assignments) {
     const helper = type.collectionHelpers.find(candidate => candidate.propertyName === assign.sourceName);
     emitLoadAssignment(assign, helper, polymorphicTypeNames, scalarCoercibleTypeNames, fieldNames, lines);
+  }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("\t\tresult.raw = make(map[string]interface{}, len(m))");
+    lines.push("\t\tfor key, value := range m {");
+    lines.push(`\t\t\tresult.raw[key] = clone${typeName}RawValue(value)`);
+    lines.push("\t\t}");
+    for (const field of type.fields) {
+      lines.push(`\t\tdelete(result.raw, "${field.name}")`);
+    }
   }
 
   lines.push("\t}");
@@ -827,6 +864,11 @@ function emitSaveMethod(
   lines.push(`// Save serializes ${typeName} to map[string]interface{}`);
   lines.push(`func (obj ${typeName}) Save(ctx *SaveContext) map[string]interface{} {`);
   lines.push("\tresult := make(map[string]interface{})");
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("\tfor key, value := range obj.raw {");
+    lines.push(`\t\tresult[key] = clone${typeName}RawValue(value)`);
+    lines.push("\t}");
+  }
 
   for (const assign of type.save.assignments) {
     const helper = type.collectionHelpers.find(candidate => candidate.propertyName === assign.targetName);

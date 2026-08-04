@@ -670,6 +670,39 @@ describe("lowerFile", () => {
       assert.match(code.slice(loadIndex), /m\["kind"\]/);
     });
 
+    it("preserves unmodeled payload only for self-referential open defaults", () => {
+      const openConnection = makeType("OpenConnection", [
+        makeProp("kind", "string", { isScalar: true }),
+        makeProp("name", "string", { isScalar: true, isOptional: true }),
+      ], {
+        discriminator: "kind",
+        childTypes: [apiKeyConnection],
+      });
+      const registry = TypeRegistry.fromTypeGraph([openConnection, apiKeyConnection]);
+      const file = lowerFile(openConnection, registry, new Set(["OpenConnection"]));
+      const code = emitGoFileContent(
+        file.types,
+        "fixtures",
+        new GoExprVisitor(registry),
+        new Set(["OpenConnection"]),
+        file.enums,
+        file.group,
+      );
+
+      assert.match(code, /type OpenConnection struct \{[\s\S]*\traw map\[string\]interface\{\}/);
+      assert.match(code, /result\.raw = make\(map\[string\]interface\{\}, len\(m\)\)/);
+      assert.match(code, /delete\(result\.raw, "kind"\)/);
+      assert.match(code, /delete\(result\.raw, "name"\)/);
+      assert.match(code, /func cloneOpenConnectionRawValue\(value interface\{\}\) interface\{\}/);
+      assert.match(code, /result\.raw\[key\] = cloneOpenConnectionRawValue\(value\)/);
+      assert.match(code, /for key, value := range obj\.raw \{[\s\S]*result\[key\] = cloneOpenConnectionRawValue\(value\)/);
+      assert.ok(
+        code.indexOf("for key, value := range obj.raw") < code.indexOf('result["kind"] = obj.Kind'),
+        "modeled fields must overwrite any retained raw payload",
+      );
+      assert.doesNotMatch(code, /type ApiKeyConnection struct \{[\s\S]*\traw map\[string\]interface\{\}/);
+    });
+
     it("flattens inherited base fields into child structs (extends)", () => {
       // Base carries the discriminator PLUS extra optional non-discriminator fields.
       const apiKeyConn = makeType("ApiKeyConn", [
