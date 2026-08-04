@@ -447,6 +447,9 @@ function tsDefaultValue(f: FieldDecl): string {
   const cat = f.category;
 
   if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
+    if (f.isOptional && f.defaultValue === null) {
+      return "";
+    }
     return " = []";
   }
 

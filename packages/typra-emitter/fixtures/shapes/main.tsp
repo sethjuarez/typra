@@ -179,6 +179,9 @@ model FixtureOmit {
 
   @doc("Optional scalar collection left unset → canonical wire omits it (a plain derive would emit []).")
   extras?: string[];
+
+  @doc("Optional model collection left unset → generated constructors and loaders preserve undefined.")
+  owners?: FixtureOwner[];
 }
 
 @discriminator("kind")
