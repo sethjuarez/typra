@@ -416,6 +416,28 @@ function emitProperties(type: TypeDecl, allTypes: TypeDecl[], findType: (name: s
     lines.push(`    public ${modifier}${csType} ${propName} { get; set; }${default_}`);
     lines.push("");
   }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("    private Dictionary<string, object?> _raw = new();");
+    lines.push("");
+    lines.push("    private static object? CloneRawValue(object? value)");
+    lines.push("    {");
+    lines.push("        if (value is IDictionary<string, object?> dictionary)");
+    lines.push("        {");
+    lines.push("            return dictionary.ToDictionary(item => item.Key, item => CloneRawValue(item.Value));");
+    lines.push("        }");
+    lines.push("        if (value is System.Collections.IEnumerable items && value is not string)");
+    lines.push("        {");
+    lines.push("            var result = new List<object?>();");
+    lines.push("            foreach (var item in items)");
+    lines.push("            {");
+    lines.push("                result.Add(CloneRawValue(item));");
+    lines.push("            }");
+    lines.push("            return result;");
+    lines.push("        }");
+    lines.push("        return value;");
+    lines.push("    }");
+    lines.push("");
+  }
   lines.push("");
 }
 
@@ -615,6 +637,13 @@ function emitLoadMethod(
   for (const assign of type.load.assignments) {
     emitLoadAssignment(assign, findType, lines);
   }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push(`        if (instance.GetType() == typeof(${typeName}))`);
+    lines.push("        {");
+    lines.push(`            instance._raw = (Dictionary<string, object?>)CloneRawValue(data)!;`);
+    lines.push("        }");
+    lines.push("");
+  }
 
   // ProcessOutput
   lines.push("        if (context is not null)");
@@ -775,7 +804,6 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
   const dispatch = type.polymorphicDispatch!;
   const typeName = type.typeName.name;
   const isClosed = isClosedPolymorphicDispatch(dispatch);
-
   lines.push("");
   lines.push("    /// <summary>");
   lines.push(`    /// Load polymorphic ${typeName} based on discriminator.`);
@@ -784,7 +812,7 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
   lines.push("    {");
   lines.push(`        if (data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) && discriminatorValue is not null)`);
   lines.push("        {");
-  lines.push(`            var discriminator = discriminatorValue.ToString()${isClosed ? "" : "?.ToLowerInvariant()"};`);
+  lines.push("            var discriminator = discriminatorValue.ToString();");
   lines.push("            return discriminator switch");
   lines.push("            {");
 
@@ -885,6 +913,8 @@ function emitSaveMethod(type: TypeDecl, allTypes: TypeDecl[], lines: string[]): 
   if (hasBase) {
     lines.push("        // Start with parent class properties");
     lines.push("        var result = base.Save(context);");
+  } else if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("        var result = (Dictionary<string, object?>)CloneRawValue(obj._raw)!;");
   } else {
     lines.push("        var result = new Dictionary<string, object?>();");
   }

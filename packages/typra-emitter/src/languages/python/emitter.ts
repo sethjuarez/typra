@@ -114,7 +114,13 @@ export function emitPythonFile(
   const hasRuntimeCancellation = decl.types.some(type =>
     type.methods.some(method => method.runtimeCancellable),
   );
+  const preservesRawPayload = decl.types.some(type =>
+    type.polymorphicDispatch?.defaultVariant?.isSelfReference,
+  );
 
+  if (preservesRawPayload) {
+    stdlibImports.push("import copy");
+  }
   if (decl.containsAbstract) {
     stdlibImports.push("from abc import ABC");
   }
@@ -292,6 +298,9 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
   lines.push("");
   for (const field of type.fields) {
     lines.push(`    ${toSnakeCase(field.name)}: ${pythonTypeAnnotation(field)}${pythonDefaultValue(field)}`);
+  }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("    _raw: dict[str, Any] = field(default_factory=dict, init=False, repr=False)");
   }
 
   // load() method
@@ -714,6 +723,11 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
     lines.push(`        if data is not None and "${a.sourceName}" in data:`);
     lines.push(`            ${emitLoadAssignment(a)}`);
   }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("");
+    lines.push(`        if type(instance) is ${name}:`);
+    lines.push("            instance._raw = copy.deepcopy(data)");
+  }
 
   // Context post-processing
   lines.push("        if context is not None:");
@@ -873,7 +887,7 @@ function emitPolymorphicDispatch(
   lines.push(`    def load_${discSnake}(data: dict, context: LoadContext | None) -> "${parentName}":`);
   lines.push(`        # load polymorphic ${parentName} instance`);
   lines.push(`        if data is not None and "${dispatch.discriminatorField}" in data:`);
-  lines.push(`            discriminator_value = str(data["${dispatch.discriminatorField}"])${isClosed ? "" : ".lower()"}`);
+  lines.push(`            discriminator_value = str(data["${dispatch.discriminatorField}"])`);
 
   for (let i = 0; i < dispatch.variants.length; i++) {
     const v = dispatch.variants[i];
@@ -936,6 +950,9 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
     lines.push("        # Start with parent class properties");
     lines.push("        result = super().save(context)");
     lines.push("");
+  } else if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("");
+    lines.push("        result: dict[str, Any] = copy.deepcopy(obj._raw)");
   } else {
     lines.push("");
     lines.push("        result: dict[str, Any] = {}");

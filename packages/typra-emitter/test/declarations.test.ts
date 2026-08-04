@@ -33,6 +33,8 @@ import type { RustTestContext } from "../src/languages/rust/driver.js";
 import { RustExprVisitor } from "../src/languages/rust/visitor.js";
 import { emitPythonFile } from "../src/languages/python/emitter.js";
 import { PythonExprVisitor } from "../src/languages/python/visitor.js";
+import { emitCSharpClass } from "../src/languages/csharp/emitter.js";
+import { CSharpExprVisitor } from "../src/languages/csharp/visitor.js";
 import { buildBaseTestContext, goTestOptions } from "../src/testing/test-context.js";
 
 // ============================================================================
@@ -1108,6 +1110,44 @@ describe("lowerFile", () => {
     const file1 = lowerFile(modelType, registry, polyNames);
     const file2 = lowerFile(modelType, registry, polyNames);
     assert.deepEqual(file1, file2);
+  });
+});
+
+// ============================================================================
+// Open self-reference payload preservation
+// ============================================================================
+
+describe("open self-reference payload preservation", () => {
+  const registry = buildTestRegistry();
+  const file = lowerFile(contentPart, registry, new Set(["ContentPart"]));
+
+  it("emits exact, deep-cloned C# passthrough state", () => {
+    const code = emitCSharpClass(
+      file.types[0],
+      "Test",
+      new CSharpExprVisitor(),
+      file.types,
+      name => file.types.find(type => type.typeName.name === name),
+    );
+
+    assert.match(code, /private Dictionary<string, object\?> _raw = new\(\);/);
+    assert.match(code, /private static object\? CloneRawValue\(object\? value\)/);
+    assert.match(code, /var discriminator = discriminatorValue\.ToString\(\);/);
+    assert.doesNotMatch(code, /ToLowerInvariant/);
+    assert.match(code, /if \(instance\.GetType\(\) == typeof\(ContentPart\)\)/);
+    assert.match(code, /instance\._raw = \(Dictionary<string, object\?>\)CloneRawValue\(data\)!;/);
+    assert.match(code, /var result = \(Dictionary<string, object\?>\)CloneRawValue\(obj\._raw\)!;/);
+  });
+
+  it("emits exact, deep-cloned Python passthrough state", () => {
+    const code = emitPythonFile(file, new PythonExprVisitor(registry));
+
+    assert.match(code, /import copy/);
+    assert.match(code, /_raw: dict\[str, Any\] = field\(default_factory=dict, init=False, repr=False\)/);
+    assert.match(code, /discriminator_value = str\(data\["kind"\]\)/);
+    assert.doesNotMatch(code, /discriminator_value = .*\.lower\(\)/);
+    assert.match(code, /if type\(instance\) is ContentPart:\s+instance\._raw = copy\.deepcopy\(data\)/);
+    assert.match(code, /result: dict\[str, Any\] = copy\.deepcopy\(obj\._raw\)/);
   });
 });
 
