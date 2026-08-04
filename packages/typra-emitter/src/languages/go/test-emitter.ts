@@ -55,45 +55,6 @@ function goStringLiteral(value: string): string {
   return JSON.stringify(value);
 }
 
-function normalizeYamlExpectedValue(value: any): any {
-  if (typeof value === "string") {
-    return value
-      .split("\n")
-      .map(line => line.trimEnd())
-      .join("\n");
-  }
-  if (Array.isArray(value)) {
-    return value.map(normalizeYamlExpectedValue);
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, nested]) => [key, normalizeYamlExpectedValue(nested)]),
-    );
-  }
-  return value;
-}
-
-function yamlExpectedSample(sample: TestExample): TestExample {
-  const normalizedSample = normalizeYamlExpectedValue(sample.sample) as Record<string, any>;
-  const validations = sample.validations.map(validation => {
-    const rawValue = validation.sourceKey
-      ? normalizedSample[validation.sourceKey]
-      : undefined;
-    if (typeof rawValue !== "string" || validation.delimiter !== '"') {
-      return validation;
-    }
-    return {
-      ...validation,
-      value: goStringLiteral(rawValue).slice(1, -1),
-    };
-  });
-  return {
-    ...sample,
-    sample: normalizedSample,
-    validations,
-  };
-}
-
 function reflectiveHelperName(typeName: string): string {
   return `assert${typeName}StringField`;
 }
@@ -703,7 +664,7 @@ function emitLoadYAMLTest(
   isAbstract: boolean,
   fieldNames?: ReadonlyMap<string, string>,
 ): void {
-  const expectedSample = yamlExpectedSample(sample);
+  const expectedSample = sample;
   lines.push(`// Test${typeName}LoadYAML${suffix} tests loading ${typeName} from YAML`);
   lines.push(`func Test${typeName}LoadYAML${suffix}(t *testing.T) {`);
   emitYamlDataBlock(lines, sample);
@@ -758,7 +719,7 @@ function emitFromYAMLTest(
   isAbstract: boolean,
   fieldNames?: ReadonlyMap<string, string>,
 ): void {
-  const expectedSample = yamlExpectedSample(sample);
+  const expectedSample = sample;
   lines.push(`// Test${typeName}FromYAML${suffix} tests loading ${typeName} through the generated YAML helper`);
   lines.push(`func Test${typeName}FromYAML${suffix}(t *testing.T) {`);
   emitYamlDataBlock(lines, sample);

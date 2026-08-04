@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const packageRoot = process.cwd();
@@ -528,7 +529,7 @@ function runRustTests() {
   const cargoPath = path.join(sourceDir, "Cargo.toml");
   const lockPath = path.join(sourceDir, "Cargo.lock");
   const libPath = path.join(sourceDir, "lib.rs");
-  const targetDir = path.join(sourceDir, "target");
+  const targetDir = mkdtempSync(path.join(tmpdir(), "typra-rust-"));
   writeFileSync(cargoPath, [
     "[package]",
     'name = "fixtures"',
@@ -547,7 +548,10 @@ function runRustTests() {
   ].join("\n"));
   writeFileSync(libPath, '#[path = "mod.rs"] pub mod model;\n');
   try {
-    runCommand("Generated Rust source and tests", "cargo", ["test", "--quiet"], { cwd: sourceDir });
+    runCommand("Generated Rust source and tests", "cargo", ["test", "--quiet"], {
+      cwd: sourceDir,
+      env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+    });
   } finally {
     for (const tempPath of [cargoPath, lockPath, libPath]) {
       if (existsSync(tempPath)) {
@@ -577,7 +581,7 @@ function runSwiftTests() {
     return;
   }
 
-  const buildDir = path.join(sourceDir, ".build");
+  const buildDir = mkdtempSync(path.join(tmpdir(), "typra-swift-"));
   const inheritedPropertyTest = path.join(
     sourceDir,
     "Tests",
@@ -735,7 +739,12 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
 }
 `);
   try {
-    runCommand("Generated Swift package tests", "swift", ["test", "--package-path", sourceDir], { cwd: sourceDir, env });
+    runCommand(
+      "Generated Swift package tests",
+      "swift",
+      ["test", "--package-path", sourceDir, "--scratch-path", buildDir],
+      { cwd: sourceDir, env },
+    );
   } finally {
     if (existsSync(inheritedPropertyTest)) {
       unlinkSync(inheritedPropertyTest);
