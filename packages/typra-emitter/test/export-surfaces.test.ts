@@ -373,7 +373,7 @@ describe("export surface scaffolding", () => {
     const csharp = emitCSharpProtocolScaffolds([...protocols, csharpProbe], "Typra.Fixtures");
     assert.match(csharp ?? "", /internal sealed class CompileOnlyEventSink : IEventSink/);
     assert.match(csharp ?? "", /public void Emit\(object @event\)/);
-    assert.match(csharp ?? "", /internal sealed class CompileOnlyCSharpProbe[\s\S]*#nullable disable annotations\n        \[global::System\.Diagnostics\.CodeAnalysis\.DisallowNull\] IDictionary<string, object> payload,\n#nullable restore annotations/);
+    assert.match(csharp ?? "", /internal sealed class CompileOnlyCSharpProbe[\s\S]*Dictionary<string, object\?> payload/);
     assert.match(csharp ?? "", /throw new NotSupportedException\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
     assert.match(csharp ?? "", /Task.FromException\(new NotSupportedException\("CSharpProbe\.save is a compile-only protocol scaffold\."\)\)/);
 
