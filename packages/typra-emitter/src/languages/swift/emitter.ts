@@ -265,7 +265,7 @@ function emitStruct(type: TypeDecl, lines: string[], visitor: ExprVisitor, polym
   lines.push("");
   emitLoad(type, lines, polymorphicTypeNames);
   for (const helper of type.collectionHelpers) {
-    if (helper.hasNameProperty) {
+    if (supportsNamedCollectionHelper(helper, polymorphicTypeNames)) {
       lines.push("");
       emitNamedCollectionLoadHelper(helper, lines, polymorphicTypeNames);
       lines.push("");
@@ -304,7 +304,7 @@ function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
   for (const assignment of type.load.assignments) {
     const field = type.fields.find(f => f.name === assignment.fieldName);
     const collectionHelper = type.collectionHelpers.find(helper =>
-      helper.propertyName === assignment.fieldName && helper.hasNameProperty
+      helper.propertyName === assignment.fieldName && supportsNamedCollectionHelper(helper, polymorphicTypeNames)
     );
     lines.push(`    if let value = object[${swiftStringLiteral(assignment.sourceName)}] {`);
     lines.push(`      instance.${swiftPropertyName(assignment.fieldName)} = ${swiftLoadExpression(assignment.category, assignment.enumName, assignment.fieldName, "value", polymorphicTypeNames, collectionHelper)}`);
@@ -331,7 +331,8 @@ function emitNamedCollectionLoadHelper(
   lines.push(`      return try values.map { try ${elementType}.load($0, context: context) }`);
   lines.push("    }");
   lines.push(`    let values = try TypraRuntime.dictionary(data, field: ${swiftStringLiteral(helper.propertyName)})`);
-  lines.push("    return try values.map { name, value in");
+  lines.push("    return try values.map { entry in");
+  lines.push("      let (name, value) = entry");
   if (polymorphicTypeNames.has(helper.elementTypeName.name)) {
     lines.push("      var itemData: [String: Any]");
     lines.push("      if let object = value as? [String: Any] {");
@@ -390,10 +391,20 @@ function typeKey(type: TypeDecl): string {
   return `${type.typeName.namespace}.${type.typeName.name}`;
 }
 
+function supportsNamedCollectionHelper(
+  helper: CollectionHelperDecl,
+  polymorphicTypeNames: Set<string>,
+): boolean {
+  return helper.hasNameProperty && !polymorphicTypeNames.has(helper.elementTypeName.name);
+}
+
 function addNamedCollectionFields(types: TypeDecl[]): TypeDecl[] {
+  const polymorphicTypeNames = new Set(
+    types.filter(type => type.polymorphicDispatch !== null).map(type => type.typeName.name),
+  );
   const namedElementKeys = new Set(
     types.flatMap(type => type.collectionHelpers)
-      .filter(helper => helper.hasNameProperty)
+      .filter(helper => supportsNamedCollectionHelper(helper, polymorphicTypeNames))
       .map(helper => `${helper.elementTypeName.namespace}.${helper.elementTypeName.name}`),
   );
   const stringCategory = { kind: "scalar" as const, scalarType: "string" };
@@ -472,7 +483,7 @@ function emitSave(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
   for (const assignment of type.save.assignments) {
     const prop = `self.${swiftPropertyName(assignment.fieldName)}`;
     const collectionHelper = type.collectionHelpers.find(helper =>
-      helper.propertyName === assignment.fieldName && helper.hasNameProperty
+      helper.propertyName === assignment.fieldName && supportsNamedCollectionHelper(helper, polymorphicTypeNames)
     );
     const serialized = swiftSaveExpression(
       assignment.category,
@@ -498,7 +509,7 @@ function emitToWire(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<s
   lines.push("    var result: [String: Any] = [:]");
   for (const mapping of type.wire!.mappings) {
     const collectionHelper = type.collectionHelpers.find(helper =>
-      helper.propertyName === mapping.fieldName && helper.hasNameProperty
+      helper.propertyName === mapping.fieldName && supportsNamedCollectionHelper(helper, polymorphicTypeNames)
     );
     emitWireField(mapping, lines, polymorphicTypeNames, collectionHelper);
   }
