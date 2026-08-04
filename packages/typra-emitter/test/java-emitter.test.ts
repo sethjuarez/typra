@@ -292,6 +292,46 @@ describe("Java emitter runtime semantics", () => {
       assert.match(source, /assertEquals\(3, instance1\.bindings\.get\(2\)\.weight, "Expected instance1\.bindings\.get\(2\)\.weight"\);/);
     });
 
+    it("uses legal local identifiers for nested union downcasts", () => {
+      const base = new TypeNode({ name: "Property" } as Model, "");
+      base.typeName = { namespace: "Test", name: "Property" };
+      base.discriminator = "kind";
+      const child = new TypeNode({ name: "StringProperty" } as Model, "");
+      child.typeName = { namespace: "Test", name: "StringProperty" };
+      const kind = new PropertyNode({ name: "kind" } as ModelProperty, "");
+      kind.typeName = { namespace: "TypeSpec", name: "string" };
+      kind.isScalar = true;
+      kind.defaultValue = "string";
+      child.properties = [kind];
+      base.childTypes = [child];
+      base.properties = [kind];
+
+      const container = new TypeNode({ name: "Container" } as Model, "");
+      container.typeName = { namespace: "Test", name: "Container" };
+      const nested = new PropertyNode({ name: "nested" } as ModelProperty, "");
+      nested.typeName = base.typeName;
+      nested.type = base;
+      nested.isScalar = false;
+      container.properties = [nested];
+
+      const source = emitJavaTest({
+        node: container,
+        isAbstract: false,
+        package: "test",
+        examples: [{
+          sample: { nested: { kind: "string" } },
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [],
+        }],
+        coercions: [],
+        factories: [],
+      });
+
+      assert.match(source, /StringProperty instance1NestedValue = \(StringProperty\) instance1\.nested;/);
+      assert.doesNotMatch(source, /StringProperty instance1\.nested/);
+    });
+
     it("uses typed enum values for nested assertions", () => {
       const approval = new TypeNode({ name: "Approval" } as Model, "");
       approval.typeName = { namespace: "Test", name: "Approval" };

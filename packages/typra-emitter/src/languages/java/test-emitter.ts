@@ -311,7 +311,7 @@ function emitPolymorphicValidation(
   const child = findSampleChildType(prop, value);
   if (!child) return;
 
-  const local = `${varName}${capitalize(propName)}Value`;
+  const local = `${localIdentifier(varName)}${capitalize(localIdentifier(propName))}Value`;
   lines.push(`    assertTrue(${expr} instanceof ${child.typeName.name}, "Expected ${propName} to be ${child.typeName.name}");`);
   lines.push(`    ${child.typeName.name} ${local} = (${child.typeName.name}) ${expr};`);
   emitStructuredValidations(lines, local, child, value, true, prop.type);
