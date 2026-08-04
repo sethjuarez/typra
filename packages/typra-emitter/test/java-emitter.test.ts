@@ -237,7 +237,7 @@ describe("Java emitter runtime semantics", () => {
       item.typeName = { namespace: "Test", name: "Binding" };
       item.coercions = [
         { scalar: "string", expansion: { value: "{value}" } },
-        { scalar: "number", expansion: { weight: "{value}" } },
+        { scalar: "float64", expansion: { weight: "{value}" } },
       ];
       const name = new PropertyNode({ name: "name" } as ModelProperty, "");
       name.typeName = { namespace: "TypeSpec", name: "string" };

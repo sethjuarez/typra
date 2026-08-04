@@ -365,7 +365,11 @@ function findTypeByName(node: TypeNode, typeName: string, visited = new Set<Type
 }
 
 function findScalarCoercionField(node: TypeNode, scalarType: string): string | undefined {
-  const coercion = node.coercions.find(entry => entry.scalar === scalarType);
+  const coercion = node.coercions.find(entry =>
+    scalarType === "number"
+      ? ["int32", "int64", "integer", "number", "float", "numeric", "float32", "float64"].includes(entry.scalar)
+      : entry.scalar === scalarType
+  );
   if (!coercion) return undefined;
 
   for (const [key, value] of Object.entries(coercion.expansion)) {
