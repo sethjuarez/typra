@@ -1086,6 +1086,62 @@ describe("Rust emitter serde derives", () => {
     assert.match(code, /ConnectionKind::Unknown \{ raw, \.\. \} => \{\s+for \(key, value\) in raw/);
   });
 
+  it("preserves open self-reference discriminator payloads losslessly", () => {
+    const file = lowerFile(contentPart, registry, new Set(["ContentPart"]));
+    const code = emitRustFile(file, new RustExprVisitor(registry), new Set(["ContentPart"]));
+
+    assert.match(
+      code,
+      /Custom \{\s+\/\/\/ The raw `kind` string for this unknown variant\.\s+kind_name: String,\s+\/\/\/ Unmodeled fields preserved for forward-compatible round trips\.\s+raw: serde_json::Map<String, serde_json::Value>/,
+    );
+    assert.match(code, /_ => ContentPartKind::Custom \{\s+kind_name: kind_str\.to_string\(\),\s+raw: \{/);
+    assert.match(code, /raw\.remove\("kind"\);/);
+    assert.match(code, /ContentPartKind::Custom \{ raw, \.\. \} => \{\s+for \(key, value\) in raw \{\s+if matches!\(key\.as_str\(\), "kind"\) \{ continue; \}/);
+  });
+
+  it("initializes raw payloads for coerced self-reference variants", () => {
+    const known = makeType("CoercedOpenKnown", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "known" }),
+    ], { base: { namespace: "Test", name: "CoercedOpen" } });
+    const open = makeType("CoercedOpen", [
+      makeProp("kind", "string", { isScalar: true }),
+    ], {
+      discriminator: "kind",
+      childTypes: [known],
+      coercions: [{ scalar: "string", expansion: { kind: "vendor" } }],
+    });
+    const coercionRegistry = TypeRegistry.fromTypeGraph([open, known]);
+    const file = lowerFile(open, coercionRegistry, new Set(["CoercedOpen"]));
+    const code = emitRustFile(file, new RustExprVisitor(coercionRegistry), new Set(["CoercedOpen"]));
+
+    assert.match(
+      code,
+      /kind: CoercedOpenKind::Custom \{ kind_name: "vendor"\.to_string\(\), raw: serde_json::Map::new\(\) \}/,
+    );
+  });
+
+  it("preserves unmatched coerced discriminators for open abstract variants", () => {
+    const known = makeType("CoercedAbstractKnown", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "known" }),
+    ], { base: { namespace: "Test", name: "CoercedAbstract" } });
+    const open = makeType("CoercedAbstract", [
+      makeProp("kind", "string", { isScalar: true }),
+    ], {
+      discriminator: "kind",
+      childTypes: [known],
+      coercions: [{ scalar: "string", expansion: { kind: "vendor" } }],
+      isAbstract: true,
+    });
+    const coercionRegistry = TypeRegistry.fromTypeGraph([open, known]);
+    const file = lowerFile(open, coercionRegistry, new Set(["CoercedAbstract"]));
+    const code = emitRustFile(file, new RustExprVisitor(coercionRegistry), new Set(["CoercedAbstract"]));
+
+    assert.match(
+      code,
+      /kind: CoercedAbstractKind::Unknown \{ kind_name: "vendor"\.to_string\(\), raw: serde_json::Map::new\(\) \}/,
+    );
+  });
+
   it("uses concrete vectors for explicit empty defaults and options for absent defaults", () => {
     const owner = makeType("CollectionOwner", [
       makeProp("name", "string", { isScalar: true }),
