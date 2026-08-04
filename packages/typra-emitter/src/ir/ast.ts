@@ -10,6 +10,7 @@ import {
   isTemplateInstance,
   getNamespaceFullName,
   getDiscriminator,
+  isErrorModel,
 } from "@typespec/compiler";
 import { getStateScalar, getStateValue, SampleEntry, FactoryEntry, MethodEntry, KnownAsEntry, DefaultForEntry, ParseAliasEntry } from "../decorators.js";
 import { StateKeys } from "../lib.js";
@@ -111,6 +112,7 @@ export class TypeNode {
   public properties: PropertyNode[] = [];
   public isAbstract: boolean = false;
   public isProtocol: boolean = false;
+  public isError: boolean = false;
   public discriminator: string | undefined = undefined;
   public factories: FactoryEntry[] = [];
   public methods: MethodEntry[] = [];
@@ -284,6 +286,7 @@ export const resolveModel = (program: Program, model: Model, visited: Set<string
     node.description = getDoc(program, innerModel) || "";
     node.isAbstract = getStateScalar<boolean>(program, StateKeys.abstracts, innerModel) || false;
     node.isProtocol = getStateScalar<boolean>(program, StateKeys.protocols, innerModel) || false;
+    node.isError = isErrorModel(program, innerModel);
     const discriminator = getDiscriminator(program, innerModel);
     node.discriminator = discriminator ? discriminator.propertyName : undefined;
     // coercion .ctor
@@ -298,6 +301,7 @@ export const resolveModel = (program: Program, model: Model, visited: Set<string
     node.childTypes = resolveModelChildren(program, model, visited, rootNamespace, rootAlias);
     node.isAbstract = getStateScalar<boolean>(program, StateKeys.abstracts, model) || false;
     node.isProtocol = getStateScalar<boolean>(program, StateKeys.protocols, model) || false;
+    node.isError = isErrorModel(program, model);
     const discriminator = getDiscriminator(program, model);
     node.discriminator = discriminator ? discriminator.propertyName : undefined;
     // coercion .ctor

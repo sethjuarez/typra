@@ -150,7 +150,7 @@ model FixtureCustomTool extends FixtureTool {
 
 model FixtureToolbox {
   @sample(#{ tools: #[#{ kind: "function", name: "search", command: "search --query" }] })
-  tools: FixtureTool[];
+  tools: Record<FixtureTool> | Named<FixtureTool>[];
 }
 
 model FixtureShortcut {
@@ -234,6 +234,13 @@ model FixtureOmit {
 
 model FixtureOptionalDefaults {
   mode?: string = "auto";
+}
+
+@error
+model FixtureInvokerError {
+  message: string;
+  component: string;
+  key: string;
 }
 
 // Prompty-like Swift generated-test regressions:

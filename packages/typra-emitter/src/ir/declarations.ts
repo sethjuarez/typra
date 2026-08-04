@@ -125,6 +125,8 @@ export interface TypeDecl {
   isAbstract: boolean;
   /** Whether this type is a protocol interface (Python: Protocol, TS: interface, Rust: trait, C#: interface, Go: interface) */
   isProtocol: boolean;
+  /** Whether TypeSpec marks this model with @error. */
+  isError?: boolean;
   /** Human-readable description for docstrings/comments */
   description: string;
   /** All fields defined on this type */

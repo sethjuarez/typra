@@ -659,6 +659,23 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     }
   }
 
+  func testNamedToolCollectionPreservesMapKeyAsPayloadName() throws {
+    let toolbox = try FixtureToolbox.load([
+      "tools": [
+        "search": [
+          "kind": "function",
+          "description": "search description",
+          "command": "search --query",
+        ]
+      ]
+    ])
+    let output = try toolbox.save()
+    let tools = output["tools"] as? [String: Any]
+    let search = tools?["search"] as? [String: Any]
+    XCTAssertEqual(search?["description"] as? String, "search description")
+    XCTAssertEqual(search?["command"] as? String, "search --query")
+  }
+
   func testScalarPropertyCoercionDispatchesToTypedVariant() throws {
     let output = try FixtureProperty.load("hello").save()
     XCTAssertEqual(output["kind"] as? String, "string")

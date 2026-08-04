@@ -261,6 +261,81 @@ describe("Swift polymorphic enums", () => {
     assert.match(runtime, /public let useShorthand: Bool/);
     assert.match(runtime, /public init\(collectionFormat: String = "object", useShorthand: Bool = true\)/);
   });
+
+  it("loads and saves named collections of polymorphic values through payload data", () => {
+    const tool = typeDecl("Tool");
+    tool.isAbstract = true;
+    addStringField(tool, "kind");
+    addStringField(tool, "description", true);
+    tool.polymorphicDispatch = {
+      discriminatorField: "kind",
+      variants: [{ value: "function", typeName: { namespace: "Test", name: "FunctionTool" } }],
+      defaultVariant: null,
+      isAbstract: true,
+    };
+
+    const functionTool = typeDecl("FunctionTool");
+    functionTool.base = tool.typeName;
+    addStringField(functionTool, "kind", false, "function");
+    addStringField(functionTool, "command");
+
+    const toolbox = typeDecl("Toolbox");
+    const toolsCategory = { kind: "collection_complex" as const, typeName: "Tool" };
+    toolbox.fields = [{
+      name: "tools",
+      typeName: tool.typeName,
+      category: toolsCategory,
+      isOptional: false,
+      defaultValue: null,
+      allowedValues: [],
+      parseAliases: {},
+      enumName: null,
+      isOpenEnum: false,
+      description: "",
+      knownAs: {},
+    }];
+    toolbox.load.assignments = [{
+      sourceName: "tools",
+      fieldName: "tools",
+      category: toolsCategory,
+      isOptional: false,
+      parentTypeName: "Toolbox",
+      enumName: null,
+      allowedValues: [],
+      parseAliases: {},
+      defaultValue: null,
+      isOpenEnum: false,
+    }];
+    toolbox.save.assignments = [{
+      targetName: "tools",
+      fieldName: "tools",
+      category: toolsCategory,
+      isOptional: false,
+      parentTypeName: "Toolbox",
+      enumName: null,
+      isOpenEnum: false,
+    }];
+    toolbox.collectionHelpers = [{
+      propertyName: "tools",
+      elementTypeName: tool.typeName,
+      innerFields: [],
+      hasNameProperty: true,
+    }];
+
+    const file = fileDecl(toolbox);
+    file.types.push(tool, functionTool);
+    const source = emitSwiftFile(
+      file,
+      new SwiftExprVisitor(),
+      new Set(["Tool"]),
+      [toolbox, tool, functionTool],
+    );
+
+    assert.match(source, /public struct FunctionTool: TypraModel \{[\s\S]*public var name: String\? = nil[\s\S]*public var description: String\? = nil/);
+    assert.match(source, /itemData = try Tool\.load\(value, context: context\)\.save\(\)/);
+    assert.match(source, /itemData\["name"\] = name\s+return try Tool\.load\(itemData, context: context\)/);
+    assert.doesNotMatch(source, /item\.name = name|Tool\.shorthandProperty/);
+  });
 });
 
 describe("Swift inherited model fields", () => {
@@ -410,6 +485,17 @@ describe("Swift typed factory expressions", () => {
     assert.match(source, /role: \.assistant/);
     assert.match(source, /roles: \[\.assistant, \(try! Role\.parse\("custom"\)\)\]/);
     assert.match(source, /parts: \[\.textPart\(TextPart\(kind: "text", value: text, format: \.plain\)\)\]/);
+  });
+});
+
+describe("Swift error models", () => {
+  it("conforms TypeSpec error models to Swift.Error", () => {
+    const error = typeDecl("InvokerError");
+    error.isError = true;
+    addStringField(error, "message");
+
+    const source = emitSwiftFile(fileDecl(error), new SwiftExprVisitor(), new Set());
+    assert.match(source, /public struct InvokerError: TypraModel, Swift\.Error/);
   });
 });
 

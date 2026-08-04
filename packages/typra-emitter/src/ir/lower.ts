@@ -153,6 +153,7 @@ export function lowerType(
     base: node.base,
     isAbstract: node.isAbstract,
     isProtocol: node.isProtocol,
+    isError: node.isError,
     description: node.description,
     fields,
     coercionProperty,
