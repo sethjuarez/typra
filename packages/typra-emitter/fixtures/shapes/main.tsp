@@ -165,6 +165,8 @@ model FixtureBagItem {
   note?: string;
 }
 
+@@coerce(FixtureBagItem, string, #{ note: "{value}" }, "item", "Load a named bag item from shorthand.", "first");
+
 // Two same-element keyed collections in ONE model — the exact prompty `inputs`/`outputs`
 // shape (both typed `Record<Property>|Named<Property>[]`). Because resolveModel visits each
 // element type once, the SECOND same-element collection's `prop.type` (the injected-`name`
@@ -198,6 +200,10 @@ model FixtureOmit {
 
   @doc("Optional model collection left unset → generated constructors and loaders preserve undefined.")
   owners?: FixtureOwner[];
+}
+
+model FixtureOptionalDefaults {
+  mode?: string = "auto";
 }
 
 // Prompty-like Swift generated-test regressions:

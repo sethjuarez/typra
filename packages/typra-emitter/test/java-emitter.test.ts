@@ -11,6 +11,8 @@ import {
   javaIdentifier,
   javaPropertyName,
 } from "../src/languages/java/identifiers.js";
+import { emitJavaSaveContext } from "../src/languages/java/scaffolding.js";
+import { emitJavaTest } from "../src/languages/java/test-emitter.js";
 import { JavaExprVisitor } from "../src/languages/java/visitor.js";
 
 function typeDecl(fields: TypeDecl["fields"]): TypeDecl {
@@ -339,5 +341,205 @@ describe("Java emitter runtime semantics", () => {
     assert.match(source, /result\.mode = FactoryMode\.fromValue\(String\.valueOf\(data\)\)/);
     assert.match(source, /public Long count = 1L;/);
     assert.match(source, /public Double ratio = 1\.0d;/);
+  });
+
+  it("normalizes only explicitly keyed collections and honors save preferences", () => {
+    const items = field("items", "FixtureBagItem", {
+      typeName: { namespace: "Test", name: "FixtureBagItem[]" },
+      category: { kind: "collection_complex", typeName: "FixtureBagItem" },
+    });
+    const decl = typeDecl([items]);
+    decl.typeName = { namespace: "Test", name: "FixtureBag" };
+    decl.collectionHelpers = [{
+      propertyName: "items",
+      elementTypeName: { namespace: "Test", name: "FixtureBagItem" },
+      innerFields: ["note"],
+      hasNameProperty: true,
+    }];
+    addAssignments(decl);
+
+    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+
+    assert.match(source, /if \(data instanceof Map<\?, \?> values\)/);
+    assert.match(source, /itemData\.put\("name", String\.valueOf\(entry\.getKey\(\)\)\)/);
+    assert.match(source, /"array"\.equals\(ctx\.collectionFormat\)/);
+    assert.match(source, /ctx\.useShorthand/);
+  });
+
+  it("keeps ordinary complex collections as arrays even when elements are nameable", () => {
+    const anyOf = field("anyOf", "FixtureProperty", {
+      typeName: { namespace: "Test", name: "FixtureProperty[]" },
+      category: { kind: "collection_complex", typeName: "FixtureProperty" },
+    });
+    const decl = typeDecl([anyOf]);
+    decl.typeName = { namespace: "Test", name: "FixtureUnionProperty" };
+    decl.collectionHelpers = [{
+      propertyName: "anyOf",
+      elementTypeName: { namespace: "Test", name: "FixtureProperty" },
+      innerFields: ["kind", "name"],
+      hasNameProperty: false,
+    }];
+    addAssignments(decl);
+
+    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+
+    assert.doesNotMatch(source, /data instanceof Map<\?, \?> values/);
+    assert.doesNotMatch(source, /collectionFormat/);
+    assert.match(source, /for \(FixtureProperty item : items\) result\.add\(item\.save\(ctx\)\)/);
+  });
+
+  it("finalizes derived saves once after accumulating inherited fields", () => {
+    const base = typeDecl([field("id", "string")]);
+    base.typeName = { namespace: "Test", name: "BaseModel" };
+    addAssignments(base);
+    const derived = typeDecl([field("id", "string"), field("label", "string")]);
+    derived.typeName = { namespace: "Test", name: "DerivedModel" };
+    derived.base = base.typeName;
+    derived.save.hasBase = true;
+    addAssignments(derived);
+
+    const source = emitJavaFileContent([derived], "test", new JavaExprVisitor(), new Set(), [], [base, derived]);
+
+    assert.match(source, /BaseModel\.saveFieldsInto\(obj, result, ctx\)/);
+    assert.doesNotMatch(source, /super\.save\(ctx\)/);
+    assert.equal((source.match(/return ctx\.processDict\(result\)/g) ?? []).length, 1);
+  });
+
+  it("preserves optional defaults as absence and initializes required enums", () => {
+    const optionalDefault = field("mode", "string", {
+      isOptional: true,
+      defaultValue: "auto",
+    });
+    const requiredEnum = field("status", "string", {
+      enumName: "fixtureStatus",
+      allowedValues: ["draft", "ready"],
+    });
+    const decl = typeDecl([optionalDefault, requiredEnum]);
+    addAssignments(decl);
+
+    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+
+    assert.match(source, /public String mode = null;/);
+    assert.match(source, /if \(obj\.mode != null\) result\.put\("mode"/);
+    assert.match(source, /public FixtureStatus status = FixtureStatus\.DRAFT;/);
+    assert.match(source, /result\.put\("status", obj\.status\.value\);/);
+  });
+
+  it("emits disjoint integer and numeric coercion branches", () => {
+    const decl = typeDecl([field("count", "int32"), field("ratio", "float64")]);
+    decl.load.coercions = [
+      {
+        scalarType: "number",
+        assignments: [{ fieldName: "ratio", isInput: true }],
+        needsDispatch: false,
+      },
+      {
+        scalarType: "int32",
+        assignments: [{ fieldName: "count", isInput: true }],
+        needsDispatch: false,
+      },
+    ];
+
+    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+    const integerBranch = source.indexOf("data instanceof Byte");
+    const numberBranch = source.indexOf("data instanceof Number");
+
+    assert.ok(integerBranch >= 0);
+    assert.ok(numberBranch > integerBranch);
+  });
+
+  it("exposes Java collection and shorthand save settings compatibly", () => {
+    const source = emitJavaSaveContext("test");
+
+    assert.match(source, /public final String collectionFormat;/);
+    assert.match(source, /public final boolean useShorthand;/);
+    assert.match(source, /this\(preSave, postSave, "object", true\)/);
+    assert.match(source, /public SaveContext\(String collectionFormat, boolean useShorthand\)/);
+  });
+});
+
+describe("Java generated tests", () => {
+  it("validates object-form named collections through their generated List model", () => {
+    const item = new TypeNode({} as Model, "");
+    item.typeName = { namespace: "Test", name: "FixtureBagItem" };
+    const name = new PropertyNode({} as ModelProperty, "");
+    name.name = "name";
+    name.isScalar = true;
+    name.typeName = { namespace: "TypeSpec", name: "string" };
+    const note = new PropertyNode({} as ModelProperty, "");
+    note.name = "note";
+    note.isScalar = true;
+    note.typeName = { namespace: "TypeSpec", name: "string" };
+    item.properties = [name, note];
+
+    const bag = new TypeNode({} as Model, "");
+    bag.typeName = { namespace: "Test", name: "FixtureBag" };
+    const items = new PropertyNode({} as ModelProperty, "");
+    items.name = "items";
+    items.typeName = { namespace: "Test", name: "FixtureBagItem" };
+    items.isCollection = true;
+    items.type = item;
+    bag.properties = [items];
+
+    const source = emitJavaTest({
+      node: bag,
+      isAbstract: false,
+      package: "test",
+      examples: [{
+        sample: { items: { alpha: { note: "first" } } },
+        json: ['{"items":{"alpha":{"note":"first"}}}'],
+        yaml: [],
+        validations: [],
+      }],
+      coercions: [],
+      factories: [],
+    });
+
+    assert.match(source, /instance1\.items\.size\(\)/);
+    assert.match(source, /instance1\.items\.get\(0\)\.name/);
+    assert.doesNotMatch(source, /instance1\.items\.get\("alpha"\)/);
+  });
+
+  it("uses canonical Java string literals and typed nested comparisons", () => {
+    const config = new TypeNode({} as Model, "");
+    config.typeName = { namespace: "Test", name: "McpApprovalConfig" };
+    const kind = new PropertyNode({} as ModelProperty, "");
+    kind.name = "kind";
+    kind.isScalar = true;
+    kind.typeName = { namespace: "TypeSpec", name: "string" };
+    config.properties = [kind];
+    config.coercions = [{
+      scalar: "string",
+      expansion: { kind: "{value}" },
+      title: "config",
+      description: "",
+      example: "always",
+    }];
+
+    const approval = new TypeNode({} as Model, "");
+    approval.typeName = { namespace: "Test", name: "McpApprovalMode" };
+    const configProp = new PropertyNode({} as ModelProperty, "");
+    configProp.name = "config";
+    configProp.typeName = config.typeName;
+    configProp.type = config;
+    approval.properties = [configProp];
+
+    const source = emitJavaTest({
+      node: approval,
+      isAbstract: false,
+      package: "test",
+      examples: [{
+        sample: { config: "always" },
+        json: ['{"config":"line\\n\\"always\\""}'],
+        yaml: [],
+        validations: [{ key: "config", value: "always", delimiter: '"', isOptional: false }],
+      }],
+      coercions: [],
+      factories: [],
+    });
+
+    assert.doesNotMatch(source, /String jsonData1 = """/);
+    assert.match(source, /instance1\.config\.kind/);
+    assert.doesNotMatch(source, /assertEquals\("always", instance1\.config,/);
   });
 });
