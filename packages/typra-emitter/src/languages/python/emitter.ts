@@ -525,10 +525,14 @@ function pythonTypeAnnotation(f: FieldDecl): string {
   switch (cat.kind) {
     case "dict":
       return f.isOptional ? "dict[str, Any] | None" : "dict[str, Any]";
-    case "collection_scalar":
-      return `list[${TYPE_MAP[cat.scalarType] || "Any"}]`;
-    case "collection_complex":
-      return `list[${cat.typeName}]`;
+    case "collection_scalar": {
+      const pyType = `list[${TYPE_MAP[cat.scalarType] || "Any"}]`;
+      return f.isOptional ? `${pyType} | None` : pyType;
+    }
+    case "collection_complex": {
+      const pyType = `list[${cat.typeName}]`;
+      return f.isOptional ? `${pyType} | None` : pyType;
+    }
     case "scalar": {
       const pyType = TYPE_MAP[cat.scalarType] || "Any";
       return f.isOptional ? `${pyType} | None` : pyType;
@@ -570,7 +574,7 @@ function pythonDefaultValue(f: FieldDecl): string {
   const cat = f.category;
 
   if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
-    return " = field(default_factory=list)";
+    return f.isOptional ? " = None" : " = field(default_factory=list)";
   }
 
   if (f.isOptional) {

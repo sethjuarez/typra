@@ -91,6 +91,7 @@ function fileDecl(type: TypeDecl): FileDecl {
 
 interface GeneratedCollectionModel {
   inputModalities?: string[];
+  outputModalities?: string[];
   requiredTags: string[];
   save(): Record<string, unknown>;
 }
@@ -127,6 +128,7 @@ describe("TypeScript optional collection defaults", () => {
   it("preserves omitted optional collections while accepting explicit empty arrays", () => {
     const type = typeDecl([
       field("inputModalities", { kind: "collection_scalar", scalarType: "string" }, true),
+      field("outputModalities", { kind: "collection_scalar", scalarType: "string" }, true),
       field("owners", { kind: "collection_complex", typeName: "Owner" }, true),
       field("requiredTags", { kind: "collection_scalar", scalarType: "string" }, false),
     ]);
@@ -134,6 +136,7 @@ describe("TypeScript optional collection defaults", () => {
     const source = emitTypeScriptFile(fileDecl(type), new TypeScriptExprVisitor());
 
     assert.match(source, /inputModalities\?: string\[\];/);
+    assert.match(source, /outputModalities\?: string\[\];/);
     assert.match(source, /owners\?: Owner\[\];/);
     assert.doesNotMatch(source, /inputModalities\?: string\[\] = \[\];/);
     assert.doesNotMatch(source, /owners\?: Owner\[\] = \[\];/);
@@ -149,13 +152,17 @@ describe("TypeScript optional collection defaults", () => {
     const CollectionModel = evaluateCollectionModel(source);
     const omitted = new CollectionModel();
     assert.equal(omitted.inputModalities, undefined);
+    assert.equal(omitted.outputModalities, undefined);
     assert.deepEqual(omitted.save(), { requiredTags: [] });
 
-    const explicit = new CollectionModel({ inputModalities: [] });
+    const explicit = new CollectionModel({ inputModalities: [], outputModalities: [] });
     assert.deepEqual(explicit.inputModalities, []);
-    assert.deepEqual(explicit.save(), { inputModalities: [], requiredTags: [] });
+    assert.deepEqual(explicit.outputModalities, []);
+    assert.deepEqual(explicit.save(), { inputModalities: [], outputModalities: [], requiredTags: [] });
 
     assert.equal(CollectionModel.load({}).inputModalities, undefined);
     assert.deepEqual(CollectionModel.load({ inputModalities: [] }).inputModalities, []);
+    assert.equal(CollectionModel.load({}).outputModalities, undefined);
+    assert.deepEqual(CollectionModel.load({ outputModalities: [] }).outputModalities, []);
   });
 });
