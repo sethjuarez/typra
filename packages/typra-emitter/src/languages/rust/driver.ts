@@ -914,7 +914,9 @@ export function emitRustTest(ctx: RustTestContext): string {
         out += '    let _ = instance; // load succeeded, no scalar properties to validate\n';
       }
     } else {
-      out += '    let _ = instance; // abstract type, load succeeded\n';
+      out += '    let saved = instance.to_value(&SaveContext::default());\n';
+      out += `    let reloaded = ${typeName}::load_from_value(&saved, &ctx);\n`;
+      out += '    assert_eq!(reloaded, instance, "scalar-coerced abstract models must survive save/reload");\n';
     }
     out += '}\n';
     out += '\n';
