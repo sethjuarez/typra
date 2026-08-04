@@ -77,4 +77,77 @@ describe("C# emitter guarded scalar loads", () => {
     assert.match(source, /instance\.Message = messageValue\.ToString\(\)!;/);
     assert.doesNotMatch(source, /messageValue\?\.ToString/);
   });
+
+  it("permits null values in dictionary fields and initializers", () => {
+    const category = { kind: "dict" as const };
+    const field = {
+      name: "metadata",
+      typeName: { namespace: "", name: "Record<unknown>" },
+      category,
+      isOptional: false,
+      defaultValue: null,
+      allowedValues: [],
+      parseAliases: {},
+      enumName: null,
+      isOpenEnum: false,
+      description: "",
+      knownAs: {},
+    };
+    const model: TypeDecl = {
+      typeName: { namespace: "Test", name: "Envelope" },
+      base: null,
+      isAbstract: false,
+      isProtocol: false,
+      description: "",
+      fields: [field],
+      coercionProperty: null,
+      load: {
+        coercions: [],
+        assignments: [{
+          sourceName: "metadata",
+          fieldName: "metadata",
+          category,
+          isOptional: false,
+          parentTypeName: "Envelope",
+          enumName: null,
+          allowedValues: [],
+          parseAliases: {},
+          defaultValue: null,
+          isOpenEnum: false,
+        }],
+        hasPolymorphicDispatch: false,
+        hasContextHooks: true,
+      },
+      save: {
+        assignments: [{
+          targetName: "metadata",
+          fieldName: "metadata",
+          category,
+          isOptional: false,
+          parentTypeName: "Envelope",
+          enumName: null,
+          isOpenEnum: false,
+        }],
+        hasBase: false,
+        hasContextHooks: true,
+      },
+      factories: [],
+      collectionHelpers: [],
+      polymorphicDispatch: null,
+      methods: [],
+      wire: null,
+    };
+
+    const source = emitCSharpClass(
+      model,
+      "Test",
+      new CSharpExprVisitor(),
+      [model],
+      () => undefined,
+    );
+
+    assert.match(source, /public IDictionary<string, object\?> Metadata \{ get; set; \}/);
+    assert.match(source, /= new Dictionary<string, object\?>\(\);/);
+    assert.doesNotMatch(source, /IDictionary<string, object>/);
+  });
 });

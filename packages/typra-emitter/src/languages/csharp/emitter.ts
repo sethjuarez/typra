@@ -54,7 +54,7 @@ const CSHARP_TYPE_MAP: Record<string, string> = {
   object: "object",
   unknown: "object",
   any: "object",
-  dictionary: "IDictionary<string, object>",
+  dictionary: "IDictionary<string, object?>",
   array: "IList<object>",
 };
 
@@ -455,7 +455,7 @@ function getCSharpType(category: PropertyCategory, isOptional: boolean, enumName
       baseType = `IList<${category.typeName}>`;
       break;
     case "dict":
-      baseType = "IDictionary<string, object>";
+      baseType = "IDictionary<string, object?>";
       break;
   }
   return isOptional ? `${baseType}?` : baseType;
@@ -488,7 +488,7 @@ function getPropertyDefault(field: FieldDecl): string {
     case "collection_complex":
       return " = [];";
     case "dict":
-      return " = new Dictionary<string, object>();";
+      return " = new Dictionary<string, object?>();";
     case "scalar": {
       const csType = CSHARP_TYPE_MAP[cat.scalarType] || "object";
       if (csType === "string") {
