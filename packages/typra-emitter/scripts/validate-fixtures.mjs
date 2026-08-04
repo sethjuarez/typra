@@ -1,10 +1,25 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const packageRoot = process.cwd();
-const generatedRoot = path.join(packageRoot, "generated", "fixtures");
+const sourceGeneratedRoot = path.join(packageRoot, "generated", "fixtures");
+const validationRoot = mkdtempSync(path.join(tmpdir(), "typra-fixtures-"));
+const generatedRoot = path.join(validationRoot, "fixtures");
+const scratchEntries = new Set([
+  ".build",
+  ".classes",
+  "__pycache__",
+  "bin",
+  "obj",
+  "target",
+]);
+cpSync(sourceGeneratedRoot, generatedRoot, {
+  recursive: true,
+  filter: source => !scratchEntries.has(path.basename(source)),
+});
+process.on("exit", () => rmSync(validationRoot, { recursive: true, force: true }));
 const failures = [];
 const fixtureRootSample = {
   name: "fixture-root",
@@ -809,8 +824,9 @@ function runCSharpBuild() {
 
   const projectPath = path.join(sourceDir, "TypraFixtureValidation.csproj");
   const stubsPath = path.join(sourceDir, "TypraFixtureValidation.Stubs.cs");
-  const binDir = path.join(sourceDir, "bin");
-  const objDir = path.join(sourceDir, "obj");
+  const outputRoot = mkdtempSync(path.join(tmpdir(), "typra-csharp-"));
+  const binDir = path.join(outputRoot, "bin");
+  const objDir = path.join(outputRoot, "obj");
   writeFileSync(projectPath, [
     '<Project Sdk="Microsoft.NET.Sdk">',
     "  <PropertyGroup>",
@@ -827,17 +843,20 @@ function runCSharpBuild() {
   ].join("\n"));
   writeFileSync(stubsPath, buildCSharpValidationStubs(sourceDir));
   try {
-    runCommand("Generated C# source build", "dotnet", ["build", projectPath, "--nologo", "--verbosity", "quiet"], { cwd: sourceDir });
+    runCommand(
+      "Generated C# source build",
+      "dotnet",
+      ["build", projectPath, "--nologo", "--verbosity", "quiet", "-p:BaseOutputPath=" + `${binDir}${path.sep}`, "-p:BaseIntermediateOutputPath=" + `${objDir}${path.sep}`],
+      { cwd: sourceDir },
+    );
   } finally {
     for (const tempPath of [projectPath, stubsPath]) {
       if (existsSync(tempPath)) {
         unlinkSync(tempPath);
       }
     }
-    for (const tempDir of [binDir, objDir]) {
-      if (existsSync(tempDir)) {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
+    if (existsSync(outputRoot)) {
+      rmSync(outputRoot, { recursive: true, force: true });
     }
   }
 }
@@ -852,8 +871,9 @@ function runCSharpProtocolScaffoldBuild() {
 
   const projectPath = path.join(sourceDir, "TypraFixtureScaffoldValidation.csproj");
   const stubsPath = path.join(sourceDir, "TypraFixtureScaffoldValidation.Stubs.cs");
-  const binDir = path.join(sourceDir, "bin");
-  const objDir = path.join(sourceDir, "obj");
+  const outputRoot = mkdtempSync(path.join(tmpdir(), "typra-csharp-scaffold-"));
+  const binDir = path.join(outputRoot, "bin");
+  const objDir = path.join(outputRoot, "obj");
   writeFileSync(projectPath, [
     '<Project Sdk="Microsoft.NET.Sdk">',
     "  <PropertyGroup>",
@@ -871,17 +891,20 @@ function runCSharpProtocolScaffoldBuild() {
   ].join("\n"));
   writeFileSync(stubsPath, buildCSharpValidationStubs(sourceDir));
   try {
-    runCommand("Generated C# protocol scaffold build", "dotnet", ["build", projectPath, "--nologo", "--verbosity", "quiet"], { cwd: sourceDir });
+    runCommand(
+      "Generated C# protocol scaffold build",
+      "dotnet",
+      ["build", projectPath, "--nologo", "--verbosity", "quiet", "-p:BaseOutputPath=" + `${binDir}${path.sep}`, "-p:BaseIntermediateOutputPath=" + `${objDir}${path.sep}`],
+      { cwd: sourceDir },
+    );
   } finally {
     for (const tempPath of [projectPath, stubsPath]) {
       if (existsSync(tempPath)) {
         unlinkSync(tempPath);
       }
     }
-    for (const tempDir of [binDir, objDir]) {
-      if (existsSync(tempDir)) {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
+    if (existsSync(outputRoot)) {
+      rmSync(outputRoot, { recursive: true, force: true });
     }
   }
 }
@@ -1292,7 +1315,7 @@ function runRustExecutableConformance() {
   const lockPath = path.join(sourceDir, "Cargo.lock");
   const libPath = path.join(sourceDir, "lib.rs");
   const runnerPath = path.join(sourceDir, "conformance_validate.rs");
-  const targetDir = path.join(sourceDir, "target");
+  const targetDir = mkdtempSync(path.join(tmpdir(), "typra-rust-conformance-"));
   if (!existsSync(sourceDir)) {
     fail("No generated Rust directory found for executable conformance.");
     return;
@@ -1364,7 +1387,12 @@ function runRustExecutableConformance() {
   ].join("\n"));
 
   try {
-    const output = execFileSync("cargo", ["run", "--quiet", "--bin", "conformance_validate"], { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    const output = execFileSync("cargo", ["run", "--quiet", "--bin", "conformance_validate"], {
+      cwd: sourceDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+    }).trim();
     assertConformanceResult("rust", output);
   } catch (error) {
     const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
