@@ -233,8 +233,9 @@ describe("Swift polymorphic enums", () => {
     assert.match(source, /public struct Binding: TypraModel \{[\s\S]*public var name: String\? = nil/);
     assert.match(source, /if let values = data as\? \[Any\] \{\s+return try values\.map \{ try Binding\.load\(\$0, context: context\) \}/);
     assert.match(source, /let values = try TypraRuntime\.dictionary\(data, field: "bindings"\)/);
-    assert.match(source, /return try values\.keys\.sorted\(\)\.map \{ name in/);
-    assert.match(source, /itemData\["name"\] = name\s+return try Binding\.load\(itemData, context: context\)/);
+    assert.match(source, /return try values\.sorted \{ \$0\.key < \$1\.key \}\.map \{ entry in/);
+    assert.match(source, /var item = try Binding\.load\(entry\.value, context: context\)/);
+    assert.match(source, /item\.name = entry\.key\s+return item/);
     assert.match(source, /private static func saveBindings/);
     assert.match(source, /let value = itemData\["source"\]/);
     assert.match(source, /if let scalar = data as\? String \{\s+var instance = Binding\(\)\s+instance\.source = try TypraRuntime\.string\(scalar, field: "source"\)/);

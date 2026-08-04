@@ -354,16 +354,21 @@ function emitNamedCollectionLoadHelper(
   lines.push(`      return try values.map { try ${elementType}.load($0, context: context) }`);
   lines.push("    }");
   lines.push(`    let values = try TypraRuntime.dictionary(data, field: ${swiftStringLiteral(helper.propertyName)})`);
-  lines.push("    return try values.keys.sorted().map { name in");
-  lines.push("      let value = values[name]!");
-  lines.push("      var itemData: [String: Any]");
-  lines.push("      if let object = value as? [String: Any] {");
-  lines.push("        itemData = object");
-  lines.push("      } else {");
-  lines.push(`        itemData = try ${elementType}.load(value, context: context).save()`);
-  lines.push("      }");
-  lines.push('      itemData["name"] = name');
-  lines.push(`      return try ${elementType}.load(itemData, context: context)`);
+  lines.push("    return try values.sorted { $0.key < $1.key }.map { entry in");
+  if (polymorphicTypeNames.has(helper.elementTypeName.name)) {
+    lines.push("      var itemData: [String: Any]");
+    lines.push("      if let object = entry.value as? [String: Any] {");
+    lines.push("        itemData = object");
+    lines.push("      } else {");
+    lines.push(`        itemData = try ${elementType}.load(entry.value, context: context).save()`);
+    lines.push("      }");
+    lines.push('      itemData["name"] = entry.key');
+    lines.push(`      return try ${elementType}.load(itemData, context: context)`);
+  } else {
+    lines.push(`      var item = try ${elementType}.load(entry.value, context: context)`);
+    lines.push("      item.name = entry.key");
+    lines.push("      return item");
+  }
   lines.push("    }");
   lines.push("  }");
 }
