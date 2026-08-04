@@ -181,6 +181,20 @@ model FixtureOmit {
   extras?: string[];
 }
 
+@discriminator("kind")
+model FixtureProperty {
+  kind: string;
+
+  description?: string;
+}
+
+model FixtureUnionProperty extends FixtureProperty {
+  kind: "union";
+
+  @sample(#{ anyOf: #[#{ kind: "string" }, #{ kind: "boolean" }] })
+  anyOf: FixtureProperty[];
+}
+
 @@knownAs(WireOptions.maxOutputTokens, "openai", "max_completion_tokens");
 @@knownAs(WireOptions.maxOutputTokens, "anthropic", "max_tokens");
 @@knownAs(WireOptions.temperature, "openai", "temperature");

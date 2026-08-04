@@ -23,6 +23,7 @@ import {
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 import { emitGoFileContent } from "../src/languages/go/emitter.js";
+import { emitGoTest } from "../src/languages/go/test-emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
 import { emitRustFile } from "../src/languages/rust/emitter.js";
 import type { RustTestContext } from "../src/languages/rust/driver.js";
@@ -519,7 +520,7 @@ describe("lowerFile", () => {
       assert.match(code, /return nil, fmt\.Errorf\("missing ConnectionWithCoercion discriminator property: kind"\)/);
     });
 
-    it("routes non-string discriminators through the default variant when one exists", () => {
+    it("falls through self-referential defaults so base fields are loaded", () => {
       const registry = buildTestRegistry();
       const file = lowerFile(contentPart, registry, new Set(["ContentPart"]));
       const code = emitGoFileContent(
@@ -531,8 +532,12 @@ describe("lowerFile", () => {
         file.group,
       );
       assert.match(code, /switch discriminator := discriminator\.\(type\) \{/);
-      assert.match(code, /\t\t\tdefault:\n\t\t\t\treturn result, nil/);
-      assert.match(code, /\t\t\tdefault:\n\t\t\t\treturn result, nil/);
+      assert.doesNotMatch(code, /default:\n\s+return result, nil/);
+
+      const dispatchIndex = code.indexOf("// Handle polymorphic types based on discriminator");
+      const loadIndex = code.indexOf("// Load from map", dispatchIndex);
+      assert.ok(dispatchIndex >= 0 && loadIndex > dispatchIndex);
+      assert.match(code.slice(loadIndex), /m\["kind"\]/);
     });
 
     it("flattens inherited base fields into child structs (extends)", () => {
@@ -551,6 +556,7 @@ describe("lowerFile", () => {
         childTypes: [apiKeyConn],
         isAbstract: true,
       });
+
       const registry = TypeRegistry.fromTypeGraph([conn, apiKeyConn]);
       const file = lowerFile(conn, registry, new Set(["Conn"]));
       const code = emitGoFileContent(
@@ -581,6 +587,36 @@ describe("lowerFile", () => {
       const loadBody = code.slice(loadStart, code.indexOf("\nfunc ", loadStart + 1));
       assert.match(loadBody, /m\["authenticationMode"\]/);
       assert.match(loadBody, /m\["usageDescription"\]/);
+    });
+  });
+
+  describe("Go test emitter optional assertions", () => {
+    it("nil-checks and dereferences optional string properties", () => {
+      const instructions = makeProp("instructions", "string", { isScalar: true, isOptional: true });
+      const prompty = makeType("Prompty", [instructions]);
+      const expected = "system:\\nBe helpful.";
+      const code = emitGoTest({
+        node: prompty,
+        isAbstract: false,
+        package: "prompty",
+        importPath: "prompty/model",
+        examples: [{
+          sample: { instructions: expected },
+          json: [`{"instructions":${JSON.stringify(expected)}}`],
+          yaml: [`instructions: ${JSON.stringify(expected)}`],
+          validations: [{
+            key: "Instructions",
+            value: expected.replace(/\\/g, "\\\\").replace(/\n/g, "\\n"),
+            delimiter: '"',
+            isOptional: true,
+          }],
+        }],
+        coercions: [],
+        factories: [],
+      });
+
+      assert.match(code, /if instance\.Instructions == nil \|\| \*instance\.Instructions != "system:\\\\nBe helpful\." \{/);
+      assert.doesNotMatch(code, /if instance\.Instructions != /);
     });
   });
 

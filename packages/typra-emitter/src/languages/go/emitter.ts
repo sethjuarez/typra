@@ -483,10 +483,8 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
 
   // Default variant
   if (dispatch.defaultVariant) {
-    lines.push("\t\t\t\tdefault:");
-    if (dispatch.defaultVariant.isSelfReference) {
-      lines.push("\t\t\t\t\treturn result, nil");
-    } else {
+    if (!dispatch.defaultVariant.isSelfReference) {
+      lines.push("\t\t\t\tdefault:");
       lines.push(`\t\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
     }
   } else if (dispatch.isAbstract) {
@@ -498,13 +496,9 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   if (dispatch.isAbstract && !dispatch.defaultVariant) {
     lines.push("\t\t\tdefault:");
     lines.push(`\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator value: %v", discriminator)`);
-  } else if (dispatch.defaultVariant) {
+  } else if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
     lines.push("\t\t\tdefault:");
-    if (dispatch.defaultVariant.isSelfReference) {
-      lines.push("\t\t\t\treturn result, nil");
-    } else {
-      lines.push(`\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
-    }
+    lines.push(`\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
   }
   lines.push("\t\t\t}");
   lines.push("\t\t}");
