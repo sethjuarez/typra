@@ -465,6 +465,14 @@ function emitKindEnum(
       lines.push(`        ${toSnakeCase(dispatch.discriminatorField)}_name: String,`);
       lines.push(`    },`);
     }
+  } else if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+    lines.push(`    /// Lossless fallback for unrecognized \`${dispatch.discriminatorField}\` values.`);
+    lines.push("    Unknown {");
+    lines.push(`        /// The raw \`${dispatch.discriminatorField}\` string for this unknown variant.`);
+    lines.push(`        ${toSnakeCase(dispatch.discriminatorField)}_name: String,`);
+    lines.push("        /// Unmodeled fields preserved for forward-compatible round trips.");
+    lines.push("        raw: serde_json::Map<String, serde_json::Value>,");
+    lines.push("    },");
   }
 
   lines.push("}");
@@ -946,10 +954,15 @@ function emitCoercionBranch(
       }
       // Otherwise use the wildcard/custom variant
       if (dispatch.defaultVariant) {
-        const dvName = dispatch.defaultVariant.isSelfReference
+        const isSelfRef = dispatch.defaultVariant.isSelfReference;
+        const dvName = isSelfRef
           ? "Custom"
           : (dispatch.defaultVariant.typeName.name.replace(typeName, "") || "Custom");
-        return `${discSnake}: ${enumName}::${dvName} { ${discSnake}_name: "${a.literalValue}".to_string() }`;
+        const raw = isSelfRef ? ", raw: serde_json::Map::new()" : "";
+        return `${discSnake}: ${enumName}::${dvName} { ${discSnake}_name: "${a.literalValue}".to_string()${raw} }`;
+      }
+      if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+        return `${discSnake}: ${enumName}::Unknown { ${discSnake}_name: "${a.literalValue}".to_string(), raw: serde_json::Map::new() }`;
       }
       return `${discSnake}: ${enumName}::default()`;
     }
@@ -1071,6 +1084,17 @@ function emitPolymorphicLoad(
     }
   } else if (isClosedPolymorphicDispatch(dispatch)) {
     lines.push(`            _ => panic!("Unknown ${name} discriminator field '${dispatch.discriminatorField}' value: {}", ${discSnake}_str),`);
+  } else if (dispatch.isAbstract) {
+    lines.push(`            _ => ${enumName}::Unknown {`);
+    lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
+    lines.push("                raw: {");
+    lines.push("                    let mut raw = value.as_object().cloned().unwrap_or_default();");
+    for (const fieldName of baseFieldNames) {
+      lines.push(`                    raw.remove("${fieldName}");`);
+    }
+    lines.push("                    raw");
+    lines.push("                },");
+    lines.push("            },");
   } else {
     lines.push(`            _ => ${enumName}::default(),`);
   }
@@ -1125,6 +1149,8 @@ function emitKindStr(
       ? "Custom"
       : (dispatch.defaultVariant.typeName.name.replace(type.typeName.name, "") || "Custom");
     lines.push(`            ${enumName}::${variantName} { ${discSnake}_name, .. } => ${discSnake}_name.as_str(),`);
+  } else if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+    lines.push(`            ${enumName}::Unknown { ${discSnake}_name, .. } => ${discSnake}_name.as_str(),`);
   }
 
   lines.push("        }");
@@ -1245,6 +1271,16 @@ function emitVariantSave(
       }
       lines.push("            }");
     }
+  } else if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+    lines.push(`            ${enumName}::Unknown { raw, .. } => {`);
+    lines.push("                for (key, value) in raw {");
+    const baseFieldPattern = Array.from(baseFieldNames)
+      .map(fieldName => `"${fieldName}"`)
+      .join(" | ");
+    lines.push(`                    if matches!(key.as_str(), ${baseFieldPattern}) { continue; }`);
+    lines.push("                    result.insert(key.clone(), value.clone());");
+    lines.push("                }");
+    lines.push("            }");
   }
 
   lines.push("        }");

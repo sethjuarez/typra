@@ -1797,6 +1797,113 @@ function runRustExecutableConformance() {
   }
 }
 
+function runRustUnknownAbstractConformance() {
+  const outputRoot = path.join(validationRoot, "rust-unknown");
+  const sourceDir = path.join(outputRoot, "rust");
+  const cargoPath = path.join(sourceDir, "Cargo.toml");
+  const libPath = path.join(sourceDir, "lib.rs");
+  const runnerPath = path.join(sourceDir, "unknown_validate.rs");
+  const initialFailureCount = failures.length;
+
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output", outputRoot,
+        "--targets", "rust",
+        "--spec", path.join(packageRoot, "fixtures", "rust-unknown", "main.tsp"),
+        "--root-object", "Typra.Fixtures.RustUnknown.Root",
+        "--no-tests",
+        "--no-format",
+        "--deterministic",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Rust abstract unknown fixture generation failed:\n${output || error.message}`);
+  }
+  if (failures.length > initialFailureCount) return;
+
+  const connectionPath = path.join(sourceDir, "connection.rs");
+  const connectionSource = existsSync(connectionPath) ? readFileSync(connectionPath, "utf8") : "";
+  for (const expected of [
+    "Unknown {",
+    "kind_name: String",
+    "raw: serde_json::Map<String, serde_json::Value>",
+    "kind_name: kind_str.to_string()",
+    'raw.remove("kind")',
+    'raw.remove("name")',
+    "ConnectionKind::Unknown { raw, .. }",
+    "for (key, value) in raw",
+  ]) {
+    if (!connectionSource.includes(expected)) {
+      fail(`Generated Rust abstract unknown fixture does not include expected content: ${expected}`);
+    }
+  }
+  if (failures.length > initialFailureCount) return;
+
+  const targetDir = mkdtempSync(path.join(tmpdir(), "typra-rust-unknown-"));
+  writeFileSync(cargoPath, [
+    "[package]",
+    'name = "rust_unknown"',
+    'version = "0.0.0"',
+    'edition = "2021"',
+    "",
+    "[dependencies]",
+    'serde = { version = "1", features = ["derive"] }',
+    'serde_json = "1"',
+    'serde_yaml = "0.9"',
+    "",
+    "[lib]",
+    'path = "lib.rs"',
+    "",
+    "[[bin]]",
+    'name = "unknown_validate"',
+    'path = "unknown_validate.rs"',
+    "",
+  ].join("\n"));
+  writeFileSync(libPath, '#[path = "mod.rs"] pub mod model;\n');
+  writeFileSync(runnerPath, [
+    "use rust_unknown::model::*;",
+    "use serde_json::json;",
+    "",
+    "fn main() {",
+    "    let load_ctx = LoadContext::new();",
+    "    let save_ctx = SaveContext::new();",
+    '    let input = json!({"kind": "future-auth", "name": "future", "endpoint": "https://future.test", "metadata": {"source": "future"}});',
+    "    let mut connection = Connection::load_from_value(&input, &load_ctx);",
+    '    assert_eq!(connection.kind_str(), "future-auth");',
+    '    assert!(matches!(&connection.kind, ConnectionKind::Unknown { raw, .. } if raw.get("endpoint") == Some(&json!("https://future.test"))));',
+    "    assert_eq!(connection.to_value(&save_ctx), input);",
+    '    connection.name = Some("updated".to_string());',
+    "    let mut updated = input.clone();",
+    '    updated["name"] = json!("updated");',
+    "    assert_eq!(connection.to_value(&save_ctx), updated);",
+    '    let root_input = json!({"connection": input});',
+    "    let root = Root::load_from_value(&root_input, &load_ctx);",
+    "    assert_eq!(root.to_value(&save_ctx), root_input);",
+    "}",
+    "",
+  ].join("\n"));
+
+  try {
+    execFileSync("cargo", ["run", "--quiet", "--bin", "unknown_validate"], {
+      cwd: sourceDir,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+    });
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated Rust abstract unknown conformance failed:\n${output || error.message}`);
+  } finally {
+    if (existsSync(targetDir)) {
+      rmSync(targetDir, { recursive: true, force: true });
+    }
+  }
+}
+
 function runCSharpExecutableConformance() {
   const sourceDir = path.join(generatedRoot, "csharp");
   const projectPath = path.join(sourceDir, "TypraFixtureConformance.csproj");
@@ -2103,6 +2210,7 @@ function runExecutableConformance() {
   runPythonExecutableConformance();
   runGoExecutableConformance();
   runRustExecutableConformance();
+  runRustUnknownAbstractConformance();
   runCSharpExecutableConformance();
   runJavaExecutableConformance();
 }

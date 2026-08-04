@@ -78,7 +78,14 @@ model FixtureCheckpoint {
 @abstract
 @discriminator("kind")
 model FixtureContent {
-  kind: string;
+  kind: FixtureContentKind;
+}
+
+union FixtureContentKind {
+  text: "text";
+  image: "image";
+  file: "file";
+  audio: "audio";
 }
 
 model TextContent extends FixtureContent {
@@ -108,7 +115,11 @@ model AudioContent extends FixtureContent {
 @abstract
 @discriminator("kind")
 model FixtureAbstractContent {
-  kind: string;
+  kind: FixtureAbstractContentKind;
+}
+
+union FixtureAbstractContentKind {
+  text: "text";
 }
 
 model FixtureAbstractTextContent extends FixtureAbstractContent {

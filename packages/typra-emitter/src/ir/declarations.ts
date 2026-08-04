@@ -317,11 +317,13 @@ export interface PolymorphicDispatchDecl {
   defaultVariant: PolymorphicDefault | null;
   /** Whether the base type is abstract (affects error handling on unknown values) */
   isAbstract: boolean;
+  /** Whether the discriminator field is a closed enum/string union with no wildcard fallback */
+  isClosed: boolean;
 }
 
-/** Closed unions have no wildcard/self fallback and must reject unknown discriminator values. */
+/** Closed discriminator contracts must reject unknown values instead of selecting a fallback. */
 export function isClosedPolymorphicDispatch(dispatch: PolymorphicDispatchDecl): boolean {
-  return dispatch.defaultVariant === null;
+  return dispatch.isClosed;
 }
 
 /**

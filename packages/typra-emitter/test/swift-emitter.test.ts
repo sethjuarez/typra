@@ -93,6 +93,7 @@ describe("Swift polymorphic enums", () => {
         isSelfReference: false,
       },
       isAbstract: true,
+      isClosed: false,
     };
     const customTool = typeDecl("CustomTool");
     const holder = typeDecl("ToolHolder");
@@ -131,6 +132,7 @@ describe("Swift polymorphic enums", () => {
         isSelfReference: true,
       },
       isAbstract: false,
+      isClosed: false,
     };
 
     const source = emitSwiftFile(fileDecl(connection), new SwiftExprVisitor(), new Set(["Connection"]));
@@ -146,6 +148,7 @@ describe("Swift polymorphic enums", () => {
       variants: [{ value: "array", typeName: { namespace: "Test", name: "ArrayProperty" } }],
       defaultVariant: { typeName: property.typeName, isSelfReference: true },
       isAbstract: false,
+      isClosed: false,
     };
     const arrayProperty = typeDecl("ArrayProperty");
     arrayProperty.fields = [{
@@ -271,6 +274,7 @@ describe("Swift polymorphic enums", () => {
       variants: [],
       defaultVariant: { typeName: property.typeName, isSelfReference: true },
       isAbstract: false,
+      isClosed: false,
     };
     property.load.coercions = [{
       scalarType: "string",

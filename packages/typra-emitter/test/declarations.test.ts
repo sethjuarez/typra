@@ -108,21 +108,33 @@ const contentPart = makeType("ContentPart", [
 });
 
 describe("closed polymorphic dispatch", () => {
-  it("treats only no-default unions as closed", () => {
+  it("uses the lowered discriminator contract instead of abstractness", () => {
     const base = {
       discriminatorField: "kind",
       variants: [],
       isAbstract: true,
+      defaultVariant: null,
     };
-    assert.equal(isClosedPolymorphicDispatch({ ...base, defaultVariant: null }), true);
-    assert.equal(isClosedPolymorphicDispatch({
-      ...base,
-      defaultVariant: { typeName: { namespace: "", name: "Connection" }, isSelfReference: true },
-    }), false);
-    assert.equal(isClosedPolymorphicDispatch({
-      ...base,
-      defaultVariant: { typeName: { namespace: "", name: "CustomTool" }, isSelfReference: false },
-    }), false);
+    assert.equal(isClosedPolymorphicDispatch({ ...base, isClosed: true }), true);
+    assert.equal(isClosedPolymorphicDispatch({ ...base, isClosed: false }), false);
+  });
+
+  it("lowers closed enums separately from open abstract discriminators", () => {
+    const closedText = makeType("ClosedText", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "text" }),
+    ], { base: { namespace: "Test", name: "ClosedContent" } });
+    const closedContent = makeType("ClosedContent", [
+      makeProp("kind", "ClosedContentKind", { allowedValues: ["text"] }),
+    ], {
+      discriminator: "kind",
+      childTypes: [closedText],
+      isAbstract: true,
+    });
+    const closedDispatch = lowerFile(closedContent, buildTestRegistry(), new Set(["ClosedContent"])).types[0].polymorphicDispatch!;
+    const openDispatch = lowerFile(connectionType, buildTestRegistry(), new Set(["Connection"])).types[0].polymorphicDispatch!;
+
+    assert.equal(isClosedPolymorphicDispatch(closedDispatch), true);
+    assert.equal(isClosedPolymorphicDispatch(openDispatch), false);
   });
 });
 
@@ -1093,6 +1105,20 @@ describe("lowerFile", () => {
 describe("Rust emitter serde derives", () => {
   const registry = buildTestRegistry();
 
+  it("preserves unknown abstract discriminator payloads losslessly", () => {
+    const file = lowerFile(connectionType, registry, new Set(["Connection"]));
+    const code = emitRustFile(file, new RustExprVisitor(registry), new Set(["Connection"]));
+
+    assert.match(
+      code,
+      /Unknown \{\s+\/\/\/ The raw `kind` string for this unknown variant\.\s+kind_name: String,\s+\/\/\/ Unmodeled fields preserved for forward-compatible round trips\.\s+raw: serde_json::Map<String, serde_json::Value>/,
+    );
+    assert.match(code, /_ => ConnectionKind::Unknown \{\s+kind_name: kind_str\.to_string\(\),\s+raw: \{/);
+    assert.match(code, /raw\.remove\("kind"\);/);
+    assert.match(code, /ConnectionKind::Unknown \{ kind_name, \.\. \} => kind_name\.as_str\(\)/);
+    assert.match(code, /ConnectionKind::Unknown \{ raw, \.\. \} => \{\s+for \(key, value\) in raw/);
+  });
+
   it("preserves open self-reference discriminator payloads losslessly", () => {
     const file = lowerFile(contentPart, registry, new Set(["ContentPart"]));
     const code = emitRustFile(file, new RustExprVisitor(registry), new Set(["ContentPart"]));
@@ -1104,6 +1130,49 @@ describe("Rust emitter serde derives", () => {
     assert.match(code, /_ => ContentPartKind::Custom \{\s+kind_name: kind_str\.to_string\(\),\s+raw: \{/);
     assert.match(code, /raw\.remove\("kind"\);/);
     assert.match(code, /ContentPartKind::Custom \{ raw, \.\. \} => \{\s+for \(key, value\) in raw \{\s+if matches!\(key\.as_str\(\), "kind"\) \{ continue; \}/);
+  });
+
+  it("initializes raw payloads for coerced self-reference variants", () => {
+    const known = makeType("CoercedOpenKnown", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "known" }),
+    ], { base: { namespace: "Test", name: "CoercedOpen" } });
+    const open = makeType("CoercedOpen", [
+      makeProp("kind", "string", { isScalar: true }),
+    ], {
+      discriminator: "kind",
+      childTypes: [known],
+      coercions: [{ scalar: "string", expansion: { kind: "vendor" } }],
+    });
+    const coercionRegistry = TypeRegistry.fromTypeGraph([open, known]);
+    const file = lowerFile(open, coercionRegistry, new Set(["CoercedOpen"]));
+    const code = emitRustFile(file, new RustExprVisitor(coercionRegistry), new Set(["CoercedOpen"]));
+
+    assert.match(
+      code,
+      /kind: CoercedOpenKind::Custom \{ kind_name: "vendor"\.to_string\(\), raw: serde_json::Map::new\(\) \}/,
+    );
+  });
+
+  it("preserves unmatched coerced discriminators for open abstract variants", () => {
+    const known = makeType("CoercedAbstractKnown", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "known" }),
+    ], { base: { namespace: "Test", name: "CoercedAbstract" } });
+    const open = makeType("CoercedAbstract", [
+      makeProp("kind", "string", { isScalar: true }),
+    ], {
+      discriminator: "kind",
+      childTypes: [known],
+      coercions: [{ scalar: "string", expansion: { kind: "vendor" } }],
+      isAbstract: true,
+    });
+    const coercionRegistry = TypeRegistry.fromTypeGraph([open, known]);
+    const file = lowerFile(open, coercionRegistry, new Set(["CoercedAbstract"]));
+    const code = emitRustFile(file, new RustExprVisitor(coercionRegistry), new Set(["CoercedAbstract"]));
+
+    assert.match(
+      code,
+      /kind: CoercedAbstractKind::Unknown \{ kind_name: "vendor"\.to_string\(\), raw: serde_json::Map::new\(\) \}/,
+    );
   });
 
   it("uses concrete vectors for explicit empty defaults and options for absent defaults", () => {

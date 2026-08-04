@@ -204,6 +204,7 @@ describe("Java emitter runtime semantics", () => {
         isSelfReference: false,
       },
       isAbstract: true,
+      isClosed: false,
     };
     addAssignments(base);
 
@@ -508,6 +509,7 @@ describe("Java emitter runtime semantics", () => {
         }],
         defaultVariant: null,
         isAbstract: true,
+        isClosed: true,
       };
 
       const source = emitJavaFileContent([base], "test", new JavaExprVisitor(), new Set(["Tool"]));
