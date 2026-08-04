@@ -279,6 +279,7 @@ function emitCoercions(
   fields: FieldDecl[] = [],
   isAbstract = false,
 ): void {
+  assertDistinctNumericCoercionFamilies(typeName, coercions);
   let emittedBroadNumberGuard = false;
   const orderedCoercions = [...coercions].sort(
     (left, right) => numericCoercionRank(left.scalarType) - numericCoercionRank(right.scalarType),
@@ -308,6 +309,19 @@ function emitCoercions(
     }
     lines.push("      return ctx.processOutput(result);");
     lines.push("    }");
+  }
+}
+
+function assertDistinctNumericCoercionFamilies(typeName: string, coercions: CoercionDecl[]): void {
+  for (const [family, matches] of [
+    ["integral", coercions.filter(coercion => isIntegralCoercion(coercion.scalarType))],
+    ["floating-point", coercions.filter(coercion => isBroadNumberCoercion(coercion.scalarType))],
+  ] as const) {
+    if (matches.length > 1) {
+      throw new Error(
+        `Java emitter cannot distinguish multiple ${family} coercions for ${typeName}: ${matches.map(match => match.scalarType).join(", ")}`,
+      );
+    }
   }
 }
 

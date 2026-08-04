@@ -653,6 +653,31 @@ describe("Java emitter runtime semantics", () => {
     assert.equal(source.match(/if \(data instanceof Number\)/g)?.length, 1);
   });
 
+  it("rejects coercions that collapse to the same Java runtime guard", () => {
+    const kind = field("kind", "string");
+    const value = field("value", "unknown");
+
+    for (const [family, scalarTypes] of [
+      ["integral", ["int32", "int64"]],
+      ["floating-point", ["float32", "float64"]],
+    ] as const) {
+      const decl = typeDecl([kind, value]);
+      decl.load.coercions = scalarTypes.map(scalarType => ({
+        scalarType,
+        assignments: [
+          { fieldName: "kind", isInput: false, literalValue: scalarType },
+          { fieldName: "value", isInput: true },
+        ],
+        needsDispatch: false,
+      }));
+
+      assert.throws(
+        () => emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set()),
+        new RegExp(`cannot distinguish multiple ${family} coercions`),
+      );
+    }
+  });
+
   it("emits direct Java coercion tests for integral and floating wrapper families", () => {
     const node = new TypeNode({ name: "GeneratedExamples" } as Model, "");
     node.typeName = { namespace: "Test", name: "GeneratedExamples" };
