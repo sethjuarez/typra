@@ -120,7 +120,17 @@ function evaluateCollectionModel(source: string): GeneratedCollectionModelConstr
     },
   }).outputText;
   const exports: Record<string, unknown> = {};
-  const loadContext = class {};
+  const loadContext = class {
+    at(): this {
+      return this;
+    }
+    processInput<T>(value: T): T {
+      return value;
+    }
+    processOutput<T>(value: T): T {
+      return value;
+    }
+  };
   const saveContext = class {};
   const requireModule = (name: string): unknown => {
     if (name === "./context") {
@@ -159,7 +169,7 @@ describe("TypeScript optional collection defaults", () => {
     assert.match(source, /this\.defaultOwners = init\?\.defaultOwners \?\? \[\];/);
 
     assert.match(source, /if \(data\["inputModalities"\] !== undefined && data\["inputModalities"\] !== null\) \{\s+instance\.inputModalities = \(data\["inputModalities"\] as unknown\[\]\)\.map\(v => String\(v\)\);\s+\}/);
-    assert.match(source, /if \(data\["owners"\] !== undefined && data\["owners"\] !== null\) \{\s+instance\.owners = CollectionModel\.loadOwners\(data\["owners"\] as unknown\[\], context\);\s+\}/);
+    assert.match(source, /if \(data\["owners"\] !== undefined && data\["owners"\] !== null\) \{\s+instance\.owners = CollectionModel\.loadOwners\(data\["owners"\] as unknown\[\], context\.at\("owners"\)\);\s+\}/);
 
     const CollectionModel = evaluateCollectionModel(source);
     const omitted = new CollectionModel();

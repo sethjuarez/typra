@@ -44,6 +44,17 @@ public class LoadContext
     /// </summary>
     public Func<object, object>? PostProcess { get; set; }
 
+    /// <summary>Current schema path used for load diagnostics.</summary>
+    public string Path { get; init; } = "";
+
+    /// <summary>Create a child context for a nested schema field.</summary>
+    public LoadContext At(string segment) => new()
+    {
+        PreProcess = PreProcess,
+        PostProcess = PostProcess,
+        Path = string.IsNullOrEmpty(Path) ? segment : $"{Path}.{segment}",
+    };
+
     /// <summary>
     /// Apply pre-processing to input data if a PreProcess callback is set.
     /// </summary>

@@ -364,6 +364,9 @@ function emitNamedCollectionLoadHelper(
   lines.push(`    let values = try TypraRuntime.dictionary(data, field: ${swiftStringLiteral(helper.propertyName)})`);
   lines.push("    return try values.keys.sorted().map { name in");
   lines.push("      let value = values[name]!");
+  lines.push("      if value is [Any] {");
+  lines.push(`        throw TypraRuntimeError.invalidField(field: context.at(name).path, expected: "non-array named collection entry; received category array")`);
+  lines.push("      }");
   lines.push("      var itemData: [String: Any]");
   lines.push("      if let object = value as? [String: Any] {");
   lines.push("        itemData = object");
@@ -384,15 +387,23 @@ function emitNamedCollectionSaveHelper(
   const methodName = `save${swiftTypeName(helper.propertyName)}`;
   const elementType = swiftTypeName(helper.elementTypeName.name);
   lines.push(`  private static func ${methodName}(_ items: [${elementType}], context: SaveContext) throws -> Any {`);
+  lines.push("    var serialized = try items.map { try $0.save(context) }");
+  lines.push("    for index in serialized.indices where (serialized[index][\"name\"] as? String) == \"\" {");
+  lines.push('      serialized[index].removeValue(forKey: "name")');
+  lines.push("    }");
   lines.push('    if context.collectionFormat == "array" {');
-  lines.push("      return try items.map { try $0.save(context) }");
+  lines.push("      return serialized");
+  lines.push("    }");
+  lines.push("    var names = Set<String>()");
+  lines.push("    for itemData in serialized {");
+  lines.push('      guard let name = itemData["name"] as? String, !name.isEmpty, names.insert(name).inserted else {');
+  lines.push("        return serialized");
+  lines.push("      }");
   lines.push("    }");
   lines.push("    var result: [String: Any] = [:]");
-  lines.push("    for item in items {");
-  lines.push("      var itemData = try item.save(context)");
-  lines.push('      guard let name = itemData.removeValue(forKey: "name") as? String else {');
-  lines.push(`        throw TypraRuntimeError.unsupported("Cannot save named ${helper.propertyName} item without a name.")`);
-  lines.push("      }");
+  lines.push("    for (item, originalData) in zip(items, serialized) {");
+  lines.push("      var itemData = originalData");
+  lines.push('      let name = itemData.removeValue(forKey: "name") as! String');
   if (!polymorphicTypeNames.has(helper.elementTypeName.name)) {
     const shorthandProperty = helper.innerFields.length === 1 ? helper.innerFields[0] : undefined;
     if (shorthandProperty) {
@@ -706,14 +717,14 @@ function swiftLoadExpression(
       if (enumName) return `try ${swiftTypeName(enumName)}.parse(try TypraRuntime.string(${valueExpr}, field: ${swiftStringLiteral(fieldName)}))`;
       return scalarLoadExpression(category.scalarType, valueExpr, fieldName);
     case "complex":
-      return `try ${swiftTypeName(category.typeName)}.load(${valueExpr}, context: context)`;
+      return `try ${swiftTypeName(category.typeName)}.load(${valueExpr}, context: context.at(${swiftStringLiteral(fieldName)}))`;
     case "collection_scalar":
       return `try TypraRuntime.array(${valueExpr}, field: ${swiftStringLiteral(fieldName)}).map { ${scalarLoadExpression(category.scalarType, "$0", fieldName)} }`;
     case "collection_complex":
       if (collectionHelper?.hasNameProperty) {
-        return `try load${swiftTypeName(collectionHelper.propertyName)}(${valueExpr}, context: context)`;
+        return `try load${swiftTypeName(collectionHelper.propertyName)}(${valueExpr}, context: context.at(${swiftStringLiteral(fieldName)}))`;
       }
-      return `try TypraRuntime.array(${valueExpr}, field: ${swiftStringLiteral(fieldName)}).map { try ${swiftTypeName(category.typeName)}.load($0, context: context) }`;
+      return `try TypraRuntime.array(${valueExpr}, field: ${swiftStringLiteral(fieldName)}).map { try ${swiftTypeName(category.typeName)}.load($0, context: context.at(${swiftStringLiteral(fieldName)})) }`;
     case "dict":
       return `try TypraRuntime.dictionary(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
   }
