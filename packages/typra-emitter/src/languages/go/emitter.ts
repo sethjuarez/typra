@@ -35,6 +35,7 @@ import {
 } from "../../ir/declarations.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
+import { buildGoFieldNames, goFieldName } from "./identifiers.js";
 
 // ============================================================================
 // Type maps
@@ -226,6 +227,7 @@ function emitTypeBlock(
 ): void {
   const typeName = type.typeName.name;
   const hasCoercions = type.load.coercions.length > 0;
+  const fieldNames = buildGoFieldNames(type.fields.map(field => field.name));
 
   // Protocol types → emit as Go interface
   if (type.isProtocol) {
@@ -239,13 +241,13 @@ function emitTypeBlock(
   emitDescriptionComment(typeName, type.description, lines);
 
   // Struct definition
-  emitStruct(type, lines, polymorphicTypeNames);
+  emitStruct(type, lines, polymorphicTypeNames, fieldNames);
 
   // Load function
-  emitLoadFunction(type, lines, polymorphicTypeNames, scalarCoercibleTypeNames);
+  emitLoadFunction(type, lines, polymorphicTypeNames, scalarCoercibleTypeNames, fieldNames);
 
   // Save method
-  emitSaveMethod(type, lines, polymorphicTypeNames);
+  emitSaveMethod(type, lines, polymorphicTypeNames, fieldNames);
 
   // ToWire method (only when wire mappings exist)
   if (type.wire) {
@@ -314,13 +316,14 @@ function emitStruct(
   type: TypeDecl,
   lines: string[],
   polymorphicTypeNames: Set<string>,
+  fieldNames: ReadonlyMap<string, string>,
 ): void {
   const typeName = type.typeName.name;
   lines.push(`type ${typeName} struct {`);
 
   for (const field of type.fields) {
     const goType = getGoFieldType(field.category, field.isOptional, polymorphicTypeNames, field.enumName);
-    const fieldName = goFieldName(field.name);
+    const fieldName = fieldNames.get(field.name) ?? goFieldName(field.name);
     const tag = getStructTag(field.name, field.isOptional);
     lines.push(`\t${fieldName} ${goType} ${tag}`);
   }
@@ -338,6 +341,7 @@ function emitLoadFunction(
   lines: string[],
   polymorphicTypeNames: Set<string>,
   scalarCoercibleTypeNames: Set<string>,
+  fieldNames: ReadonlyMap<string, string>,
 ): void {
   const typeName = type.typeName.name;
   const isPolymorphicBase = type.polymorphicDispatch !== null;
@@ -379,7 +383,7 @@ function emitLoadFunction(
   lines.push("\tif m, ok := data.(map[string]interface{}); ok {");
 
   for (const assign of type.load.assignments) {
-    emitLoadAssignment(assign, polymorphicTypeNames, scalarCoercibleTypeNames, lines);
+    emitLoadAssignment(assign, polymorphicTypeNames, scalarCoercibleTypeNames, fieldNames, lines);
   }
 
   lines.push("\t}");
@@ -471,9 +475,10 @@ function emitLoadAssignment(
   assign: LoadAssignment,
   polymorphicTypeNames: Set<string>,
   scalarCoercibleTypeNames: Set<string>,
+  fieldNames: ReadonlyMap<string, string>,
   lines: string[],
 ): void {
-  const fieldName = goFieldName(assign.fieldName);
+  const fieldName = fieldNames.get(assign.fieldName) ?? goFieldName(assign.fieldName);
   const cat = assign.category;
 
   switch (cat.kind) {
@@ -754,6 +759,7 @@ function emitSaveMethod(
   type: TypeDecl,
   lines: string[],
   polymorphicTypeNames: Set<string>,
+  fieldNames: ReadonlyMap<string, string>,
 ): void {
   const typeName = type.typeName.name;
 
@@ -762,7 +768,7 @@ function emitSaveMethod(
   lines.push("\tresult := make(map[string]interface{})");
 
   for (const assign of type.save.assignments) {
-    emitSaveAssignment(assign, polymorphicTypeNames, lines);
+    emitSaveAssignment(assign, polymorphicTypeNames, fieldNames, lines);
   }
 
   lines.push("");
@@ -778,9 +784,10 @@ function emitSaveMethod(
 function emitSaveAssignment(
   assign: SaveAssignment,
   polymorphicTypeNames: Set<string>,
+  fieldNames: ReadonlyMap<string, string>,
   lines: string[],
 ): void {
-  const fieldName = goFieldName(assign.fieldName);
+  const fieldName = fieldNames.get(assign.fieldName) ?? goFieldName(assign.fieldName);
   const cat = assign.category;
 
   switch (cat.kind) {
@@ -1089,14 +1096,6 @@ function getStructTag(fieldName: string, isOptional: boolean): string {
   const jsonTag = isOptional ? `${fieldName},omitempty` : fieldName;
   const yamlTag = isOptional ? `${fieldName},omitempty` : fieldName;
   return `\`json:"${jsonTag}" yaml:"${yamlTag}"\``;
-}
-
-function goFieldName(name: string): string {
-  const converted = toPascalCase(name);
-  const leading = converted.match(/^[^A-Za-z]+/)?.[0] ?? "";
-  const identifier = converted.slice(leading.length);
-  const prefix = "Field".repeat(leading.length);
-  return `${prefix}${identifier || "Value"}`;
 }
 
 // ============================================================================
