@@ -812,6 +812,60 @@ describe("lowerFile", () => {
 describe("Rust emitter serde derives", () => {
   const registry = buildTestRegistry();
 
+  it("uses concrete vectors for explicit empty defaults and options for absent defaults", () => {
+    const owner = makeType("CollectionOwner", [
+      makeProp("name", "string", { isScalar: true }),
+    ]);
+    const collectionModel = makeType("CollectionModel", [
+      makeProp("inputModalities", "string", {
+        isScalar: true,
+        isCollection: true,
+        isOptional: true,
+      }),
+      makeProp("outputModalities", "string", {
+        isScalar: true,
+        isCollection: true,
+        isOptional: true,
+        defaultValue: null,
+      }),
+      makeProp("owners", "CollectionOwner", {
+        isCollection: true,
+        isOptional: true,
+        type: owner,
+      }),
+      makeProp("defaultOwners", "CollectionOwner", {
+        isCollection: true,
+        isOptional: true,
+        type: owner,
+        defaultValue: null,
+      }),
+    ]);
+    const collectionRegistry = TypeRegistry.fromTypeGraph([collectionModel, owner]);
+    const file = lowerFile(collectionModel, collectionRegistry, new Set());
+    const code = emitRustFile(file, new RustExprVisitor(collectionRegistry), new Set());
+
+    assert.match(code, /pub input_modalities: Option<Vec<String>>/);
+    assert.match(code, /pub output_modalities: Vec<String>/);
+    assert.match(code, /pub owners: Option<Vec<CollectionOwner>>/);
+    assert.match(code, /pub default_owners: Vec<CollectionOwner>/);
+    assert.match(
+      code,
+      /output_modalities: value\.get\("outputModalities"\).*\.unwrap_or_default\(\)/,
+    );
+    assert.match(
+      code,
+      /default_owners: value\.get\("defaultOwners"\).*\.unwrap_or_default\(\)/,
+    );
+    assert.match(
+      code,
+      /result\.insert\("outputModalities"\.to_string\(\), serde_json::to_value\(&self\.output_modalities\)/,
+    );
+    assert.match(
+      code,
+      /result\.insert\("defaultOwners"\.to_string\(\), Self::save_default_owners\(&self\.default_owners, ctx\)\)/,
+    );
+  });
+
   it("emits manual serde (delegating to canonical to_value/load_from_value) on plain data structs", () => {
     // Every data struct — flat ones included — routes serde through the canonical
     // to_value/load_from_value path, NOT a field-by-field derive, so custom
