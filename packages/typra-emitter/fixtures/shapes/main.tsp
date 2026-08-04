@@ -224,13 +224,39 @@ model McpApprovalMode {
 model FixtureProperty {
   kind: string;
 
+  name?: string;
+
   description?: string;
+
+  required?: boolean;
+
+  nullable?: boolean;
+
+  default?: unknown;
+
+  example?: unknown;
+
+  enumValues?: unknown[];
+}
+
+model FixtureArrayProperty extends FixtureProperty {
+  kind: "array";
+
+  @sample(#{ items: #{ kind: "string", name: "item", required: true } })
+  items: FixtureProperty;
+}
+
+model FixtureObjectProperty extends FixtureProperty {
+  kind: "object";
+
+  @sample(#{ additionalProperties: #{ kind: "string", description: "Object value" } })
+  additionalProperties: FixtureProperty;
 }
 
 model FixtureUnionProperty extends FixtureProperty {
   kind: "union";
 
-  @sample(#{ anyOf: #[#{ kind: "string" }, #{ kind: "boolean" }] })
+  @sample(#{ anyOf: #[#{ kind: "string", name: "value", nullable: true }, #{ kind: "boolean", enumValues: #[true, false] }] })
   anyOf: FixtureProperty[];
 }
 

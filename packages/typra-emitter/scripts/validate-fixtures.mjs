@@ -578,6 +578,12 @@ function runSwiftTests() {
   }
 
   const buildDir = path.join(sourceDir, ".build");
+  const inheritedPropertyTest = path.join(
+    sourceDir,
+    "Tests",
+    "TypraFixturesTests",
+    "InheritedPropertyRoundTripTests.swift",
+  );
   const env = { ...process.env };
   if (process.platform === "win32" && !env.SDKROOT) {
     const sdkRoot = findSwiftWindowsSdk();
@@ -594,9 +600,57 @@ function runSwiftTests() {
     env.GIT_CONFIG_KEY_0 = "safe.bareRepository";
     env.GIT_CONFIG_VALUE_0 = "all";
   }
+  writeFileSync(inheritedPropertyTest, `import XCTest
+@testable import TypraFixtures
+
+final class InheritedPropertyRoundTripTests: XCTestCase {
+  private func roundTrip(_ json: String) throws -> [String: Any] {
+    let loaded = try FixtureProperty.fromJSON(json)
+    let reloaded = try FixtureProperty.load(loaded.save())
+    return try reloaded.save()
+  }
+
+  private func assertMetadata(_ value: [String: Any], name: String) {
+    XCTAssertEqual(value["name"] as? String, name)
+    XCTAssertEqual(value["description"] as? String, "\\(name) description")
+    XCTAssertEqual(value["required"] as? Bool, true)
+    XCTAssertEqual(value["nullable"] as? Bool, false)
+    XCTAssertEqual(value["default"] as? String, "fallback")
+    XCTAssertEqual(value["example"] as? String, "example")
+    XCTAssertEqual(value["enumValues"] as? [String], ["one", "two"])
+  }
+
+  func testArrayPropertyRetainsInheritedMetadata() throws {
+    let value = try roundTrip("""
+    {"kind":"array","name":"array","description":"array description","required":true,"nullable":false,"default":"fallback","example":"example","enumValues":["one","two"],"items":{"kind":"string"}}
+    """)
+    assertMetadata(value, name: "array")
+    XCTAssertNotNil(value["items"])
+  }
+
+  func testObjectPropertyRetainsInheritedMetadata() throws {
+    let value = try roundTrip("""
+    {"kind":"object","name":"object","description":"object description","required":true,"nullable":false,"default":"fallback","example":"example","enumValues":["one","two"],"additionalProperties":{"kind":"string"}}
+    """)
+    assertMetadata(value, name: "object")
+    XCTAssertNotNil(value["additionalProperties"])
+  }
+
+  func testUnionPropertyRetainsInheritedMetadata() throws {
+    let value = try roundTrip("""
+    {"kind":"union","name":"union","description":"union description","required":true,"nullable":false,"default":"fallback","example":"example","enumValues":["one","two"],"anyOf":[{"kind":"string"},{"kind":"boolean"}]}
+    """)
+    assertMetadata(value, name: "union")
+    XCTAssertEqual((value["anyOf"] as? [[String: Any]])?.count, 2)
+  }
+}
+`);
   try {
     runCommand("Generated Swift package tests", "swift", ["test", "--package-path", sourceDir], { cwd: sourceDir, env });
   } finally {
+    if (existsSync(inheritedPropertyTest)) {
+      unlinkSync(inheritedPropertyTest);
+    }
     if (existsSync(buildDir)) {
       rmSync(buildDir, { recursive: true, force: true });
     }

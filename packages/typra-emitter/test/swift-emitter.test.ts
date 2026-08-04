@@ -41,6 +41,44 @@ function fileDecl(type: TypeDecl): FileDecl {
   };
 }
 
+function addStringField(type: TypeDecl, name: string, isOptional = false, defaultValue: string | null = null): void {
+  const category = { kind: "scalar" as const, scalarType: "string" };
+  type.fields.push({
+    name,
+    typeName: { namespace: "", name: "string" },
+    category,
+    isOptional,
+    defaultValue,
+    allowedValues: [],
+    parseAliases: {},
+    enumName: null,
+    isOpenEnum: false,
+    description: "",
+    knownAs: {},
+  });
+  type.load.assignments.push({
+    sourceName: name,
+    fieldName: name,
+    category,
+    isOptional,
+    parentTypeName: type.typeName.name,
+    enumName: null,
+    allowedValues: [],
+    parseAliases: {},
+    defaultValue,
+    isOpenEnum: false,
+  });
+  type.save.assignments.push({
+    targetName: name,
+    fieldName: name,
+    category,
+    isOptional,
+    parentTypeName: type.typeName.name,
+    enumName: null,
+    isOpenEnum: false,
+  });
+}
+
 describe("Swift polymorphic enums", () => {
   it("declares and saves wildcard fallback cases", () => {
     const tool = typeDecl("Tool");
@@ -107,6 +145,30 @@ describe("Swift polymorphic enums", () => {
 
     const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set(["Property"]));
     assert.match(source, /public indirect enum Property: TypraModel/);
+  });
+});
+
+describe("Swift inherited model fields", () => {
+  it("flattens base fields into derived value structs for lossless load and save", () => {
+    const property = typeDecl("Property");
+    addStringField(property, "kind");
+    addStringField(property, "name", true);
+    addStringField(property, "description", true);
+
+    const union = typeDecl("UnionProperty");
+    union.base = property.typeName;
+    addStringField(union, "kind", false, "union");
+    addStringField(union, "anyOf");
+
+    const file = fileDecl(property);
+    file.types.push(union);
+    const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set());
+
+    assert.match(source, /public struct UnionProperty: TypraModel \{[\s\S]*public var kind: String = "union"[\s\S]*public var name: String\? = nil[\s\S]*public var description: String\? = nil[\s\S]*public var anyOf: String/);
+    assert.match(source, /instance\.name = try TypraRuntime\.string\(value, field: "name"\)/);
+    assert.match(source, /instance\.description = try TypraRuntime\.string\(value, field: "description"\)/);
+    assert.match(source, /if let value = self\.name \{\s+result\["name"\] = value/);
+    assert.match(source, /if let value = self\.description \{\s+result\["description"\] = value/);
   });
 });
 
