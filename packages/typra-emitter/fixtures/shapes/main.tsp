@@ -227,6 +227,7 @@ model FixtureStopOptions {
 
 model FixtureMultilineWhitespace {
   @sample(#{ value: "first line with trailing space \nsecond line\n" })
+  @sample(#{ value: "first line with two spaces  \n\n  \nlast line with three spaces   \n" })
   value: string;
 }
 

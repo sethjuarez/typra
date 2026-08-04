@@ -115,7 +115,7 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
       Scalar(key, yamlNode) {
         if (typeof yamlNode.value === 'string') {
           const str = yamlNode.value as string;
-          const hasTrailingHorizontalWhitespace = /\S[ \t]+(?:\r?\n|$)/.test(str);
+          const hasTrailingHorizontalWhitespace = /[ \t]+(?:\r?\n|$)/.test(str);
           const supportsBlockLiteral = str.includes('\n')
             && /\S/.test(str)
             && !/[\u2028\u2029]/.test(str)

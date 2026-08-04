@@ -933,6 +933,22 @@ describe("lowerFile", () => {
         ['value: "first line with trailing space \\nsecond line\\n"', ""],
       );
 
+      const mixedWhitespaceValue = "first line with two spaces  \n\n  \nlast line with three spaces   \n";
+      trailingSpace.samples = [{
+        sample: { value: mixedWhitespaceValue },
+        description: "",
+      }];
+      const mixedWhitespaceContext = buildBaseTestContext(
+        makeType("MixedWhitespace", [trailingSpace]),
+        "prompty",
+        goTestOptions,
+      );
+      assert.deepEqual(
+        mixedWhitespaceContext.examples[0].yaml,
+        ['value: "first line with two spaces  \\n\\n  \\nlast line with three spaces   \\n"', ""],
+      );
+      assert.equal(mixedWhitespaceContext.examples[0].sample.value, mixedWhitespaceValue);
+
       const leadingTab = makeProp("value", "string", { isScalar: true });
       leadingTab.samples = [{
         sample: { value: "\tfirst indented\nsecond line" },

@@ -1784,9 +1784,13 @@ function assertStaticFixtureCoverage() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "go", "tests", "fixture_multiline_whitespace_test.go"),
+    'value: "first line with two spaces  \\n\\n  \\nlast line with three spaces   \\n"',
     'value: "first line with trailing space \\nsecond line\\n"',
-    "TestFixtureMultilineWhitespaceLoadYAML",
-    "TestFixtureMultilineWhitespaceFromYAML",
+    "func TestFixtureMultilineWhitespaceLoadYAML(t *testing.T)",
+    "func TestFixtureMultilineWhitespaceFromYAML(t *testing.T)",
+    "func TestFixtureMultilineWhitespaceLoadYAML1(t *testing.T)",
+    "func TestFixtureMultilineWhitespaceFromYAML1(t *testing.T)",
+    'instance.Value != "first line with two spaces  \\n\\n  \\nlast line with three spaces   \\n"',
     'instance.Value != "first line with trailing space \\nsecond line\\n"',
   );
   assertIncludes(
