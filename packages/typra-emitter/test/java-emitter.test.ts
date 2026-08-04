@@ -757,7 +757,9 @@ describe("Java emitter runtime semantics", () => {
     assert.match(source, /if \(entry\.getValue\(\) instanceof Iterable<\?>\) \{[\s\S]*invalid named collection entry category array/);
     assert.match(source, /itemData\.put\("name", String\.valueOf\(entry\.getKey\(\)\)\);\s+Binding item = Binding\.load\(itemData, ctx\.at\("bindings"\)\.at\(String\.valueOf\(entry\.getKey\(\)\)\)\);/);
     assert.match(source, /else if \(map\.get\("bindings"\) instanceof Iterable<\?> values\)/);
-    assert.match(source, /if \("array"\.equals\(ctx\.collectionFormat\)\)/);
+    assert.match(source, /String itemName = item\.name;\s+itemNames\.add\(itemName\);\s+if \(itemName == null \|\| itemName\.isEmpty\(\) \|\| !names\.add\(itemName\)\) canUseObject = false;/);
+    assert.match(source, /if \("array"\.equals\(ctx\.collectionFormat\) \|\| !canUseObject\)/);
+    assert.match(source, /String itemName = itemNames\.get\(index\);\s+itemData\.remove\("name"\);/);
     assert.match(source, /ctx\.useShorthand && Binding\.SHORTHAND_PROPERTY != null/);
   });
 
