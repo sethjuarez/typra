@@ -483,6 +483,7 @@ export const goTestOptions: TestContextOptions = {
     .replace(/\t/g, '\\t'),
   getDelimiter: (str: string) => '"',
   yamlMultilineStyle: "block-literal",
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   scalarValues: {
     "boolean": "false",
     "float": "3.14",

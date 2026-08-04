@@ -704,7 +704,7 @@ describe("lowerFile", () => {
       assert.doesNotMatch(code, /if instance\.Instructions != /);
     });
 
-    it("emits multiline YAML samples as block literals", () => {
+    it("keeps whitespace-sensitive multiline YAML trim-proof", () => {
       const instructions = makeProp("instructions", "string", { isScalar: true });
       const expected = "some\npersonal\ncontent";
       instructions.samples = [{ sample: { instructions: expected }, description: "" }];
@@ -713,13 +713,30 @@ describe("lowerFile", () => {
       const context = buildBaseTestContext(prompty, "prompty", goTestOptions);
 
       assert.deepEqual(context.examples[0].yaml, [
+        'instructions: "some\\ \\npersonal\\ncontent"',
+        "",
+      ]);
+      assert.equal(context.examples[0].sample.instructions, expected);
+
+      const blockValue = "some\npersonal\ncontent";
+      instructions.samples = [{ sample: { instructions: blockValue }, description: "" }];
+      const blockContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
+      assert.deepEqual(blockContext.examples[0].yaml, [
         "instructions: |-",
         "  some",
         "  personal",
         "  content",
         "",
       ]);
-      assert.equal(context.examples[0].sample.instructions, expected);
+      assert.equal(blockContext.examples[0].sample.instructions, blockValue);
+
+      const trailingValue = "some\npersonal\ncontent\u00a0";
+      instructions.samples = [{ sample: { instructions: trailingValue }, description: "" }];
+      const trailingContext = buildBaseTestContext(prompty, "prompty", goTestOptions);
+      assert.deepEqual(trailingContext.examples[0].yaml, [
+        `instructions: "some\\npersonal\\ncontent${"\u00a0"}"`,
+        "",
+      ]);
 
       const trailingSpace = makeProp("value", "string", { isScalar: true });
       trailingSpace.samples = [{
