@@ -41,6 +41,19 @@ export function emitSwiftTests(ctx: BaseTestContext & { moduleName: string }): s
       lines.push("    } else {");
       lines.push(`      XCTFail("Expected ${swiftTypeName(child.typeName.name)}")`);
       lines.push("    }");
+    } else if (
+      expansion
+      && ctx.node.discriminator
+      && ctx.node.childTypes.length > 0
+      && !ctx.node.isAbstract
+      && !defaultPolymorphicChild(ctx.node)
+    ) {
+      emitUnknownCoercionValidation(
+        lines,
+        coercion.validations,
+        expansion,
+        ctx.node.coercions[index]?.scalar,
+      );
     } else {
       for (const validation of coercion.validations) {
         const expected = validation.delimiter ? `${validation.delimiter}${validation.value}${validation.delimiter}` : String(validation.value);
@@ -99,10 +112,11 @@ function emitExampleTest(lines: string[], node: TypeNode, typeName: string, exam
   lines.push(`  func testYAMLRoundTrip${index + 1}() throws {`);
   lines.push(`    let yaml = ${swiftMultilineString(example.yaml.join("\n"))}`);
   lines.push(`    let instance = try ${typeName}.fromYAML(yaml)`);
-  emitValidations(lines, "instance", example, node);
+  const canonicalYamlExample = canonicalizeYamlExample(example);
+  emitValidations(lines, "instance", canonicalYamlExample, node);
   lines.push("    let reloaded = try " + typeName + ".fromYAML(try instance.toYAML())");
   const yamlReloadValidationStart = lines.length;
-  emitValidations(lines, "reloaded", example, node);
+  emitValidations(lines, "reloaded", canonicalYamlExample, node);
   if (lines.length === yamlReloadValidationStart) {
     lines.push("    _ = reloaded");
   }
@@ -127,8 +141,15 @@ function emitStructuredValidations(lines: string[], varName: string, sample: Rec
     if (!(prop.name in sample)) continue;
     const value = sample[prop.name];
     const accessor = `${varName}.${swiftPropertyName(prop.name)}`;
-    if (prop.isCollection && Array.isArray(value)) {
-      lines.push(`    XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional)}.count, ${value.length})`);
+    if (prop.isCollection) {
+      const count = Array.isArray(value)
+        ? value.length
+        : value && typeof value === "object"
+          ? Object.keys(value).length
+          : undefined;
+      if (count !== undefined) {
+        lines.push(`    XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional)}.count, ${count})`);
+      }
       continue;
     }
     if (prop.isDict && value && typeof value === "object" && !Array.isArray(value)) {
@@ -150,13 +171,15 @@ function emitNestedValidation(lines: string[], accessor: string, value: Record<s
     }
   }
   for (const [key, expected] of Object.entries(value)) {
+    const nestedProp = findProperty(prop.type!, key);
+    if (!nestedProp) continue;
     const literal = swiftExpectedLiteral(expected);
     if (literal !== null) {
       emitPropertyAssertion(
         lines,
-        `${accessor}.${swiftPropertyName(key)}`,
+        `${accessor}.${swiftPropertyName(nestedProp.name)}`,
         literal,
-        prop.type?.properties.find(candidate => candidate.name === key),
+        nestedProp,
         "    ",
       );
     }
@@ -208,9 +231,10 @@ function emitChildPatternValidation(
     if (literal === null) continue;
     const prop = child.properties.find(candidate => candidate.name === key)
       ?? node.properties.find(candidate => candidate.name === key);
+    if (!prop) continue;
     emitPropertyAssertion(
       lines,
-      `concrete.${swiftPropertyName(key)}`,
+      `concrete.${swiftPropertyName(prop.name)}`,
       literal,
       prop,
       `${indent}  `,
@@ -250,6 +274,16 @@ function emitPropertyAssertion(
     return;
   }
 
+  if (prop?.enumName) {
+    const enumExpected = expected.startsWith("\"")
+      ? `(try! ${swiftTypeName(prop.enumName)}.parse(${expected}))`
+      : expected;
+    lines.push(
+      `${indent}XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional)}, ${enumExpected})`,
+    );
+    return;
+  }
+
   if (prop && !prop.isScalar && prop.type) {
     const nestedKey = coercionProperty(prop.type) ?? prop.type.discriminator;
     if (nestedKey) {
@@ -284,7 +318,51 @@ function requiredAccessor(accessor: string, isOptional: boolean): string {
 
 function findProperty(node: TypeNode, key: string): PropertyNode | undefined {
   return node.properties.find(candidate =>
-    swiftPropertyName(candidate.name) === swiftPropertyName(key));
+    swiftPropertyName(candidate.name) === swiftPropertyName(key)
+    || candidate.knownAs.some(mapping =>
+      swiftPropertyName(mapping.name) === swiftPropertyName(key)));
+}
+
+function emitUnknownCoercionValidation(
+  lines: string[],
+  validations: TestExample["validations"],
+  expansion: Record<string, unknown>,
+  scalarType: string | undefined,
+): void {
+  lines.push("    if case .unknown(let concrete) = instance {");
+  for (const validation of validations) {
+    const expected = validation.delimiter
+      ? `${validation.delimiter}${validation.value}${validation.delimiter}`
+      : String(validation.value);
+    const rawValue = expansion[validation.key];
+    const cast = rawValue === "{value}"
+      ? swiftCoercionCast(scalarType)
+      : swiftDictionaryCast(rawValue);
+    lines.push(
+      `      XCTAssertEqual(concrete[${swiftStringLiteral(validation.key)}] as? ${cast}, ${expected})`,
+    );
+  }
+  lines.push("    } else {");
+  lines.push('      XCTFail("Expected unknown polymorphic fallback")');
+  lines.push("    }");
+}
+
+function swiftCoercionCast(scalarType: string | undefined): string {
+  switch (scalarType) {
+    case "boolean":
+      return "Bool";
+    case "float":
+    case "float32":
+    case "float64":
+    case "number":
+      return "Double";
+    case "int32":
+    case "int64":
+    case "integer":
+      return "Int";
+    default:
+      return "String";
+  }
 }
 
 function swiftExpectedLiteral(value: unknown): string | null {
@@ -301,4 +379,36 @@ function swiftDictionaryCast(value: unknown): string {
 
 function swiftMultilineString(value: string): string {
   return `"""\n${value.replace(/"""/g, "\\\"\\\"\\\"")}\n"""`;
+}
+
+function canonicalizeYamlExample(example: TestExample): TestExample {
+  return {
+    ...example,
+    sample: canonicalizeYamlValue(example.sample) as Record<string, any>,
+    validations: example.validations.map(validation => ({
+      ...validation,
+      value: typeof validation.value === "string"
+        ? validation.value
+          .replace(/[ \t]+\\r\\n/g, "\\n")
+          .replace(/[ \t]+\\n/g, "\\n")
+        : validation.value,
+    })),
+  };
+}
+
+function canonicalizeYamlValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value
+      .replace(/[ \t]+\r\n/g, "\n")
+      .replace(/[ \t]+\n/g, "\n");
+  }
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeYamlValue);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [key, canonicalizeYamlValue(nested)]),
+    );
+  }
+  return value;
 }

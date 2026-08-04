@@ -8,7 +8,7 @@
 import { TypeNode, PropertyValidation, TestExample, CoercionTest, BaseTestContext } from "../ir/ast.js";
 import { getCombinations, scalarValue, toSnakeCase } from "../ir/utilities.js";
 import { toPascalCase } from "../ir/visitor.js";
-import { swiftPropertyName } from "../languages/swift/identifiers.js";
+import { swiftPropertyName, swiftTypeName } from "../languages/swift/identifiers.js";
 import * as YAML from "yaml";
 
 const RUST_KEYWORDS = new Set([
@@ -438,8 +438,8 @@ export const swiftTestOptions: TestContextOptions = {
   escapeYamlForTemplate: (yaml: string) => yaml.replace(/\\/g, "\\\\"),
   renderEnumValue: (enumName: string, rawValue: string, _fieldName: string, isOpenEnum?: boolean) => ({
     value: isOpenEnum
-      ? `${enumName}(rawValue: "${rawValue}")`
-      : `${enumName}.${swiftPropertyName(rawValue)}`,
+      ? `${swiftTypeName(enumName)}(rawValue: "${rawValue}")`
+      : `${swiftTypeName(enumName)}.${swiftPropertyName(rawValue)}`,
     delimiter: '',
   }),
   includeCoercedComplexValues: true,

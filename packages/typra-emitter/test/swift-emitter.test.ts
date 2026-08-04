@@ -5,9 +5,11 @@ import type { Model, ModelProperty } from "@typespec/compiler";
 import type { FileDecl, TypeDecl } from "../src/ir/declarations.js";
 import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
+import { flattenInheritance } from "../src/ir/inheritance.js";
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import { emitSwiftProtocolScaffolds, emitSwiftRuntime } from "../src/languages/swift/scaffolding.js";
 import { emitSwiftConformanceTest, emitSwiftTests } from "../src/languages/swift/test-emitter.js";
+import { swiftTestOptions } from "../src/testing/test-context.js";
 import { swiftType } from "../src/languages/swift/types.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 
@@ -403,6 +405,21 @@ describe("Swift inherited model fields", () => {
     assert.match(source, /public var name: String/);
     assert.match(source, /public var command: String/);
   });
+
+  it("inherits named collection load and save helpers", () => {
+    const tool = typeDecl("Tool");
+    tool.collectionHelpers = [{
+      propertyName: "bindings",
+      elementTypeName: { namespace: "Test", name: "Binding" },
+      innerFields: ["input"],
+      hasNameProperty: true,
+    }];
+    const functionTool = typeDecl("FunctionTool");
+    functionTool.base = tool.typeName;
+
+    const flattened = flattenInheritance([tool, functionTool]);
+    assert.deepEqual(flattened[1].collectionHelpers, tool.collectionHelpers);
+  });
 });
 
 describe("Swift typed factory expressions", () => {
@@ -553,7 +570,12 @@ describe("Swift generated tests", () => {
     ownerId.isScalar = true;
     ownerType.properties = [ownerId];
     owner.type = ownerType;
-    modelInfo.properties = [inputModalities, owner];
+    const bindings = new PropertyNode({} as ModelProperty, "");
+    bindings.name = "bindings";
+    bindings.typeName = { namespace: "Test", name: "Binding" };
+    bindings.isCollection = true;
+    bindings.isOptional = true;
+    modelInfo.properties = [inputModalities, owner, bindings];
 
     const source = emitSwiftTests({
       node: modelInfo,
@@ -563,6 +585,7 @@ describe("Swift generated tests", () => {
         sample: {
           inputModalities: ["text"],
           owner: { id: "owner-1" },
+          bindings: { input: { source: "value" } },
         },
         json: ["{}"],
         yaml: ["{}"],
@@ -575,6 +598,112 @@ describe("Swift generated tests", () => {
 
     assert.match(source, /XCTAssertEqual\(\(try XCTUnwrap\(instance\.inputModalities\)\)\.count, 1\)/);
     assert.match(source, /XCTAssertEqual\(\(try XCTUnwrap\(instance\.owner\)\)\.id, "owner-1"\)/);
+    assert.match(source, /XCTAssertEqual\(\(try XCTUnwrap\(instance\.bindings\)\)\.count, 1\)/);
+    assert.doesNotMatch(source, /instance\.bindings\)\)\.(?:customTool|source)/);
+  });
+
+  it("uses emitted Swift enum type casing", () => {
+    assert.deepEqual(
+      swiftTestOptions.renderEnumValue?.("apiType", "chat", "apiType", true),
+      { value: 'ApiType(rawValue: "chat")', delimiter: "" },
+    );
+    assert.deepEqual(
+      swiftTestOptions.renderEnumValue?.("authenticationMode", "system", "authenticationMode", false),
+      { value: "AuthenticationMode.system", delimiter: "" },
+    );
+  });
+
+  it("normalizes trim-sensitive multiline expectations for YAML only", () => {
+    const prompt = new TypeNode({} as Model, "");
+    prompt.typeName = { namespace: "Test", name: "Prompt" };
+    const instructions = new PropertyNode({} as ModelProperty, "");
+    instructions.name = "instructions";
+    instructions.typeName = { namespace: "", name: "string" };
+    instructions.isScalar = true;
+    prompt.properties = [instructions];
+
+    const source = emitSwiftTests({
+      node: prompt,
+      isAbstract: false,
+      package: undefined,
+      examples: [{
+        sample: { instructions: "some \npersonal" },
+        json: ["{}"],
+        yaml: ["instructions: |-", "  some ", "  personal"],
+        validations: [{
+          key: "instructions",
+          value: "some \\npersonal",
+          delimiter: "\"",
+          isOptional: false,
+        }],
+      }],
+      coercions: [],
+      factories: [],
+      moduleName: "TestModels",
+    });
+
+    assert.match(source, /XCTAssertEqual\(instance\.instructions, "some \\npersonal"\)/);
+    assert.equal(source.match(/XCTAssertEqual\(instance\.instructions, "some\\npersonal"\)/g)?.length, 1);
+    assert.equal(source.match(/XCTAssertEqual\(reloaded\.instructions, "some\\npersonal"\)/g)?.length, 1);
+  });
+
+  it("skips unknown sample keys and compares nested enums as typed values", () => {
+    const connection = new TypeNode({} as Model, "");
+    connection.typeName = { namespace: "Test", name: "Connection" };
+    connection.discriminator = "kind";
+    connection.isAbstract = true;
+
+    const apiKeyConnection = new TypeNode({} as Model, "");
+    apiKeyConnection.typeName = { namespace: "Test", name: "ApiKeyConnection" };
+    const kind = new PropertyNode({} as ModelProperty, "");
+    kind.name = "kind";
+    kind.typeName = { namespace: "", name: "string" };
+    kind.isScalar = true;
+    kind.defaultValue = "key";
+    const authenticationMode = new PropertyNode({} as ModelProperty, "");
+    authenticationMode.name = "authenticationMode";
+    authenticationMode.typeName = { namespace: "Test", name: "authenticationMode" };
+    authenticationMode.isScalar = true;
+    authenticationMode.isOptional = true;
+    authenticationMode.enumName = "authenticationMode";
+    authenticationMode.allowedValues = ["user", "system"];
+    apiKeyConnection.properties = [kind, authenticationMode];
+    connection.childTypes = [apiKeyConnection];
+
+    const model = new TypeNode({} as Model, "");
+    model.typeName = { namespace: "Test", name: "Model" };
+    const connectionProperty = new PropertyNode({} as ModelProperty, "");
+    connectionProperty.name = "connection";
+    connectionProperty.typeName = connection.typeName;
+    connectionProperty.type = connection;
+    model.properties = [connectionProperty];
+
+    const source = emitSwiftTests({
+      node: model,
+      isAbstract: false,
+      package: undefined,
+      examples: [{
+        sample: {
+          connection: {
+            kind: "key",
+            authenticationMode: "system",
+            obsoleteKey: "ignored",
+          },
+        },
+        json: ["{}"],
+        yaml: ["{}"],
+        validations: [],
+      }],
+      coercions: [],
+      factories: [],
+      moduleName: "TestModels",
+    });
+
+    assert.match(
+      source,
+      /XCTAssertEqual\(\(try XCTUnwrap\(concrete\.authenticationMode\)\), \(try! AuthenticationMode\.parse\("system"\)\)\)/,
+    );
+    assert.doesNotMatch(source, /obsoleteKey/);
   });
 
   it("pattern-matches polymorphic roots before validating payload fields", () => {
@@ -717,6 +846,52 @@ describe("Swift generated tests", () => {
     assert.match(source, /if case \.stringProperty\(let concrete\) = instance/);
     assert.match(source, /XCTAssertEqual\(try XCTUnwrap\(concrete\.`default` as\? String\), "hello"\)/);
     assert.doesNotMatch(source, /instance\.kind|instance\.`default`/);
+  });
+
+  it("validates scalar coercions preserved by an unknown polymorphic fallback", () => {
+    const property = new TypeNode({} as Model, "");
+    property.typeName = { namespace: "Test", name: "Property" };
+    property.discriminator = "kind";
+    property.coercions = [{
+      scalar: "boolean",
+      expansion: { kind: "boolean", example: "{value}" },
+      title: "boolean property",
+      description: "",
+      example: false,
+    }];
+
+    const arrayProperty = new TypeNode({} as Model, "");
+    arrayProperty.typeName = { namespace: "Test", name: "ArrayProperty" };
+    const kind = new PropertyNode({} as ModelProperty, "");
+    kind.name = "kind";
+    kind.typeName = { namespace: "", name: "string" };
+    kind.isScalar = true;
+    kind.defaultValue = "array";
+    arrayProperty.properties = [kind];
+    property.childTypes = [arrayProperty];
+
+    const source = emitSwiftTests({
+      node: property,
+      isAbstract: false,
+      package: undefined,
+      examples: [],
+      coercions: [{
+        title: "boolean property",
+        scalarType: "Bool",
+        value: "false",
+        validations: [
+          { key: "kind", value: "boolean", delimiter: "\"", isOptional: false },
+          { key: "example", value: "false", delimiter: "", isOptional: false },
+        ],
+      }],
+      factories: [],
+      moduleName: "TestModels",
+    });
+
+    assert.match(source, /if case \.unknown\(let concrete\) = instance/);
+    assert.match(source, /concrete\["kind"\] as\? String, "boolean"/);
+    assert.match(source, /concrete\["example"\] as\? Bool, false/);
+    assert.doesNotMatch(source, /instance\.kind|instance\.example/);
   });
 
   it("validates compound coercion values through their typed nested field", () => {
