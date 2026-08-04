@@ -345,7 +345,7 @@ function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
 function emitNamedCollectionLoadHelper(
   helper: CollectionHelperDecl,
   lines: string[],
-  polymorphicTypeNames: Set<string>,
+  _polymorphicTypeNames: Set<string>,
 ): void {
   const methodName = `load${swiftTypeName(helper.propertyName)}`;
   const elementType = swiftTypeName(helper.elementTypeName.name);
@@ -354,23 +354,16 @@ function emitNamedCollectionLoadHelper(
   lines.push(`      return try values.map { try ${elementType}.load($0, context: context) }`);
   lines.push("    }");
   lines.push(`    let values = try TypraRuntime.dictionary(data, field: ${swiftStringLiteral(helper.propertyName)})`);
-  lines.push(`    return try values.sorted { $0.key < $1.key }.map { entry -> ${elementType} in`);
-  lines.push("      let name = entry.key");
-  lines.push("      let value = entry.value");
-  if (polymorphicTypeNames.has(helper.elementTypeName.name)) {
-    lines.push("      var itemData: [String: Any]");
-    lines.push("      if let object = value as? [String: Any] {");
-    lines.push("        itemData = object");
-    lines.push("      } else {");
-    lines.push(`        itemData = try ${elementType}.load(value, context: context).save()`);
-    lines.push("      }");
-    lines.push('      itemData["name"] = name');
-    lines.push(`      return try ${elementType}.load(itemData, context: context)`);
-  } else {
-    lines.push(`      var item = try ${elementType}.load(value, context: context)`);
-    lines.push("      item.name = name");
-    lines.push("      return item");
-  }
+  lines.push("    return try values.keys.sorted().map { name in");
+  lines.push("      let value = values[name]!");
+  lines.push("      var itemData: [String: Any]");
+  lines.push("      if let object = value as? [String: Any] {");
+  lines.push("        itemData = object");
+  lines.push("      } else {");
+  lines.push(`        itemData = try ${elementType}.load(value, context: context).save()`);
+  lines.push("      }");
+  lines.push('      itemData["name"] = name');
+  lines.push(`      return try ${elementType}.load(itemData, context: context)`);
   lines.push("    }");
   lines.push("  }");
 }
@@ -417,9 +410,9 @@ function typeKey(type: TypeDecl): string {
 
 function supportsNamedCollectionHelper(
   helper: CollectionHelperDecl,
-  polymorphicTypeNames: Set<string>,
+  _polymorphicTypeNames: Set<string>,
 ): boolean {
-  return helper.hasNameProperty && !polymorphicTypeNames.has(helper.elementTypeName.name);
+  return helper.hasNameProperty;
 }
 
 function addNamedCollectionFields(types: TypeDecl[]): TypeDecl[] {

@@ -215,15 +215,53 @@ describe("Swift polymorphic enums", () => {
     const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set());
 
     assert.match(source, /instance\.bindings = try loadBindings\(value, context: context\)/);
+    assert.match(source, /public struct Binding: TypraModel \{[\s\S]*public var name: String\? = nil/);
     assert.match(source, /if let values = data as\? \[Any\] \{\s+return try values\.map \{ try Binding\.load\(\$0, context: context\) \}/);
     assert.match(source, /let values = try TypraRuntime\.dictionary\(data, field: "bindings"\)/);
-    assert.match(source, /values\.sorted \{ \$0\.key < \$1\.key \}\.map \{ entry -> Binding in/);
-    assert.match(source, /let name = entry\.key\s+let value = entry\.value/);
-    assert.match(source, /var item = try Binding\.load\(value, context: context\)/);
-    assert.match(source, /item\.name = name\s+return item/);
+    assert.match(source, /return try values\.keys\.sorted\(\)\.map \{ name in/);
+    assert.match(source, /itemData\["name"\] = name\s+return try Binding\.load\(itemData, context: context\)/);
     assert.match(source, /private static func saveBindings/);
     assert.match(source, /let value = itemData\["source"\]/);
     assert.match(source, /if let scalar = data as\? String \{\s+var instance = Binding\(\)\s+instance\.source = try TypraRuntime\.string\(scalar, field: "source"\)/);
+  });
+
+  it("injects map keys before loading polymorphic named collection elements", () => {
+    const toolbox = typeDecl("Toolbox");
+    toolbox.fields = [{
+      name: "tools",
+      typeName: { namespace: "Test", name: "Tool" },
+      category: { kind: "collection_complex", typeName: "Tool" },
+      isOptional: false,
+      defaultValue: null,
+      allowedValues: [],
+      parseAliases: {},
+      enumName: null,
+      isOpenEnum: false,
+      description: "",
+      knownAs: {},
+    }];
+    toolbox.collectionHelpers = [{
+      propertyName: "tools",
+      elementTypeName: { namespace: "Test", name: "Tool" },
+      innerFields: [],
+      hasNameProperty: true,
+    }];
+    toolbox.load.assignments = [{
+      sourceName: "tools",
+      fieldName: "tools",
+      category: toolbox.fields[0].category,
+      isOptional: false,
+      parentTypeName: "Toolbox",
+      enumName: null,
+      allowedValues: [],
+      parseAliases: {},
+      defaultValue: null,
+      isOpenEnum: false,
+    }];
+
+    const source = emitSwiftFile(fileDecl(toolbox), new SwiftExprVisitor(), new Set(["Tool"]));
+    assert.match(source, /private static func loadTools\(_ data: Any, context: LoadContext\) throws -> \[Tool\]/);
+    assert.match(source, /return try values\.keys\.sorted\(\)\.map \{ name in[\s\S]*itemData\["name"\] = name[\s\S]*return try Tool\.load\(itemData, context: context\)/);
   });
 
   it("applies scalar coercions before polymorphic dispatch", () => {
