@@ -62,7 +62,7 @@ export const generateSwift = async (
     }
 
     if (testRoot && !n.base && !n.isProtocol) {
-      const testContext = { ...buildTestContext(n), moduleName };
+      const testContext = { ...buildTestContext(n, registry), moduleName };
       const group = n.group || "";
       const outDir = group ? `${testRoot}/${group}` : testRoot;
       await emitSwiftGeneratedFile(context, `${n.typeName.name}Tests.swift`, emitSwiftTests(testContext), outDir, outputDir);
@@ -86,8 +86,8 @@ export const generateSwift = async (
   }
 };
 
-function buildTestContext(node: TypeNode): BaseTestContext {
-  return buildBaseTestContext(node, undefined, swiftTestOptions);
+function buildTestContext(node: TypeNode, registry: TypeRegistry): BaseTestContext {
+  return buildBaseTestContext(node, undefined, swiftTestOptions, name => registry.get(name));
 }
 
 function formatSwiftFiles(outputDir: string): void {

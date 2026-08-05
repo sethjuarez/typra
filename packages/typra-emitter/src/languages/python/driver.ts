@@ -137,7 +137,7 @@ export const generatePython = async (
     // Render test file for each type (skip protocols — they have no data to test)
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const testDir = n.group ? `${emitTarget["test-dir"]}/${n.group}` : emitTarget["test-dir"];
-      const testContext = buildTestContext(n, importPath);
+      const testContext = buildTestContext(n, importPath, registry);
       const testContent = emitPythonTest(testContext);
       await emitPythonFile(context, `test_${toSnakeCase(n.typeName.name)}.py`, testContent, testDir, emitTarget["test-dir"]);
     }
@@ -358,8 +358,8 @@ function buildInitContext(nodes: TypeNode[]): PythonInitContext {
 /**
  * Build context for rendering a test file using the standardized shared helper.
  */
-function buildTestContext(node: TypeNode, packageName: string): BaseTestContext & { classCtx: PythonClassContext } {
-  const base = buildBaseTestContext(node, packageName, pythonTestOptions);
+function buildTestContext(node: TypeNode, packageName: string, registry: TypeRegistry): BaseTestContext & { classCtx: PythonClassContext } {
+  const base = buildBaseTestContext(node, packageName, pythonTestOptions, name => registry.get(name));
   const classCtx = buildClassContext(node);
   return { ...base, classCtx };
 }
