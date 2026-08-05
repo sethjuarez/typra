@@ -5,7 +5,7 @@
  * This ensures consistency in how tests are generated from @sample decorators.
  */
 
-import { TypeNode, PropertyValidation, TestExample, CoercionTest, BaseTestContext } from "../ir/ast.js";
+import { TypeNode, PropertyNode, PropertyValidation, TestExample, CoercionTest, BaseTestContext } from "../ir/ast.js";
 import { getCombinations, scalarValue, toSnakeCase } from "../ir/utilities.js";
 import { toPascalCase } from "../ir/visitor.js";
 import { swiftPropertyName, swiftTypeName } from "../languages/swift/identifiers.js";
@@ -72,15 +72,138 @@ export interface TestContextOptions {
 }
 
 /**
+ * Resolves a declared type name to its node. Supplied by each language driver from the
+ * `TypeRegistry` it already builds, so synthesis can follow a property whose own `.type`
+ * back-reference was left unresolved by `resolveModel`'s cycle prevention (only the first
+ * property of a given element type gets one).
+ */
+export type TypeResolver = (name: string) => TypeNode | undefined;
+
+/**
+ * Wire-level stand-ins for required scalars that carry no `@sample`. These are payload
+ * values (they get serialized into the generated JSON/YAML), not language literals, so they
+ * are deliberately separate from `TestContextOptions.scalarValues`, which holds rendered
+ * source-code literals like `"3.14f"` or `"True"`.
+ */
+const WIRE_SCALAR_DEFAULTS: Record<string, unknown> = {
+  string: "sample",
+  boolean: true,
+  int32: 1,
+  int64: 1,
+  integer: 1,
+  float: 1.5,
+  float32: 1.5,
+  float64: 1.5,
+  number: 1.5,
+};
+
+/**
+ * Build the payload a complex property needs when it carries no `@sample` of its own.
+ *
+ * Every emitter validates that required complex fields are present before it constructs an
+ * instance, so a sample payload that omits one cannot pass the validation generated beside
+ * it — the generated test fails against its own generated loader. The data needed to build
+ * that payload is already in the IR (the target type's own `@sample` decorators), so it is
+ * derived here rather than demanded a second time from the schema author.
+ *
+ * Returns `undefined` when nothing can be derived, leaving the property absent rather than
+ * emitting a payload that is confidently wrong.
+ */
+function synthesizeComplexSample(
+  type: TypeNode,
+  resolveType: TypeResolver,
+  seen: Set<string>,
+): Record<string, any> | undefined {
+  const key = `${type.typeName.namespace}.${type.typeName.name}`;
+  if (seen.has(key)) {
+    // Self-referential model. The cycle can only be broken by an optional edge, and an
+    // omitted optional is exactly what the loaders accept.
+    return undefined;
+  }
+  const nested = new Set(seen).add(key);
+
+  // A polymorphic base cannot be described without naming a concrete variant, so build the
+  // payload from the first declared child; its discriminator literal comes along with it.
+  const concrete = type.discriminator && type.childTypes.length > 0 ? type.childTypes[0] : type;
+
+  const payload: Record<string, any> = {};
+  for (const prop of concrete.properties) {
+    const sampled = prop.samples?.[0]?.sample;
+    if (sampled) {
+      Object.assign(payload, sampled);
+      continue;
+    }
+    if (prop.isOptional || prop.hasExplicitDefault) continue;
+
+    const value = synthesizeRequiredValue(prop, resolveType, nested);
+    if (value !== undefined) {
+      payload[prop.name] = value;
+    }
+  }
+  return payload;
+}
+
+/** Derive a wire value for a single required property that carries no `@sample`. */
+function synthesizeRequiredValue(
+  prop: PropertyNode,
+  resolveType: TypeResolver,
+  seen: Set<string>,
+): any {
+  // A discriminator on a concrete subtype is pinned to its literal; honour that first so the
+  // synthesized payload dispatches back to the type it was built from.
+  if (prop.defaultValue !== null && prop.defaultValue !== undefined) return prop.defaultValue;
+  if (prop.allowedValues.length > 0) return prop.allowedValues[0];
+  if (prop.isCollection) return [];
+  if (prop.isDict || prop.isAny) return {};
+  if (prop.isScalar) return WIRE_SCALAR_DEFAULTS[prop.typeName.name];
+
+  const target = prop.type ?? resolveType(prop.typeName.name);
+  return target ? synthesizeComplexSample(target, resolveType, seen) : undefined;
+}
+
+/**
+ * Add payloads for required complex properties the `@sample` combinations left out.
+ *
+ * `buildExamples` derives a payload from `@sample` decorators alone, so a required complex
+ * property that declares none is silently dropped — and the generated validation then
+ * rejects the very payload the generator produced.
+ */
+function withRequiredComplexSamples(
+  sample: Record<string, any>,
+  node: TypeNode,
+  resolveType: TypeResolver,
+): Record<string, any> {
+  const seed = new Set<string>([`${node.typeName.namespace}.${node.typeName.name}`]);
+  const completed = { ...sample };
+
+  for (const prop of node.properties) {
+    if (prop.name in completed) continue;
+    if (prop.isOptional || prop.hasExplicitDefault) continue;
+    if (prop.isScalar || prop.isAny || prop.isDict || prop.enumName) continue;
+
+    const target = prop.type ?? resolveType(prop.typeName.name);
+    if (!target) continue;
+
+    const payload = synthesizeComplexSample(target, resolveType, seed);
+    if (payload === undefined) continue;
+
+    completed[prop.name] = prop.isCollection ? [payload] : payload;
+  }
+
+  return completed;
+}
+
+/**
  * Build a standardized test context from a TypeNode.
  * All language emitters should use this to ensure consistent test generation.
  */
 export function buildBaseTestContext(
   node: TypeNode,
   packageName: string | undefined,
-  options: TestContextOptions
+  options: TestContextOptions,
+  resolveType: TypeResolver = () => undefined
 ): BaseTestContext {
-  const examples = buildExamples(node, options);
+  const examples = buildExamples(node, options, resolveType);
   const coercions = buildCoercions(node, options);
   const isAbstract = node.isAbstract || (node.discriminator !== undefined && node.discriminator.length > 0);
 
@@ -97,7 +220,7 @@ export function buildBaseTestContext(
 /**
  * Build test examples from @sample decorators on properties.
  */
-function buildExamples(node: TypeNode, options: TestContextOptions): TestExample[] {
+function buildExamples(node: TypeNode, options: TestContextOptions, resolveType: TypeResolver): TestExample[] {
   // Get sample properties and generate combinations
   const samples = node.properties
     .filter(p => p.samples && p.samples.length > 0)
@@ -106,7 +229,7 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
   const combinations = samples.length > 0 ? getCombinations(samples) : [];
 
   return combinations.map(c => {
-    const sample = Object.assign({}, ...c);
+    const sample = withRequiredComplexSamples(Object.assign({}, ...c), node, resolveType);
 
     // Create YAML document with proper string escaping
     const doc = new YAML.Document(sample);

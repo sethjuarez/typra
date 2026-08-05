@@ -105,7 +105,7 @@ export const generateTypeScript = async (
       const testDir = group ? `${emitTarget["test-dir"]}/${group}` : emitTarget["test-dir"];
       const groupDepth = group ? group.split("/").filter(Boolean).length : 0;
       const testImportPath = groupDepth > 0 ? `${"../".repeat(groupDepth)}${importPath}` : importPath;
-      const testContext = buildTestContext(n);
+      const testContext = buildTestContext(n, registry);
       const testCode = emitTypeScriptTest({
         ...testContext,
         importPath: testImportPath,
@@ -233,8 +233,8 @@ function buildIndexContext(nodes: TypeNode[]): { baseTypes: TypeNode[]; types: T
 /**
  * Build context for rendering a test file.
  */
-function buildTestContext(node: TypeNode): BaseTestContext {
-  return buildBaseTestContext(node, undefined, typescriptTestOptions);
+function buildTestContext(node: TypeNode, registry: TypeRegistry): BaseTestContext {
+  return buildBaseTestContext(node, undefined, typescriptTestOptions, name => registry.get(name));
 }
 
 /**

@@ -103,7 +103,7 @@ export const generateGo = async (
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const importPath = emitTarget["import-path"] || packageName;
       const fieldNames = buildGoFieldNames(collectInheritedPropertyNames(n, registry));
-      const testContext = { ...buildTestContext(n, packageName), importPath, fieldNames };
+      const testContext = { ...buildTestContext(n, packageName, registry), importPath, fieldNames };
       const testContent = emitGoTest(testContext);
       const testFileName = toSnakeCase(n.typeName.name) + '_test.go';
       await emitGoFile(context, testFileName, testContent, emitTarget["test-dir"], emitTarget["test-dir"]);
@@ -161,8 +161,8 @@ function formatGoFiles(outputDir: string, testDir?: string): void {
 /**
  * Build context for rendering a test file.
  */
-function buildTestContext(node: TypeNode, packageName: string): BaseTestContext {
-  return buildBaseTestContext(node, packageName, goTestOptions);
+function buildTestContext(node: TypeNode, packageName: string, registry: TypeRegistry): BaseTestContext {
+  return buildBaseTestContext(node, packageName, goTestOptions, name => registry.get(name));
 }
 
 function collectInheritedPropertyNames(node: TypeNode, registry: TypeRegistry): string[] {

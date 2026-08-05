@@ -100,7 +100,7 @@ export const generateJava = async (
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const testClass = javaTestClassName(n.typeName.name);
       testClassNames.push(testClass);
-      const testContext = buildBaseTestContext(n, packageName, javaTestOptions);
+      const testContext = buildBaseTestContext(n, packageName, javaTestOptions, name => registry.get(name));
       await emitJavaFile(context, `${testClass}.java`, emitJavaTest(testContext), emitTarget["test-dir"], emitTarget["test-dir"]);
     }
   }

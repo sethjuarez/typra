@@ -1,0 +1,157 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { Model, ModelProperty } from "@typespec/compiler";
+
+import { TypeNode, PropertyNode } from "../src/ir/ast.js";
+import { buildBaseTestContext, goTestOptions } from "../src/testing/test-context.js";
+
+interface PropOptions {
+  isScalar?: boolean;
+  isOptional?: boolean;
+  isCollection?: boolean;
+  defaultValue?: string | null;
+  allowedValues?: string[];
+  sample?: Record<string, unknown>;
+  type?: TypeNode;
+}
+
+function makeProp(name: string, typeName: string, options: PropOptions = {}): PropertyNode {
+  const prop = new PropertyNode({} as ModelProperty, `Test ${name}`);
+  prop.name = name;
+  prop.typeName = { namespace: "Test", name: typeName };
+  prop.isScalar = options.isScalar ?? false;
+  prop.isOptional = options.isOptional ?? false;
+  prop.isCollection = options.isCollection ?? false;
+  prop.defaultValue = options.defaultValue ?? null;
+  prop.allowedValues = options.allowedValues ?? [];
+  prop.samples = options.sample ? [{ sample: options.sample }] : [];
+  prop.type = options.type;
+  return prop;
+}
+
+interface TypeOptions {
+  discriminator?: string;
+  childTypes?: TypeNode[];
+  isAbstract?: boolean;
+}
+
+function makeType(name: string, properties: PropertyNode[], options: TypeOptions = {}): TypeNode {
+  const node = new TypeNode({} as Model, `Test ${name}`);
+  node.typeName = { namespace: "Test", name };
+  node.properties = properties;
+  node.discriminator = options.discriminator;
+  node.childTypes = options.childTypes ?? [];
+  node.factories = [];
+  node.coercions = [];
+  node.isAbstract = options.isAbstract ?? false;
+  node.base = null;
+  node.methods = [];
+  return node;
+}
+
+function sampleFor(node: TypeNode, types: TypeNode[] = []): Record<string, any> {
+  const byName = new Map(types.map(type => [type.typeName.name, type]));
+  const context = buildBaseTestContext(node, undefined, goTestOptions, name => byName.get(name));
+  assert.equal(context.examples.length, 1, "expected exactly one generated example");
+  return context.examples[0].sample;
+}
+
+describe("test context — required complex sample synthesis", () => {
+  it("includes a required complex property that declares no @sample", () => {
+    const detail = makeType("Detail", [
+      makeProp("code", "string", { isScalar: true, sample: { code: "detail-code" } }),
+    ]);
+    const node = makeType("Root", [
+      makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),
+      makeProp("detail", "Detail", { type: detail }),
+    ]);
+
+    // Emitters validate that required complex fields are present before constructing an
+    // instance, so a payload missing one cannot pass the validation generated beside it.
+    assert.deepEqual(sampleFor(node, [detail]).detail, { code: "detail-code" });
+  });
+
+  it("leaves an optional complex property absent", () => {
+    const detail = makeType("Detail", [
+      makeProp("code", "string", { isScalar: true, sample: { code: "detail-code" } }),
+    ]);
+    const node = makeType("Root", [
+      makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),
+      makeProp("detail", "Detail", { isOptional: true, type: detail }),
+    ]);
+
+    // Guard against over-broad synthesis: nothing rejects an omitted optional, so filling it
+    // in would assert coverage the schema never asked for.
+    assert.ok(!("detail" in sampleFor(node, [detail])), "optional complex field must stay absent");
+  });
+
+  it("resolves the target type through the registry when the property back-reference is unset", () => {
+    // `resolveModel` only attaches `.type` to the first property of a given element type, so
+    // a later sibling of the same type must still be synthesizable.
+    const detail = makeType("Detail", [
+      makeProp("code", "string", { isScalar: true, sample: { code: "detail-code" } }),
+    ]);
+    const node = makeType("Root", [
+      makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),
+      makeProp("detail", "Detail"),
+    ]);
+
+    assert.deepEqual(sampleFor(node, [detail]).detail, { code: "detail-code" });
+  });
+
+  it("wraps the synthesized payload for a required complex collection", () => {
+    const detail = makeType("Detail", [
+      makeProp("code", "string", { isScalar: true, sample: { code: "detail-code" } }),
+    ]);
+    const node = makeType("Root", [
+      makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),
+      makeProp("details", "Detail", { isCollection: true, type: detail }),
+    ]);
+
+    assert.deepEqual(sampleFor(node, [detail]).details, [{ code: "detail-code" }]);
+  });
+
+  it("recurses into a nested required complex property and fills unsampled required scalars", () => {
+    const inner = makeType("Inner", [
+      makeProp("id", "string", { isScalar: true }),
+    ]);
+    const middle = makeType("Middle", [
+      makeProp("inner", "Inner", { type: inner }),
+    ]);
+    const node = makeType("Root", [
+      makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),
+      makeProp("middle", "Middle", { type: middle }),
+    ]);
+
+    // A nested type carrying no samples at all still has to produce a loadable payload, or
+    // the synthesized value trades one "missing required field" failure for another.
+    assert.deepEqual(sampleFor(node, [inner, middle]).middle, { inner: { id: "sample" } });
+  });
+
+  it("names a concrete variant when the required property is a polymorphic base", () => {
+    const text = makeType("TextContent", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "text" }),
+      makeProp("value", "string", { isScalar: true, sample: { value: "hello" } }),
+    ]);
+    const base = makeType("Content", [
+      makeProp("kind", "ContentKind", { allowedValues: ["text"] }),
+    ], { discriminator: "kind", childTypes: [text], isAbstract: true });
+    const node = makeType("Root", [
+      makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),
+      makeProp("content", "Content", { type: base }),
+    ]);
+
+    // A polymorphic base is not loadable without a discriminator that selects a variant.
+    assert.deepEqual(sampleFor(node, [base, text]).content, { kind: "text", value: "hello" });
+  });
+
+  it("stops at a self-referential required property instead of recursing forever", () => {
+    const node = makeType("Tree", [
+      makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),
+    ]);
+    // A cycle can only be broken by an optional edge, and an omitted optional is accepted.
+    node.properties.push(makeProp("child", "Tree", { type: node }));
+
+    assert.ok(!("child" in sampleFor(node, [node])), "self-reference must not be synthesized");
+  });
+});

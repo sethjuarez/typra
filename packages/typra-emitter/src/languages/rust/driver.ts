@@ -141,7 +141,7 @@ export const generateRust = async (
     // Render test file — skip children of polymorphic hierarchies (they're enum variants now) and protocols
     if (emitTarget["test-dir"] && !childToParent.has(n.typeName.name) && !n.isProtocol) {
       const importPath = emitTarget["import-path"] || "crate";
-      const testContext = buildTestContext(n);
+      const testContext = buildTestContext(n, registry);
       const isPolymorphicBase = !!(n.discriminator && n.childTypes.length > 0);
       const testContent = emitRustTest({
         ...testContext,
@@ -249,8 +249,8 @@ function normalizeRustFileEndings(dir: string): void {
 /**
  * Build context for rendering a test file.
  */
-function buildTestContext(node: TypeNode): BaseTestContext {
-  return buildBaseTestContext(node, undefined, rustTestOptions);
+function buildTestContext(node: TypeNode, registry: TypeRegistry): BaseTestContext {
+  return buildBaseTestContext(node, undefined, rustTestOptions, name => registry.get(name));
 }
 
 /**
