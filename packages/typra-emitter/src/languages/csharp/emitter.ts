@@ -753,8 +753,9 @@ function emitCollectionLoadHelper(
   lines.push("    {");
   lines.push(`        var result = new List<${elemType}>();`);
   lines.push("");
-  lines.push("        if (data is Dictionary<string, object?> dict)");
+  lines.push("        if (data is System.Collections.IDictionary)");
   lines.push("        {");
+  lines.push("            var dict = data.GetDictionary();");
   lines.push("            // Convert named dictionary to list");
   lines.push("            foreach (var kvp in dict)");
   lines.push("            {");
@@ -765,7 +766,7 @@ function emitCollectionLoadHelper(
   lines.push(`                        $"'${helper.propertyName}' must be a flat list of objects or a name-keyed dict — " +`);
   lines.push(`                        "not a nested {" + kvp.Key + ": [...]} structure.");`);
   lines.push("                }");
-  lines.push("                var itemDict = kvp.Value.GetDictionary();");
+  lines.push("                var itemDict = new Dictionary<string, object?>(kvp.Value.GetDictionary());");
   lines.push("                if (itemDict.Count > 0)");
   lines.push("                {");
   lines.push("                    // Value is an object, add name to it");
