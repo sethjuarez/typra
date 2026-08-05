@@ -13,6 +13,7 @@ import {
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor } from "../../ir/visitor.js";
+import { EDITABLE_SEAM_MARKER, hasEditableSeamMarker } from "../../cleanup/generated-file.js";
 import {
   javaEnumMemberName,
   javaEnumTypeName,
@@ -669,13 +670,33 @@ function emitMethodDelegation(typeName: string, method: MethodStubDecl, lines: s
   lines.push("");
 }
 
+export const JAVA_EDITABLE_SEAM_MARKER = `// ${EDITABLE_SEAM_MARKER}`;
+export const JAVA_EDITABLE_SEAM_NOTE = "// Typra editable seam. This file is created once and is safe to edit.";
+
+/**
+ * Adds the editable-seam marker to a pre-existing helper that predates the marker contract.
+ * Returns null when the file already carries the marker and needs no migration.
+ *
+ * Seam files are create-once and consumer-owned, so migration only prepends the comment
+ * header; hand-written bodies are never rewritten. A leading BOM stays at byte zero and the
+ * file's dominant line ending is preserved so the result stays valid and diff-clean.
+ */
+export function ensureJavaEditableSeamMarker(existingSource: string): string | null {
+  if (hasEditableSeamMarker(existingSource)) return null;
+
+  const bom = existingSource.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const body = bom ? existingSource.slice(1) : existingSource;
+  const eol = /\r\n/.test(body) ? "\r\n" : "\n";
+  return `${bom}${JAVA_EDITABLE_SEAM_MARKER}${eol}${JAVA_EDITABLE_SEAM_NOTE}${eol}${body}`;
+}
+
 export function emitJavaMethodHelper(type: TypeDecl, packageName: string): { filename: string; source: string } | null {
   if (type.isProtocol || type.methods.length === 0) return null;
   const typeName = javaTypeName(type.typeName.name);
   const helperName = `${typeName}Methods`;
   const lines = [
-    "// <typra-editable-seam>",
-    "// Typra editable seam. This file is created once and is safe to edit.",
+    JAVA_EDITABLE_SEAM_MARKER,
+    JAVA_EDITABLE_SEAM_NOTE,
     `package ${packageName};`,
     "",
     `public final class ${helperName} {`,

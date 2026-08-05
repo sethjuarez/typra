@@ -6,7 +6,7 @@ import type { EnumDef, TypeDecl } from "../src/ir/declarations.js";
 import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { javaTestOptions } from "../src/languages/java/driver.js";
-import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper } from "../src/languages/java/emitter.js";
+import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper, ensureJavaEditableSeamMarker } from "../src/languages/java/emitter.js";
 import { emitJavaSaveContext } from "../src/languages/java/scaffolding.js";
 import { emitJavaTest } from "../src/languages/java/test-emitter.js";
 import {
@@ -496,6 +496,86 @@ describe("Java emitter runtime semantics", () => {
       assert.match(helper.source, /public static String text\(Message self, String prefix\)/);
       assert.match(helper.source, /Implement Message\.text in MessageMethods/);
       assert.doesNotMatch(helper.source, /Code generated|auto-generated/);
+    });
+
+    it("adds the seam marker to helpers created before the marker contract", () => {
+      const legacy = [
+        "package test;",
+        "",
+        "public final class MessageMethods {",
+        "  private MessageMethods() { }",
+        "",
+        "  public static String text(Message self, String prefix) {",
+        "    return prefix + self.content;",
+        "  }",
+        "}",
+        "",
+      ].join("\n");
+
+      const migrated = ensureJavaEditableSeamMarker(legacy);
+
+      assert.ok(migrated);
+      assert.match(migrated, /^\/\/ <typra-editable-seam>\n/);
+      assert.match(migrated, /Typra editable seam\. This file is created once and is safe to edit\./);
+      // The hand-written body must survive migration untouched.
+      assert.match(migrated, /return prefix \+ self\.content;/);
+      assert.ok(migrated.endsWith(legacy));
+    });
+
+    it("leaves already-marked seams untouched and is idempotent", () => {
+      const marked = emitJavaMethodHelper((() => {
+        const decl = typeDecl([]);
+        decl.typeName = { namespace: "Test", name: "Message" };
+        decl.methods = [{
+          name: "text",
+          returns: "string",
+          description: "Render message text.",
+          params: {},
+          optional: false,
+          sync: true,
+        }];
+        return decl;
+      })(), "test");
+
+      assert.ok(marked);
+      assert.equal(ensureJavaEditableSeamMarker(marked.source), null);
+
+      const migrated = ensureJavaEditableSeamMarker("package test;\n");
+      assert.ok(migrated);
+      assert.equal(ensureJavaEditableSeamMarker(migrated), null);
+    });
+
+    it("keeps a leading BOM at byte zero and preserves CRLF files", () => {
+      const bomFile = "\uFEFFpackage test;\n\npublic final class M { }\n";
+      const migratedBom = ensureJavaEditableSeamMarker(bomFile);
+      assert.ok(migratedBom);
+      assert.ok(migratedBom.startsWith("\uFEFF// <typra-editable-seam>"));
+      // The BOM must not survive anywhere except byte zero.
+      assert.equal(migratedBom.indexOf("\uFEFF", 1), -1);
+      assert.equal(ensureJavaEditableSeamMarker(migratedBom), null);
+
+      const crlfFile = "package test;\r\n\r\npublic final class M { }\r\n";
+      const migratedCrlf = ensureJavaEditableSeamMarker(crlfFile);
+      assert.ok(migratedCrlf);
+      assert.ok(migratedCrlf.startsWith("// <typra-editable-seam>\r\n"));
+      assert.doesNotMatch(migratedCrlf, /[^\r]\n/);
+      assert.equal(ensureJavaEditableSeamMarker(migratedCrlf), null);
+    });
+
+    it("does not mistake the marker inside a string literal for a real seam header", () => {
+      const impostor = [
+        "package test;",
+        "",
+        "public final class MessageMethods {",
+        '  static final String DOC = "// <typra-editable-seam>";',
+        "}",
+        "",
+      ].join("\n");
+
+      const migrated = ensureJavaEditableSeamMarker(impostor);
+      assert.ok(migrated, "a marker inside a string literal must not count as a seam header");
+      assert.match(migrated, /^\/\/ <typra-editable-seam>\n/);
+      assert.equal(ensureJavaEditableSeamMarker(migrated), null);
     });
 
     it("matches polymorphic discriminator wire values exactly", () => {

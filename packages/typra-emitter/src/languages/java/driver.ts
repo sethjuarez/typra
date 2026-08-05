@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { emitFile, EmitContext, resolvePath } from "@typespec/compiler";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
@@ -9,7 +9,7 @@ import { TypeRegistry } from "../../ir/expansion.js";
 import { collectPolymorphicTypeNames, lowerFile } from "../../ir/lower.js";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import { buildBaseTestContext, TestContextOptions } from "../../testing/test-context.js";
-import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper } from "./emitter.js";
+import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper, ensureJavaEditableSeamMarker } from "./emitter.js";
 import { emitJavaContext, emitJavaJson, emitJavaMaps, emitJavaSaveContext, emitJavaYaml } from "./scaffolding.js";
 import { emitJavaTest, emitJavaTestRunner, javaTestClassName } from "./test-emitter.js";
 import { JavaExprVisitor } from "./visitor.js";
@@ -145,8 +145,17 @@ async function emitJavaMethodHelperIfMissing(
   outputDir?: string,
 ): Promise<void> {
   const filePath = resolvePath(outputDir || `${context.emitterOutputDir}/java`, filename);
-  if (existsSync(filePath)) return;
-  await emitFile(context.program, { path: filePath, content });
+  if (!existsSync(filePath)) {
+    await emitFile(context.program, { path: filePath, content });
+    return;
+  }
+
+  // Seam files created before the marker contract stay unmarked forever under create-once,
+  // which leaves them outside the cleaner allow-list. Prepend the marker without touching
+  // any hand-written body.
+  const migrated = ensureJavaEditableSeamMarker(readFileSync(filePath, "utf8"));
+  if (migrated === null) return;
+  await emitFile(context.program, { path: filePath, content: migrated });
 }
 
 function formatJavaFiles(outputDir: string, excludedFiles: Set<string>): void {
