@@ -13,7 +13,7 @@ import { buildBaseTestContext, goTestOptions } from "../../testing/test-context.
 import { toSnakeCase } from "../../ir/utilities.js";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { GoExprVisitor } from "./visitor.js";
-import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
+import { lowerFile, lowerType, collectPolymorphicTypeNames } from "../../ir/lower.js";
 import { emitGoFileContent } from "./emitter.js";
 import { emitGoContext } from "./scaffolding.js";
 import { emitGoTest } from "./test-emitter.js";
@@ -73,6 +73,7 @@ export const generateGo = async (
       scalarCoercibleTypeNames.add(n.typeName.name);
     }
   }
+  const declarationUniverse = nodes.map(n => lowerType(n, registry, polymorphicTypeNames));
 
   // Emit context file (LoadContext/SaveContext utilities)
   const contextContent = emitGoContext({ header: "Typra Context", packageName });
@@ -84,7 +85,16 @@ export const generateGo = async (
     if (!n.base) {
       const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
       // Go stays flat: pass group as a header comment only, no subfolder emission
-      const fileContent = emitGoFileContent(fileDecl.types, packageName, visitor, polymorphicTypeNames, fileDecl.enums, n.group || "", scalarCoercibleTypeNames);
+      const fileContent = emitGoFileContent(
+        fileDecl.types,
+        packageName,
+        visitor,
+        polymorphicTypeNames,
+        fileDecl.enums,
+        n.group || "",
+        scalarCoercibleTypeNames,
+        declarationUniverse,
+      );
       const fileName = toSnakeCase(n.typeName.name) + '.go';
       await emitGoFile(context, fileName, fileContent, emitTarget["output-dir"], emitTarget["output-dir"]);
     }

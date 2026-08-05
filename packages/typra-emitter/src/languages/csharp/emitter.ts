@@ -37,6 +37,7 @@ import {
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
+import { flattenInheritance } from "../../ir/inheritance.js";
 import { csharpIdentifier } from "./identifiers.js";
 
 // ============================================================================
@@ -98,6 +99,10 @@ export function emitCSharpClass(
   findType: (name: string) => TypeDecl | undefined,
 ): string {
   const lines: string[] = [];
+  const inheritedType = flattenInheritance([type], allTypes)[0];
+  const loadType = inheritedType === type
+    ? type
+    : { ...type, load: inheritedType.load };
 
   // Protocol types → emit as interface
   if (type.isProtocol) {
@@ -123,7 +128,7 @@ export function emitCSharpClass(
   emitProperties(type, allTypes, findType, lines);
 
   // Load region
-  emitLoadRegion(type, allTypes, findType, lines);
+  emitLoadRegion(loadType, allTypes, findType, lines);
 
   // Save region
   emitSaveRegion(type, allTypes, findType, lines);

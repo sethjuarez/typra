@@ -87,13 +87,15 @@ export function emitGoFileContent(
   enums: EnumDef[] = [],
   group: string = "",
   scalarCoercibleTypeNames: Set<string> = new Set(types.filter(t => t.load.coercions.length > 0).map(t => t.typeName.name)),
+  declarationUniverse: TypeDecl[] = types,
 ): string {
   const lines: string[] = [];
 
   // Go has no inheritance: flatten transitive base fields into each child struct
   // so inherited (non-discriminator) fields are not dropped. All ancestors live in
-  // this same `types` array (the driver emits one file per root hierarchy).
-  types = flattenInheritance(types);
+  // Ancestors can live in another emitted file, so resolve them from the complete
+  // declaration universe rather than assuming every hierarchy is co-located.
+  types = flattenInheritance(types, declarationUniverse);
 
   // Protocol-only files have a simpler header (no JSON/YAML imports)
   const hasNonProtocol = types.some(t => !t.isProtocol);

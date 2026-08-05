@@ -778,6 +778,42 @@ describe("lowerFile", () => {
       assert.match(loadBody, /m\["authenticationMode"\]/);
       assert.match(loadBody, /m\["usageDescription"\]/);
     });
+
+    it("flattens named collection helpers from ancestors emitted in another file", () => {
+      const binding = makeType("Binding", [
+        makeProp("name", "string", { isScalar: true, isOptional: true }),
+        makeProp("input", "string", { isScalar: true }),
+      ]);
+      const tool = makeType("Tool", [
+        makeProp("kind", "string", { isScalar: true }),
+        makeProp("bindings", "Binding", {
+          isCollection: true,
+          isNamedCollection: true,
+          type: binding,
+        }),
+      ]);
+      const functionTool = makeType("FunctionTool", [
+        makeProp("kind", "string", { isScalar: true, defaultValue: "function" }),
+      ], { base: tool.typeName });
+      const registry = TypeRegistry.fromTypeGraph([tool, functionTool, binding]);
+      const baseDecl = lowerType(tool, registry, new Set());
+      const childDecl = lowerType(functionTool, registry, new Set());
+      const code = emitGoFileContent(
+        [childDecl],
+        "fixtures",
+        new GoExprVisitor(registry),
+        new Set(),
+        [],
+        "",
+        new Set(),
+        [baseDecl, childDecl],
+      );
+
+      assert.match(code, /type FunctionTool struct \{[\s\S]*Bindings \[\]Binding/);
+      assert.match(code, /if named, ok := val\.\(map\[string\]interface\{\}\); ok \{/);
+      assert.match(code, /sort\.Strings\(keys\)/);
+      assert.match(code, /item\["name"\] = key/);
+    });
   });
 
   describe("Go test emitter optional assertions", () => {
