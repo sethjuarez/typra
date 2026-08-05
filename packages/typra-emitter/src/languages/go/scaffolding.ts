@@ -59,6 +59,16 @@ export function emitGoContext(ctx: GoContextContext): string {
   lines.push('\treturn &LoadContext{Path: ctx.Path + "." + segment}');
   lines.push("}");
   lines.push("");
+  lines.push("// AtIndex creates a child context for an array element. Rendered with bracket");
+  lines.push("// notation (messages[3]) so an index is never confused with a map key of the");
+  lines.push("// same name, which dot-joining would make ambiguous.");
+  lines.push("func (ctx *LoadContext) AtIndex(index int) *LoadContext {");
+  lines.push("\tif ctx == nil {");
+  lines.push('\t\treturn &LoadContext{Path: fmt.Sprintf("[%d]", index)}');
+  lines.push("\t}");
+  lines.push('\treturn &LoadContext{Path: fmt.Sprintf("%s[%d]", ctx.Path, index)}');
+  lines.push("}");
+  lines.push("");
   lines.push("// SaveContext provides context for saving operations");
   lines.push('const CollectionFormatObject = "object"');
   lines.push('const CollectionFormatArray = "array"');

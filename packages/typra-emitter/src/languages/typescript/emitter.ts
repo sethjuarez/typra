@@ -907,7 +907,7 @@ function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDe
   lines.push("      }");
   lines.push("      return result;");
   lines.push("    }");
-  lines.push(`    return data.map(item => ${elemName}.load(item as Record<string, unknown>, context));`);
+  lines.push(`    return data.map((item, index) => ${elemName}.load(item as Record<string, unknown>, context.atIndex(index)));`);
   lines.push("  }");
   lines.push("");
 }

@@ -832,7 +832,7 @@ function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDe
   lines.push("                    # value is a scalar, use it as the primary property");
   lines.push(`                    result.append(${elemName}.load({"name": k, "${firstInnerField}": v}, context.at(k)))`);
   lines.push("            return result");
-  lines.push(`        return [${elemName}.load(item, context) for item in data]`);
+  lines.push(`        return [${elemName}.load(item, context.at_index(index)) for index, item in enumerate(data)]`);
 }
 
 function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDecl, lines: string[]): void {
