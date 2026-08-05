@@ -367,11 +367,21 @@ function lowerPolymorphicDispatch(
     && (discriminatorProperty?.allowedValues.length ?? 0) > 0
     && discriminatorProperty?.isOpenEnum !== true;
 
+  // A non-abstract base is itself instantiable, so discriminator values that its own declared
+  // union permits but that no subtype claims (e.g. `kind: "string"` on a concrete `Property`
+  // whose only subtypes are array/object/union) must load as the base rather than be rejected.
+  // This only applies when such unclaimed values actually exist: when every permitted value is
+  // claimed by a subtype the dispatch is genuinely closed and the base needs no fallback arm.
+  // Closedness still bounds which values are legal; it must not strip the base's self-reference.
+  const claimedValues = new Set(variants.map(variant => variant.value));
+  const absorbsUnclaimedValues = !node.isAbstract
+    && (discriminatorProperty?.allowedValues ?? []).some(value => !claimedValues.has(value));
+
   let defaultVariant: PolymorphicDefault | null = null;
   if (polyTypes.default) {
     const defaultNode = polyTypes.default.instance as TypeNode;
     const isSelfReference = defaultNode.typeName.name === node.typeName.name;
-    if (!isClosed || !isSelfReference) {
+    if (!isClosed || !isSelfReference || absorbsUnclaimedValues) {
       defaultVariant = {
         typeName: defaultNode.typeName,
         isSelfReference,

@@ -200,6 +200,55 @@ describe("closed polymorphic dispatch", () => {
     assert.equal(dispatch.defaultVariant!.isSelfReference, false);
     assert.equal(dispatch.defaultVariant!.typeName.name, "SeamOpenCustom");
   });
+
+  // Regression lock for the concrete-base fallback. Prompty's `Property` is a NON-abstract
+  // model with @discriminator("kind") whose union permits string/integer/float/boolean/
+  // array/object/union, but only array/object/union are claimed by subtypes. The scalar
+  // kinds are legal values the base itself represents. Emitter 0.4.15-0.4.18 dropped the
+  // self-reference fallback for these, so Rust emitted `panic!` and Go returned a zero
+  // value on `kind: "string"`. A non-abstract base must absorb permitted-but-unclaimed
+  // discriminator values instead of rejecting them.
+  it("lets a non-abstract base absorb permitted discriminator values no subtype claims", () => {
+    const arrayProperty = makeType("ArrayProperty", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "array" }),
+    ], { base: { namespace: "Test", name: "BaseProperty" } });
+    const objectProperty = makeType("ObjectProperty", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "object" }),
+    ], { base: { namespace: "Test", name: "BaseProperty" } });
+    // Non-abstract: "string" and "boolean" are permitted but claimed by no subtype.
+    const baseProperty = makeType("BaseProperty", [
+      makeProp("kind", "SimpleTypes", { allowedValues: ["string", "boolean", "array", "object"] }),
+    ], { discriminator: "kind", childTypes: [arrayProperty, objectProperty] });
+
+    const dispatch = lowerType(baseProperty, buildTestRegistry(), new Set(["BaseProperty"])).polymorphicDispatch!;
+
+    // The base absorbs the unclaimed values via its own self-reference.
+    assert.ok(dispatch.defaultVariant, "non-abstract base must keep a self-reference fallback");
+    assert.equal(dispatch.defaultVariant!.isSelfReference, true);
+    assert.equal(dispatch.defaultVariant!.typeName.name, "BaseProperty");
+    assert.deepEqual(dispatch.variants.map(v => v.value), ["array", "object"]);
+
+    // A reachable fallback means backends must not emit reject-before-dispatch validation,
+    // which would make the fallback arm dead code.
+    assert.equal(isClosedPolymorphicDispatch(dispatch), false);
+  });
+
+  // Counterpart to the test above: being non-abstract is not on its own enough. When every
+  // permitted value is claimed by a subtype there is nothing for the base to absorb, so the
+  // dispatch stays genuinely closed and unknown values must still be rejected.
+  it("keeps a non-abstract base closed when every permitted value is claimed", () => {
+    const onlyVariant = makeType("OnlyVariant", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "only" }),
+    ], { base: { namespace: "Test", name: "FullyClaimed" } });
+    const fullyClaimed = makeType("FullyClaimed", [
+      makeProp("kind", "FullyClaimedKind", { allowedValues: ["only"] }),
+    ], { discriminator: "kind", childTypes: [onlyVariant] });
+
+    const dispatch = lowerType(fullyClaimed, buildTestRegistry(), new Set(["FullyClaimed"])).polymorphicDispatch!;
+
+    assert.equal(dispatch.defaultVariant, null);
+    assert.equal(isClosedPolymorphicDispatch(dispatch), true);
+  });
 });
 
 // NamedProp for testing collection hasNameProperty
