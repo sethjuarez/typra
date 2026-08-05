@@ -1720,6 +1720,16 @@ function runGoExecutableConformance() {
     '\tabstractKnown, err := fixtures.LoadFixtureAbstractOpenConnection(map[string]interface{}{"kind": "managed", "label": "known", "resourceId": "res-1"}, loadCtx)',
     "\tif err != nil { panic(err) }",
     '\tif _, ok := abstractKnown.(fixtures.FixtureManagedConnection); !ok { panic("known subtype dispatch on abstract open base regressed") }',
+    // Issue #37: a CLOSED discriminator union is not the same thing as an exhaustive
+    // dispatch. A permitted value that no subtype claims must load as the base type.
+    '\tunclaimed, err := fixtures.LoadFixtureUnclaimedBase(map[string]interface{}{"kind": "plain", "label": "leftover"}, loadCtx)',
+    '\tif err != nil { panic("closed union rejected a permitted but unclaimed discriminator value: " + err.Error()) }',
+    "\tunclaimedValue, ok := unclaimed.(fixtures.FixtureUnclaimedBase)",
+    '\tif !ok { panic("unclaimed discriminator value did not load as the base type") }',
+    '\tif unclaimedValue.Kind != "plain" || unclaimedValue.Label == nil || *unclaimedValue.Label != "leftover" { panic("unclaimed discriminator value lost its payload") }',
+    '\tclaimed, err := fixtures.LoadFixtureUnclaimedBase(map[string]interface{}{"kind": "managed", "label": "known", "resourceId": "res-1"}, loadCtx)',
+    "\tif err != nil { panic(err) }",
+    '\tif _, ok := claimed.(fixtures.FixtureClaimedVariant); !ok { panic("claimed discriminator value stopped dispatching to its subtype") }',
     // Issue #47: a failure inside an array element must carry the element index.
     '\t_, arrayIndexErr := fixtures.LoadFixtureIndexedList(map[string]interface{}{"entries": []interface{}{',
     '\t\tmap[string]interface{}{"label": "first", "detail": map[string]interface{}{"code": "ok"}},',
@@ -1727,6 +1737,35 @@ function runGoExecutableConformance() {
     "\t}}, loadCtx)",
     '\tif arrayIndexErr == nil { panic("missing required field inside an array element was not rejected") }',
     '\tif !strings.Contains(arrayIndexErr.Error(), "entries[1].detail") { panic("array element diagnostic lost the element index: " + arrayIndexErr.Error()) }',
+    // Numeric coercions must match what a real decoder actually produces. encoding/json
+    // yields float64 for EVERY JSON number -- never int, never float32 -- while yaml.v3
+    // yields int for integers and float64 for floats. Feeding Go-native int32/float32
+    // values in directly (as the generated tests do) exercises none of that, which is why
+    // the decoder-native bridging cases could regress without any fixture drift.
+    "\tfor _, numeric := range []struct {",
+    "\t\tname     string",
+    "\t\tencoded  string",
+    "\t\tdecoder  string",
+    "\t\twantType string",
+    "\t}{",
+    '\t\t{"json integer", "7", "json", "fixtures.FixtureIntegerProperty"},',
+    '\t\t{"json fractional", "3.5", "json", "fixtures.FixtureNumberProperty"},',
+    '\t\t{"json integral float", "7.0", "json", "fixtures.FixtureIntegerProperty"},',
+    '\t\t{"yaml integer", "7", "yaml", "fixtures.FixtureIntegerProperty"},',
+    '\t\t{"yaml fractional", "3.5", "yaml", "fixtures.FixtureNumberProperty"},',
+    "\t} {",
+    "\t\tvar decoded interface{}",
+    '\t\tif numeric.decoder == "json" {',
+    "\t\t\tif err := json.Unmarshal([]byte(numeric.encoded), &decoded); err != nil { panic(err) }",
+    "\t\t} else {",
+    "\t\t\tif err := yaml.Unmarshal([]byte(numeric.encoded), &decoded); err != nil { panic(err) }",
+    "\t\t}",
+    "\t\tcoerced, err := fixtures.LoadFixtureProperty(decoded, loadCtx)",
+    '\t\tif err != nil { panic(numeric.name + ": decoder-native numeric coercion failed: " + err.Error()) }',
+    '\t\tif got := fmt.Sprintf("%T", coerced); got != numeric.wantType {',
+    '\t\t\tpanic(numeric.name + ": expected " + numeric.wantType + " but got " + got + " (a bare FixtureProperty means no coercion case matched the decoded type)")',
+    "\t\t}",
+    "\t}",
     '\t_, missingConnectionErr := fixtures.LoadFixtureToolbox(map[string]interface{}{"tools": map[string]interface{}{"custom": map[string]interface{}{"kind": "vendor"}}, "inheritedMapBindingTool": map[string]interface{}{"kind": "function", "name": "map", "command": "run"}, "inheritedListBindingTool": map[string]interface{}{"kind": "function", "name": "list", "command": "run"}}, loadCtx)',
     '\tif missingConnectionErr == nil || !strings.Contains(missingConnectionErr.Error(), "tools.custom.connection") || !strings.Contains(missingConnectionErr.Error(), "missing required field") { panic("missing required CustomTool.connection was not rejected pathfully") }',
     '\tunionProperty, err := fixtures.LoadFixtureProperty(map[string]interface{}{',
@@ -1918,6 +1957,14 @@ function runRustExecutableConformance() {
     "    let known_connection = FixtureConnection::load_from_value(&known_connection_input, &load_ctx);",
     "    assert!(matches!(known_connection.kind, FixtureConnectionKind::FixtureCustomConnection { .. }));",
     "    assert_eq!(known_connection.to_value(&save_ctx), known_connection_input);",
+    // A named open-enum discriminator must round-trip an unrecognized kind losslessly.
+    // (This is adjacent to issue #38 but does not reproduce it — see the fixture doc.)
+    '    let named_open_input = json!({"kind": "vendor-specific", "label": "future", "extra": {"nested": [1, null]}});',
+    "    let named_open = FixtureNamedOpenBase::load_from_value(&named_open_input, &load_ctx);",
+    '    assert_eq!(named_open.kind_str(), "vendor-specific");',
+    "    assert_eq!(named_open.to_value(&save_ctx), named_open_input);",
+    '    let named_open_known = FixtureNamedOpenBase::load_from_value(&json!({"kind": "managed", "label": "known", "resourceId": "res-1"}), &load_ctx);',
+    "    assert!(matches!(named_open_known.kind, FixtureNamedOpenBaseKind::FixtureNamedOpenVariant { .. }));",
     '    let missing_connection_error = FixtureToolbox::from_json(r#"{"tools":{"custom":{"kind":"vendor"}},"inheritedMapBindingTool":{"kind":"function","name":"map","command":"run"},"inheritedListBindingTool":{"kind":"function","name":"list","command":"run"}}"#, &load_ctx).expect_err("missing required CustomTool.connection");',
     "    let missing_connection_diagnostic = missing_connection_error.to_string();",
     '    assert!(missing_connection_diagnostic.contains("tools.custom.connection") && missing_connection_diagnostic.contains("missing required field"), "{missing_connection_diagnostic}");',

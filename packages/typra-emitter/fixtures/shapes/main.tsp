@@ -476,6 +476,50 @@ model FixtureManagedConnection extends FixtureAbstractOpenConnection {
   resourceId: string;
 }
 
+@doc("A non-abstract base over a CLOSED discriminator union that permits a value no subtype claims. The unclaimed value must load as the base type rather than erroring, because a closed union is not the same thing as an exhaustive dispatch. Regression coverage for issue #37.")
+@discriminator("kind")
+model FixtureUnclaimedBase {
+  @sample(#{ kind: "plain" })
+  kind: FixtureUnclaimedKind;
+
+  @sample(#{ label: "unclaimed base" })
+  label?: string;
+}
+
+union FixtureUnclaimedKind {
+  managed: "managed";
+  plain: "plain";
+}
+
+model FixtureClaimedVariant extends FixtureUnclaimedBase {
+  kind: "managed";
+
+  @sample(#{ resourceId: "claimed-resource-1" })
+  resourceId: string;
+}
+
+@doc("A base whose discriminator is a NAMED union admitting arbitrary strings. Locks that an unrecognized kind round-trips losslessly through a named open enum discriminator. NOTE: this does NOT reproduce issue #38 — resolveUnionProperty classifies a union of string literals plus bare string as `scalar`, never `complex`, so the pre-validation branch #38 describes is unreachable from TypeSpec source. See the comment on issue #38.")
+@discriminator("kind")
+model FixtureNamedOpenBase {
+  @sample(#{ kind: "vendor-specific" })
+  kind: FixtureNamedOpenKind;
+
+  @sample(#{ label: "named open base" })
+  label?: string;
+}
+
+union FixtureNamedOpenKind {
+  managed: "managed",
+  open: string,
+}
+
+model FixtureNamedOpenVariant extends FixtureNamedOpenBase {
+  kind: "managed";
+
+  @sample(#{ resourceId: "named-open-resource-1" })
+  resourceId: string;
+}
+
 @@coerce(McpApprovalConfig, string, #{ kind: "{value}" }, "config", "Load an approval config from its kind.", "always");
 model McpApprovalConfig {
   kind: string;
