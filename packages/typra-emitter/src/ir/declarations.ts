@@ -390,7 +390,22 @@ export interface EntryShorthandCase {
   /** Scalar type name from TypeSpec (e.g., "string", "integer", "float32") */
   scalarType: string;
   /** Constant field assignments applied for this scalar type. */
-  assignments: Array<{ fieldName: string; literalValue: string }>;
+  assignments: EntryShorthandAssignment[];
+}
+
+/**
+ * A constant field assignment within an entry-shorthand arm.
+ *
+ * `literalValue` keeps the value's original JSON type rather than stringifying
+ * it, because a schema is free to expand into a non-string constant — for
+ * example `#{ nullable: true, value: "{value}" }`. Emitting every constant as a
+ * quoted string would silently retype such a field.
+ */
+export interface EntryShorthandAssignment {
+  /** Property name (camelCase, as declared in TypeSpec) */
+  fieldName: string;
+  /** Constant value, preserving its declared JSON type. */
+  literalValue: string | number | boolean | null;
 }
 
 export interface CollectionHelperDecl {

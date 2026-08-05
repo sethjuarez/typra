@@ -50,6 +50,13 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import {
+  INTEGRAL_SCALAR_TYPES,
+  FRACTIONAL_SCALAR_TYPES,
+  scalarRuntimeKind,
+  orderedEntryShorthandCases,
+  entryShorthandTarget,
+} from "../../ir/scalar-kinds.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 
@@ -241,12 +248,6 @@ const RUST_TYPE_MAP: Record<string, string> = {
   dictionary: "serde_json::Value",
   array: "Vec<serde_json::Value>",
 };
-
-/** Schema scalar types whose canonical JSON form is a whole number. */
-const INTEGRAL_SCALAR_TYPES = new Set(["integer", "int32", "int64"]);
-
-/** Schema scalar types whose canonical JSON form may carry a fraction. */
-const FRACTIONAL_SCALAR_TYPES = new Set(["float", "float32", "float64", "number", "numeric"]);
 
 /**
  * Emit a complete Rust source file from a FileDecl.
@@ -1503,9 +1504,7 @@ function emitCollectionLoadHelper(
 
   if (helper.hasNameProperty) {
     // Dict format with name keys
-    const shorthandField = helper.entryShorthand?.valueField
-      ?? helper.coercionProperty
-      ?? (helper.innerFields.length > 0 ? helper.innerFields[0] : "value");
+  const shorthandField = entryShorthandTarget(helper);
     lines.push("            serde_json::Value::Object(obj) => {");
     lines.push("                obj.iter()");
     lines.push("                    .map(|(name, value)| {");
@@ -1560,13 +1559,7 @@ function emitEntryShorthandArms(
     return;
   }
 
-  const ordered = [
-    ...shorthand.cases.filter(c => INTEGRAL_SCALAR_TYPES.has(c.scalarType)),
-    ...shorthand.cases.filter(c => FRACTIONAL_SCALAR_TYPES.has(c.scalarType)),
-    ...shorthand.cases.filter(
-      c => !INTEGRAL_SCALAR_TYPES.has(c.scalarType) && !FRACTIONAL_SCALAR_TYPES.has(c.scalarType),
-    ),
-  ];
+  const ordered = orderedEntryShorthandCases(shorthand.cases);
 
   for (const entryCase of ordered) {
     const check = rustScalarValueCheck(entryCase.scalarType);
@@ -1585,11 +1578,13 @@ function emitEntryShorthandArms(
 
 /** serde_json predicate that recognises a JSON token of the given TypeSpec scalar type. */
 function rustScalarValueCheck(scalarType: string): string | null {
-  if (INTEGRAL_SCALAR_TYPES.has(scalarType)) return "is_i64()";
-  if (FRACTIONAL_SCALAR_TYPES.has(scalarType)) return "is_f64()";
-  if (scalarType === "string") return "is_string()";
-  if (scalarType === "boolean") return "is_boolean()";
-  return null;
+  switch (scalarRuntimeKind(scalarType)) {
+    case "integral": return "is_i64()";
+    case "fractional": return "is_f64()";
+    case "string": return "is_string()";
+    case "boolean": return "is_boolean()";
+    default: return null;
+  }
 }
 
 function emitCollectionSaveHelper(

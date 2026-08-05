@@ -33,8 +33,19 @@ import {
   MethodStubDecl,
   WireDecl,
   CollectionHelperDecl,
+  EntryShorthandAssignment,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import {
+  INTEGRAL_SCALAR_TYPES,
+  FRACTIONAL_SCALAR_TYPES,
+  isIntegralScalar,
+  isFractionalScalar,
+  isStringEncodedScalar,
+  isBooleanScalar,
+  orderedEntryShorthandCases,
+  entryShorthandTarget,
+} from "../../ir/scalar-kinds.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
 import { buildGoFieldNames, goFieldName } from "./identifiers.js";
@@ -64,12 +75,6 @@ const NUMERIC_GO_TYPES = new Set(["int", "int32", "int64", "float32", "float64"]
 
 /** Float Go types get an identity case (v = n) in the type switch. */
 const FLOAT_GO_TYPES = new Set(["float32", "float64"]);
-
-/** Schema scalar types whose canonical JSON form is a whole number. */
-const INTEGRAL_SCALAR_TYPES = new Set(["integer", "int32", "int64"]);
-
-/** Schema scalar types whose canonical JSON form may carry a fraction. */
-const FRACTIONAL_SCALAR_TYPES = new Set(["float", "float32", "float64", "number", "numeric"]);
 
 // ============================================================================
 // Main entry point
@@ -122,7 +127,7 @@ export function emitGoFileContent(
     type.load.coercions.some(c => INTEGRAL_SCALAR_TYPES.has(c.scalarType))
     && type.load.coercions.some(c => FRACTIONAL_SCALAR_TYPES.has(c.scalarType))
     && !type.load.coercions.some(c => (GO_TYPE_MAP[c.scalarType] || c.scalarType) === "float64")
-  );
+  ) || types.some(type => type.collectionHelpers.some(entryShorthandNeedsMath));
   if (hasNonProtocol) {
     emitHeader(lines, packageName, group, needsFmt, needsContext, needsNamedCollections, needsMath);
   } else {
@@ -902,7 +907,7 @@ function emitLoadCollectionComplex(
     lines.push("\t\t\t\t\titem, ok := entry.(map[string]interface{})");
     lines.push("\t\t\t\t\tif !ok {");
     lines.push("\t\t\t\t\t\titem = map[string]interface{}{}");
-    lines.push(`\t\t\t\t\t\titem["${helper.coercionProperty ?? helper.innerFields[0] ?? "value"}"] = entry`);
+    emitGoEntryShorthandArms(helper, lines);
     lines.push("\t\t\t\t\t} else {");
     lines.push("\t\t\t\t\t\tcopy := make(map[string]interface{}, len(item)+1)");
     lines.push("\t\t\t\t\t\tfor itemKey, itemValue := range item {");
@@ -984,6 +989,117 @@ function emitSaveMethod(
   lines.push("\treturn result");
   lines.push("}");
   lines.push("");
+}
+
+// ============================================================================
+// Named-collection entry shorthand
+// ============================================================================
+
+/**
+ * True when the emitted shorthand switch will reference `math.Trunc`.
+ *
+ * `encoding/json` decodes every JSON number into `float64`, so a type that can be
+ * either integral or fractional has to reconstruct integrality from the value. A
+ * type with only one numeric kind needs no discrimination and so no `math` import.
+ */
+function entryShorthandNeedsMath(helper: CollectionHelperDecl): boolean {
+  const cases = helper.entryShorthand?.cases ?? [];
+  return cases.some(c => isIntegralScalar(c.scalarType))
+    && cases.some(c => isFractionalScalar(c.scalarType));
+}
+
+/**
+ * Emit the immediate-scalar branch of a name-keyed collection entry.
+ *
+ * With `@entryShorthand` declared, each `@coerce` scalar type contributes a type
+ * switch case that applies that coercion's constant assignments (typically the
+ * discriminator) and routes the raw scalar to the declared value field. Without it,
+ * this falls back to the historical single-field assignment.
+ *
+ * `float64` carries both JSON numeric kinds, so when the declaration admits both
+ * integral and fractional scalars that case discriminates with `math.Trunc` — the
+ * same bridge the direct-coercion path uses, and for the same decoder reason.
+ * `math.Trunc` is preferred over `float64(int64(v))` because the latter is
+ * undefined for magnitudes at or above 2^63.
+ */
+function emitGoEntryShorthandArms(helper: CollectionHelperDecl, lines: string[]): void {
+  const shorthand = helper.entryShorthand;
+  const indent = "\t\t\t\t\t\t";
+
+  if (!shorthand || shorthand.cases.length === 0) {
+    lines.push(`${indent}item["${entryShorthandTarget(helper)}"] = entry`);
+    return;
+  }
+
+  const ordered = orderedEntryShorthandCases(shorthand.cases);
+  const integral = ordered.find(c => isIntegralScalar(c.scalarType));
+  const fractional = ordered.find(c => isFractionalScalar(c.scalarType));
+
+  const assignConstants = (
+    entryCase: { assignments: EntryShorthandAssignment[] },
+    depth: string,
+  ) => {
+    for (const a of entryCase.assignments) {
+      lines.push(`${depth}item["${a.fieldName}"] = ${goLiteral(a.literalValue)}`);
+    }
+  };
+
+  lines.push(`${indent}switch shorthandValue := entry.(type) {`);
+
+  // yaml.v3 decodes whole numbers as int, so the integral case needs a native arm.
+  if (integral) {
+    lines.push(`${indent}case int, int32, int64:`);
+    assignConstants(integral, `${indent}\t`);
+    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+  }
+
+  if (integral && fractional) {
+    lines.push(`${indent}case float64:`);
+    lines.push(`${indent}\tif shorthandValue == math.Trunc(shorthandValue) {`);
+    assignConstants(integral, `${indent}\t\t`);
+    lines.push(`${indent}\t} else {`);
+    assignConstants(fractional, `${indent}\t\t`);
+    lines.push(`${indent}\t}`);
+    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+  } else if (fractional) {
+    lines.push(`${indent}case float32, float64:`);
+    assignConstants(fractional, `${indent}\t`);
+    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+  }
+
+  for (const entryCase of ordered) {
+    if (isIntegralScalar(entryCase.scalarType) || isFractionalScalar(entryCase.scalarType)) continue;
+    const goCase = goScalarSwitchCase(entryCase.scalarType);
+    if (!goCase) continue;
+    lines.push(`${indent}case ${goCase}:`);
+    assignConstants(entryCase, `${indent}\t`);
+    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+  }
+
+  lines.push(`${indent}default:`);
+  lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+  lines.push(`${indent}}`);
+}
+
+/** Go type-switch case matching a decoded value of the given non-numeric TypeSpec scalar. */
+function goScalarSwitchCase(scalarType: string): string | null {
+  if (isStringEncodedScalar(scalarType)) return "string";
+  if (isBooleanScalar(scalarType)) return "bool";
+  return null;
+}
+
+/**
+ * Render a coercion constant as a Go literal, preserving its declared JSON type.
+ *
+ * The target is `map[string]interface{}`, so an untyped constant of any kind is
+ * assignable. Stringifying everything here would retype a schema that expands
+ * into a boolean or numeric constant.
+ */
+function goLiteral(value: string | number | boolean | null): string {
+  if (value === null) return "nil";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  return JSON.stringify(value);
 }
 
 // ============================================================================

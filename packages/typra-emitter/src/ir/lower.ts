@@ -451,7 +451,10 @@ function lowerEntryShorthand(node: TypeNode): EntryShorthandDecl | null {
     scalarType: coercion.scalar,
     assignments: Object.entries(coercion.expansion)
       .filter(([, value]) => value !== "{value}")
-      .map(([fieldName, value]) => ({ fieldName, literalValue: String(value) })),
+      .map(([fieldName, value]) => ({
+        fieldName,
+        literalValue: value as string | number | boolean | null,
+      })),
   }));
 
   return { valueField, cases };

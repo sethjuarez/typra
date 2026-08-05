@@ -36,6 +36,13 @@ import {
   MethodStubDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import {
+  orderedEntryShorthandCases,
+  isIntegralScalar,
+  isFractionalScalar,
+  isStringEncodedScalar,
+  isBooleanScalar,
+} from "../../ir/scalar-kinds.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
 import { csharpIdentifier } from "./identifiers.js";
@@ -757,7 +764,9 @@ function emitCollectionLoadHelper(
   // Determine primary property for scalar shorthand in dict format
   const elemTypeDecl = findType(elemType);
   let primaryProp: string | null = null;
-  if (elemTypeDecl?.coercionProperty) {
+  if (helper.entryShorthand?.valueField) {
+    primaryProp = helper.entryShorthand.valueField;
+  } else if (elemTypeDecl?.coercionProperty) {
     primaryProp = elemTypeDecl.coercionProperty;
   } else if (helper.innerFields.length > 0) {
     primaryProp = helper.innerFields[0];
@@ -793,12 +802,13 @@ function emitCollectionLoadHelper(
   lines.push("                }");
   lines.push("                else");
   lines.push("                {");
-  lines.push("                    // Value is a scalar, use it as the primary property");
+  lines.push("                    // Value is a scalar, infer the entry shape from its runtime type");
   lines.push("                    var newDict = new Dictionary<string, object?>");
   lines.push("                    {");
   lines.push('                        ["name"] = kvp.Key,');
   lines.push(`                        ["${primaryProp || ""}"] = kvp.Value`);
   lines.push("                    };");
+  emitCsEntryShorthandArms(helper, lines);
   lines.push(`                    result.Add(${elemType}.Load(newDict, context?.At(kvp.Key)));`);
   lines.push("                }");
   lines.push("            }");
@@ -1126,6 +1136,62 @@ function getSaveExpression(assign: SaveAssignment, propName: string): string {
 // ============================================================================
 // Collection Save Helper
 // ============================================================================
+
+/**
+ * Emit the constant assignments that accompany an immediate-scalar collection entry.
+ *
+ * The scalar itself is already written into the dictionary against the declared
+ * value field; these arms add the coercion's constants (typically the
+ * discriminator) inferred from the scalar's runtime type. Without an
+ * `@entryShorthand` declaration nothing is emitted and behaviour is unchanged.
+ */
+function emitCsEntryShorthandArms(helper: CollectionHelperDecl, lines: string[]): void {
+  const shorthand = helper.entryShorthand;
+  if (!shorthand || shorthand.cases.length === 0) return;
+
+  const indent = "                    ";
+  let first = true;
+  for (const entryCase of orderedEntryShorthandCases(shorthand.cases)) {
+    const check = csScalarValueCheck(entryCase.scalarType);
+    if (!check) continue;
+    lines.push(`${indent}${first ? "if" : "else if"} (${check})`);
+    lines.push(`${indent}{`);
+    for (const a of entryCase.assignments) {
+      lines.push(`${indent}    newDict["${a.fieldName}"] = ${csLiteral(a.literalValue)};`);
+    }
+    lines.push(`${indent}}`);
+    first = false;
+  }
+}
+
+/**
+ * Pattern matching a boxed value of the given TypeSpec scalar.
+ *
+ * `bool` is listed before the numeric patterns by `orderedEntryShorthandCases`
+ * only incidentally; each pattern here is already mutually exclusive because C#
+ * type patterns match the boxed runtime type exactly rather than by conversion.
+ */
+function csScalarValueCheck(scalarType: string): string | null {
+  if (isIntegralScalar(scalarType)) return "kvp.Value is int or long or short or byte";
+  if (isFractionalScalar(scalarType)) return "kvp.Value is double or float or decimal";
+  if (isStringEncodedScalar(scalarType)) return "kvp.Value is string";
+  if (isBooleanScalar(scalarType)) return "kvp.Value is bool";
+  return null;
+}
+
+/**
+ * Render a coercion constant as a C# literal, preserving its declared JSON type.
+ *
+ * The dictionary is `object?`, so a boxed literal of any kind is assignable.
+ * Stringifying every constant would retype a schema expanding into a boolean or
+ * numeric value.
+ */
+function csLiteral(value: string | number | boolean | null): string {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  return JSON.stringify(value);
+}
 
 function emitCollectionSaveHelper(helper: CollectionHelperDecl, lines: string[]): void {
   const propName = toPascalCase(helper.propertyName);
