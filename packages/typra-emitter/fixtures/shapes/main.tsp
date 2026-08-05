@@ -372,6 +372,28 @@ model FixtureOmit {
   owners?: FixtureOwner[];
 }
 
+@doc("Locks that a required complex field carrying no @sample of its own still appears in generated sample payloads. The emitters' required-complex validation rejects a payload that omits such a field, so omitting it makes a generated test unable to pass its own generated validation.")
+model FixtureRequiredComplexSample {
+  @sample(#{ label: "required-complex" })
+  @doc("Sampled scalar; at least one sampled property is needed for any example to be generated.")
+  label: string;
+
+  @doc("Required complex field with no @sample → its payload is synthesized from the target type's own samples.")
+  detail: FixtureRequiredComplexDetail;
+
+  @doc("Optional complex field with no @sample → stays absent, since nothing rejects an omitted optional.")
+  optionalDetail?: FixtureRequiredComplexDetail;
+}
+
+@doc("Target of the unsampled required reference above; its own samples are what the synthesized payload is built from.")
+model FixtureRequiredComplexDetail {
+  @sample(#{ code: "detail-code" })
+  code: string;
+
+  @sample(#{ retries: 2 })
+  retries?: int32;
+}
+
 model FixtureOptionalDefaults {
   mode?: string = "auto";
 }
