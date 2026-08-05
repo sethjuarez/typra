@@ -579,6 +579,15 @@ model FixtureArrayProperty extends FixtureProperty {
 
   @sample(#{ items: #{ kind: "string", name: "item", required: true } })
   items: FixtureProperty;
+
+  // A union of a polymorphic base and its `Named<>` wrapper has no generated
+  // counterpart in any backend, so it is carried as a raw JSON value. Declaring
+  // it optional is the case that regressed: the declaration site dropped the
+  // optionality that the load and save sites both honoured, so the generated
+  // Rust failed to compile. Keep `items` required above so both branches stay
+  // covered by the fixture gate.
+  @sample(#{ fallbackItems: #{ kind: "string" } })
+  fallbackItems?: FixtureProperty | Named<FixtureProperty>;
 }
 
 model FixtureObjectProperty extends FixtureProperty {

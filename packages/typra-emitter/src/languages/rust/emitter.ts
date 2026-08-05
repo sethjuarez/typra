@@ -428,7 +428,7 @@ function emitKindEnum(
         if (field.description) {
           emitDocComment(field.description, "        ", lines);
         }
-        lines.push(`        ${rustFieldName(field.name)}: ${fieldType(field, polymorphicTypeNames)},`);
+        lines.push(`        ${rustFieldName(field.name)}: ${fieldType(field, polymorphicTypeNames, true)},`);
       }
       lines.push(`    },`);
     }
@@ -466,7 +466,7 @@ function emitKindEnum(
         if (field.description) {
           emitDocComment(field.description, "        ", lines);
         }
-        lines.push(`        ${rustFieldName(field.name)}: ${fieldType(field, polymorphicTypeNames)},`);
+        lines.push(`        ${rustFieldName(field.name)}: ${fieldType(field, polymorphicTypeNames, true)},`);
       }
       lines.push(`        /// The raw \`${dispatch.discriminatorField}\` string for this unknown variant.`);
       lines.push(`        ${toSnakeCase(dispatch.discriminatorField)}_name: String,`);
@@ -1786,7 +1786,20 @@ function emitProtocolTrait(type: TypeDecl, lines: string[]): void {
 // Field type rendering
 // ============================================================================
 
-function fieldType(field: FieldDecl, polymorphicTypeNames: Set<string>): string {
+/**
+ * A `complex` field whose declared type has no generated Rust counterpart —
+ * a polymorphic base (carried as raw JSON so subtype data survives) or the
+ * `unknown` placeholder. These are represented as `serde_json::Value`.
+ */
+function isValueBackedComplex(typeName: string, polymorphicTypeNames: Set<string>): boolean {
+  return polymorphicTypeNames.has(typeName) || typeName === "unknown";
+}
+
+function fieldType(
+  field: FieldDecl,
+  polymorphicTypeNames: Set<string>,
+  inVariant: boolean = false,
+): string {
   // Named enum field — use the enum type
   if (field.enumName && field.allowedValues.length > 0) {
     return field.isOptional ? `Option<${field.enumName}>` : field.enumName;
@@ -1804,10 +1817,16 @@ function fieldType(field: FieldDecl, polymorphicTypeNames: Set<string>): string 
       return field.isOptional ? `Option<${rustType}>` : rustType;
     }
     case "complex": {
-      // Polymorphic references and "unknown" become serde_json::Value
-      // Always non-optional — Value::Null serves as the "absent" sentinel
-      if (polymorphicTypeNames.has(cat.typeName) || cat.typeName === "unknown") {
-        return "serde_json::Value";
+      // Polymorphic references and "unknown" have no generated Rust type of their
+      // own, so they are carried as serde_json::Value.
+      //
+      // Struct fields keep Value::Null as the "absent" sentinel, which is a stable
+      // part of the generated API. Enum variant fields cannot: their load and save
+      // paths construct and match an Option (a variant field is moved out of the
+      // enum, so there is no place to put a Null default), so an optional one must
+      // be declared Option<Value> or the generated crate fails to compile (E0308).
+      if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
+        return inVariant && field.isOptional ? "Option<serde_json::Value>" : "serde_json::Value";
       }
       return field.isOptional ? `Option<${cat.typeName}>` : cat.typeName;
     }
@@ -1860,8 +1879,8 @@ function fieldDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): stri
       return "Default::default()";
     }
     case "complex": {
-      // Polymorphic refs are always serde_json::Value, Null is the "absent" sentinel
-      if (polymorphicTypeNames.has(cat.typeName)) return "serde_json::Value::Null";
+      // Struct fields keep Value::Null as the "absent" sentinel (see fieldType).
+      if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) return "serde_json::Value::Null";
       return field.isOptional ? "None" : "Default::default()";
     }
     case "collection_scalar":
@@ -1894,8 +1913,8 @@ function loadExpr(a: LoadAssignment, polymorphicTypeNames: Set<string>): string 
     case "scalar":
       return scalarLoadExpr(key, cat.scalarType, a.isOptional);
     case "complex": {
-      if (polymorphicTypeNames.has(cat.typeName)) {
-        // Polymorphic ref → always serde_json::Value, Null is the "absent" sentinel
+      if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
+        // Struct fields keep Value::Null as the "absent" sentinel (see fieldType).
         return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
       }
       if (a.isOptional) {
@@ -2010,7 +2029,7 @@ function variantLoadExpr(
     case "scalar":
       return scalarLoadExpr(key, cat.scalarType, field.isOptional);
     case "complex": {
-      if (polymorphicTypeNames.has(cat.typeName)) {
+      if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
         return field.isOptional
           ? `value.get("${key}").cloned()`
           : `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
@@ -2071,8 +2090,8 @@ function emitSaveField(
       emitScalarSave(key, fieldRef, cat.scalarType, a.isOptional, lines, indent);
       return;
     case "complex": {
-      if (polymorphicTypeNames.has(cat.typeName)) {
-        // Polymorphic ref → always serde_json::Value, check .is_null()
+      if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
+        // Struct fields keep Value::Null as the "absent" sentinel (see fieldType).
         lines.push(`${indent}if !${fieldRef}.is_null() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
         lines.push(`${indent}}`);
@@ -2242,7 +2261,7 @@ function emitVariantSaveField(
       emitVariantScalarSave(key, fieldRef, cat.scalarType, field.isOptional, lines, indent);
       return;
     case "complex": {
-      if (polymorphicTypeNames.has(cat.typeName)) {
+      if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
         if (field.isOptional) {
           lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), val.clone());`);
