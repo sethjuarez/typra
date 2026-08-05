@@ -366,6 +366,8 @@ export interface CollectionHelperDecl {
   elementTypeName: TypeName;
   /** Field names on the element type (excluding "name" — used for shorthand detection) */
   innerFields: string[];
+  /** Element field populated by scalar @coerce shorthand, when declared. */
+  coercionProperty?: string | null;
   /** Whether the schema explicitly opts into a name-keyed map via Record<T> | Named<T>[] */
   hasNameProperty: boolean;
 }

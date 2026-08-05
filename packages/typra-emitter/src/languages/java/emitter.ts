@@ -159,6 +159,9 @@ function emitType(
   for (const field of type.fields.filter(field => !inheritedFields.has(field.name))) {
     lines.push(`  public ${javaFieldType(field, polymorphicTypeNames)} ${javaPropertyName(field.name)}${javaDefault(field, polymorphicTypeNames)};`);
   }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("  private Map<String, Object> rawPayload;");
+  }
   lines.push("");
   const inheritedDefaults = type.fields.filter(field =>
     inheritedFields.has(field.name) &&
@@ -201,6 +204,9 @@ function emitType(
     emitMethodDelegation(typeName, method, lines);
   }
   emitClassHelpers(lines);
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    emitRawPayloadHelpers(lines);
+  }
 
   lines.push("}");
   lines.push("");
@@ -243,6 +249,14 @@ function emitLoad(
   lines.push(`      return ctx.processOutput(new ${typeName}());`);
   lines.push("    }");
   lines.push(`    ${typeName} result = new ${typeName}();`);
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push(`    if (map.get("${escapeJava(type.polymorphicDispatch.discriminatorField)}") instanceof String) {`);
+    lines.push("      result.rawPayload = cloneRawMap(map);");
+    for (const assignment of type.load.assignments) {
+      lines.push(`      result.rawPayload.remove("${escapeJava(assignment.sourceName)}");`);
+    }
+    lines.push("    }");
+  }
   lines.push(`    ${typeName}.loadBaseInto(result, map, ctx);`);
   lines.push("    return ctx.processOutput(result);");
   lines.push("  }");
@@ -442,7 +456,11 @@ function emitSave(
   lines.push("  public Map<String, Object> save(SaveContext context) {");
   lines.push("    SaveContext ctx = context == null ? new SaveContext() : context;");
   lines.push(`    ${javaTypeName(type.typeName.name)} obj = ctx.processObject(this);`);
-  lines.push("    Map<String, Object> result = new LinkedHashMap<>();");
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("    Map<String, Object> result = obj.rawPayload == null ? new LinkedHashMap<>() : cloneRawMap(obj.rawPayload);");
+  } else {
+    lines.push("    Map<String, Object> result = new LinkedHashMap<>();");
+  }
   lines.push("    obj.saveFields(result, ctx);");
   lines.push("    return ctx.processDict(result);");
   lines.push("  }");
@@ -550,6 +568,27 @@ function emitClassHelpers(lines: string[]): void {
   lines.push("");
   lines.push("  private static Object serializeScalar(Object value) {");
   lines.push("    if (value instanceof Enum<?> e) return e.name().toLowerCase().replace(\"_\", \"-\");");
+  lines.push("    return value;");
+  lines.push("  }");
+  lines.push("");
+}
+
+function emitRawPayloadHelpers(lines: string[]): void {
+  lines.push("  private static Map<String, Object> cloneRawMap(Map<?, ?> source) {");
+  lines.push("    Map<String, Object> result = new LinkedHashMap<>();");
+  lines.push("    for (Map.Entry<?, ?> entry : source.entrySet()) {");
+  lines.push("      result.put(String.valueOf(entry.getKey()), cloneRawValue(entry.getValue()));");
+  lines.push("    }");
+  lines.push("    return result;");
+  lines.push("  }");
+  lines.push("");
+  lines.push("  private static Object cloneRawValue(Object value) {");
+  lines.push("    if (value instanceof Map<?, ?> map) return cloneRawMap(map);");
+  lines.push("    if (value instanceof Iterable<?> values) {");
+  lines.push("      List<Object> result = new ArrayList<>();");
+  lines.push("      for (Object item : values) result.add(cloneRawValue(item));");
+  lines.push("      return result;");
+  lines.push("    }");
   lines.push("    return value;");
   lines.push("  }");
   lines.push("");

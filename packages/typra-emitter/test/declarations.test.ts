@@ -783,7 +783,10 @@ describe("lowerFile", () => {
       const binding = makeType("Binding", [
         makeProp("name", "string", { isScalar: true, isOptional: true }),
         makeProp("input", "string", { isScalar: true }),
-      ]);
+        makeProp("source", "string", { isScalar: true }),
+      ], {
+        coercions: [{ scalar: "string", expansion: { source: "{value}" } }],
+      });
       const tool = makeType("Tool", [
         makeProp("kind", "string", { isScalar: true }),
         makeProp("bindings", "Binding", {
@@ -813,6 +816,10 @@ describe("lowerFile", () => {
       assert.match(code, /if named, ok := val\.\(map\[string\]interface\{\}\); ok \{/);
       assert.match(code, /sort\.Strings\(keys\)/);
       assert.match(code, /item\["name"\] = key/);
+      assert.match(code, /item\["source"\] = entry/);
+      assert.doesNotMatch(code, /item\["value"\] = entry/);
+      assert.match(code, /if \(ctx == nil \|\| ctx\.UseShorthand\) && len\(copy\) == 1 \{/);
+      assert.match(code, /objectItems\[name\] = shorthand/);
     });
   });
 

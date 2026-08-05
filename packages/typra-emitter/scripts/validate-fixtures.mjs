@@ -788,10 +788,45 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
   }
 
   func testUnknownConnectionDiscriminatorIsLossless() throws {
-    let input: [String: Any] = ["kind": "future", "endpoint": "https://future.test"]
+    let input: [String: Any] = [
+      "kind": "future-auth",
+      "name": "future",
+      "config": ["nested": [1, NSNull(), ["enabled": true]]],
+      "nullable": NSNull(),
+    ]
     let output = try FixtureConnection.load(input).save()
-    XCTAssertEqual(output["kind"] as? String, "future")
-    XCTAssertEqual(output["endpoint"] as? String, "https://future.test")
+    XCTAssertEqual(output["kind"] as? String, "future-auth")
+    XCTAssertEqual(output["name"] as? String, "future")
+    XCTAssertTrue(output["nullable"] is NSNull)
+    let nested = (output["config"] as? [String: Any])?["nested"] as? [Any]
+    XCTAssertEqual(nested?[0] as? Int, 1)
+    XCTAssertTrue(nested?[1] is NSNull)
+    XCTAssertEqual((nested?[2] as? [String: Any])?["enabled"] as? Bool, true)
+
+    let reloaded = try FixtureConnection.load(output).save()
+    XCTAssertEqual(reloaded["kind"] as? String, "future-auth")
+    XCTAssertEqual(((reloaded["config"] as? [String: Any])?["nested"] as? [Any])?.count, 3)
+
+    let caseCollision = try FixtureConnection.load([
+      "kind": "Custom",
+      "name": "case-sensitive-unknown",
+      "payload": ["mode": "future"],
+    ])
+    guard case .unknown(let casePayload) = caseCollision else {
+      throw TypraRuntimeError.unsupported("Expected wrong-case Connection to remain unknown")
+    }
+    XCTAssertEqual(casePayload["kind"] as? String, "Custom")
+    XCTAssertEqual((casePayload["payload"] as? [String: Any])?["mode"] as? String, "future")
+
+    let known = try FixtureConnection.load([
+      "kind": "custom",
+      "name": "known",
+      "endpoint": "https://example.test",
+    ])
+    guard case .fixtureCustomConnection(let custom) = known else {
+      throw TypraRuntimeError.unsupported("Expected exact Connection discriminator to dispatch")
+    }
+    XCTAssertEqual(custom.endpoint, "https://example.test")
   }
 
   func testNamedCollectionsUseLosslessFallbackAndRejectNestedArrays() throws {
@@ -1639,12 +1674,23 @@ function runGoExecutableConformance() {
     '\tduplicateNamed, err := fixtures.LoadFixtureNamedPayloadCollection(map[string]interface{}{"items": []interface{}{map[string]interface{}{"name": "dup", "payload": 1}, map[string]interface{}{"name": "dup", "payload": 2}}}, loadCtx)',
     "\tif err != nil { panic(err) }",
     '\tif values, ok := duplicateNamed.Save(saveCtx)["items"].([]interface{}); !ok || len(values) != 2 { panic("duplicate named collection lost entries") }',
-    '\tfunctionTool, err := fixtures.LoadFixtureFunctionTool(map[string]interface{}{"kind": "function", "name": "convert", "command": "convert", "bindings": map[string]interface{}{"unit": map[string]interface{}{"source": "preferred_unit"}}}, loadCtx)',
+    '\tfunctionBindingInput := map[string]interface{}{"source": "preferred_unit"}',
+    '\tfunctionToolFromMap, err := fixtures.LoadFixtureFunctionTool(map[string]interface{}{"kind": "function", "name": "convert", "command": "convert", "bindings": map[string]interface{}{"unit": functionBindingInput}}, loadCtx)',
     "\tif err != nil { panic(err) }",
-    '\tif len(functionTool.Bindings) != 1 || functionTool.Bindings[0].Name == nil || *functionTool.Bindings[0].Name != "unit" || functionTool.Bindings[0].Source != "preferred_unit" { panic("direct derived loader lost named-map bindings") }',
-    '\tfunctionToolReloaded, err := fixtures.LoadFixtureFunctionTool(functionTool.Save(saveCtx), loadCtx)',
-    "\tif err != nil { panic(err) }",
-    '\tif len(functionToolReloaded.Bindings) != 1 || functionToolReloaded.Bindings[0].Name == nil || *functionToolReloaded.Bindings[0].Name != "unit" || functionToolReloaded.Bindings[0].Source != "preferred_unit" { panic("direct derived named-map bindings did not survive reload") }',
+    '\tif len(functionToolFromMap.Bindings) != 1 || functionToolFromMap.Bindings[0].Name == nil || *functionToolFromMap.Bindings[0].Name != "unit" || functionToolFromMap.Bindings[0].Source != "preferred_unit" { panic("direct derived loader lost named-map bindings") }',
+    '\tif _, mutated := functionBindingInput["name"]; mutated { panic("named-map load mutated its input binding") }',
+    '\tfor _, bindingKey := range []string{"unit", "unitMUT"} {',
+    '\t\tbindingSource := "preferred_" + bindingKey',
+    '\t\tfunctionTool, err := fixtures.LoadFixtureFunctionTool(map[string]interface{}{"kind": "function", "name": "convert", "command": "convert", "bindings": map[string]interface{}{bindingKey: bindingSource}}, loadCtx)',
+    "\t\tif err != nil { panic(err) }",
+    '\t\tif len(functionTool.Bindings) != 1 || functionTool.Bindings[0].Name == nil || *functionTool.Bindings[0].Name != bindingKey || functionTool.Bindings[0].Source != bindingSource { panic("direct derived loader lost named scalar bindings") }',
+    '\t\tfunctionToolSaved := functionTool.Save(saveCtx)',
+    '\t\tbindings, ok := functionToolSaved["bindings"].(map[string]interface{})',
+    '\t\tif !ok || bindings[bindingKey] != bindingSource { panic("named scalar bindings did not save canonically") }',
+    '\t\tfunctionToolReloaded, err := fixtures.LoadFixtureFunctionTool(functionToolSaved, loadCtx)',
+    "\t\tif err != nil { panic(err) }",
+    '\t\tif len(functionToolReloaded.Bindings) != 1 || functionToolReloaded.Bindings[0].Name == nil || *functionToolReloaded.Bindings[0].Name != bindingKey || functionToolReloaded.Bindings[0].Source != bindingSource { panic("direct derived named scalar bindings did not survive reload") }',
+    "\t}",
     '\tarrayCtx := fixtures.NewSaveContext()',
     '\tarrayCtx.CollectionFormat = fixtures.CollectionFormatArray',
     '\tif _, ok := uniqueNamed.Save(arrayCtx)["items"].([]interface{}); !ok { panic("explicit array format was ignored") }',
@@ -2054,11 +2100,19 @@ function runCSharpExecutableConformance() {
     'var duplicateNamed = FixtureNamedPayloadCollection.FromJson("""{"items":[{"name":"dup","payload":1},{"name":"dup","payload":2}]}""");',
     'if (duplicateNamed.Save()["items"] is not IList<Dictionary<string, object?>> duplicateItems || duplicateItems.Count != 2) throw new InvalidOperationException("duplicate named collection lost entries");',
     'var functionBindingInput = new Dictionary<string, object?> { ["source"] = "preferred_unit" };',
-    'var functionTool = FixtureFunctionTool.Load(new Dictionary<string, object?> { ["kind"] = "function", ["name"] = "convert", ["command"] = "convert", ["bindings"] = new Dictionary<string, object?> { ["unit"] = functionBindingInput } });',
-    'if (functionTool.Bindings is not { Count: 1 } || functionTool.Bindings[0].Name != "unit" || functionTool.Bindings[0].Source != "preferred_unit") throw new InvalidOperationException("direct derived loader lost named-map bindings");',
+    'var functionToolFromMap = FixtureFunctionTool.Load(new Dictionary<string, object?> { ["kind"] = "function", ["name"] = "convert", ["command"] = "convert", ["bindings"] = new Dictionary<string, object?> { ["unit"] = functionBindingInput } });',
+    'if (functionToolFromMap.Bindings is not { Count: 1 } || functionToolFromMap.Bindings[0].Name != "unit" || functionToolFromMap.Bindings[0].Source != "preferred_unit") throw new InvalidOperationException("direct derived loader lost named-map bindings");',
     'if (functionBindingInput.ContainsKey("name")) throw new InvalidOperationException("named-map load mutated its input binding");',
-    'var functionToolReloaded = FixtureFunctionTool.Load(functionTool.Save());',
-    'if (functionToolReloaded.Bindings is not { Count: 1 } || functionToolReloaded.Bindings[0].Name != "unit" || functionToolReloaded.Bindings[0].Source != "preferred_unit") throw new InvalidOperationException("direct derived named-map bindings did not survive reload");',
+    'foreach (var bindingKey in new[] { "unit", "unitMUT" })',
+    "{",
+    '    var bindingSource = $"preferred_{bindingKey}";',
+    '    var functionTool = FixtureFunctionTool.Load(new Dictionary<string, object?> { ["kind"] = "function", ["name"] = "convert", ["command"] = "convert", ["bindings"] = new Dictionary<string, object?> { [bindingKey] = bindingSource } });',
+    '    if (functionTool.Bindings is not { Count: 1 } || functionTool.Bindings[0].Name != bindingKey || functionTool.Bindings[0].Source != bindingSource) throw new InvalidOperationException("direct derived loader lost named scalar bindings");',
+    "    var functionToolSaved = functionTool.Save();",
+    '    if (functionToolSaved["bindings"] is not IDictionary<string, object?> bindings || !Equals(bindings[bindingKey], bindingSource)) throw new InvalidOperationException("named scalar bindings did not save canonically");',
+    "    var functionToolReloaded = FixtureFunctionTool.Load(functionToolSaved);",
+    '    if (functionToolReloaded.Bindings is not { Count: 1 } || functionToolReloaded.Bindings[0].Name != bindingKey || functionToolReloaded.Bindings[0].Source != bindingSource) throw new InvalidOperationException("direct derived named scalar bindings did not survive reload");',
+    "}",
     'var yamlFunctionTool = FixtureFunctionTool.FromYaml("""',
     "kind: function",
     "name: convert",
@@ -2179,6 +2233,28 @@ function runJavaExecutableConformance() {
     '        require(error.getMessage().contains("kind") && error.getMessage().contains(invalidKind), "closed discriminator error must preserve exact value");',
     "      }",
     "    }",
+    "    Map<String, Object> unknownConfig = new LinkedHashMap<>();",
+    '    unknownConfig.put("nested", new java.util.ArrayList<>(java.util.Arrays.asList(1, null, Map.of("enabled", true))));',
+    "    Map<String, Object> unknownConnectionInput = new LinkedHashMap<>();",
+    '    unknownConnectionInput.put("kind", "future-auth");',
+    '    unknownConnectionInput.put("name", "future");',
+    '    unknownConnectionInput.put("config", unknownConfig);',
+    '    unknownConnectionInput.put("nullable", null);',
+    "    FixtureConnection unknownConnection = FixtureConnection.load(unknownConnectionInput, new LoadContext());",
+    '    ((List<Object>) unknownConfig.get("nested")).set(0, 999);',
+    '    unknownConnection.kind = "future-auth-mutated";',
+    "    Map<String, Object> unknownConnectionSaved = unknownConnection.save(new SaveContext());",
+    '    require("future-auth-mutated".equals(unknownConnectionSaved.get("kind")) && "future".equals(unknownConnectionSaved.get("name")) && unknownConnectionSaved.containsKey("nullable") && unknownConnectionSaved.get("nullable") == null, "unknown connection modeled/null payload changed");',
+    '    require(((List<?>) ((Map<?, ?>) unknownConnectionSaved.get("config")).get("nested")).get(0).equals(1), "unknown connection raw payload aliased load input");',
+    '    ((List<Object>) ((Map<?, ?>) unknownConnectionSaved.get("config")).get("nested")).set(0, 777);',
+    "    Map<String, Object> unknownConnectionSavedAgain = unknownConnection.save(new SaveContext());",
+    '    require(((List<?>) ((Map<?, ?>) unknownConnectionSavedAgain.get("config")).get("nested")).get(0).equals(1), "unknown connection raw payload aliased save output");',
+    '    require(FixtureConnection.load(unknownConnectionSavedAgain, new LoadContext()).save(new SaveContext()).equals(unknownConnectionSavedAgain), "unknown connection payload did not survive load-save-reload");',
+    '    Map<String, Object> caseCollisionInput = new LinkedHashMap<>(Map.of("kind", "Custom", "name", "case-sensitive-unknown", "payload", Map.of("mode", "future")));',
+    "    FixtureConnection caseCollision = FixtureConnection.load(caseCollisionInput, new LoadContext());",
+    '    require(caseCollision.getClass() == FixtureConnection.class && caseCollision.save(new SaveContext()).equals(caseCollisionInput), "wrong-case connection discriminator did not remain unknown");',
+    '    FixtureConnection knownConnection = FixtureConnection.load(Map.of("kind", "custom", "name", "known", "endpoint", "https://example.test"), new LoadContext());',
+    '    require(knownConnection instanceof FixtureCustomConnection && "https://example.test".equals(knownConnection.save(new SaveContext()).get("endpoint")), "known connection dispatch regressed");',
     "    WireOptions wire = WireOptions.load(wireData, new LoadContext());",
     '    FixtureReference reference = FixtureReference.fromYaml("\\"ref-coerced\\"");',
     "    FixtureRoot reloadedRoot = FixtureRoot.fromYaml(root.toYaml());",

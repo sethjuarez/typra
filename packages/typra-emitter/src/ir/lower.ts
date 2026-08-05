@@ -404,6 +404,7 @@ function lowerCollectionHelpers(node: TypeNode, registry: TypeRegistry): Collect
         propertyName: p.name,
         elementTypeName: p.typeName,
         innerFields: elementType?.properties.filter(t => t.name !== "name").map(t => t.name) || [],
+        coercionProperty: elementType ? findCoercionProperty(elementType) : null,
         hasNameProperty,
       };
     });

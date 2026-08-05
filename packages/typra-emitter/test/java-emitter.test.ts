@@ -518,6 +518,39 @@ describe("Java emitter runtime semantics", () => {
       assert.doesNotMatch(source, /toLowerCase\(java\.util\.Locale\.ROOT\)/);
     });
 
+    it("preserves unmodeled payload for self-referential open defaults", () => {
+      const base = typeDecl([]);
+      base.typeName = { namespace: "Test", name: "Connection" };
+      base.fields = [
+        field("kind", "string"),
+        field("name", "string", { isOptional: true }),
+      ];
+      addAssignments(base);
+      base.polymorphicDispatch = {
+        discriminatorField: "kind",
+        variants: [{
+          value: "custom",
+          typeName: { namespace: "Test", name: "CustomConnection" },
+        }],
+        defaultVariant: {
+          typeName: base.typeName,
+          isSelfReference: true,
+        },
+        isAbstract: false,
+        isClosed: false,
+      };
+
+      const source = emitJavaFileContent([base], "test", new JavaExprVisitor(), new Set(["Connection"]));
+
+      assert.match(source, /private Map<String, Object> rawPayload;/);
+      assert.match(source, /result\.rawPayload = cloneRawMap\(map\);/);
+      assert.match(source, /result\.rawPayload\.remove\("kind"\);/);
+      assert.match(source, /result\.rawPayload\.remove\("name"\);/);
+      assert.match(source, /obj\.rawPayload == null \? new LinkedHashMap<>\(\) : cloneRawMap\(obj\.rawPayload\)/);
+      assert.match(source, /if \(value instanceof Map<\?, \?> map\) return cloneRawMap\(map\);/);
+      assert.match(source, /if \(value instanceof Iterable<\?> values\)/);
+    });
+
     it("delegates void methods without returning a value", () => {
       const decl = typeDecl([]);
       decl.typeName = { namespace: "Test", name: "Message" };

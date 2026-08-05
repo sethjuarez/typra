@@ -802,7 +802,7 @@ function emitLoadCollectionComplex(
     lines.push("\t\t\t\t\titem, ok := entry.(map[string]interface{})");
     lines.push("\t\t\t\t\tif !ok {");
     lines.push("\t\t\t\t\t\titem = map[string]interface{}{}");
-    lines.push("\t\t\t\t\t\titem[\"value\"] = entry");
+    lines.push(`\t\t\t\t\t\titem["${helper.coercionProperty ?? helper.innerFields[0] ?? "value"}"] = entry`);
     lines.push("\t\t\t\t\t} else {");
     lines.push("\t\t\t\t\t\tcopy := make(map[string]interface{}, len(item)+1)");
     lines.push("\t\t\t\t\t\tfor itemKey, itemValue := range item {");
@@ -1066,6 +1066,14 @@ function emitSaveCollectionComplex(
     lines.push("\t\t\t}");
     lines.push("\t\t\tseenNames[name] = struct{}{}");
     lines.push("\t\t\tdelete(copy, \"name\")");
+    if (helper.coercionProperty) {
+      lines.push(`\t\t\tif (ctx == nil || ctx.UseShorthand) && len(copy) == 1 {`);
+      lines.push(`\t\t\t\tif shorthand, ok := copy["${helper.coercionProperty}"]; ok {`);
+      lines.push("\t\t\t\t\tobjectItems[name] = shorthand");
+      lines.push("\t\t\t\t\tcontinue");
+      lines.push("\t\t\t\t}");
+      lines.push("\t\t\t}");
+    }
     lines.push("\t\t\tobjectItems[name] = copy");
     lines.push("\t\t}");
     lines.push("\t\tif losslessObject && (ctx == nil || ctx.CollectionFormat != CollectionFormatArray) {");
