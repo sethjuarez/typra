@@ -210,6 +210,9 @@ model FixtureFunctionTool extends FixtureTool {
 
   @sample(#{ command: "search --query" })
   command: string;
+
+  @sample(#{ parameters: #[#{ name: "query", kind: "string", required: true }] })
+  parameters: Record<FixtureProperty> | Named<FixtureProperty>[];
 }
 
 model FixturePromptTool extends FixtureTool {

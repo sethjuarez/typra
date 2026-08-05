@@ -1231,7 +1231,8 @@ function emitVariantSave(
       const destructure = variantFields.map(f => rustFieldName(f.name)).join(", ");
       lines.push(`            ${enumName}::${variantName} { ${destructure},  .. } => {`);
       for (const field of variantFields) {
-        emitVariantSaveField(field, polymorphicTypeNames, type.typeName.name, lines);
+        const helper = childType?.collectionHelpers.find(candidate => candidate.propertyName === field.name);
+        emitVariantSaveField(field, polymorphicTypeNames, type.typeName.name, lines, helper);
       }
       lines.push("            }");
     }
@@ -1267,7 +1268,8 @@ function emitVariantSave(
       const destructure = variantFields.map(f => rustFieldName(f.name)).join(", ");
       lines.push(`            ${enumName}::${variantName} { ${destructure}, ${discSnake}_name: _, .. } => {`);
       for (const field of variantFields) {
-        emitVariantSaveField(field, polymorphicTypeNames, type.typeName.name, lines);
+        const helper = defaultType?.collectionHelpers.find(candidate => candidate.propertyName === field.name);
+        emitVariantSaveField(field, polymorphicTypeNames, type.typeName.name, lines, helper);
       }
       lines.push("            }");
     }
@@ -2054,6 +2056,7 @@ function emitVariantSaveField(
   polymorphicTypeNames: Set<string>,
   parentTypeName: string,
   lines: string[],
+  collectionHelper?: CollectionHelperDecl,
 ): void {
   const key = field.name;
   const fieldRef = rustFieldName(field.name);
@@ -2118,6 +2121,21 @@ function emitVariantSaveField(
       return;
     }
     case "collection_complex": {
+      if (collectionHelper?.hasNameProperty) {
+        const saveHelper = `Self::save_${toSnakeCase(field.name)}`;
+        if (field.isOptional && !field.hasExplicitDefault) {
+          lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
+          lines.push(`${indent}    result.insert("${key}".to_string(), ${saveHelper}(items, ctx));`);
+          lines.push(`${indent}}`);
+        } else if (field.hasExplicitDefault) {
+          lines.push(`${indent}result.insert("${key}".to_string(), ${saveHelper}(${fieldRef}, ctx));`);
+        } else {
+          lines.push(`${indent}if !${fieldRef}.is_empty() {`);
+          lines.push(`${indent}    result.insert("${key}".to_string(), ${saveHelper}(${fieldRef}, ctx));`);
+          lines.push(`${indent}}`);
+        }
+        return;
+      }
       if (field.isOptional && !field.hasExplicitDefault) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(items.iter().map(|item| item.to_value(ctx)).collect()));`);
