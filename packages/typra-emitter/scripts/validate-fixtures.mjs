@@ -2849,8 +2849,16 @@ function assertStaticFixtureCoverage() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "rust", "fixture_property.rs"),
-    "if let Some(value) = value.as_f64().map(|value| value as f32) {",
+    "if let Some(value) = value.as_i64() {",
+    'kind: FixturePropertyKind::FixtureIntegerProperty, default: Some(value.into())',
+    "if let Some(value) = value.as_f64() {",
     'kind: FixturePropertyKind::FixtureNumberProperty, default: Some(value.into())',
+  );
+  // The float32-declared coercion must not narrow through f32: serde_json holds an
+  // exact f64 and the vector contract requires "the unmodified scalar".
+  assertExcludes(
+    path.join("generated", "fixtures", "rust", "fixture_property.rs"),
+    "value.as_f64().map(|value| value as f32)",
   );
   assertIncludes(
     path.join("generated", "fixtures", "rust", "tests", "protocol_scaffolds_test.rs"),
