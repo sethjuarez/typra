@@ -321,9 +321,16 @@ export interface PolymorphicDispatchDecl {
   isClosed: boolean;
 }
 
-/** Closed discriminator contracts must reject unknown values instead of selecting a fallback. */
+/**
+ * Closed discriminator contracts must reject unknown values instead of selecting a fallback.
+ *
+ * A dispatch that has any fallback — a declared wildcard subtype, or a non-abstract base's
+ * self-reference — is by definition not closed-rejecting: the fallback is the thing that
+ * absorbs values no concrete variant claims. Treating such a dispatch as closed emits
+ * validation that rejects those values before dispatch, leaving the fallback arm unreachable.
+ */
 export function isClosedPolymorphicDispatch(dispatch: PolymorphicDispatchDecl): boolean {
-  return dispatch.isClosed;
+  return dispatch.isClosed && dispatch.defaultVariant === null;
 }
 
 /**
