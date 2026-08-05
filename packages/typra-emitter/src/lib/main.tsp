@@ -130,3 +130,23 @@ extern dec parseAlias(target: Union, canonical: valueof string, aliases: valueof
  * emitter generates language-appropriate interface/trait/protocol definitions.
  */
 extern dec protocol(target: Model);
+
+/**
+ * Declares which field of this model receives an immediate scalar value when the
+ * model appears as an entry of a name-keyed collection.
+ *
+ * This is deliberately distinct from the `@coerce` expansion target. A bare scalar
+ * reaching the type directly and a bare scalar reaching it as a named collection
+ * entry are different contexts and may populate different fields. When declared,
+ * the discriminator value is inferred from the model's `@coerce` table and the raw
+ * scalar is assigned to the named field.
+ *
+ * @example
+ * ```typespec
+ * @entryShorthand("default")
+ * model Property { kind: SimpleTypes; default?: unknown; example?: unknown; }
+ * ```
+ * With this declaration `inputs: { city: "Seattle" }` loads as
+ * `{ name: "city", kind: "string", default: "Seattle" }`, leaving `example` unset.
+ */
+extern dec entryShorthand(target: Model, field: valueof string);

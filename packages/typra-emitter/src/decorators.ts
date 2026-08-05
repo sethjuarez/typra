@@ -365,3 +365,32 @@ export function $defaultFor(context: DecoratorContext, target: ModelProperty, pr
 export function $protocol(context: DecoratorContext, target: Model) {
   setStateScalar(context, StateKeys.protocols, target, true);
 }
+
+// ============================================================================
+// Entry shorthand decorator
+// ============================================================================
+
+/**
+ * Declares which field of this model receives an immediate scalar value when the
+ * model appears as an entry of a name-keyed collection. This is deliberately
+ * distinct from the `@coerce` expansion target: a bare scalar reaching the type
+ * directly and a bare scalar reaching it as a named collection entry are
+ * different contexts and may legitimately populate different fields.
+ */
+export function $entryShorthand(context: DecoratorContext, target: Model, field: string | StringValue) {
+  const fieldName = typeof field === "object" && field !== null && "value" in field
+    ? (field as StringValue).value
+    : (field as string);
+
+  if (!fieldName || !target.properties.has(fieldName)) {
+    context.program.reportDiagnostic({
+      code: "typra-emitter-entry-shorthand-field",
+      message: `@entryShorthand requires a field declared on ${target.name}; "${fieldName}" is not.`,
+      severity: "error",
+      target,
+    });
+    return;
+  }
+
+  setStateScalar(context, StateKeys.entryShorthands, target, fieldName);
+}

@@ -12,6 +12,14 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import {
+  orderedEntryShorthandCases,
+  entryShorthandTarget,
+  isIntegralScalar,
+  isFractionalScalar,
+  isStringEncodedScalar,
+  isBooleanScalar,
+} from "../../ir/scalar-kinds.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { EDITABLE_SEAM_MARKER, hasEditableSeamMarker } from "../../cleanup/generated-file.js";
 import {
@@ -431,7 +439,7 @@ function emitLoadField(
         lines.push("            itemData = copyMap(itemMap);");
         lines.push("          } else {");
         lines.push("            itemData = new LinkedHashMap<>();");
-        lines.push(`            itemData.put("${collectionHelper.innerFields[0] || "kind"}", entry.getValue());`);
+        lines.push(...emitJavaEntryShorthandArms(collectionHelper, "            "));
         lines.push("          }");
         lines.push("          itemData.put(\"name\", String.valueOf(entry.getKey()));");
         lines.push(`          ${javaTypeName(field.category.typeName)} item = ${javaTypeName(field.category.typeName)}.load(itemData, ctx.at("${wireName}").at(String.valueOf(entry.getKey())));`);
@@ -455,6 +463,66 @@ function emitLoadField(
   }
   lines.push("    }");
   void polymorphicTypeNames;
+}
+
+// ============================================================================
+// Named-collection entry shorthand
+// ============================================================================
+
+/**
+ * Expand an immediate scalar entry of a name-keyed collection.
+ *
+ * Without a declaration this keeps the historical positional behaviour, which is
+ * unsound for a discriminated element type because its first declared field is
+ * the discriminator. With `@entryShorthand` the value lands in the declared
+ * field and the constants come from the element's own `@coerce` table.
+ */
+function emitJavaEntryShorthandArms(helper: CollectionHelperDecl, indent: string): string[] {
+  const target = entryShorthandTarget(helper, "kind");
+  const shorthand = helper.entryShorthand;
+  const cases = shorthand ? orderedEntryShorthandCases(shorthand.cases) : [];
+
+  if (!shorthand || cases.length === 0) {
+    return [`${indent}itemData.put("${target}", entry.getValue());`];
+  }
+
+  const lines: string[] = [`${indent}Object shorthandValue = entry.getValue();`];
+  let first = true;
+  for (const entryCase of cases) {
+    const check = javaScalarValueCheck(entryCase.scalarType);
+    if (!check) continue;
+    lines.push(`${indent}${first ? "if" : "} else if"} (${check}) {`);
+    first = false;
+    for (const a of entryCase.assignments) {
+      lines.push(`${indent}  itemData.put("${a.fieldName}", ${javaShorthandLiteral(a.literalValue)});`);
+    }
+  }
+  if (!first) lines.push(`${indent}}`);
+  lines.push(`${indent}itemData.put("${shorthand.valueField}", shorthandValue);`);
+  return lines;
+}
+
+/** Java `instanceof` test recognising a decoded value of the given TypeSpec scalar. */
+function javaScalarValueCheck(scalarType: string): string | null {
+  if (isIntegralScalar(scalarType)) {
+    return "shorthandValue instanceof Integer || shorthandValue instanceof Long"
+      + " || shorthandValue instanceof Short || shorthandValue instanceof Byte";
+  }
+  if (isFractionalScalar(scalarType)) {
+    return "shorthandValue instanceof Double || shorthandValue instanceof Float"
+      + " || shorthandValue instanceof java.math.BigDecimal";
+  }
+  if (isStringEncodedScalar(scalarType)) return "shorthandValue instanceof String";
+  if (isBooleanScalar(scalarType)) return "shorthandValue instanceof Boolean";
+  return null;
+}
+
+/** Render a coercion constant as a Java literal, preserving its declared JSON type. */
+function javaShorthandLiteral(value: string | number | boolean | null): string {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  return JSON.stringify(value);
 }
 
 function emitSave(

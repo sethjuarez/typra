@@ -38,6 +38,14 @@ import {
   WireFieldMapping,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import {
+  orderedEntryShorthandCases,
+  entryShorthandTarget,
+  isIntegralScalar,
+  isFractionalScalar,
+  isStringEncodedScalar,
+  isBooleanScalar,
+} from "../../ir/scalar-kinds.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 
@@ -861,7 +869,7 @@ function emitCoercionBranch(
 function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDecl, lines: string[]): void {
   const snake = toSnakeCase(helper.propertyName);
   const elemName = helper.elementTypeName.name;
-  const firstInnerField = helper.innerFields[0] || "kind";
+  const shorthandField = entryShorthandTarget(helper, "kind");
 
   lines.push("");
   lines.push("    @staticmethod");
@@ -878,10 +886,82 @@ function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDe
   lines.push("                    # value is an object, spread its properties");
   lines.push(`                    result.append(${elemName}.load({"name": k, **v}, context.at(k)))`);
   lines.push("                else:");
-  lines.push("                    # value is a scalar, use it as the primary property");
-  lines.push(`                    result.append(${elemName}.load({"name": k, "${firstInnerField}": v}, context.at(k)))`);
+  emitPyEntryShorthandArms(helper, shorthandField, elemName, lines);
   lines.push("            return result");
   lines.push(`        return [${elemName}.load(item, context.at_index(index)) for index, item in enumerate(data)]`);
+}
+
+/**
+ * Emit the immediate-scalar branch of a name-keyed collection entry.
+ *
+ * With `@entryShorthand` declared, each `@coerce` scalar type contributes an arm
+ * that applies that coercion's constant assignments (typically the discriminator)
+ * and routes the raw scalar to the declared value field. Without it, this falls
+ * back to the historical single-field assignment so existing schemas are unchanged.
+ */
+function emitPyEntryShorthandArms(
+  helper: CollectionHelperDecl,
+  shorthandField: string,
+  elemName: string,
+  lines: string[],
+): void {
+  const shorthand = helper.entryShorthand;
+  const indent = "                    ";
+
+  if (!shorthand || shorthand.cases.length === 0) {
+    lines.push(`${indent}# value is a scalar, use it as the primary property`);
+    lines.push(
+      `${indent}result.append(${elemName}.load({"name": k, "${shorthandField}": v}, context.at(k)))`,
+    );
+    return;
+  }
+
+  lines.push(`${indent}# value is a scalar, infer the entry shape from its type`);
+  let first = true;
+  for (const entryCase of orderedEntryShorthandCases(shorthand.cases)) {
+    const check = pyScalarValueCheck(entryCase.scalarType);
+    if (!check) continue;
+    const fields = entryCase.assignments
+      .map(a => `"${a.fieldName}": ${pythonLiteral(a.literalValue)}`)
+      .concat(`"${shorthand.valueField}": v`)
+      .join(", ");
+    lines.push(`${indent}${first ? "if" : "elif"} ${check}:`);
+    lines.push(`${indent}    shorthand = {${fields}}`);
+    first = false;
+  }
+  lines.push(`${indent}else:`);
+  lines.push(`${indent}    shorthand = {"${shorthand.valueField}": v}`);
+  lines.push(
+    `${indent}result.append(${elemName}.load({"name": k, **shorthand}, context.at(k)))`,
+  );
+}
+
+/**
+ * Runtime predicate recognising a decoded value of the given TypeSpec scalar.
+ *
+ * The integral check explicitly excludes `bool` because Python's `bool` is a
+ * subclass of `int`, so a bare `isinstance(v, int)` claims every boolean. That
+ * exclusion makes the arms order-independent rather than relying on emission order.
+ */
+function pyScalarValueCheck(scalarType: string): string | null {
+  if (isIntegralScalar(scalarType)) return "isinstance(v, int) and not isinstance(v, bool)";
+  if (isFractionalScalar(scalarType)) return "isinstance(v, float)";
+  if (isStringEncodedScalar(scalarType)) return "isinstance(v, str)";
+  if (isBooleanScalar(scalarType)) return "isinstance(v, bool)";
+  return null;
+}
+
+/**
+ * Render a coercion constant as a Python literal, preserving its declared JSON type.
+ *
+ * Python spells booleans and null differently from JSON, and stringifying every
+ * constant would retype a schema that expands into a boolean or numeric value.
+ */
+function pythonLiteral(value: string | number | boolean | null): string {
+  if (value === null) return "None";
+  if (typeof value === "boolean") return value ? "True" : "False";
+  if (typeof value === "number") return String(value);
+  return JSON.stringify(value);
 }
 
 function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDecl, lines: string[]): void {

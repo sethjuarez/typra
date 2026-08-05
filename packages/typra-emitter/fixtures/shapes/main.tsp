@@ -534,6 +534,11 @@ model McpApprovalMode {
 @@coerce(FixtureProperty, boolean, #{ kind: "boolean", default: "{value}" }, "property", "Load a boolean property from its default value.", true);
 @@coerce(FixtureProperty, int32, #{ kind: "integer", default: "{value}" }, "property", "Load an integer property from its default value.", 7);
 @@coerce(FixtureProperty, float32, #{ kind: "number", default: "{value}" }, "property", "Load a number property from its default value.", 3.5);
+// A bare scalar sitting under a name key in `Record<FixtureProperty>` form must
+// infer its discriminator from the coercion table above and carry the raw value in
+// `default`. Without this declaration the scalar is expanded positionally into the
+// first declared field — `kind` — which the model's own validator then rejects.
+@@entryShorthand(FixtureProperty, "default");
 @discriminator("kind")
 model FixtureProperty {
   kind: string;

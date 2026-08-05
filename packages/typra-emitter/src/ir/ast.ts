@@ -14,6 +14,46 @@ import {
 } from "@typespec/compiler";
 import { getStateScalar, getStateValue, SampleEntry, FactoryEntry, MethodEntry, KnownAsEntry, DefaultForEntry, ParseAliasEntry } from "../decorators.js";
 import { StateKeys } from "../lib.js";
+import { scalarRuntimeKind } from "./scalar-kinds.js";
+
+/**
+ * Warn when `@entryShorthand` cannot produce any runtime arm.
+ *
+ * The shorthand expansion is driven by the type's `@coerce` table: with no
+ * coercions there is nothing to infer the constant assignments from, and with
+ * only unclassifiable scalars every arm is dropped. Either way the emitted code
+ * silently falls back to the positional target, which is exactly the unsound
+ * behaviour the decorator exists to replace. Report it rather than degrade.
+ */
+const reportUnusableEntryShorthand = (program: Program, model: Model, node: TypeNode): void => {
+  if (!node.entryShorthand) return;
+
+  if (node.coercions.length === 0) {
+    program.reportDiagnostic({
+      code: "typra-emitter-entry-shorthand-no-coercions",
+      message:
+        `@entryShorthand("${node.entryShorthand}") on ${model.name} has no @coerce declarations to expand, `
+        + `so no shorthand arm can be emitted and immediate scalar entries fall back to positional assignment.`,
+      severity: "warning",
+      target: model,
+    });
+    return;
+  }
+
+  const unmappable = node.coercions
+    .map(c => c.scalar)
+    .filter(scalar => scalarRuntimeKind(scalar) === null);
+  if (unmappable.length === node.coercions.length) {
+    program.reportDiagnostic({
+      code: "typra-emitter-entry-shorthand-unmappable",
+      message:
+        `@entryShorthand("${node.entryShorthand}") on ${model.name} declares only scalar types with no `
+        + `distinguishable JSON form (${unmappable.join(", ")}), so no shorthand arm can be emitted.`,
+      severity: "warning",
+      target: model,
+    });
+  }
+};
 
 
 export interface TypeName {
@@ -112,6 +152,7 @@ export class TypeNode {
   public properties: PropertyNode[] = [];
   public isAbstract: boolean = false;
   public isProtocol: boolean = false;
+  public entryShorthand: string | null = null;
   public isError: boolean = false;
   public discriminator: string | undefined = undefined;
   public factories: FactoryEntry[] = [];
@@ -157,6 +198,7 @@ export class TypeNode {
       base: this.base || {},
       isAbstract: this.isAbstract,
       isProtocol: this.isProtocol,
+      entryShorthand: this.entryShorthand,
       discriminator: this.discriminator,
       coercions: this.coercions,
       factories: this.factories,
@@ -294,6 +336,7 @@ export const resolveModel = (program: Program, model: Model, visited: Set<string
     node.description = getDoc(program, innerModel) || "";
     node.isAbstract = getStateScalar<boolean>(program, StateKeys.abstracts, innerModel) || false;
     node.isProtocol = getStateScalar<boolean>(program, StateKeys.protocols, innerModel) || false;
+    node.entryShorthand = getStateScalar<string>(program, StateKeys.entryShorthands, innerModel) || null;
     node.isError = isErrorModel(program, innerModel);
     const discriminator = getDiscriminator(program, innerModel);
     node.discriminator = discriminator ? discriminator.propertyName : undefined;
@@ -303,12 +346,14 @@ export const resolveModel = (program: Program, model: Model, visited: Set<string
     node.factories = getStateValue<FactoryEntry>(program, StateKeys.factories, innerModel);
     node.methods = getStateValue<MethodEntry>(program, StateKeys.methods, innerModel);
     node.group = extractGroup(getNodeFilePath(innerModel.node));
+    reportUnusableEntryShorthand(program, innerModel, node);
     visited.add(innerModel.name);
   } else {
     node.typeName = getModelType(model, rootNamespace, rootAlias);
     node.childTypes = resolveModelChildren(program, model, visited, rootNamespace, rootAlias);
     node.isAbstract = getStateScalar<boolean>(program, StateKeys.abstracts, model) || false;
     node.isProtocol = getStateScalar<boolean>(program, StateKeys.protocols, model) || false;
+    node.entryShorthand = getStateScalar<string>(program, StateKeys.entryShorthands, model) || null;
     node.isError = isErrorModel(program, model);
     const discriminator = getDiscriminator(program, model);
     node.discriminator = discriminator ? discriminator.propertyName : undefined;
@@ -318,6 +363,7 @@ export const resolveModel = (program: Program, model: Model, visited: Set<string
     node.factories = getStateValue<FactoryEntry>(program, StateKeys.factories, model);
     node.methods = getStateValue<MethodEntry>(program, StateKeys.methods, model);
     node.group = extractGroup(getNodeFilePath(model.node));
+    reportUnusableEntryShorthand(program, model, node);
     visited.add(model.name);
   }
 

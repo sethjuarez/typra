@@ -50,6 +50,13 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import {
+  INTEGRAL_SCALAR_TYPES,
+  FRACTIONAL_SCALAR_TYPES,
+  scalarRuntimeKind,
+  orderedEntryShorthandCases,
+  entryShorthandTarget,
+} from "../../ir/scalar-kinds.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 
@@ -241,12 +248,6 @@ const RUST_TYPE_MAP: Record<string, string> = {
   dictionary: "serde_json::Value",
   array: "Vec<serde_json::Value>",
 };
-
-/** Schema scalar types whose canonical JSON form is a whole number. */
-const INTEGRAL_SCALAR_TYPES = new Set(["integer", "int32", "int64"]);
-
-/** Schema scalar types whose canonical JSON form may carry a fraction. */
-const FRACTIONAL_SCALAR_TYPES = new Set(["float", "float32", "float64", "number", "numeric"]);
 
 /**
  * Emit a complete Rust source file from a FileDecl.
@@ -1503,7 +1504,7 @@ function emitCollectionLoadHelper(
 
   if (helper.hasNameProperty) {
     // Dict format with name keys
-    const shorthandField = helper.innerFields.length > 0 ? helper.innerFields[0] : "value";
+  const shorthandField = entryShorthandTarget(helper);
     lines.push("            serde_json::Value::Object(obj) => {");
     lines.push("                obj.iter()");
     lines.push("                    .map(|(name, value)| {");
@@ -1512,8 +1513,7 @@ function emitCollectionLoadHelper(
     lines.push("                        }");
     lines.push("                        let mut v = if value.is_object() {");
     lines.push("                            value.clone()");
-    lines.push("                        } else {");
-    lines.push(`                            serde_json::json!({ "${shorthandField}": value })`);
+    emitEntryShorthandArms(helper, shorthandField, lines);
     lines.push("                        };");
     lines.push('                        if let serde_json::Value::Object(ref mut m) = v {');
     lines.push('                            m.entry("name".to_string()).or_insert_with(|| serde_json::Value::String(name.clone()));');
@@ -1531,6 +1531,60 @@ function emitCollectionLoadHelper(
   lines.push("");
 
   // Save helper
+}
+
+/**
+ * Emit the immediate-scalar arms of a name-keyed collection entry.
+ *
+ * When `@entryShorthand` is declared, each `@coerce` scalar type gets its own arm
+ * that applies that coercion's constant assignments (the discriminator) and routes
+ * the raw scalar to the declared value field. Integral checks precede fractional
+ * ones for the same reason as the coercion bridge: `serde_json` preserves the
+ * token's int/float distinction and classifying in the wrong order collapses
+ * integers into floats.
+ *
+ * Without the declaration this falls back to the historical single-field shorthand.
+ */
+function emitEntryShorthandArms(
+  helper: CollectionHelperDecl,
+  shorthandField: string,
+  lines: string[],
+): void {
+  const shorthand = helper.entryShorthand;
+  const indent = "                        ";
+
+  if (!shorthand || shorthand.cases.length === 0) {
+    lines.push(`${indent}} else {`);
+    lines.push(`${indent}    serde_json::json!({ "${shorthandField}": value })`);
+    return;
+  }
+
+  const ordered = orderedEntryShorthandCases(shorthand.cases);
+
+  for (const entryCase of ordered) {
+    const check = rustScalarValueCheck(entryCase.scalarType);
+    if (!check) continue;
+    const fields = entryCase.assignments
+      .map(a => `"${a.fieldName}": ${JSON.stringify(a.literalValue)}`)
+      .concat(`"${shorthand.valueField}": value`)
+      .join(", ");
+    lines.push(`${indent}} else if value.${check} {`);
+    lines.push(`${indent}    serde_json::json!({ ${fields} })`);
+  }
+
+  lines.push(`${indent}} else {`);
+  lines.push(`${indent}    serde_json::json!({ "${shorthand.valueField}": value })`);
+}
+
+/** serde_json predicate that recognises a JSON token of the given TypeSpec scalar type. */
+function rustScalarValueCheck(scalarType: string): string | null {
+  switch (scalarRuntimeKind(scalarType)) {
+    case "integral": return "is_i64()";
+    case "fractional": return "is_f64()";
+    case "string": return "is_string()";
+    case "boolean": return "is_boolean()";
+    default: return null;
+  }
 }
 
 function emitCollectionSaveHelper(

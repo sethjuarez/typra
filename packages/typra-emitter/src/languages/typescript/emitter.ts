@@ -44,6 +44,11 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import {
+  orderedEntryShorthandCases,
+  entryShorthandTarget,
+  scalarRuntimeKind,
+} from "../../ir/scalar-kinds.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toKebabCase } from "../../ir/utilities.js";
 
@@ -987,7 +992,7 @@ function emitPolymorphicDispatch(
 function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDecl, lines: string[]): void {
   const methodName = `load${capitalize(helper.propertyName)}`;
   const elemName = helper.elementTypeName.name;
-  const firstInnerField = helper.innerFields[0] || "kind";
+  const shorthandField = entryShorthandTarget(helper, "kind");
 
   lines.push(`  static ${methodName}(data: Record<string, unknown>[] | unknown[], context?: LoadContext): ${elemName}[] {`);
   lines.push(`    context ??= new LoadContext({ path: "${helper.propertyName}" });`);
@@ -1000,7 +1005,7 @@ function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDe
   lines.push("        if (typeof v === \"object\" && v !== null && !Array.isArray(v)) {");
   lines.push(`          result.push(${elemName}.load({ name: k, ...(v as Record<string, unknown>) }, context.at(k)));`);
   lines.push("        } else {");
-  lines.push(`          result.push(${elemName}.load({ name: k, "${firstInnerField}": v }, context.at(k)));`);
+  emitTsEntryShorthandArms(helper, shorthandField, elemName, lines);
   lines.push("        }");
   lines.push("      }");
   lines.push("      return result;");
@@ -1008,6 +1013,64 @@ function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDe
   lines.push(`    return data.map((item, index) => ${elemName}.load(item as Record<string, unknown>, context.atIndex(index)));`);
   lines.push("  }");
   lines.push("");
+}
+
+/**
+ * Emit the immediate-scalar branch of a name-keyed collection entry.
+ *
+ * With `@entryShorthand` declared, each `@coerce` scalar type contributes an arm
+ * that applies that coercion's constant assignments (typically the discriminator)
+ * and routes the raw scalar to the declared value field. Without it, this falls
+ * back to the historical single-field assignment so existing schemas are unchanged.
+ */
+function emitTsEntryShorthandArms(
+  helper: CollectionHelperDecl,
+  shorthandField: string,
+  elemName: string,
+  lines: string[],
+): void {
+  const shorthand = helper.entryShorthand;
+  const load = (expr: string) =>
+    lines.push(`          result.push(${elemName}.load(${expr}, context.at(k)));`);
+
+  if (!shorthand || shorthand.cases.length === 0) {
+    load(`{ name: k, "${shorthandField}": v }`);
+    return;
+  }
+
+  lines.push("          let shorthand: Record<string, unknown>;");
+  let first = true;
+  for (const entryCase of orderedEntryShorthandCases(shorthand.cases)) {
+    const check = tsScalarValueCheck(entryCase.scalarType);
+    if (!check) continue;
+    const fields = entryCase.assignments
+      .map(a => `"${a.fieldName}": ${JSON.stringify(a.literalValue)}`)
+      .concat(`"${shorthand.valueField}": v`)
+      .join(", ");
+    lines.push(`          ${first ? "if" : "} else if"} (${check}) {`);
+    lines.push(`            shorthand = { ${fields} };`);
+    first = false;
+  }
+  lines.push("          } else {");
+  lines.push(`            shorthand = { "${shorthand.valueField}": v };`);
+  lines.push("          }");
+  load("{ name: k, ...shorthand }");
+}
+
+/**
+ * Runtime predicate recognising a decoded JSON token of the given TypeSpec scalar.
+ *
+ * The integral check is narrower than the fractional one, which is sound only
+ * because `orderedEntryShorthandCases` guarantees integral arms are emitted first.
+ */
+function tsScalarValueCheck(scalarType: string): string | null {
+  switch (scalarRuntimeKind(scalarType)) {
+    case "integral": return 'typeof v === "number" && Number.isInteger(v)';
+    case "fractional": return 'typeof v === "number"';
+    case "string": return 'typeof v === "string"';
+    case "boolean": return 'typeof v === "boolean"';
+    default: return null;
+  }
 }
 
 function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDecl, lines: string[]): void {

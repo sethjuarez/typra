@@ -6,6 +6,51 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## 0.4.23
+
+### Added
+
+- **`@entryShorthand(field)`** — declares which field an immediate scalar entry of a
+  name-keyed collection is assigned to. `spec/vectors/model/named_collection_vectors.json`
+  requires that "Immediate primitive Property values infer kind and **default** without
+  leaking direct-coercion **example** semantics." Previously the target was chosen
+  *positionally* — the element's first declared field — which is unsound for a discriminated
+  element type, because its first declared field is the discriminator. `inputs: { city:
+  "Seattle" }` therefore loaded as `kind: "Seattle"`, a value the element's own validator
+  rejects (#76).
+
+  The declaration is required rather than inferred because a bare scalar reaching a type
+  *directly* and the same scalar reaching it *as a named-collection entry* are genuinely
+  different contexts that may populate different fields — the vector requires `default` set
+  **and** `example` absent, which one `@coerce` table cannot express. The constant
+  assignments are still inferred from the type's own `@coerce` table.
+
+  Undeclared schemas keep their previous shape.
+
+### Fixed
+
+- **Entry shorthand is emitted by every backend**, not just Rust. Go, TypeScript, Python,
+  C# and Java now expand an immediate scalar entry identically. Swift is unaffected: it
+  emits no load-side named-collection shorthand.
+
+- **Coercion constants keep their declared type.** Constants were stringified during
+  lowering and re-quoted by each emitter, so a schema expanding into a boolean or numeric
+  constant emitted the string `"true"`. Each backend now renders the literal in its own
+  native syntax (`True`/`None` in Python, `nil` in Go, and so on).
+
+- **Scalar classification covers the whole TypeSpec numeric tower.** The integral and
+  fractional sets were duplicated per backend and covered only `integer`/`int32`/`int64`
+  and the float family, so a schema declaring `int16`, `uint32`, `safeint`, `decimal` or a
+  string-encoded scalar such as `utcDateTime` produced no runtime arm at all — a silent
+  degradation rather than an error. The sets now live in one place
+  (`src/ir/scalar-kinds.ts`) shared by every backend, which also removes the per-backend
+  drift that let the coercion family diverge in the first place. This additionally widens
+  the numeric bridging introduced in 0.4.19.
+
+- **`@entryShorthand` that cannot emit an arm now warns** instead of silently falling back
+  to positional assignment — either because the type declares no `@coerce` table, or
+  because every declared scalar lacks a distinguishable JSON form.
+
 ## 0.4.22
 
 ### Fixed

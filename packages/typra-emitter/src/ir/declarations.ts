@@ -366,6 +366,48 @@ export interface PolymorphicDefault {
  *   - Array format: [{ name: "a", kind: "b" }, ...]
  *   - Dict/object format: { "a": { kind: "b" }, ... }
  */
+/**
+ * Immediate-scalar expansion for an entry of a name-keyed collection.
+ *
+ * Declared via `@entryShorthand` on the element model. This is deliberately
+ * distinct from the `@coerce` expansion: a bare scalar reaching a type directly
+ * and a bare scalar reaching it as a named collection entry are different
+ * contexts and may populate different fields.
+ */
+export interface EntryShorthandDecl {
+  /** Element field that receives the raw scalar value. */
+  valueField: string;
+  /**
+   * Per-scalar-type constant assignments inferred from the element's `@coerce`
+   * table — typically the discriminator. Excludes the `{value}` assignment,
+   * which is redirected to `valueField`.
+   */
+  cases: EntryShorthandCase[];
+}
+
+/** One scalar arm of an `@entryShorthand` expansion. */
+export interface EntryShorthandCase {
+  /** Scalar type name from TypeSpec (e.g., "string", "integer", "float32") */
+  scalarType: string;
+  /** Constant field assignments applied for this scalar type. */
+  assignments: EntryShorthandAssignment[];
+}
+
+/**
+ * A constant field assignment within an entry-shorthand arm.
+ *
+ * `literalValue` keeps the value's original JSON type rather than stringifying
+ * it, because a schema is free to expand into a non-string constant — for
+ * example `#{ nullable: true, value: "{value}" }`. Emitting every constant as a
+ * quoted string would silently retype such a field.
+ */
+export interface EntryShorthandAssignment {
+  /** Property name (camelCase, as declared in TypeSpec) */
+  fieldName: string;
+  /** Constant value, preserving its declared JSON type. */
+  literalValue: string | number | boolean | null;
+}
+
 export interface CollectionHelperDecl {
   /** Property name (used for method naming: load_<name>, save_<name>) */
   propertyName: string;
@@ -375,6 +417,8 @@ export interface CollectionHelperDecl {
   innerFields: string[];
   /** Element field populated by scalar @coerce shorthand, when declared. */
   coercionProperty?: string | null;
+  /** Immediate-scalar entry expansion declared via `@entryShorthand`, when present. */
+  entryShorthand?: EntryShorthandDecl | null;
   /** Whether the schema explicitly opts into a name-keyed map via Record<T> | Named<T>[] */
   hasNameProperty: boolean;
 }
