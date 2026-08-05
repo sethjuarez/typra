@@ -200,6 +200,101 @@ describe("TypeScript optional collection defaults", () => {
   });
 });
 
+interface GeneratedNamedCollectionModel {
+  parameters: Record<string, unknown>[];
+}
+
+interface GeneratedNamedCollectionConstructor {
+  load(data: Record<string, unknown>): GeneratedNamedCollectionModel;
+}
+
+/**
+ * Transpile and execute an emitted named-collection file so both accepted entry forms and the
+ * rejected one are asserted against real behaviour. The element type is not emitted here, so
+ * `Parameter` is injected as a scope variable with a loader that echoes the payload it receives.
+ */
+function evaluateNamedCollectionModel(source: string): GeneratedNamedCollectionConstructor {
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+      useDefineForClassFields: true,
+    },
+  }).outputText;
+  const exports: Record<string, unknown> = {};
+  const loadContext = class {
+    readonly path: string = "parameters";
+    at(): this {
+      return this;
+    }
+    atIndex(): this {
+      return this;
+    }
+    processInput<T>(value: T): T {
+      return value;
+    }
+    processOutput<T>(value: T): T {
+      return value;
+    }
+  };
+  const saveContext = class {};
+  const requireModule = (name: string): unknown => {
+    if (name === "./context") {
+      return { LoadContext: loadContext, SaveContext: saveContext };
+    }
+    throw new Error(`Unexpected generated import: ${name}`);
+  };
+  const parameter = { load: (data: Record<string, unknown>) => ({ ...data }) };
+  const execute = new Function("exports", "require", "Parameter", output);
+  execute(exports, requireModule, parameter);
+  assert.equal(typeof exports.CollectionModel, "function");
+  return exports.CollectionModel as GeneratedNamedCollectionConstructor;
+}
+
+describe("TypeScript named collection entry forms", () => {
+  /**
+   * `spec/vectors/model/named_collection_vectors.json` states the contract in its header:
+   * "Array-valued entries in name-keyed object form are rejected recursively, while arrays in
+   * declared entry fields remain valid." Its first vector, `unique_names_use_canonical_object_form`,
+   * loads the collection itself as an array of entry objects and expects success.
+   *
+   * Both halves are asserted together here because they are easy to conflate: the rejection is
+   * scoped to an array sitting under a key *inside* name-keyed object form, and must never
+   * generalise to the collection-level array form.
+   */
+  it("accepts the collection-level array form while rejecting arrays under keys in object form", () => {
+    const type = typeDecl([
+      field("parameters", { kind: "collection_complex", typeName: "Parameter" }, false),
+    ]);
+    const source = emitTypeScriptFile(fileDecl(type), new TypeScriptExprVisitor());
+    const CollectionModel = evaluateNamedCollectionModel(source);
+
+    const listForm = CollectionModel.load({
+      parameters: [
+        { name: "city", kind: "string", required: true },
+        { name: "unit", kind: "string" },
+      ],
+    });
+    assert.deepEqual(listForm.parameters, [
+      { name: "city", kind: "string", required: true },
+      { name: "unit", kind: "string" },
+    ]);
+
+    const objectForm = CollectionModel.load({
+      parameters: { city: { kind: "string", required: true } },
+    });
+    assert.deepEqual(objectForm.parameters, [{ name: "city", kind: "string", required: true }]);
+
+    const shorthandForm = CollectionModel.load({ parameters: { city: "string" } });
+    assert.deepEqual(shorthandForm.parameters, [{ name: "city", kind: "string" }]);
+
+    assert.throws(
+      () => CollectionModel.load({ parameters: { properties: [{ name: "city", kind: "string" }] } }),
+      /invalid named collection entry category array/,
+    );
+  });
+});
+
 interface GeneratedConnection {
   kind: string;
   name?: string;

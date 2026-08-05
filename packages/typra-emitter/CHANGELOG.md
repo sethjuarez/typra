@@ -6,6 +6,30 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## Unreleased
+
+### Testing
+
+- **Locked the named-collection entry-form contract with an executable test.** A defect report
+  claimed the emitted validator rejected the legal collection-level list form of a named
+  collection, citing every one of prompty's 28 `agent_vectors` Rust tests failing with
+  `tools.parameters.properties: invalid named collection entry category array`. The defect does
+  not exist: rewriting *only* the vector data from `parameters: {"properties": [...]}` to the
+  declared list form `parameters: [...]` took that suite from `0 passed / 28 failed` to
+  `28 passed / 0 failed` with no emitter change. `FunctionTool.parameters` is declared
+  `Properties` (a named collection), so `{"properties": [...]}` is name-keyed *object* form
+  whose single entry holds an array — exactly what
+  `spec/vectors/model/named_collection_vectors.json` requires be rejected:
+
+  > Array-valued entries in name-keyed object form are rejected recursively, while arrays in
+  > declared entry fields remain valid.
+
+  No test asserted the *accepting* half of that contract, so nothing contradicted the report.
+  `test/typescript-emitter.test.ts` now transpiles and executes an emitted collection loader and
+  asserts all four cases together: collection-level array form, name-keyed object form, scalar
+  shorthand, and the rejected array-under-a-key. Both halves were verified by mutation —
+  injecting the claimed defect reproduces the reported wording verbatim.
+
 ## 0.4.21
 
 ### Fixed
