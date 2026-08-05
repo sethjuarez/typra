@@ -250,12 +250,14 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
       lines.push(`  ${field.name}: ${annotation}${defaultVal};`);
     }
   }
-  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
-    lines.push("  private raw: Record<string, unknown> = {};");
+  if (absorbsUnknownValues(type.polymorphicDispatch)) {
+    // `protected` rather than `private`: an abstract base's unknown-value carrier is a
+    // separate subclass and has to populate this.
+    lines.push("  protected raw: Record<string, unknown> = {};");
   }
   lines.push("");
 
-  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+  if (absorbsUnknownValues(type.polymorphicDispatch)) {
     emitRawCloneMethod(lines);
   }
 
@@ -271,11 +273,16 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
 
   // Polymorphic dispatch
   if (type.polymorphicDispatch) {
-    emitPolymorphicDispatch(name, type.polymorphicDispatch, lines);
+    emitPolymorphicDispatch(
+      name,
+      type.polymorphicDispatch,
+      lines,
+      needsUnknownCarrier(type) ? unknownCarrierName(name) : undefined,
+    );
   }
 
   function emitRawCloneMethod(lines: string[]): void {
-    lines.push("  private static cloneRawValue(value: unknown): unknown {");
+    lines.push("  protected static cloneRawValue(value: unknown): unknown {");
     lines.push("    if (Array.isArray(value)) {");
     lines.push("      return value.map(item => this.cloneRawValue(item));");
     lines.push("    }");
@@ -334,10 +341,52 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
 
   lines.push("}");
 
+  if (needsUnknownCarrier(type)) {
+    emitUnknownCarrier(type, lines);
+  }
+
   // Emit MessageHelpers-style interface after the class
   if (type.methods.length > 0) {
     emitMethodHelpersInterface(type, lines);
   }
+}
+
+/**
+ * Emit the concrete carrier for an abstract base whose discriminator is open.
+ *
+ * Rust models polymorphism as an enum and adds an `Unknown { kind_name, raw }` variant;
+ * Swift adds `case unknown([String: Any])`. The class-based backends have no variant to add,
+ * so the equivalent is a concrete subclass. The base stays `abstract`, which honours the
+ * schema's `@abstract`, and unknown discriminator values land here instead of throwing.
+ *
+ * The carrier needs no `kind` field of its own: the base's `load()` applies the declared
+ * field assignments to whatever instance `loadKind` returned, so the exact unrecognized
+ * discriminator is already preserved on `kind` by the time this instance is handed back.
+ * It also needs no `save()`: the base's `save()` seeds its result from `raw`, so the
+ * inherited implementation already re-emits the unknown payload.
+ */
+function emitUnknownCarrier(type: TypeDecl, lines: string[]): void {
+  const parentName = type.typeName.name;
+  const carrier = unknownCarrierName(parentName);
+
+  lines.push("");
+  lines.push(`/**`);
+  lines.push(` * Carries a ${parentName} whose discriminator value matches no known subtype.`);
+  lines.push(` *`);
+  lines.push(` * The unrecognized value stays on \`${type.polymorphicDispatch!.discriminatorField}\` and every`);
+  lines.push(` * key the schema does not declare is preserved verbatim, so an unknown ${parentName}`);
+  lines.push(` * survives a load/save round-trip unchanged.`);
+  lines.push(` */`);
+  lines.push(`export class ${carrier} extends ${parentName} {`);
+  lines.push(`  static load(data: Record<string, unknown>, context?: LoadContext): ${carrier} {`);
+  lines.push(`    const instance = new ${carrier}();`);
+  lines.push(`    instance.raw = ${parentName}.cloneRawValue(data) as Record<string, unknown>;`);
+  for (const a of type.load.assignments) {
+    lines.push(`    delete instance.raw["${a.sourceName}"];`);
+  }
+  lines.push("    return instance;");
+  lines.push("  }");
+  lines.push("}");
 }
 
 /**
@@ -838,10 +887,51 @@ function emitCoercionBody(
 // Polymorphic dispatch (loadKind)
 // ============================================================================
 
+/**
+ * Does this dispatch absorb unrecognized discriminator values into a carrier
+ * rather than rejecting them?
+ *
+ * Two shapes qualify. A non-abstract base declares itself as the wildcard variant, so the IR
+ * hands back a self-referencing default and the base doubles as its own carrier. An abstract
+ * base never gets that default (see `TypeNode.retrievePolymorphicTypes`), but when its
+ * discriminator is open the unknown values still have to land somewhere. TypeScript emits
+ * `abstract class` for those, so `new Base()` is a compile error and a dedicated concrete
+ * subclass carries them instead. Closed dispatches absorb nothing.
+ *
+ * This mirrors `absorbsUnknownIntoBase` in the Go emitter; the predicate is deliberately
+ * identical so the two backends agree on which schemas are open.
+ */
+function absorbsUnknownValues(dispatch: PolymorphicDispatchDecl | null | undefined): boolean {
+  if (!dispatch) {
+    return false;
+  }
+  if (dispatch.defaultVariant) {
+    return dispatch.defaultVariant.isSelfReference;
+  }
+  return !isClosedPolymorphicDispatch(dispatch);
+}
+
+/**
+ * An abstract base with an open discriminator needs a concrete carrier, because the base
+ * itself cannot be instantiated. Non-abstract bases carry unknown values themselves.
+ */
+function needsUnknownCarrier(type: TypeDecl): boolean {
+  const dispatch = type.polymorphicDispatch;
+  if (!dispatch || !type.isAbstract) {
+    return false;
+  }
+  return !dispatch.defaultVariant && !isClosedPolymorphicDispatch(dispatch);
+}
+
+function unknownCarrierName(parentName: string): string {
+  return `Unknown${parentName}`;
+}
+
 function emitPolymorphicDispatch(
   parentName: string,
   dispatch: PolymorphicDispatchDecl,
   lines: string[],
+  carrier?: string,
 ): void {
   const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push(`  private static loadKind(data: Record<string, unknown>, context?: LoadContext): ${parentName} {`);
@@ -863,6 +953,9 @@ function emitPolymorphicDispatch(
     } else {
       lines.push(`          return ${dispatch.defaultVariant.typeName.name}.load(data, context);`);
     }
+  } else if (carrier) {
+    lines.push("        default:");
+    lines.push(`          return ${carrier}.load(data, context);`);
   } else {
     lines.push("        default:");
     lines.push(`          throw new Error(\`Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: \${discriminator}\`);`);
@@ -872,7 +965,12 @@ function emitPolymorphicDispatch(
   lines.push("    }");
 
   // Missing discriminator
-  if (isClosed || dispatch.isAbstract) {
+  if (carrier) {
+    // Matches the Go backend, which absorbs a missing discriminator into the same
+    // carrier it uses for an unrecognized one. No vector covers this case; the
+    // choice is made for cross-backend consistency, not from a stated requirement.
+    lines.push(`    return ${carrier}.load(data, context);`);
+  } else if (isClosed || dispatch.isAbstract) {
     lines.push(`    throw new Error("Missing ${parentName} discriminator property: '${dispatch.discriminatorField}'");`);
   } else {
     lines.push(`    return new ${parentName}();`);
@@ -982,7 +1080,7 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
   if (type.save.hasBase) {
     lines.push("    // Start with parent class properties");
     lines.push("    const result = super.save(context);");
-  } else if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+  } else if (absorbsUnknownValues(type.polymorphicDispatch)) {
     lines.push(`    const result = ${name}.cloneRawValue(obj.raw) as Record<string, unknown>;`);
   } else {
     lines.push("    const result: Record<string, unknown> = {};");

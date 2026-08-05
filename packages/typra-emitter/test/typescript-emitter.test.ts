@@ -200,6 +200,148 @@ describe("TypeScript optional collection defaults", () => {
   });
 });
 
+interface GeneratedConnection {
+  kind: string;
+  name?: string;
+  save(): Record<string, unknown>;
+}
+
+interface GeneratedConnectionModule {
+  Connection: { load(data: Record<string, unknown>): GeneratedConnection };
+  UnknownConnection?: unknown;
+}
+
+/**
+ * Transpile and execute an emitted abstract-open polymorphic file so a round-trip can be
+ * asserted on real behaviour rather than on the shape of the emitted text. `ReferenceConnection`
+ * is not emitted here, so it is stubbed with a loader that mirrors what the emitter would
+ * produce for a known variant.
+ */
+function evaluateOpenConnection(source: string): GeneratedConnectionModule {
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+      useDefineForClassFields: true,
+    },
+  }).outputText;
+  const exports: Record<string, unknown> = {};
+  const loadContext = class {
+    at(): this {
+      return this;
+    }
+    processInput<T>(value: T): T {
+      return value;
+    }
+    processOutput<T>(value: T): T {
+      return value;
+    }
+  };
+  const saveContext = class {};
+  const requireModule = (name: string): unknown => {
+    if (name === "./context") {
+      return { LoadContext: loadContext, SaveContext: saveContext };
+    }
+    throw new Error(`Unexpected generated import: ${name}`);
+  };
+  const preamble = "class ReferenceConnection extends exports.__base { static load() { return new ReferenceConnection(); } }\n";
+  const execute = new Function("exports", "require", `${output}\nexports.__base = exports.Connection;\n${preamble}exports.ReferenceConnection = ReferenceConnection;`);
+  execute(exports, requireModule);
+  return exports as unknown as GeneratedConnectionModule;
+}
+
+function abstractOpenConnection(): TypeDecl {
+  const connection = typeDecl([
+    field("kind", { kind: "scalar", scalarType: "string" }, false),
+    field("name", { kind: "scalar", scalarType: "string" }, true),
+  ]);
+  connection.typeName = { namespace: "Test", name: "Connection" };
+  connection.isAbstract = true;
+  connection.load.hasPolymorphicDispatch = true;
+  for (const a of connection.load.assignments) {
+    a.parentTypeName = "Connection";
+  }
+  for (const a of connection.save.assignments) {
+    a.parentTypeName = "Connection";
+  }
+  connection.polymorphicDispatch = {
+    discriminatorField: "kind",
+    variants: [{
+      value: "reference",
+      typeName: { namespace: "Test", name: "ReferenceConnection" },
+    }],
+    defaultVariant: null,
+    isClosed: false,
+    isAbstract: true,
+  };
+  return connection;
+}
+
+describe("TypeScript abstract open polymorphic dispatch", () => {
+  it("absorbs unknown discriminators into a carrier instead of throwing", () => {
+    const source = emitTypeScriptFile(fileDecl(abstractOpenConnection()), new TypeScriptExprVisitor());
+
+    // The base must stay abstract — the schema said @abstract, so `new Connection()` should
+    // remain a compile error. The carrier is what makes the open fallback constructible.
+    assert.match(source, /export abstract class Connection/);
+    assert.match(source, /export class UnknownConnection extends Connection \{/);
+    assert.doesNotMatch(source, /Unknown Connection discriminator field/);
+    assert.match(source, /default:\s+return UnknownConnection\.load\(data, context\);/);
+    assert.doesNotMatch(source, /Missing Connection discriminator property/);
+
+    const { Connection } = evaluateOpenConnection(source);
+
+    // spec/vectors/model/connection_roundtrip_vectors.json,
+    // case "unknown_connection_kind_preserves_payload": the exact kind and the complete
+    // payload must survive, including explicit nulls and nested structures.
+    const payload = {
+      kind: "future-auth",
+      name: "future",
+      endpoint: "https://example.invalid",
+      notes: null,
+      providerOptions: ["alpha", { retry: { attempts: 3 }, nullable: null }],
+    };
+    const loaded = Connection.load(structuredClone(payload));
+    assert.equal(loaded.kind, "future-auth");
+    assert.deepEqual(loaded.save(), payload);
+
+    // Deep-cloned, not aliased: mutating the round-tripped payload must not reach back
+    // into the instance.
+    const saved = loaded.save();
+    (saved["providerOptions"] as unknown[])[0] = "mutated";
+    assert.deepEqual(loaded.save(), payload);
+  });
+
+  it("matches unknown discriminators case-sensitively", () => {
+    const source = emitTypeScriptFile(fileDecl(abstractOpenConnection()), new TypeScriptExprVisitor());
+    const { Connection, ReferenceConnection } = evaluateOpenConnection(source) as unknown as {
+      Connection: { load(data: Record<string, unknown>): GeneratedConnection };
+      ReferenceConnection: Function;
+    };
+
+    // spec/vectors/model/connection_roundtrip_vectors.json,
+    // case "unknown_connection_case_collision_preserves_payload": "Reference" must NOT
+    // coerce to the known "reference" variant.
+    const loaded = Connection.load({ kind: "Reference", name: "collision", extra: 1 });
+    assert.equal(loaded.kind, "Reference");
+    assert.notEqual(loaded.constructor, ReferenceConnection);
+    assert.deepEqual(loaded.save(), { kind: "Reference", name: "collision", extra: 1 });
+  });
+
+  it("does not emit a carrier for a closed abstract dispatch", () => {
+    // Counterpart guard: a closed discriminator has no unknown values to absorb, so
+    // rejecting them stays correct and no carrier should appear.
+    const connection = abstractOpenConnection();
+    connection.polymorphicDispatch!.isClosed = true;
+    const source = emitTypeScriptFile(fileDecl(connection), new TypeScriptExprVisitor());
+
+    assert.doesNotMatch(source, /class UnknownConnection/);
+    assert.doesNotMatch(source, /protected raw: Record<string, unknown>/);
+    assert.match(source, /Unknown Connection discriminator field/);
+    assert.match(source, /Missing Connection discriminator property/);
+  });
+});
+
 describe("TypeScript open polymorphic preservation", () => {
   it("preserves exact unknown discriminators and payloads without case folding", () => {
     const connection = typeDecl([
@@ -224,8 +366,8 @@ describe("TypeScript open polymorphic preservation", () => {
 
     const source = emitTypeScriptFile(fileDecl(connection), new TypeScriptExprVisitor());
 
-    assert.match(source, /private raw: Record<string, unknown> = \{\};/);
-    assert.match(source, /private static cloneRawValue\(value: unknown\): unknown/);
+    assert.match(source, /protected raw: Record<string, unknown> = \{\};/);
+    assert.match(source, /protected static cloneRawValue\(value: unknown\): unknown/);
     assert.match(source, /const discriminator = String\(discriminatorValue\);/);
     assert.doesNotMatch(source, /discriminatorValue\)\.toLowerCase\(\)/);
     assert.match(source, /if \(instance\.constructor === Connection\) \{/);
