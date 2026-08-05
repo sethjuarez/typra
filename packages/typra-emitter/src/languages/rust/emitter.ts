@@ -1503,7 +1503,9 @@ function emitCollectionLoadHelper(
 
   if (helper.hasNameProperty) {
     // Dict format with name keys
-    const shorthandField = helper.innerFields.length > 0 ? helper.innerFields[0] : "value";
+    const shorthandField = helper.entryShorthand?.valueField
+      ?? helper.coercionProperty
+      ?? (helper.innerFields.length > 0 ? helper.innerFields[0] : "value");
     lines.push("            serde_json::Value::Object(obj) => {");
     lines.push("                obj.iter()");
     lines.push("                    .map(|(name, value)| {");
@@ -1512,8 +1514,7 @@ function emitCollectionLoadHelper(
     lines.push("                        }");
     lines.push("                        let mut v = if value.is_object() {");
     lines.push("                            value.clone()");
-    lines.push("                        } else {");
-    lines.push(`                            serde_json::json!({ "${shorthandField}": value })`);
+    emitEntryShorthandArms(helper, shorthandField, lines);
     lines.push("                        };");
     lines.push('                        if let serde_json::Value::Object(ref mut m) = v {');
     lines.push('                            m.entry("name".to_string()).or_insert_with(|| serde_json::Value::String(name.clone()));');
@@ -1531,6 +1532,64 @@ function emitCollectionLoadHelper(
   lines.push("");
 
   // Save helper
+}
+
+/**
+ * Emit the immediate-scalar arms of a name-keyed collection entry.
+ *
+ * When `@entryShorthand` is declared, each `@coerce` scalar type gets its own arm
+ * that applies that coercion's constant assignments (the discriminator) and routes
+ * the raw scalar to the declared value field. Integral checks precede fractional
+ * ones for the same reason as the coercion bridge: `serde_json` preserves the
+ * token's int/float distinction and classifying in the wrong order collapses
+ * integers into floats.
+ *
+ * Without the declaration this falls back to the historical single-field shorthand.
+ */
+function emitEntryShorthandArms(
+  helper: CollectionHelperDecl,
+  shorthandField: string,
+  lines: string[],
+): void {
+  const shorthand = helper.entryShorthand;
+  const indent = "                        ";
+
+  if (!shorthand || shorthand.cases.length === 0) {
+    lines.push(`${indent}} else {`);
+    lines.push(`${indent}    serde_json::json!({ "${shorthandField}": value })`);
+    return;
+  }
+
+  const ordered = [
+    ...shorthand.cases.filter(c => INTEGRAL_SCALAR_TYPES.has(c.scalarType)),
+    ...shorthand.cases.filter(c => FRACTIONAL_SCALAR_TYPES.has(c.scalarType)),
+    ...shorthand.cases.filter(
+      c => !INTEGRAL_SCALAR_TYPES.has(c.scalarType) && !FRACTIONAL_SCALAR_TYPES.has(c.scalarType),
+    ),
+  ];
+
+  for (const entryCase of ordered) {
+    const check = rustScalarValueCheck(entryCase.scalarType);
+    if (!check) continue;
+    const fields = entryCase.assignments
+      .map(a => `"${a.fieldName}": ${JSON.stringify(a.literalValue)}`)
+      .concat(`"${shorthand.valueField}": value`)
+      .join(", ");
+    lines.push(`${indent}} else if value.${check} {`);
+    lines.push(`${indent}    serde_json::json!({ ${fields} })`);
+  }
+
+  lines.push(`${indent}} else {`);
+  lines.push(`${indent}    serde_json::json!({ "${shorthand.valueField}": value })`);
+}
+
+/** serde_json predicate that recognises a JSON token of the given TypeSpec scalar type. */
+function rustScalarValueCheck(scalarType: string): string | null {
+  if (INTEGRAL_SCALAR_TYPES.has(scalarType)) return "is_i64()";
+  if (FRACTIONAL_SCALAR_TYPES.has(scalarType)) return "is_f64()";
+  if (scalarType === "string") return "is_string()";
+  if (scalarType === "boolean") return "is_boolean()";
+  return null;
 }
 
 function emitCollectionSaveHelper(

@@ -248,3 +248,98 @@ describe("rust emitter — numeric coercion bridging", () => {
     assert.ok(!/as_i64\(\)/.test(code), "string-only coercions must gain no numeric bridge");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Named-collection entry shorthand (@entryShorthand) — issue #76
+// ---------------------------------------------------------------------------
+
+interface EntryShorthandOptions {
+  /** Field declared via @entryShorthand, or null to leave it undeclared. */
+  entryShorthand?: string | null;
+}
+
+/**
+ * Builds a `Prompty { inputs: Property[] }` name-keyed collection whose element
+ * type carries prompty's real coercion table (`#{ kind: "<x>", example: "{value}" }`).
+ * Lowered through the production pipeline so the test exercises real IR, not a stub.
+ */
+function emitNamedCollectionOwner(options: EntryShorthandOptions = {}): string {
+  const element = makeType("Property", [
+    makeProp("name", "string", { isScalar: true }),
+    makeProp("kind", "string", { isScalar: true }),
+    makeProp("default", "unknown", { isScalar: true }),
+    makeProp("example", "unknown", { isScalar: true }),
+  ]);
+  element.coercions = [
+    { scalar: "string", expansion: { kind: "string", example: "{value}" } },
+    { scalar: "integer", expansion: { kind: "integer", example: "{value}" } },
+    { scalar: "float32", expansion: { kind: "float", example: "{value}" } },
+    { scalar: "boolean", expansion: { kind: "boolean", example: "{value}" } },
+  ] as unknown as typeof element.coercions;
+  if (options.entryShorthand !== undefined) {
+    element.entryShorthand = options.entryShorthand;
+  }
+
+  const inputs = makeProp("inputs", "Property");
+  inputs.isCollection = true;
+  inputs.isNamedCollection = true;
+  inputs.type = element;
+
+  const owner = makeType("Prompty", [inputs]);
+  const registry = TypeRegistry.fromTypeGraph([owner, element]);
+  return emitRustFile(lowerFile(owner, registry, new Set<string>()), new RustExprVisitor(registry), new Set<string>());
+}
+
+describe("rust emitter — named-collection entry shorthand", () => {
+  it("infers the discriminator and routes the scalar to the declared field", () => {
+    const code = emitNamedCollectionOwner({ entryShorthand: "default" });
+
+    assert.ok(
+      /is_string\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "string", "default": value \}\)/.test(code),
+      'a string entry must infer kind "string" and populate the declared field',
+    );
+    assert.ok(
+      /is_boolean\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "boolean", "default": value \}\)/.test(code),
+      'a boolean entry must infer kind "boolean" and populate the declared field',
+    );
+    assert.ok(
+      !/"example": value/.test(code),
+      "the entry shorthand must not leak direct-coercion example semantics",
+    );
+    assert.ok(
+      !/serde_json::json!\(\{ "kind": value \}\)/.test(code),
+      "the raw scalar must never be written into the discriminator field",
+    );
+  });
+
+  it("classifies integers before floats", () => {
+    const code = emitNamedCollectionOwner({ entryShorthand: "default" });
+
+    const integral = code.indexOf('is_i64() {');
+    const fractional = code.indexOf('is_f64() {');
+    assert.ok(integral !== -1, "expected an integral entry arm");
+    assert.ok(fractional !== -1, "expected a fractional entry arm");
+    assert.ok(
+      integral < fractional,
+      "is_i64 must be tested before is_f64 or every integer collapses into a float",
+    );
+    assert.ok(
+      /is_i64\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "integer", "default": value \}\)/.test(code),
+      'an integer entry must infer kind "integer"',
+    );
+    assert.ok(
+      /is_f64\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "float", "default": value \}\)/.test(code),
+      'a float entry must infer kind "float"',
+    );
+  });
+
+  it("falls back to the historical single-field shorthand when undeclared", () => {
+    const code = emitNamedCollectionOwner();
+
+    assert.ok(
+      /serde_json::json!\(\{ "example": value \}\)/.test(code),
+      "without @entryShorthand the coercion property remains the shorthand target",
+    );
+    assert.ok(!/is_i64\(\) \{/.test(code), "an undeclared collection gains no inference arms");
+  });
+});

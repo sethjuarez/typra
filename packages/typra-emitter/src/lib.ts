@@ -175,7 +175,8 @@ export const $lib = createTypeSpecLibrary({
     knownAs: { description: "Wire field name mappings per target system" },
     defaultFor: { description: "Per-target required default values" },
     protocols: { description: "Pipeline interface markers" },
-    parseAliases: { description: "Parse-only aliases for named string unions" }
+    parseAliases: { description: "Parse-only aliases for named string unions" },
+    entryShorthands: { description: "Field populated by an immediate scalar in name-keyed collection form" }
   }
 });
 

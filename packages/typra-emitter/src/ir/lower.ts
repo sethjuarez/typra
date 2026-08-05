@@ -39,6 +39,8 @@ import {
   PolymorphicVariant,
   PolymorphicDefault,
   CollectionHelperDecl,
+  EntryShorthandDecl,
+  EntryShorthandCase,
   FactoryDecl,
   MethodStubDecl,
   ImportRef,
@@ -427,9 +429,32 @@ function lowerCollectionHelpers(node: TypeNode, registry: TypeRegistry): Collect
         elementTypeName: p.typeName,
         innerFields: elementType?.properties.filter(t => t.name !== "name").map(t => t.name) || [],
         coercionProperty: elementType ? findCoercionProperty(elementType) : null,
+        entryShorthand: elementType ? lowerEntryShorthand(elementType) : null,
         hasNameProperty,
       };
     });
+}
+
+/**
+ * Build the immediate-scalar entry expansion declared by `@entryShorthand`.
+ *
+ * The value field comes from the decorator; the constant assignments (typically
+ * the discriminator) are inferred from the element's `@coerce` table, dropping
+ * each coercion's own `{value}` assignment since that value is redirected to the
+ * declared field instead.
+ */
+function lowerEntryShorthand(node: TypeNode): EntryShorthandDecl | null {
+  const valueField = node.entryShorthand;
+  if (!valueField) return null;
+
+  const cases: EntryShorthandCase[] = (node.coercions || []).map(coercion => ({
+    scalarType: coercion.scalar,
+    assignments: Object.entries(coercion.expansion)
+      .filter(([, value]) => value !== "{value}")
+      .map(([fieldName, value]) => ({ fieldName, literalValue: String(value) })),
+  }));
+
+  return { valueField, cases };
 }
 
 // ============================================================================
