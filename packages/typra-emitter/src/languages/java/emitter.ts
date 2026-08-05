@@ -441,8 +441,9 @@ function emitLoadField(
       } else {
         lines.push(`      if (map.get("${wireName}") instanceof Iterable<?> values) {`);
       }
+      lines.push(`        int ${name}Index = 0;`);
       lines.push("        for (Object item : values) {");
-      lines.push(`          result.${name}.add(${javaTypeName(field.category.typeName)}.load(item, ctx.at("${wireName}")));`);
+      lines.push(`          result.${name}.add(${javaTypeName(field.category.typeName)}.load(item, ctx.at("${wireName}").atIndex(${name}Index++)));`);
       lines.push("        }");
       lines.push("      }");
       break;

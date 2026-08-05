@@ -924,7 +924,7 @@ function emitLoadCollectionComplex(
   lines.push(`\t\t\t\tresult.${fieldName} = make([]${goElemType}, len(arr))`);
   lines.push("\t\t\t\tfor i, v := range arr {");
   lines.push("\t\t\t\t\tif item, ok := v.(map[string]interface{}); ok {");
-  lines.push(`\t\t\t\t\t\tloaded, err := Load${typeName}(item, ctx.At("${assign.sourceName}"))`);
+  lines.push(`\t\t\t\t\t\tloaded, err := Load${typeName}(item, ctx.At("${assign.sourceName}").AtIndex(i))`);
   lines.push("\t\t\t\t\t\tif err != nil {");
   lines.push("\t\t\t\t\t\t\treturn result, err");
   lines.push("\t\t\t\t\t\t}");

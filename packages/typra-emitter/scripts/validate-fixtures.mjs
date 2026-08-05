@@ -1292,7 +1292,7 @@ function runTypeScriptExecutableConformance() {
   const configPath = path.join(sourceDir, "tsconfig.conformance.json");
   const outDir = path.join(sourceDir, ".typra-conformance");
   writeFileSync(runnerPath, [
-    'import { FixtureConnection, FixtureContent, FixtureCustomTool, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, SaveContext, WireOptions } from "./index";',
+    'import { FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, SaveContext, WireOptions } from "./index";',
     "",
     `const root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)});`,
     `const imageContent = FixtureContent.load(${JSON.stringify(imageContentSample)});`,
@@ -1336,6 +1336,13 @@ function runTypeScriptExecutableConformance() {
     "} catch (error) {",
     "  const diagnostic = String(error);",
     '  if (!diagnostic.includes("tools.custom.connection") || !diagnostic.includes("missing required field")) throw error;',
+    "}",
+    "try {",
+    '  FixtureIndexedList.load({ entries: [{ label: "first", detail: { code: "ok" } }, { label: "second" }] } as any);',
+    '  throw new Error("missing required field inside an array element was accepted");',
+    "} catch (error) {",
+    "  const diagnostic = String(error);",
+    '  if (!diagnostic.includes("entries[1].detail")) throw new Error("array element diagnostic lost the element index: " + diagnostic);',
     "}",
     `const wire = WireOptions.load(${JSON.stringify(wireOptionsSample)});`,
     'const reference = FixtureReference.load("ref-coerced" as any);',
@@ -1713,6 +1720,13 @@ function runGoExecutableConformance() {
     '\tabstractKnown, err := fixtures.LoadFixtureAbstractOpenConnection(map[string]interface{}{"kind": "managed", "label": "known", "resourceId": "res-1"}, loadCtx)',
     "\tif err != nil { panic(err) }",
     '\tif _, ok := abstractKnown.(fixtures.FixtureManagedConnection); !ok { panic("known subtype dispatch on abstract open base regressed") }',
+    // Issue #47: a failure inside an array element must carry the element index.
+    '\t_, arrayIndexErr := fixtures.LoadFixtureIndexedList(map[string]interface{}{"entries": []interface{}{',
+    '\t\tmap[string]interface{}{"label": "first", "detail": map[string]interface{}{"code": "ok"}},',
+    '\t\tmap[string]interface{}{"label": "second"},',
+    "\t}}, loadCtx)",
+    '\tif arrayIndexErr == nil { panic("missing required field inside an array element was not rejected") }',
+    '\tif !strings.Contains(arrayIndexErr.Error(), "entries[1].detail") { panic("array element diagnostic lost the element index: " + arrayIndexErr.Error()) }',
     '\t_, missingConnectionErr := fixtures.LoadFixtureToolbox(map[string]interface{}{"tools": map[string]interface{}{"custom": map[string]interface{}{"kind": "vendor"}}, "inheritedMapBindingTool": map[string]interface{}{"kind": "function", "name": "map", "command": "run"}, "inheritedListBindingTool": map[string]interface{}{"kind": "function", "name": "list", "command": "run"}}, loadCtx)',
     '\tif missingConnectionErr == nil || !strings.Contains(missingConnectionErr.Error(), "tools.custom.connection") || !strings.Contains(missingConnectionErr.Error(), "missing required field") { panic("missing required CustomTool.connection was not rejected pathfully") }',
     '\tunionProperty, err := fixtures.LoadFixtureProperty(map[string]interface{}{',
