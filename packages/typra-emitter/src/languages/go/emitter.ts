@@ -112,7 +112,7 @@ export function emitGoFileContent(
   );
   const needsFmt = enums.some(enumDef => hasParseAliases(enumDef) && !enumDef.isOpen) ||
     types.some(type => type.polymorphicDispatch
-      && (isClosedPolymorphicDispatch(type.polymorphicDispatch) || type.polymorphicDispatch.isAbstract)
+      && isClosedPolymorphicDispatch(type.polymorphicDispatch)
       && !type.polymorphicDispatch.defaultVariant) ||
     needsNamedCollections ||
     needsRequiredComplexValidation;
@@ -275,7 +275,7 @@ function emitTypeBlock(
 
   // Struct definition
   emitStruct(type, lines, polymorphicTypeNames, fieldNames);
-  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+  if (absorbsUnknownIntoBase(type.polymorphicDispatch)) {
     emitRawCloneHelper(typeName, lines);
   }
 
@@ -344,6 +344,26 @@ function emitDescriptionComment(typeName: string, description: string, lines: st
   }
 }
 
+/**
+ * True when the base type itself is the lossless carrier for discriminator values that no
+ * subtype claims, and therefore needs the `raw` passthrough map.
+ *
+ * Two shapes qualify. A non-abstract base declares itself as the wildcard variant, so the IR
+ * hands back a self-referencing default. An abstract base never gets that default (see
+ * `TypeNode.retrievePolymorphicTypes`), but when its discriminator is open the unknown values
+ * still have to land somewhere -- and Go has no abstract construct, so the base struct is a
+ * perfectly good carrier. Closed dispatches absorb nothing and get no `raw` field.
+ */
+function absorbsUnknownIntoBase(dispatch: PolymorphicDispatchDecl | null | undefined): boolean {
+  if (!dispatch) {
+    return false;
+  }
+  if (dispatch.defaultVariant) {
+    return dispatch.defaultVariant.isSelfReference;
+  }
+  return !isClosedPolymorphicDispatch(dispatch);
+}
+
 function emitRawCloneHelper(typeName: string, lines: string[]): void {
   lines.push(`func clone${typeName}RawValue(value interface{}) interface{} {`);
   lines.push("\tswitch value := value.(type) {");
@@ -385,7 +405,7 @@ function emitStruct(
     const tag = getStructTag(field.name, field.isOptional, field.hasExplicitDefault);
     lines.push(`\t${fieldName} ${goType} ${tag}`);
   }
-  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+  if (absorbsUnknownIntoBase(type.polymorphicDispatch)) {
     lines.push("\traw map[string]interface{}");
   }
 
@@ -406,8 +426,11 @@ function emitLoadFunction(
 ): void {
   const typeName = type.typeName.name;
   const isPolymorphicBase = type.polymorphicDispatch !== null;
+  // A closed discriminator has no value left to absorb, so an unrecognized one is
+  // an error. `isAbstract` is a separate axis: an abstract base over an open
+  // discriminator must still absorb the unknown kind rather than reject it.
   const hasTerminalDispatch = type.polymorphicDispatch !== null
-    && (isClosedPolymorphicDispatch(type.polymorphicDispatch) || type.polymorphicDispatch.isAbstract)
+    && isClosedPolymorphicDispatch(type.polymorphicDispatch)
     && !type.polymorphicDispatch.defaultVariant;
   const hasCoercions = type.load.coercions.length > 0;
   const returnType = isPolymorphicBase ? "interface{}" : typeName;
@@ -479,7 +502,7 @@ function emitLoadFunction(
     const helper = type.collectionHelpers.find(candidate => candidate.propertyName === assign.sourceName);
     emitLoadAssignment(assign, helper, polymorphicTypeNames, scalarCoercibleTypeNames, fieldNames, lines);
   }
-  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+  if (absorbsUnknownIntoBase(type.polymorphicDispatch)) {
     lines.push("\t\tresult.raw = make(map[string]interface{}, len(m))");
     lines.push("\t\tfor key, value := range m {");
     lines.push(`\t\t\tresult.raw[key] = clone${typeName}RawValue(value)`);
@@ -500,8 +523,7 @@ function emitLoadFunction(
 // Polymorphic dispatch
 // ============================================================================
 
-function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatchDecl, lines: string[]): void {
-  const isClosed = isClosedPolymorphicDispatch(dispatch);
+function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatchDecl, lines: string[]): void {  const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push("\t// Handle polymorphic types based on discriminator");
   lines.push("\tif m, ok := data.(map[string]interface{}); ok {");
   lines.push(`\t\tif discriminator, ok := m["${dispatch.discriminatorField}"]; ok {`);
@@ -520,13 +542,13 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
       lines.push("\t\t\t\tdefault:");
       lines.push(`\t\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
     }
-  } else if (isClosed || dispatch.isAbstract) {
+  } else if (isClosed) {
     lines.push("\t\t\t\tdefault:");
     lines.push(`\t\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: %s", discriminator)`);
   }
 
   lines.push("\t\t\t\t}");
-  if ((isClosed || dispatch.isAbstract) && !dispatch.defaultVariant) {
+  if (isClosed && !dispatch.defaultVariant) {
     lines.push("\t\t\tdefault:");
     lines.push(`\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: %v", discriminator)`);
   } else if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
@@ -536,7 +558,7 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   lines.push("\t\t\t}");
   lines.push("\t\t}");
   lines.push("\t}");
-  if ((isClosed || dispatch.isAbstract) && !dispatch.defaultVariant) {
+  if (isClosed && !dispatch.defaultVariant) {
     lines.push(`\treturn nil, fmt.Errorf("missing ${typeName} discriminator property: ${dispatch.discriminatorField}")`);
   }
 }
@@ -947,7 +969,7 @@ function emitSaveMethod(
   lines.push(`// Save serializes ${typeName} to map[string]interface{}`);
   lines.push(`func (obj ${typeName}) Save(ctx *SaveContext) map[string]interface{} {`);
   lines.push("\tresult := make(map[string]interface{})");
-  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+  if (absorbsUnknownIntoBase(type.polymorphicDispatch)) {
     lines.push("\tfor key, value := range obj.raw {");
     lines.push(`\t\tresult[key] = clone${typeName}RawValue(value)`);
     lines.push("\t}");
