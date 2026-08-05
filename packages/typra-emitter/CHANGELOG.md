@@ -6,6 +6,36 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## 0.4.24
+
+### Fixed
+
+- **Rust: an optional union-typed field inside a discriminated variant generated
+  uncompilable code** (#78). A variant field whose declared type has no generated
+  Rust counterpart — a polymorphic base, a union containing one (`Property |
+  Named<Property>`), or `unknown` — is carried as `serde_json::Value`. The variant
+  *declaration* ignored `?` while the variant *load* and *save* paths both honoured
+  it, so the generated crate failed with `error[E0308]: expected Value, found
+  Option<Value>`. An optional variant field is now declared
+  `Option<serde_json::Value>`, matching the loader and saver.
+
+  Struct fields are deliberately unchanged: there, `Value::Null` remains the
+  "absent" sentinel and the declaration, loader, and saver already agreed.
+
+  Rust-only. It is the only backend that erases these types to a *non-nullable*
+  type — Go uses `interface{}`, and C#/TypeScript/Python/Java keep the declared
+  class, all of which are already nullable.
+
+### Testing
+
+- `fixtures/shapes/main.tsp` gains an optional union-typed field inside a
+  discriminated variant (`FixtureArrayProperty.fallbackItems`), so the fixture gate
+  — which compiles the generated Rust — now covers the shape that regressed. Only
+  a *required* field of this shape was previously declared, which is why the gate
+  never failed. Reverting the fix makes the gate reproduce the original `E0308`.
+- Two Rust emitter tests lock the declaration, load, and save sites against each
+  other for both the optional and required cases.
+
 ## 0.4.23
 
 ### Added
