@@ -6,6 +6,42 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## 0.4.21
+
+### Fixed
+
+- **C#, Python, and TypeScript no longer conflate `@abstract` with closed** (#59, PR #67).
+  An abstract base over an *open* discriminator threw
+  `Unknown Connection discriminator field 'kind' value: future-auth` instead of absorbing
+  the unrecognized kind. This completes the reject-before-the-open-fallback family — #37,
+  #38, #54, #59 — four instances across four backends, which is what motivated the
+  cross-backend audit in `0.4.19`.
+
+  Each backend now emits a concrete `UnknownX` carrier for abstract bases whose
+  discriminator is open, sharing the predicate Go already used: TypeScript
+  `export class UnknownX extends X`, C# `public sealed partial class UnknownX : X`,
+  Python `@dataclass class UnknownX(X)`.
+
+  A subclass was chosen over dropping `abstract` from the base. Rust and Swift model
+  polymorphism as enums, where an `Unknown` variant is natural; these three model it as
+  class inheritance, so the faithful analogue is a concrete subclass. Dropping `@abstract`
+  would silently discard the schema author's intent.
+
+  The carrier needs no `kind` field and no `save()` override, because all three backends
+  emit `load()` as *dispatch first, then apply base assignments* — so the base assigns the
+  unrecognized discriminator after dispatch, and the base's `save()` re-emits the preserved
+  payload from `raw`. This ordering was verified against generated fixture output for each
+  backend rather than assumed from TypeScript.
+
+  Authority is `spec/vectors/model/connection_roundtrip_vectors.json` in `microsoft/prompty`,
+  which requires preserving the exact kind and the complete payload — including explicit
+  nulls, and without case-folding `"Reference"` to `"reference"`.
+
+### Changed
+
+- `raw`/`_raw` and the raw-clone helpers are now `protected` rather than `private` in the
+  TypeScript and C# emitters, so the carrier subclass can reach them.
+
 ## 0.4.20
 
 ### Fixed
@@ -70,8 +106,8 @@ behind the stack of unmerged pull requests.
   An abstract base over an *open* discriminator must absorb an unrecognized kind
   losslessly, the way Rust's `Unknown { kind_name, raw }` variant does. Go emitted
   `fmt.Errorf("unknown ... discriminator")` instead, and its struct had no `raw` field to
-  round-trip the payload with. Both halves are fixed. C#, Python, and TypeScript remain
-  affected — see *Known limitations*.
+  round-trip the payload with. Both halves are fixed. C#, Python, and TypeScript
+  followed in `0.4.21` (#59).
 
 - **Diagnostics now carry array element indices** (#47, PR #60).
   A failure in `messages[3]` was reported as just `messages`. Array elements now thread an
@@ -153,13 +189,6 @@ as `0.4.14 -> 0.4.15` mid-effort across seven runtimes with no recorded baseline
 resulting failures were initially misattributed to pre-existing problems.
 
 ## Known limitations
-
-- **#59 — C#, Python, and TypeScript still conflate `@abstract` with closed.** Go was fixed
-  in `0.4.19`; the other three emit an "unknown discriminator" error for an unrecognized
-  kind on an abstract *open* base. Their fix is not the mechanical predicate flip Go took:
-  C# and Python emit genuinely abstract classes, where instantiating the base is a compile
-  error, so each needs a concrete `Unknown` carrier of the kind Rust and Swift already have.
-  Java and Swift are correct.
 
 - **#38's reachability.** `resolveUnionProperty` (`src/ir/ast.ts:645-681`) classifies a union
   of string literals plus a bare `string` as `scalar` — never `complex` — and the
