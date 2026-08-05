@@ -126,6 +126,21 @@ model FixtureAbstractTextContent extends FixtureAbstractContent {
   text: string;
 }
 
+@doc("Locks default synthesis for polymorphic union fields, including the abstract closed union that declares no unknown case.")
+model FixturePolymorphicDefaults {
+  @sample(#{ requiredAbstractContent: #{ kind: "text", text: "closed union required field" } })
+  @doc("Required field of an abstract closed union; must default to a declared variant, never an undeclared unknown case")
+  requiredAbstractContent: FixtureAbstractContent;
+
+  @sample(#{ optionalAbstractContent: #{ kind: "text", text: "closed union optional field" } })
+  @doc("Optional field of the same abstract closed union")
+  optionalAbstractContent?: FixtureAbstractContent;
+
+  @sample(#{ requiredConnection: #{ kind: "custom", name: "defaults-connection" } })
+  @doc("Required field of an open union that does declare an unknown case")
+  requiredConnection: FixtureConnection;
+}
+
 @parseAlias("ready", #["complete"])
 union FixtureStatus {
   draft: "draft";
