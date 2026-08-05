@@ -242,6 +242,12 @@ const RUST_TYPE_MAP: Record<string, string> = {
   array: "Vec<serde_json::Value>",
 };
 
+/** Schema scalar types whose canonical JSON form is a whole number. */
+const INTEGRAL_SCALAR_TYPES = new Set(["integer", "int32", "int64"]);
+
+/** Schema scalar types whose canonical JSON form may carry a fraction. */
+const FRACTIONAL_SCALAR_TYPES = new Set(["float", "float32", "float64", "number", "numeric"]);
+
 /**
  * Emit a complete Rust source file from a FileDecl.
  *
@@ -921,10 +927,21 @@ function emitLoadFromValue(
   lines.push('            panic!("{}", message);');
   lines.push("        }");
 
-  // Coercions
+  // Coercions.
+  //
+  // Numeric coercions are emitted as one bridged block rather than one `if let` each.
+  // `serde_json::Value::as_f64()` succeeds for whole numbers too, so an independent
+  // fractional branch placed before an integral one swallows every integer and reports
+  // the wrong primitive kind. This mirrors the Go backend's decoder-native bridging
+  // (#39) so both backends classify an identical payload identically.
+  const numericCoercions = type.load.coercions.filter(
+    c => INTEGRAL_SCALAR_TYPES.has(c.scalarType) || FRACTIONAL_SCALAR_TYPES.has(c.scalarType),
+  );
   for (const c of type.load.coercions) {
+    if (numericCoercions.includes(c)) continue;
     emitCoercionBranch(name, c, type, childTypes, baseFieldNames, polymorphicTypeNames, lines);
   }
+  emitNumericCoercionBridge(name, numericCoercions, type, childTypes, baseFieldNames, polymorphicTypeNames, lines);
 
   // Polymorphic dispatch
   if (type.polymorphicDispatch) {
@@ -961,6 +978,62 @@ function emitCoercionBranch(
     lines.push("            let value = s.to_string();");
   }
 
+  lines.push(coercionReturnStatement(typeName, c, type, childTypes, baseFieldNames, polymorphicTypeNames, "            "));
+  lines.push("        }");
+}
+
+/**
+ * Emit the numeric coercions of a type as one ordered, decoder-native block.
+ *
+ * `serde_json::Value::as_f64()` returns `Some` for whole numbers as well as fractional ones,
+ * so a fractional branch emitted before an integral one swallows every integer and reports the
+ * wrong primitive kind. Unlike Go's `encoding/json` — which decodes every JSON number as
+ * `float64` and must therefore reconstruct integrality with `math.Trunc` — `serde_json` keeps
+ * the token's own int/float distinction, so `as_i64()` tested first is both simpler and exactly
+ * what "stores the unmodified scalar" asks for: `4` stays `4` rather than becoming `4.0`.
+ */
+function emitNumericCoercionBridge(
+  typeName: string,
+  coercions: CoercionDecl[],
+  type: TypeDecl,
+  childTypes: TypeDecl[],
+  baseFieldNames: Set<string>,
+  polymorphicTypeNames: Set<string>,
+  lines: string[],
+): void {
+  if (coercions.length === 0) return;
+
+  const integral = coercions.filter(c => INTEGRAL_SCALAR_TYPES.has(c.scalarType));
+  const fractional = coercions.filter(c => FRACTIONAL_SCALAR_TYPES.has(c.scalarType));
+
+  const statement = (c: CoercionDecl): string =>
+    coercionReturnStatement(typeName, c, type, childTypes, baseFieldNames, polymorphicTypeNames, "            ");
+
+  // Integral first — `as_f64()` also matches whole numbers, so the reverse order is unreachable.
+  if (integral.length > 0) {
+    lines.push("        if let Some(value) = value.as_i64() {");
+    lines.push(statement(integral[0]));
+    lines.push("        }");
+  }
+  if (fractional.length > 0) {
+    lines.push("        if let Some(value) = value.as_f64() {");
+    lines.push(statement(fractional[0]));
+    lines.push("        }");
+  }
+}
+
+/**
+ * Build the `return <Type> { ... };` statement for one coercion branch.
+ */
+function coercionReturnStatement(
+  typeName: string,
+  c: CoercionDecl,
+  type: TypeDecl,
+  childTypes: TypeDecl[],
+  baseFieldNames: Set<string>,
+  polymorphicTypeNames: Set<string>,
+  indent: string,
+): string {
   const dispatch = type.polymorphicDispatch;
   const discField = dispatch?.discriminatorField;
   const enumName = typeName + "Kind";
@@ -978,7 +1051,15 @@ function emitCoercionBranch(
         const enumExpr = `${targetField.enumName}::from_str_opt(&value).unwrap_or(${targetField.enumName}::${toPascalCase(defaultVal)})`;
         return isOptional ? `${snake}: Some(${enumExpr})` : `${snake}: ${enumExpr}`;
       }
-      const expr = isOptional ? "Some(value.into())" : "value.into()";
+      // `value` is bound as f64 for every numeric coercion so the decoded scalar reaches the
+      // target unmodified. Narrow only when the destination field is genuinely f32; widening
+      // a f32 back to f64 is what turned 3.14 into 3.140000104904175.
+      const valueExpr = FRACTIONAL_SCALAR_TYPES.has(c.scalarType)
+        && targetField?.category.kind === "scalar"
+        && targetField.category.scalarType === "float32"
+        ? "(value as f32).into()"
+        : "value.into()";
+      const expr = isOptional ? `Some(${valueExpr})` : valueExpr;
       return `${snake}: ${expr}`;
     }
     // Check if this field is the discriminator — must construct enum variant
@@ -1017,12 +1098,14 @@ function emitCoercionBranch(
     return targetField?.isOptional ? `${snake}: Some(${literalExpr})` : `${snake}: ${literalExpr}`;
   });
 
-  lines.push(`            return ${typeName} { ${fieldAssignments.join(", ")}, ..Default::default() };`);
-  lines.push("        }");
+  return `${indent}return ${typeName} { ${fieldAssignments.join(", ")}, ..Default::default() };`;
 }
 
 /**
  * Get the Rust coercion check pattern for a scalar type.
+ *
+ * Numeric scalars are handled by `emitNumericCoercionBridge` and never reach here;
+ * they are deliberately absent so the lossy `as f32` narrowing cannot come back.
  */
 function rustCoercionCheck(scalarType: string): { ifLet: string } | null {
   switch (scalarType) {
@@ -1030,30 +1113,9 @@ function rustCoercionCheck(scalarType: string): { ifLet: string } | null {
       return { ifLet: "if let Some(s) = value.as_str()" };
     case "boolean":
       return { ifLet: "if let Some(value) = value.as_bool()" };
-    case "float32":
-      return { ifLet: "if let Some(value) = value.as_f64().map(|value| value as f32)" };
-    case "float64":
-    case "float":
-    case "number":
-    case "numeric":
-      return { ifLet: "if let Some(value) = value.as_f64()" };
-    case "int32":
-    case "int64":
-    case "integer":
-      return { ifLet: "if let Some(value) = value.as_i64()" };
     default:
       return null;
   }
-}
-
-/**
- * Get the Rust expression to convert a coercion value to the target field type.
- */
-function coercionIntoValue(scalarType: string): string {
-  // `value` is already bound in the coercion branch
-  // For string coercions: value is String, .into() for String → String
-  // For numeric/bool: value is the extracted primitive
-  return "value.into()";
 }
 
 function emitPolymorphicLoad(

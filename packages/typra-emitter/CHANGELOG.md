@@ -8,6 +8,45 @@ PR #36 has since been merged and `main` is once again the source of truth for re
 
 ## Unreleased
 
+### Fixed
+
+- **Rust no longer loses the primitive kind or the precision of an immediate `Property` scalar**
+  (#73). `spec/vectors/model/property_scalar_coercion_vectors.json` requires that direct
+  generated-model JSON loading infer "the exact primitive kind" and store "the unmodified
+  scalar", but the Rust backend reported `4` as `kind: "float"` and stored `3.14` as
+  `3.140000104904175`. Two independent defects in one emitted block:
+
+  1. **Kind collapse.** `serde_json::Value::as_f64()` returns `Some` for whole numbers too, and
+     the fractional coercion branch was emitted before the integral one, so every integer
+     matched float first and the integer branch was unreachable. Which branch won was decided
+     by declaration order in the schema, which is not a contract.
+  2. **Precision loss.** The fractional branch narrowed through `as f32`;
+     `3.140000104904175` is exactly `3.14f32` widened back to `f64`. The destination field is a
+     `serde_json::Value`, which holds an `f64` exactly, so the narrowing was gratuitous.
+
+  Numeric coercions are now emitted as one ordered block with the `as_i64()` guard first, and
+  the `f32` cast is applied only when the *destination field* is genuinely `f32` rather than
+  whenever the declared coercion scalar is `float32`.
+
+  This is the Rust counterpart of #39 / PR #52, which fixed the same contract in Go. The two
+  backends diverge deliberately: Go must reconstruct integrality with `math.Trunc` because
+  `encoding/json` decodes every JSON number as `float64`, whereas `serde_json` preserves the
+  token's own int/float distinction — a literal `as_f64()` + `trunc()` port stores `4.0` where
+  the vector requires `4`.
+
+  For the record, the general Rust numeric mapping was never at fault: `float`, `float64`,
+  `number` and `numeric` all map to `f64`, and only an explicitly declared `float32` maps to
+  `f32`. The narrowing came from the coercion path alone.
+
+  `scripts/validate-fixtures.mjs` had asserted the lossy
+  `as_f64().map(|value| value as f32)` line as *expected content*, so the defect was pinned in
+  place by its own gate. That assertion is now inverted into an `assertExcludes`.
+
+  Measured against prompty: `cargo test --no-fail-fast --test property_scalar_coercion_vectors`
+  `0 passed / 1 failed` → `1 passed / 0 failed`; the full Rust suite `869 passed / 39 failed` →
+  `870 passed / 38 failed`, a single flip in the intended direction. Regeneration touched five
+  lines in one file, `model/core/property.rs`.
+
 ### Testing
 
 - **Locked the named-collection entry-form contract with an executable test.** A defect report
