@@ -14,6 +14,7 @@ interface PropOptions {
   defaultValue?: string | null;
   allowedValues?: string[];
   isOpenEnum?: boolean;
+  isOptional?: boolean;
 }
 
 function makeProp(name: string, typeName: string, options: PropOptions = {}): PropertyNode {
@@ -24,6 +25,7 @@ function makeProp(name: string, typeName: string, options: PropOptions = {}): Pr
   prop.defaultValue = options.defaultValue ?? null;
   prop.allowedValues = options.allowedValues ?? [];
   prop.isOpenEnum = options.isOpenEnum ?? false;
+  prop.isOptional = options.isOptional ?? false;
   return prop;
 }
 
@@ -116,8 +118,79 @@ describe("rust emitter — open polymorphic discriminators", () => {
 });
 
 // ============================================================================
-// Numeric coercion bridging (immediate scalar Property loads)
+// Optional fields carried as serde_json::Value
 // ============================================================================
+
+/**
+ * Builds a closed polymorphic base with one variant carrying two fields whose
+ * declared type is the polymorphic base itself — one required, one optional.
+ *
+ * A field typed as a polymorphic base (or as a union containing one, e.g.
+ * `Property | Named<Property>`) has no generated Rust counterpart, so it is
+ * carried as `serde_json::Value`. That representation is orthogonal to
+ * optionality, and the declaration, loader, saver, and default must all agree
+ * about it.
+ */
+function emitValueBackedVariantOwner(): string {
+  const arrayVariant = makeType(
+    "ArrayProp",
+    [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "array" }),
+      makeProp("items", "Prop"),
+      makeProp("fallbackItems", "Prop", { isOptional: true }),
+    ],
+    { base: { namespace: "Test", name: "Prop" } },
+  );
+  const base = makeType(
+    "Prop",
+    [makeProp("kind", "string", { isScalar: true })],
+    { discriminator: "kind", childTypes: [arrayVariant] },
+  );
+
+  const registry = TypeRegistry.fromTypeGraph([base, arrayVariant]);
+  const polymorphic = new Set(["Prop"]);
+  return emitRustFile(lowerFile(base, registry, polymorphic), new RustExprVisitor(registry), polymorphic);
+}
+
+describe("rust emitter — optional serde_json::Value fields", () => {
+  it("declares an optional polymorphic variant field as Option<serde_json::Value>", () => {
+    const code = emitValueBackedVariantOwner();
+
+    // The loader builds `value.get("fallbackItems").cloned()`, which is an
+    // Option<Value>. If the variant declares a bare `serde_json::Value` the two
+    // halves disagree and the generated crate fails to compile with E0308.
+    assert.ok(
+      /fallback_items: Option<serde_json::Value>/.test(code),
+      "an optional polymorphic variant field must be declared Option<serde_json::Value>",
+    );
+    assert.ok(
+      /fallback_items: value\.get\("fallbackItems"\)\.cloned\(\),/.test(code),
+      "an optional polymorphic variant field must load without an unwrap_or(Null) fallback",
+    );
+    assert.ok(
+      /if let Some\(val\) = fallback_items \{/.test(code),
+      "an optional polymorphic variant field must be omitted from save when absent",
+    );
+  });
+
+  it("leaves a required polymorphic variant field as a bare serde_json::Value", () => {
+    const code = emitValueBackedVariantOwner();
+
+    // Counterpart guard: optionality must be honoured, not applied unconditionally.
+    assert.ok(
+      /items: serde_json::Value,/.test(code),
+      "a required polymorphic variant field must stay a bare serde_json::Value",
+    );
+    assert.ok(
+      !/items: Option<serde_json::Value>/.test(code.replace(/fallback_items/g, "")),
+      "a required polymorphic variant field must not be wrapped in Option",
+    );
+    assert.ok(
+      /items: value\.get\("items"\)\.cloned\(\)\.unwrap_or\(serde_json::Value::Null\),/.test(code),
+      "a required polymorphic variant field must keep its Null sentinel on load",
+    );
+  });
+});
 
 function scalarField(name: string, scalarType: string, isOptional = true): FieldDecl {
   return {
