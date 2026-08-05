@@ -1,6 +1,6 @@
 {
   "name": "@typra/emitter",
-  "version": "0.4.18",
+  "version": "0.4.19",
   "description": "Generic TypeSpec emitter for generating multi-runtime model surfaces",
   "license": "MIT",
   "repository": {
@@ -37,6 +37,7 @@
   },
   "files": [
     "README.md",
+    "CHANGELOG.md",
     "dist/src/**/*.js",
     "dist/src/**/*.d.ts",
     "dist/src/**/*.json",
