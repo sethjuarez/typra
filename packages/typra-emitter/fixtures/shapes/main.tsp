@@ -437,6 +437,24 @@ model FixtureCustomConnection extends FixtureConnection {
   endpoint: string;
 }
 
+@doc("An abstract base over an open discriminator. Abstract means the base is not directly instantiable; open means an unrecognized kind must still be absorbed losslessly rather than rejected. Locks that backends do not conflate the two.")
+@abstract
+@discriminator("kind")
+model FixtureAbstractOpenConnection {
+  @sample(#{ kind: "managed" })
+  kind: string;
+
+  @sample(#{ label: "abstract open connection" })
+  label?: string;
+}
+
+model FixtureManagedConnection extends FixtureAbstractOpenConnection {
+  kind: "managed";
+
+  @sample(#{ resourceId: "managed-resource-1" })
+  resourceId: string;
+}
+
 @@coerce(McpApprovalConfig, string, #{ kind: "{value}" }, "config", "Load an approval config from its kind.", "always");
 model McpApprovalConfig {
   kind: string;

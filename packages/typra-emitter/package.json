@@ -66,6 +66,8 @@
     "prepack": "npm run build",
     "watch": "tsc --watch",
     "generate:fixtures": "tsp compile ./fixtures/shapes/main.tsp --config ./fixtures/tspconfig.yaml",
+    "pretest": "npm run build",
+    "prevalidate:fixtures": "npm run build && npm run generate:fixtures",
     "validate:fixtures": "node ./scripts/validate-fixtures.mjs",
     "test": "node --test \"dist/test/*.test.js\"",
     "lint": "eslint src/ test/ --report-unused-disable-directives --max-warnings=0",

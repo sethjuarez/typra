@@ -686,13 +686,51 @@ describe("lowerFile", () => {
       assert.ok(coercionIndex >= 0, "expected generated coercion block");
       assert.ok(dispatchIndex >= 0, "expected generated polymorphic dispatch block");
       assert.ok(coercionIndex < dispatchIndex, "scalar coercions must run before abstract dispatch errors");
-      assert.match(code, /\t"fmt"/);
-      assert.match(code, /return nil, fmt\.Errorf\("unknown ConnectionWithCoercion discriminator field 'kind' value: %s", discriminator\)/);
-      assert.match(code, /return nil, fmt\.Errorf\("missing ConnectionWithCoercion discriminator property: kind"\)/);
+
+      // `kind` here is a bare `string` with no allowedValues, so this dispatch is OPEN. An open
+      // dispatch is not exhaustive, so the loader must fall through and absorb the unknown kind
+      // into the base rather than error. See issue #54: `isAbstract` was previously conflated
+      // with `isClosed`, which made every abstract base terminal regardless of openness.
       const loadStart = code.indexOf("func LoadConnectionWithCoercion(");
       const loadBody = code.slice(loadStart, code.indexOf("\nfunc ", loadStart + 1));
+      assert.doesNotMatch(loadBody, /unknown ConnectionWithCoercion discriminator/);
+      assert.doesNotMatch(loadBody, /missing ConnectionWithCoercion discriminator/);
+      assert.match(loadBody, /\/\/ Load from map/);
+      assert.match(loadBody, /return result, nil/);
+      assert.match(loadBody, /result\.raw\[key\] = cloneConnectionWithCoercionRawValue\(value\)/);
+    });
+
+    it("keeps an abstract CLOSED dispatch terminal so no unreachable load tail is emitted", () => {
+      // Counterpart guard for the test above. Closedness -- not abstractness -- is what makes a
+      // dispatch exhaustive. This pins the original terminal-loader behaviour for the case where
+      // it is actually correct, so a future fix cannot make every abstract base fall through.
+      const textPart = makeType("ClosedTextPart", [
+        makeProp("kind", "ClosedPartKind", { defaultValue: "text", allowedValues: ["text"] }),
+      ], { base: { namespace: "Test", name: "ClosedPartBase" } });
+      const closedBase = makeType("ClosedPartBase", [
+        makeProp("kind", "ClosedPartKind", { allowedValues: ["text"] }),
+      ], {
+        discriminator: "kind",
+        childTypes: [textPart],
+        isAbstract: true,
+      });
+      const registry = TypeRegistry.fromTypeGraph([closedBase, textPart]);
+      const file = lowerFile(closedBase, registry, new Set(["ClosedPartBase"]));
+      const code = emitGoFileContent(
+        file.types,
+        "fixtures",
+        new GoExprVisitor(registry),
+        new Set(["ClosedPartBase"]),
+        file.enums,
+        file.group,
+      );
+
+      const loadStart = code.indexOf("func LoadClosedPartBase(");
+      const loadBody = code.slice(loadStart, code.indexOf("\nfunc ", loadStart + 1));
+      assert.match(loadBody, /return nil, fmt\.Errorf\("unknown ClosedPartBase discriminator field 'kind' value: %s", discriminator\)/);
+      assert.match(loadBody, /return nil, fmt\.Errorf\("missing ClosedPartBase discriminator property: kind"\)/);
       assert.doesNotMatch(loadBody, /\/\/ Load from map/);
-      assert.doesNotMatch(loadBody, /return result, nil/);
+      assert.doesNotMatch(code, /cloneClosedPartBaseRawValue/);
     });
 
     it("exports safe field identifiers while preserving leading-underscore wire keys", () => {
