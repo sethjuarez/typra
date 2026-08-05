@@ -191,9 +191,14 @@ export function emitTypeScriptTest(ctx: BaseTestContext & { importPath: string; 
   lines.push("");
   if (!(isAbstract && node.isAbstract)) {
     lines.push(`  describe("load and save", () => {`);
-    if (!isAbstract) {
+    if (!isAbstract && examples.length > 0) {
       lines.push(`    it("should load from dictionary", () => {`);
-      lines.push(`      const data: Record<string, unknown> = {};`);
+      // Reuse the payload the sibling JSON/YAML tests load. An empty object
+      // fails required-field validation for any type that has one, so a type
+      // with no example has no dictionary payload worth asserting on.
+      lines.push(
+        "      const data = JSON.parse(`" + examples[0].json.join("\\n") + "`) as Record<string, unknown>;",
+      );
       lines.push(`      const instance = ${typeName}.load(data);`);
       lines.push(`      expect(instance).toBeDefined();`);
       lines.push(`    });`);
