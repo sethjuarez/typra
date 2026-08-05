@@ -352,7 +352,19 @@ function lowerPolymorphicDispatch(
   }));
 
   const discriminatorProperty = node.properties.find(property => property.name === node.discriminator);
-  const isClosed = (discriminatorProperty?.allowedValues.length ?? 0) > 0
+
+  // A wildcard subtype declared in the schema owns unknown discriminator values, and that
+  // declaration is what makes the discriminator open — the emitter never infers it.
+  // This matters when the discriminator union itself lists "*" as a member (e.g.
+  // `union Kind { known: "known", wildcard: "*" }`), which TypeSpec accepts: allowedValues
+  // is then non-empty and the dispatch would otherwise look closed, so backends that
+  // validate closed-ness before dispatching (Rust) would reject unknown values and leave
+  // the declared wildcard arm unreachable.
+  const hasDeclaredWildcard = polyTypes.default !== undefined
+    && polyTypes.default !== null
+    && (polyTypes.default.instance as TypeNode).typeName.name !== node.typeName.name;
+  const isClosed = !hasDeclaredWildcard
+    && (discriminatorProperty?.allowedValues.length ?? 0) > 0
     && discriminatorProperty?.isOpenEnum !== true;
 
   let defaultVariant: PolymorphicDefault | null = null;

@@ -151,6 +151,55 @@ describe("closed polymorphic dispatch", () => {
     assert.match(goSource, /"fmt"/);
     assert.match(goSource, /unknown ClosedContent discriminator field 'kind' value/);
   });
+
+  // Reachable schema shape, verified against TypeSpec 1.10:
+  //   union Kind { known: "known", wildcard: "*" }
+  //   @discriminator("kind") model Base { kind: Kind; }
+  //   model K extends Base { kind: "known"; }
+  //   model W extends Base { kind: "*"; }
+  // That compiles cleanly, so allowedValues is non-empty and the dispatch would look
+  // closed. Backends validating closed-ness before dispatch (Rust) would then reject
+  // unknown values and leave W's arm dead. The declared wildcard must open the dispatch.
+  it("lets a schema-declared wildcard subtype own the open decision", () => {
+    const knownVariant = makeType("SeamKnown", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "known" }),
+    ], { base: { namespace: "Test", name: "SeamContent" } });
+    const wildcardVariant = makeType("SeamCustom", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "*" }),
+    ], { base: { namespace: "Test", name: "SeamContent" } });
+    const seamContent = makeType("SeamContent", [
+      makeProp("kind", "SeamContentKind", { allowedValues: ["known", "*"] }),
+    ], { discriminator: "kind", childTypes: [knownVariant, wildcardVariant] });
+
+    const dispatch = lowerType(seamContent, buildTestRegistry(), new Set(["SeamContent"])).polymorphicDispatch!;
+
+    assert.equal(isClosedPolymorphicDispatch(dispatch), false);
+    assert.ok(dispatch.defaultVariant);
+    assert.equal(dispatch.defaultVariant!.isSelfReference, false);
+    assert.equal(dispatch.defaultVariant!.typeName.name, "SeamCustom");
+    // The wildcard owns unknown values, so it must not also appear as a keyed variant.
+    assert.deepEqual(dispatch.variants.map(v => v.value), ["known"]);
+  });
+
+  // Contract lock (not a regression test for this change): the canonical schema owner
+  // relies on a declared wildcard subtype outranking the emitter's self-reference
+  // fallback, so unknown handling stays schema-owned. Ordering in retrievePolymorphicTypes
+  // already guarantees this; this test pins it so a future reorder cannot silently
+  // hand ownership back to the emitter.
+  it("prefers a declared wildcard subtype over the self-reference fallback", () => {
+    const wildcardVariant = makeType("SeamOpenCustom", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "*" }),
+    ], { base: { namespace: "Test", name: "SeamOpen" } });
+    // Non-abstract base, so a self-reference default is also available.
+    const seamOpen = makeType("SeamOpen", [
+      makeProp("kind", "string", { isScalar: true }),
+    ], { discriminator: "kind", childTypes: [wildcardVariant] });
+
+    const dispatch = lowerType(seamOpen, buildTestRegistry(), new Set(["SeamOpen"])).polymorphicDispatch!;
+
+    assert.equal(dispatch.defaultVariant!.isSelfReference, false);
+    assert.equal(dispatch.defaultVariant!.typeName.name, "SeamOpenCustom");
+  });
 });
 
 // NamedProp for testing collection hasNameProperty

@@ -133,6 +133,9 @@ export class TypeNode {
         instance: child,
       }));
 
+      // Appended last so a schema-declared wildcard subtype wins the default slot below.
+      // Duplicate schema-declared literal wildcards are rejected upstream by the TypeSpec
+      // compiler itself (invalid-discriminator-value), which points at each offending model.
       if (!this.isAbstract) {
         instances = [...instances, { discriminator: this.discriminator, value: "*", instance: this }];
       }
