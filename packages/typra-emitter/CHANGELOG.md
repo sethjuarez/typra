@@ -6,6 +6,27 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## 0.4.20
+
+### Fixed
+
+- **TypeScript no longer emits a generated test file with no test cases** (PR #64).
+  An abstract type carrying no `@sample` on any property skipped every emitted block:
+  the construction and save tests are gated on `!node.isAbstract`, and the JSON, YAML,
+  alternate-representation and dictionary-load tests are gated on `examples.length > 0`.
+  What reached disk was a bare `describe("X", () => {});`, which vitest **fails**
+  outright. Confirmed in `microsoft/prompty` as suite-level collection failures in
+  `tests/model/conversation/content-part.test.ts` and
+  `tests/model/events/stream-chunk.test.ts` after regenerating against `0.4.19`.
+
+  Such a type now emits a `should be defined` case, asserting the only property still
+  meaningful for a type that can be neither constructed nor loaded — that it is
+  exported and reachable. Emitting no file was rejected because consumers track these
+  paths in git and regeneration does not prune stale output.
+
+  This defect predates `0.4.19`; it became visible only when prompty's regeneration
+  moved several types to `@abstract`.
+
 ## 0.4.19
 
 First release cut from `main` since `0.4.2`. Contains every fix that had accumulated
