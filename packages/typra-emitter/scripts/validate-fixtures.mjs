@@ -1,9 +1,21 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync as nodeExecFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, readdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const packageRoot = process.cwd();
+
+/**
+ * Node defaults `maxBuffer` to 1 MB and throws ENOBUFS past it. The verifier's `--json`
+ * self-compare already emits ~1 MB for the current fixture set, so any fixture growth makes
+ * every child process here fail in a way that is indistinguishable from a real tool failure.
+ * These are all build/test/verify steps whose output we want in full.
+ */
+const CHILD_PROCESS_MAX_BUFFER = 64 * 1024 * 1024;
+
+function execFileSync(file, args, options = {}) {
+  return nodeExecFileSync(file, args, { maxBuffer: CHILD_PROCESS_MAX_BUFFER, ...options });
+}
 const sourceGeneratedRoot = path.join(packageRoot, "generated", "fixtures");
 const validationRoot = mkdtempSync(path.join(tmpdir(), "typra-fixtures-"));
 const generatedRoot = path.join(validationRoot, "fixtures");
