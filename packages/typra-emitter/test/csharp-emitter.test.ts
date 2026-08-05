@@ -212,3 +212,111 @@ describe("C# emitter guarded scalar loads", () => {
     assert.doesNotMatch(source, /#nullable disable annotations|IDictionary<string, object>/);
   });
 });
+
+function abstractOpenConnection(): TypeDecl {
+  const category = { kind: "scalar" as const, scalarType: "string" };
+  const names = ["kind", "label"];
+  return {
+    typeName: { namespace: "Test", name: "Connection" },
+    base: null,
+    isAbstract: true,
+    isProtocol: false,
+    description: "",
+    fields: names.map(name => ({
+      name,
+      typeName: { namespace: "", name: "string" },
+      category,
+      isOptional: name === "label",
+      defaultValue: null,
+      allowedValues: [],
+      parseAliases: {},
+      enumName: null,
+      isOpenEnum: false,
+      description: "",
+      knownAs: {},
+    })),
+    coercionProperty: null,
+    load: {
+      coercions: [],
+      assignments: names.map(name => ({
+        sourceName: name,
+        fieldName: name,
+        category,
+        isOptional: name === "label",
+        parentTypeName: "Connection",
+        enumName: null,
+        allowedValues: [],
+        parseAliases: {},
+        defaultValue: null,
+        isOpenEnum: false,
+      })),
+      hasPolymorphicDispatch: true,
+      hasContextHooks: true,
+    },
+    save: {
+      assignments: names.map(name => ({
+        targetName: name,
+        fieldName: name,
+        category,
+        isOptional: name === "label",
+        parentTypeName: "Connection",
+        enumName: null,
+        isOpenEnum: false,
+      })),
+      hasBase: false,
+      hasContextHooks: true,
+    },
+    factories: [],
+    collectionHelpers: [],
+    polymorphicDispatch: {
+      discriminatorField: "kind",
+      variants: [{ value: "managed", typeName: { namespace: "Test", name: "ManagedConnection" } }],
+      defaultVariant: null,
+      isClosed: false,
+      isAbstract: true,
+    },
+    methods: [],
+    wire: null,
+  };
+}
+
+describe("C# abstract open polymorphic dispatch", () => {
+  it("absorbs unknown discriminators into a carrier instead of throwing", () => {
+    const model = abstractOpenConnection();
+    const source = emitCSharpClass(model, "Test", new CSharpExprVisitor(), [model], () => undefined);
+
+    // The base stays abstract, so `new Connection()` remains a compile error and the
+    // schema author's @abstract is honoured. The carrier is what makes the fallback
+    // constructible.
+    assert.match(source, /public abstract partial class Connection/);
+    assert.match(source, /public sealed partial class UnknownConnection : Connection/);
+    assert.doesNotMatch(source, /Unknown Connection discriminator field/);
+    assert.doesNotMatch(source, /Missing Connection discriminator property/);
+    assert.match(source, /_ => UnknownConnection\.Load\(data, context\),/);
+    assert.match(source, /return UnknownConnection\.Load\(data, context\);/);
+
+    // The retained payload is deep-cloned and stripped of the declared fields, so save
+    // re-emits the unknown keys without duplicating the modelled ones.
+    assert.match(source, /instance\._raw = \(Dictionary<string, object\?>\)CloneRawValue\(data\)!;/);
+    assert.match(source, /instance\._raw\.Remove\("kind"\);/);
+    assert.match(source, /instance\._raw\.Remove\("label"\);/);
+    assert.match(source, /var result = \(Dictionary<string, object\?>\)CloneRawValue\(obj\._raw\)!;/);
+
+    // The carrier is a separate class, so the retained-payload members cannot be private.
+    assert.match(source, /protected Dictionary<string, object\?> _raw = new\(\);/);
+    assert.match(source, /protected static object\? CloneRawValue\(object\? value\)/);
+  });
+
+  it("does not emit a carrier for a closed abstract dispatch", () => {
+    // Counterpart guard: a closed discriminator has no unknown values to absorb, so
+    // rejecting them stays correct.
+    const model = abstractOpenConnection();
+    model.polymorphicDispatch!.isClosed = true;
+    const source = emitCSharpClass(model, "Test", new CSharpExprVisitor(), [model], () => undefined);
+
+    assert.doesNotMatch(source, /class UnknownConnection/);
+    assert.doesNotMatch(source, /_raw/);
+    assert.match(source, /Unknown Connection discriminator field/);
+    assert.match(source, /Missing Connection discriminator property/);
+  });
+});

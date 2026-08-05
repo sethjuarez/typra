@@ -115,7 +115,7 @@ export function emitPythonFile(
     type.methods.some(method => method.runtimeCancellable),
   );
   const preservesRawPayload = decl.types.some(type =>
-    type.polymorphicDispatch?.defaultVariant?.isSelfReference,
+    absorbsUnknownValues(type.polymorphicDispatch),
   );
 
   if (preservesRawPayload) {
@@ -299,7 +299,7 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
   for (const field of type.fields) {
     lines.push(`    ${toSnakeCase(field.name)}: ${pythonTypeAnnotation(field)}${pythonDefaultValue(field)}`);
   }
-  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+  if (absorbsUnknownValues(type.polymorphicDispatch)) {
     lines.push("    _raw: dict[str, Any] = field(default_factory=dict, init=False, repr=False)");
   }
 
@@ -318,7 +318,13 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
   if (type.polymorphicDispatch) {
     lines.push("");
     lines.push("");
-    emitPolymorphicDispatch(name, type.polymorphicDispatch, type.isAbstract, lines);
+    emitPolymorphicDispatch(
+      name,
+      type.polymorphicDispatch,
+      type.isAbstract,
+      lines,
+      needsUnknownCarrier(type) ? unknownCarrierName(name) : undefined,
+    );
   }
 
   // save() method
@@ -348,10 +354,53 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
 
   lines.push("");
 
+  if (needsUnknownCarrier(type)) {
+    emitUnknownCarrier(type, lines);
+  }
+
   // Method stubs — emit as a sibling Protocol class outside the dataclass
   if (type.methods.length > 0) {
     emitMethodHelpersProtocol(type, lines);
   }
+}
+
+/**
+ * Emit the concrete carrier for an abstract base whose discriminator is open.
+ *
+ * Rust models polymorphism as an enum and adds an `Unknown { kind_name, raw }` variant.
+ * Python models it as class inheritance over an `ABC`, so the equivalent is a concrete
+ * subclass: the base keeps its `ABC` marker, honouring the schema's `@abstract`, and
+ * unrecognized discriminator values land here rather than raising.
+ *
+ * The carrier declares no discriminator field of its own. `<T>.load` calls `load_<disc>`
+ * first and then applies the base's own assignments to whatever instance came back, so the
+ * exact unrecognized value is already preserved by the time this instance is returned.
+ * It needs no `save` either: the base's `save` seeds its result from `_raw`.
+ */
+function emitUnknownCarrier(type: TypeDecl, lines: string[]): void {
+  const parentName = type.typeName.name;
+  const carrier = unknownCarrierName(parentName);
+
+  lines.push("@dataclass");
+  lines.push(`class ${carrier}(${parentName}):`);
+  lines.push(`    """Carries a ${parentName} whose discriminator matches no known subtype.`);
+  lines.push("");
+  lines.push(`    The unrecognized value stays on \`${toSnakeCase(type.polymorphicDispatch!.discriminatorField)}\` and every key the`);
+  lines.push(`    schema does not declare is preserved verbatim, so an unknown ${parentName}`);
+  lines.push("    survives a load/save round-trip unchanged.");
+  lines.push("");
+  lines.push('    """');
+  lines.push("");
+  lines.push("    @staticmethod");
+  lines.push(`    def load(data: Any, context: LoadContext | None = None) -> "${carrier}":`);
+  lines.push(`        instance = ${carrier}()`);
+  lines.push("        instance._raw = copy.deepcopy(data)");
+  for (const a of type.load.assignments) {
+    lines.push(`        instance._raw.pop("${a.sourceName}", None)`);
+  }
+  lines.push("        return instance");
+  lines.push("");
+  lines.push("");
 }
 
 /**
@@ -880,6 +929,38 @@ function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDe
   }
 }
 
+/**
+ * Does this dispatch absorb unrecognized discriminator values into a carrier rather than
+ * rejecting them? Mirrors `absorbsUnknownIntoBase` in the Go emitter and
+ * `absorbsUnknownValues` in the TypeScript emitter; the predicate is deliberately identical
+ * across backends so they agree on which schemas are open.
+ */
+function absorbsUnknownValues(dispatch: PolymorphicDispatchDecl | null | undefined): boolean {
+  if (!dispatch) {
+    return false;
+  }
+  if (dispatch.defaultVariant) {
+    return dispatch.defaultVariant.isSelfReference;
+  }
+  return !isClosedPolymorphicDispatch(dispatch);
+}
+
+/**
+ * An abstract base with an open discriminator has no wildcard self-variant, so unrecognized
+ * values need a concrete subclass to land in.
+ */
+function needsUnknownCarrier(type: TypeDecl): boolean {
+  const dispatch = type.polymorphicDispatch;
+  if (!dispatch || !type.isAbstract) {
+    return false;
+  }
+  return !dispatch.defaultVariant && !isClosedPolymorphicDispatch(dispatch);
+}
+
+function unknownCarrierName(parentName: string): string {
+  return `Unknown${parentName}`;
+}
+
 // ============================================================================
 // Polymorphic dispatch
 // ============================================================================
@@ -889,6 +970,7 @@ function emitPolymorphicDispatch(
   dispatch: PolymorphicDispatchDecl,
   isAbstract: boolean,
   lines: string[],
+  carrier?: string,
 ): void {
   const discSnake = toSnakeCase(dispatch.discriminatorField);
   const isClosed = isClosedPolymorphicDispatch(dispatch);
@@ -917,6 +999,11 @@ function emitPolymorphicDispatch(
       lines.push(`                # load default instance`);
       lines.push(`                return ${dispatch.defaultVariant.typeName.name}.load(data, context)`);
     }
+  } else if (carrier) {
+    lines.push("");
+    lines.push("            else:");
+    lines.push(`                # absorb unrecognized discriminator`);
+    lines.push(`                return ${carrier}.load(data, context)`);
   } else {
     lines.push("");
     lines.push("            else:");
@@ -924,7 +1011,13 @@ function emitPolymorphicDispatch(
   }
 
   lines.push("        else:");
-  if (isClosed || isAbstract) {
+  if (carrier) {
+    // Matches the Go and TypeScript backends, which absorb a missing discriminator into the
+    // same carrier they use for an unrecognized one. No vector covers this case; the choice
+    // is made for cross-backend consistency, not from a stated requirement.
+    lines.push(`            # absorb missing discriminator`);
+    lines.push(`            return ${carrier}.load(data, context)`);
+  } else if (isClosed || isAbstract) {
     lines.push("");
     lines.push(`            raise ValueError("Missing ${parentName} discriminator property: '${dispatch.discriminatorField}'")`);
   } else {
@@ -959,7 +1052,7 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
     lines.push("        # Start with parent class properties");
     lines.push("        result = super().save(context)");
     lines.push("");
-  } else if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+  } else if (absorbsUnknownValues(type.polymorphicDispatch)) {
     lines.push("");
     lines.push("        result: dict[str, Any] = copy.deepcopy(obj._raw)");
   } else {

@@ -1309,8 +1309,8 @@ describe("open self-reference payload preservation", () => {
       name => file.types.find(type => type.typeName.name === name),
     );
 
-    assert.match(code, /private Dictionary<string, object\?> _raw = new\(\);/);
-    assert.match(code, /private static object\? CloneRawValue\(object\? value\)/);
+    assert.match(code, /protected Dictionary<string, object\?> _raw = new\(\);/);
+    assert.match(code, /protected static object\? CloneRawValue\(object\? value\)/);
     assert.match(code, /var discriminator = discriminatorValue\.ToString\(\);/);
     assert.doesNotMatch(code, /ToLowerInvariant/);
     assert.match(code, /if \(instance\.GetType\(\) == typeof\(ContentPart\)\)/);
