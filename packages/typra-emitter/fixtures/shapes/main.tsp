@@ -351,6 +351,27 @@ model FixtureBag {
   secondItems: Record<FixtureBagItem> | Named<FixtureBagItem>[];
 }
 
+// Issue #47: a load failure inside an ARRAY element must report the element index, not just
+// the collection name. Proving that needs an array whose element type carries a REQUIRED
+// COMPLEX field, because that is what raises a pathful diagnostic from inside the element.
+// `entries[1].detail` also proves the index composes with further nested segments.
+model FixtureIndexedDetail {
+  @sample(#{ code: "detail-code" })
+  code: string;
+}
+
+model FixtureIndexedEntry {
+  @sample(#{ label: "entry-label" })
+  label: string;
+
+  detail: FixtureIndexedDetail;
+}
+
+model FixtureIndexedList {
+  @sample(#{ entries: #[#{ label: "entry-label", detail: #{ code: "detail-code" } }] })
+  entries: FixtureIndexedEntry[];
+}
+
 // Empty-omission regression: a FLAT struct whose optional fields are intentionally
 // left UNSET in the sample. Its canonical to_value/load_from_value wire OMITS unset
 // optionals, so `{ "label": "present" }` round-trips byte-identically. A plain
