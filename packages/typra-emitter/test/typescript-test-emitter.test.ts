@@ -69,4 +69,32 @@ describe("TypeScript test emitter", () => {
     // The sibling save test is unaffected.
     assert.match(output, /it\("should save to dictionary"/);
   });
+
+  it("never emits a test file with no test cases", () => {
+    // An abstract type with no @sample cannot be constructed and has no example
+    // payload to load, so every emitted block is skipped and the file ends up as a
+    // bare `describe(..., () => {})`. vitest fails such a file outright, which is
+    // how prompty's content-part.test.ts and stream-chunk.test.ts broke.
+    const node = {
+      typeName: { namespace: "prompty", name: "ContentPart" },
+      isAbstract: true,
+      properties: [{
+        name: "kind",
+        type: { name: "string", coercions: [] },
+        isScalar: true,
+        samples: [],
+      }],
+      factories: [],
+    } as unknown as TypeNode;
+
+    const output = emit(node);
+
+    assert.match(
+      output,
+      /it\(/,
+      "an abstract type with no example still has to emit at least one test case",
+    );
+    assert.match(output, /it\("should be defined"/);
+    assert.match(output, /expect\(ContentPart\)\.toBeDefined\(\);/);
+  });
 });

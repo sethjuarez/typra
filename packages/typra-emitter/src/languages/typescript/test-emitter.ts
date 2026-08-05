@@ -214,6 +214,16 @@ export function emitTypeScriptTest(ctx: BaseTestContext & { importPath: string; 
     }
     lines.push(`  });`);
   }
+  // A file that declares no test cases is not a passing test file — vitest fails it
+  // outright. An abstract type with no `@sample` reaches this state: it cannot be
+  // constructed, and there is no example payload to load. Assert the one thing that
+  // is still meaningful, that the type is exported and reachable, rather than
+  // emitting an empty `describe`.
+  if (!lines.some(line => line.trimStart().startsWith("it("))) {
+    lines.push(`  it("should be defined", () => {`);
+    lines.push(`    expect(${typeName}).toBeDefined();`);
+    lines.push(`  });`);
+  }
   lines.push("});");
   lines.push("");
 
