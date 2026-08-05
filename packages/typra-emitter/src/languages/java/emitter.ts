@@ -281,6 +281,14 @@ function emitLoadBaseInto(
     const collectionHelper = type.collectionHelpers.find(helper =>
       helper.propertyName === assignment.fieldName && helper.hasNameProperty
     );
+    if (field?.category.kind === "complex" && !field.isOptional && !field.hasExplicitDefault) {
+      const wireName = escapeJava(assignment.sourceName);
+      const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
+      const guard = wildcardDiscriminator ? `map.get("${escapeJava(wildcardDiscriminator)}") instanceof String discriminator && !discriminator.isEmpty() && ` : "";
+      lines.push(`    if (${guard}(!map.containsKey("${wireName}") || map.get("${wireName}") == null)) {`);
+      lines.push(`      throw new IllegalArgumentException(ctx.at("${wireName}").path + ": missing required field");`);
+      lines.push("    }");
+    }
     if (field) emitLoadField(field, collectionHelper, lines, polymorphicTypeNames);
   }
   lines.push("  }");

@@ -633,6 +633,16 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
 
   lines.push("");
 
+  for (const a of type.load.assignments) {
+    const field = type.fields.find(candidate => candidate.name === a.fieldName);
+    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
+    const guard = wildcardDiscriminator ? `typeof data["${wildcardDiscriminator}"] === "string" && data["${wildcardDiscriminator}"] !== "" && ` : "";
+    lines.push(`    if (${guard}(data["${a.sourceName}"] === undefined || data["${a.sourceName}"] === null)) {`);
+    lines.push(`      throw new Error(\`\${context.at("${a.sourceName}").path}: missing required field\`);`);
+    lines.push("    }");
+  }
+
   // Create instance (polymorphic dispatch or direct)
   if (type.load.hasPolymorphicDispatch && type.polymorphicDispatch) {
     lines.push(`    // Load polymorphic ${name} instance`);
@@ -884,19 +894,18 @@ function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDe
   lines.push(`  static ${methodName}(data: Record<string, unknown>[] | unknown[], context?: LoadContext): ${elemName}[] {`);
   lines.push(`    context ??= new LoadContext({ path: "${helper.propertyName}" });`);
   lines.push("    if (!Array.isArray(data)) {");
-  lines.push("      // Convert dict/object format to array format");
-  lines.push("      const result: Record<string, unknown>[] = [];");
+  lines.push(`      const result: ${elemName}[] = [];`);
   lines.push("      for (const [k, v] of Object.entries(data)) {");
   lines.push("        if (Array.isArray(v)) {");
   lines.push('          throw new TypeError(context.at(k).path + ": invalid named collection entry category array");');
   lines.push("        }");
   lines.push("        if (typeof v === \"object\" && v !== null && !Array.isArray(v)) {");
-  lines.push(`          result.push({ name: k, ...(v as Record<string, unknown>) });`);
+  lines.push(`          result.push(${elemName}.load({ name: k, ...(v as Record<string, unknown>) }, context.at(k)));`);
   lines.push("        } else {");
-  lines.push(`          result.push({ name: k, "${firstInnerField}": v });`);
+  lines.push(`          result.push(${elemName}.load({ name: k, "${firstInnerField}": v }, context.at(k)));`);
   lines.push("        }");
   lines.push("      }");
-  lines.push("      data = result;");
+  lines.push("      return result;");
   lines.push("    }");
   lines.push(`    return data.map(item => ${elemName}.load(item as Record<string, unknown>, context));`);
   lines.push("  }");

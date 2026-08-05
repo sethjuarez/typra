@@ -222,7 +222,7 @@ describe("Swift polymorphic enums", () => {
     assert.match(source, /if let values = data as\? \[Any\] \{\s+return try values\.map \{ try Binding\.load\(\$0, context: context\) \}/);
     assert.match(source, /let values = try TypraRuntime\.dictionary\(data, field: "bindings"\)/);
     assert.match(source, /return try values\.keys\.sorted\(\)\.map \{ name in/);
-    assert.match(source, /itemData\["name"\] = name\s+return try Binding\.load\(itemData, context: context\)/);
+    assert.match(source, /itemData\["name"\] = name\s+return try Binding\.load\(itemData, context: context\.at\(name\)\)/);
     assert.match(source, /private static func saveBindings/);
     assert.match(source, /let value = itemData\["source"\]/);
     assert.match(source, /if let scalar = data as\? String \{\s+var instance = Binding\(\)\s+instance\.source = try TypraRuntime\.string\(scalar, field: "source"\)/);
@@ -264,7 +264,7 @@ describe("Swift polymorphic enums", () => {
 
     const source = emitSwiftFile(fileDecl(toolbox), new SwiftExprVisitor(), new Set(["Tool"]));
     assert.match(source, /private static func loadTools\(_ data: Any, context: LoadContext\) throws -> \[Tool\]/);
-    assert.match(source, /return try values\.keys\.sorted\(\)\.map \{ name in[\s\S]*itemData\["name"\] = name[\s\S]*return try Tool\.load\(itemData, context: context\)/);
+    assert.match(source, /return try values\.keys\.sorted\(\)\.map \{ name in[\s\S]*itemData\["name"\] = name[\s\S]*return try Tool\.load\(itemData, context: context\.at\(name\)\)/);
   });
 
   it("applies scalar coercions before polymorphic dispatch", () => {

@@ -626,6 +626,18 @@ function emitLoadMethod(
 
   lines.push("");
 
+  for (const assign of type.load.assignments) {
+    const field = type.fields.find(candidate => candidate.name === assign.fieldName);
+    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
+    const guard = wildcardDiscriminator ? `!string.IsNullOrEmpty(data.GetValueOrDefault("${wildcardDiscriminator}")?.ToString()) && ` : "";
+    lines.push(`        if (${guard}(!data.TryGetValue("${assign.sourceName}", out var required${toPascalCase(assign.fieldName)}Value) || required${toPascalCase(assign.fieldName)}Value is null))`);
+    lines.push("        {");
+    lines.push(`            throw new ArgumentException($"{context!.At("${assign.sourceName}").Path}: missing required field");`);
+    lines.push("        }");
+    lines.push("");
+  }
+
   // Instance creation: polymorphic dispatch or direct
   if (type.polymorphicDispatch) {
     lines.push(`        // Load polymorphic ${typeName} instance`);
@@ -771,7 +783,7 @@ function emitCollectionLoadHelper(
   lines.push("                {");
   lines.push("                    // Value is an object, add name to it");
   lines.push('                    itemDict["name"] = kvp.Key;');
-  lines.push(`                    result.Add(${elemType}.Load(itemDict, context));`);
+  lines.push(`                    result.Add(${elemType}.Load(itemDict, context?.At(kvp.Key)));`);
   lines.push("                }");
   lines.push("                else");
   lines.push("                {");
@@ -781,7 +793,7 @@ function emitCollectionLoadHelper(
   lines.push('                        ["name"] = kvp.Key,');
   lines.push(`                        ["${primaryProp || ""}"] = kvp.Value`);
   lines.push("                    };");
-  lines.push(`                    result.Add(${elemType}.Load(newDict, context));`);
+  lines.push(`                    result.Add(${elemType}.Load(newDict, context?.At(kvp.Key)));`);
   lines.push("                }");
   lines.push("            }");
   lines.push("        }");

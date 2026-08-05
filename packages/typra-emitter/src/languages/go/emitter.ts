@@ -101,11 +101,15 @@ export function emitGoFileContent(
   const hasNonProtocol = types.some(t => !t.isProtocol);
   const needsContext = types.some(type => type.methods.some(method => method.runtimeCancellable));
   const needsNamedCollections = types.some(type => type.collectionHelpers.some(helper => helper.hasNameProperty));
+  const needsRequiredComplexValidation = types.some(type =>
+    type.fields.some(field => field.category.kind === "complex" && !field.isOptional && !field.hasExplicitDefault)
+  );
   const needsFmt = enums.some(enumDef => hasParseAliases(enumDef) && !enumDef.isOpen) ||
     types.some(type => type.polymorphicDispatch
       && (isClosedPolymorphicDispatch(type.polymorphicDispatch) || type.polymorphicDispatch.isAbstract)
       && !type.polymorphicDispatch.defaultVariant) ||
-    needsNamedCollections;
+    needsNamedCollections ||
+    needsRequiredComplexValidation;
   if (hasNonProtocol) {
     emitHeader(lines, packageName, group, needsFmt, needsContext, needsNamedCollections);
   } else {
@@ -437,6 +441,22 @@ function emitLoadFunction(
   // 3. Map loading
   lines.push("\t// Load from map");
   lines.push("\tif m, ok := data.(map[string]interface{}); ok {");
+
+  for (const assign of type.load.assignments) {
+    const field = type.fields.find(candidate => candidate.name === assign.fieldName);
+    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
+    if (wildcardDiscriminator) {
+      lines.push(`\t\tif discriminatorValue, hasDiscriminator := m["${wildcardDiscriminator}"].(string); hasDiscriminator && discriminatorValue != "" {`);
+    }
+    const indent = wildcardDiscriminator ? "\t\t\t" : "\t\t";
+    lines.push(`${indent}if requiredValue, exists := m["${assign.sourceName}"]; !exists || requiredValue == nil {`);
+    lines.push(`${indent}\treturn result, fmt.Errorf("%s: missing required field", ctx.At("${assign.sourceName}").Path)`);
+    lines.push(`${indent}}`);
+    if (wildcardDiscriminator) {
+      lines.push("\t\t}");
+    }
+  }
 
   for (const assign of type.load.assignments) {
     const helper = type.collectionHelpers.find(candidate => candidate.propertyName === assign.sourceName);

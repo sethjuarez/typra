@@ -696,7 +696,7 @@ function emitImpl(
 
   // load_from_value()
   emitLoadFromValue(name, type, childTypes, baseFieldNames, polymorphicTypeNames, lines);
-  emitInputValidation(type, lines);
+  emitInputValidation(type, childTypes, lines);
   if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
     emitClosedDiscriminatorValidation(type, lines);
   }
@@ -795,63 +795,100 @@ function emitClosedDiscriminatorValidation(type: TypeDecl, lines: string[]): voi
   lines.push("");
 }
 
-function emitInputValidation(type: TypeDecl, lines: string[]): void {
+function emitInputValidation(type: TypeDecl, childTypes: TypeDecl[], lines: string[]): void {
   const closed = type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch);
   lines.push("    pub(crate) fn validate_input_at(value: &serde_json::Value, path: &str) -> Result<(), String> {");
   if (closed) {
     lines.push("        Self::validate_discriminator(value)?;");
   }
-  for (const assignment of type.load.assignments) {
-    const field = assignment.sourceName;
-    const category = assignment.category;
-    const helper = type.collectionHelpers.find(candidate => candidate.propertyName === field);
-    if (category.kind === "complex") {
-      lines.push(`        if let Some(child) = value.get("${field}") {`);
-      lines.push(`            let child_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
-      lines.push(`            ${category.typeName}::validate_input_at(child, &child_path)?;`);
-      lines.push("        }");
-    } else if (category.kind === "collection_complex" && helper?.hasNameProperty) {
-      const shorthandField = helper.innerFields[0] || "value";
-      lines.push(`        if let Some(collection) = value.get("${field}") {`);
-      lines.push(`            let collection_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
-      lines.push("            match collection {");
-      lines.push("                serde_json::Value::Object(entries) => {");
-      lines.push("                    for (name, entry) in entries {");
-      lines.push('                        let entry_path = format!("{}.{}", collection_path, name);');
-      lines.push("                        if entry.is_array() {");
-      lines.push('                            return Err(format!("{}: invalid named collection entry category array", entry_path));');
-      lines.push("                        }");
-      lines.push("                        let mut candidate = if entry.is_object() {");
-      lines.push("                            entry.clone()");
-      lines.push("                        } else {");
-      lines.push(`                            serde_json::json!({ "${shorthandField}": entry })`);
-      lines.push("                        };");
-      lines.push("                        if let serde_json::Value::Object(ref mut map) = candidate {");
-      lines.push('                            map.insert("name".to_string(), serde_json::Value::String(name.clone()));');
-      lines.push("                        }");
-      lines.push(`                        ${category.typeName}::validate_input_at(&candidate, &entry_path)?;`);
-      lines.push("                    }");
-      lines.push("                }");
-      lines.push("                serde_json::Value::Array(entries) => {");
-      lines.push("                    for entry in entries {");
-      lines.push(`                        ${category.typeName}::validate_input_at(entry, &collection_path)?;`);
-      lines.push("                    }");
-      lines.push("                }");
-      lines.push("                _ => {}");
+  emitFieldInputValidation(type, type.load.assignments, lines, "        ");
+  if (type.polymorphicDispatch) {
+    const dispatch = type.polymorphicDispatch;
+    lines.push(`        match value.get("${dispatch.discriminatorField}").and_then(|candidate| candidate.as_str()).unwrap_or("") {`);
+    for (const variant of dispatch.variants) {
+      const childType = childTypes.find(candidate => candidate.typeName.name === variant.typeName.name);
+      lines.push(`            "${variant.value}" => {`);
+      if (childType) emitFieldInputValidation(childType, childType.load.assignments, lines, "                ");
       lines.push("            }");
-      lines.push("        }");
-    } else if (category.kind === "collection_complex") {
-      lines.push(`        if let Some(entries) = value.get("${field}").and_then(|candidate| candidate.as_array()) {`);
-      lines.push(`            let collection_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
-      lines.push("            for entry in entries {");
-      lines.push(`                ${category.typeName}::validate_input_at(entry, &collection_path)?;`);
-      lines.push("            }");
-      lines.push("        }");
     }
+    if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
+      const defaultType = childTypes.find(candidate => candidate.typeName.name === dispatch.defaultVariant!.typeName.name);
+      lines.push("            _ => {");
+      lines.push(`                if value.get("${dispatch.discriminatorField}").and_then(|candidate| candidate.as_str()).is_some_and(|discriminator| !discriminator.is_empty()) {`);
+      if (defaultType) emitFieldInputValidation(defaultType, defaultType.load.assignments, lines, "                    ");
+      lines.push("                }");
+      lines.push("            }");
+    } else {
+      lines.push("            _ => {}");
+    }
+    lines.push("        }");
   }
   lines.push("        Ok(())");
   lines.push("    }");
   lines.push("");
+}
+
+function emitFieldInputValidation(
+  type: TypeDecl,
+  assignments: LoadAssignment[],
+  lines: string[],
+  indent: string,
+): void {
+  for (const assignment of assignments) {
+    const field = assignment.sourceName;
+    const category = assignment.category;
+    const helper = type.collectionHelpers.find(candidate => candidate.propertyName === field);
+    if (category.kind === "complex") {
+      const fieldDecl = type.fields.find(candidate => candidate.name === assignment.fieldName);
+      lines.push(`${indent}let child_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
+      if (fieldDecl && !fieldDecl.isOptional && !fieldDecl.hasExplicitDefault) {
+        lines.push(`${indent}let child = value.get("${field}").filter(|candidate| !candidate.is_null())`);
+        lines.push(`${indent}    .ok_or_else(|| format!("{}: missing required field", child_path))?;`);
+        lines.push(`${indent}${category.typeName}::validate_input_at(child, &child_path)?;`);
+      } else {
+        lines.push(`${indent}if let Some(child) = value.get("${field}") {`);
+        lines.push(`${indent}    ${category.typeName}::validate_input_at(child, &child_path)?;`);
+        lines.push(`${indent}}`);
+      }
+    } else if (category.kind === "collection_complex" && helper?.hasNameProperty) {
+      const shorthandField = helper.innerFields[0] || "value";
+      lines.push(`${indent}if let Some(collection) = value.get("${field}") {`);
+      lines.push(`${indent}    let collection_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
+      lines.push(`${indent}    match collection {`);
+      lines.push(`${indent}        serde_json::Value::Object(entries) => {`);
+      lines.push(`${indent}            for (name, entry) in entries {`);
+      lines.push(`${indent}                let entry_path = format!("{}.{}", collection_path, name);`);
+      lines.push(`${indent}                if entry.is_array() {`);
+      lines.push(`${indent}                    return Err(format!("{}: invalid named collection entry category array", entry_path));`);
+      lines.push(`${indent}                }`);
+      lines.push(`${indent}                let mut candidate = if entry.is_object() {`);
+      lines.push(`${indent}                    entry.clone()`);
+      lines.push(`${indent}                } else {`);
+      lines.push(`${indent}                    serde_json::json!({ "${shorthandField}": entry })`);
+      lines.push(`${indent}                };`);
+      lines.push(`${indent}                if let serde_json::Value::Object(ref mut map) = candidate {`);
+      lines.push(`${indent}                    map.insert("name".to_string(), serde_json::Value::String(name.clone()));`);
+      lines.push(`${indent}                }`);
+      lines.push(`${indent}                ${category.typeName}::validate_input_at(&candidate, &entry_path)?;`);
+      lines.push(`${indent}            }`);
+      lines.push(`${indent}        }`);
+      lines.push(`${indent}        serde_json::Value::Array(entries) => {`);
+      lines.push(`${indent}            for entry in entries {`);
+      lines.push(`${indent}                ${category.typeName}::validate_input_at(entry, &collection_path)?;`);
+      lines.push(`${indent}            }`);
+      lines.push(`${indent}        }`);
+      lines.push(`${indent}        _ => {}`);
+      lines.push(`${indent}    }`);
+      lines.push(`${indent}}`);
+    } else if (category.kind === "collection_complex") {
+      lines.push(`${indent}if let Some(entries) = value.get("${field}").and_then(|candidate| candidate.as_array()) {`);
+      lines.push(`${indent}    let collection_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
+      lines.push(`${indent}    for entry in entries {`);
+      lines.push(`${indent}        ${category.typeName}::validate_input_at(entry, &collection_path)?;`);
+      lines.push(`${indent}    }`);
+      lines.push(`${indent}}`);
+    }
+  }
 }
 
 // ============================================================================

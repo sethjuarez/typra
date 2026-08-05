@@ -700,6 +700,15 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   lines.push(`        if not isinstance(data, dict):`);
   lines.push(`            raise ValueError(f"Invalid data for ${name}: {data}")`);
 
+  for (const a of type.load.assignments) {
+    const field = type.fields.find(candidate => candidate.name === a.fieldName);
+    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
+    const guard = wildcardDiscriminator ? `isinstance(data.get("${wildcardDiscriminator}"), str) and data["${wildcardDiscriminator}"] != "" and ` : "";
+    lines.push(`        if ${guard}("${a.sourceName}" not in data or data["${a.sourceName}"] is None):`);
+    lines.push(`            raise ValueError(f"{context.at('${a.sourceName}').path}: missing required field")`);
+  }
+
   // Create instance (polymorphic dispatch or direct)
   if (type.load.hasPolymorphicDispatch && type.polymorphicDispatch) {
     const discSnake = toSnakeCase(type.polymorphicDispatch.discriminatorField);
@@ -818,11 +827,11 @@ function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDe
   lines.push('                    raise TypeError(f"{context.at(k).path}: invalid named collection entry category array")');
   lines.push("                if isinstance(v, dict):");
   lines.push("                    # value is an object, spread its properties");
-  lines.push(`                    result.append({"name": k, **v})`);
+  lines.push(`                    result.append(${elemName}.load({"name": k, **v}, context.at(k)))`);
   lines.push("                else:");
   lines.push("                    # value is a scalar, use it as the primary property");
-  lines.push(`                    result.append({"name": k, "${firstInnerField}": v})`);
-  lines.push("            data = result");
+  lines.push(`                    result.append(${elemName}.load({"name": k, "${firstInnerField}": v}, context.at(k)))`);
+  lines.push("            return result");
   lines.push(`        return [${elemName}.load(item, context) for item in data]`);
 }
 

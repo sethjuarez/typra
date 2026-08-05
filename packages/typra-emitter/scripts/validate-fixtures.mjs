@@ -677,7 +677,7 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
       ["kind": "prompt", "name": "prompt", "description": "prompt description", "prompt": "hello"],
       ["kind": "mcp", "name": "mcp", "description": "mcp description", "server": "local"],
       ["kind": "http", "name": "http", "description": "http description", "endpoint": "https://example.test"],
-      ["kind": "custom", "name": "custom", "description": "custom description", "config": ["enabled": true]],
+      ["kind": "custom", "name": "custom", "description": "custom description", "connection": ["kind": "future-auth", "name": "future"], "config": ["enabled": true]],
     ]
     for input in variants {
       let output = try FixtureTool.load(input).save()
@@ -689,6 +689,7 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
       "kind": "vendor",
       "name": "vendor",
       "description": "vendor description",
+      "connection": ["kind": "future-auth", "name": "future"],
       "config": ["enabled": true],
     ]
     let wildcard = try FixtureTool.load(wildcardInput)
@@ -864,6 +865,19 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
       let message = String(describing: error)
       XCTAssertTrue(message.contains("inputs.profile.properties.arrayEntry"), message)
       XCTAssertTrue(message.contains("array"), message)
+    }
+  }
+
+  func testMissingRequiredCustomToolConnectionIsRejectedPathfully() throws {
+    do {
+      _ = try FixtureToolbox.fromJSON("""
+      {"tools":{"custom":{"kind":"vendor"}},"inheritedMapBindingTool":{"kind":"function","name":"map","command":"run"},"inheritedListBindingTool":{"kind":"function","name":"list","command":"run"}}
+      """)
+      XCTFail("missing required CustomTool.connection was accepted")
+    } catch {
+      let diagnostic = String(describing: error)
+      XCTAssertTrue(diagnostic.contains("tools.custom.connection"), diagnostic)
+      XCTAssertTrue(diagnostic.contains("missing required field"), diagnostic)
     }
   }
 }
@@ -1266,7 +1280,7 @@ function runTypeScriptExecutableConformance() {
   const configPath = path.join(sourceDir, "tsconfig.conformance.json");
   const outDir = path.join(sourceDir, ".typra-conformance");
   writeFileSync(runnerPath, [
-    'import { FixtureConnection, FixtureContent, FixtureCustomTool, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, SaveContext, WireOptions } from "./index";',
+    'import { FixtureConnection, FixtureContent, FixtureCustomTool, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, SaveContext, WireOptions } from "./index";',
     "",
     `const root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)});`,
     `const imageContent = FixtureContent.load(${JSON.stringify(imageContentSample)});`,
@@ -1304,6 +1318,13 @@ function runTypeScriptExecutableConformance() {
     "const wildcardToolSaved = wildcardTool.save();",
     'if (wildcardToolSaved.kind !== "vendor" || wildcardToolSaved.name !== "vendor" || (wildcardToolSaved.config as { enabled: boolean }).enabled !== true) throw new Error("wildcard tool payload changed");',
     'if (!(FixtureTool.load(wildcardToolSaved) instanceof FixtureCustomTool)) throw new Error("wildcard tool did not survive reload");',
+    "try {",
+    '  FixtureToolbox.load({ tools: { custom: { kind: "vendor" } }, inheritedMapBindingTool: { kind: "function", name: "map", command: "run" }, inheritedListBindingTool: { kind: "function", name: "list", command: "run" } } as any);',
+    '  throw new Error("missing required CustomTool.connection was accepted");',
+    "} catch (error) {",
+    "  const diagnostic = String(error);",
+    '  if (!diagnostic.includes("tools.custom.connection") || !diagnostic.includes("missing required field")) throw error;',
+    "}",
     `const wire = WireOptions.load(${JSON.stringify(wireOptionsSample)});`,
     'const reference = FixtureReference.load("ref-coerced" as any);',
     'const uniqueNamed = FixtureNamedPayloadCollection.load({ items: [{ name: "alpha", payload: { nested: [1, null] } }, { name: "beta", payload: "second" }] });',
@@ -1367,7 +1388,7 @@ function runPythonExecutableConformance() {
     "import json",
     "import sys",
     `sys.path.insert(0, ${JSON.stringify(generatedRoot)})`,
-    "from python import FixtureCheckpoint, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, LoadContext, ModelInfo, SaveContext, WireOptions",
+    "from python import FixtureCheckpoint, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, LoadContext, ModelInfo, SaveContext, WireOptions",
     `root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)})`,
     "root = FixtureRoot.load(json.loads(json.dumps(root.save())))",
     'checkpoint = FixtureCheckpoint.load({"pendingToolRequests": [{"id": "call-a", "name": "echo"}, {"id": "call-b", "name": "echo"}]})',
@@ -1416,6 +1437,13 @@ function runPythonExecutableConformance() {
     "wildcard_tool_saved = wildcard_tool.save()",
     'assert wildcard_tool_saved["kind"] == "vendor" and wildcard_tool_saved["name"] == "vendor" and wildcard_tool_saved["config"]["enabled"] is True, "wildcard tool payload changed"',
     'assert type(FixtureTool.load(wildcard_tool_saved)) is FixtureCustomTool, "wildcard tool did not survive reload"',
+    "try:",
+    '    FixtureToolbox.load({"tools": {"custom": {"kind": "vendor"}}, "inheritedMapBindingTool": {"kind": "function", "name": "map", "command": "run"}, "inheritedListBindingTool": {"kind": "function", "name": "list", "command": "run"}})',
+    "except ValueError as error:",
+    "    diagnostic = str(error)",
+    '    assert "tools.custom.connection" in diagnostic and "missing required field" in diagnostic',
+    "else:",
+    '    raise AssertionError("missing required CustomTool.connection was accepted")',
     `wire = WireOptions.load(${JSON.stringify(wireOptionsSample)})`,
     'reference = FixtureReference.load("ref-coerced")',
     'unique_named = FixtureNamedPayloadCollection.load({"items": [{"name": "alpha", "payload": {"nested": [1, None]}}, {"name": "beta", "payload": "second"}]})',
@@ -1654,6 +1682,8 @@ function runGoExecutableConformance() {
     '\tknownConnection, err := fixtures.LoadFixtureConnection(map[string]interface{}{"kind": "custom", "name": "known", "endpoint": "https://example.test"}, loadCtx)',
     "\tif err != nil { panic(err) }",
     '\tif _, ok := knownConnection.(fixtures.FixtureCustomConnection); !ok { panic("known connection dispatch regressed") }',
+    '\t_, missingConnectionErr := fixtures.LoadFixtureToolbox(map[string]interface{}{"tools": map[string]interface{}{"custom": map[string]interface{}{"kind": "vendor"}}, "inheritedMapBindingTool": map[string]interface{}{"kind": "function", "name": "map", "command": "run"}, "inheritedListBindingTool": map[string]interface{}{"kind": "function", "name": "list", "command": "run"}}, loadCtx)',
+    '\tif missingConnectionErr == nil || !strings.Contains(missingConnectionErr.Error(), "tools.custom.connection") || !strings.Contains(missingConnectionErr.Error(), "missing required field") { panic("missing required CustomTool.connection was not rejected pathfully") }',
     '\tunionProperty, err := fixtures.LoadFixtureProperty(map[string]interface{}{',
     '\t\t"kind": "union",',
     '\t\t"description": "combined scalar property",',
@@ -1843,6 +1873,9 @@ function runRustExecutableConformance() {
     "    let known_connection = FixtureConnection::load_from_value(&known_connection_input, &load_ctx);",
     "    assert!(matches!(known_connection.kind, FixtureConnectionKind::FixtureCustomConnection { .. }));",
     "    assert_eq!(known_connection.to_value(&save_ctx), known_connection_input);",
+    '    let missing_connection_error = FixtureToolbox::from_json(r#"{"tools":{"custom":{"kind":"vendor"}},"inheritedMapBindingTool":{"kind":"function","name":"map","command":"run"},"inheritedListBindingTool":{"kind":"function","name":"list","command":"run"}}"#, &load_ctx).expect_err("missing required CustomTool.connection");',
+    "    let missing_connection_diagnostic = missing_connection_error.to_string();",
+    '    assert!(missing_connection_diagnostic.contains("tools.custom.connection") && missing_connection_diagnostic.contains("missing required field"), "{missing_connection_diagnostic}");',
     '    let function_tool_input = json!({"kind": "function", "name": "search", "command": "run", "parameters": [{"name": "query", "kind": "string", "required": true}]});',
     "    let function_tool = FixtureTool::load_from_value(&function_tool_input, &load_ctx);",
     "    let function_tool_saved = function_tool.to_value(&save_ctx);",
@@ -2138,6 +2171,7 @@ function runCSharpExecutableConformance() {
     'if (FixtureTool.Load(wildcardToolSaved).GetType() != typeof(FixtureCustomTool)) throw new InvalidOperationException("wildcard tool did not survive reload");',
     'var knownConnection = FixtureConnection.Load(new Dictionary<string, object?> { ["kind"] = "custom", ["name"] = "known", ["endpoint"] = "https://example.test" });',
     'if (knownConnection.GetType() == typeof(FixtureConnection) || !Equals(knownConnection.Save()["endpoint"], "https://example.test")) throw new InvalidOperationException("known connection dispatch regressed");',
+    'try { FixtureToolbox.FromJson("""{"tools":{"custom":{"kind":"vendor"}},"inheritedMapBindingTool":{"kind":"function","name":"map","command":"run"},"inheritedListBindingTool":{"kind":"function","name":"list","command":"run"}}"""); throw new InvalidOperationException("missing required CustomTool.connection was accepted"); } catch (ArgumentException error) { if (!error.Message.Contains("tools.custom.connection") || !error.Message.Contains("missing required field")) throw; }',
     'var reference = FixtureReference.FromJson("\\"ref-coerced\\"");',
     'var uniqueNamed = FixtureNamedPayloadCollection.FromJson("""{"items":[{"name":"alpha","payload":{"nested":[1,null]}},{"name":"beta","payload":"second"}]}""");',
     'if (uniqueNamed.Save()["items"] is not IDictionary<string, object?> uniqueItems || uniqueItems.Count != 2) throw new InvalidOperationException("unique named collection did not save as object");',
@@ -2308,6 +2342,12 @@ function runJavaExecutableConformance() {
     '    require(FixtureTool.load(wildcardToolSaved, new LoadContext()).getClass() == FixtureCustomTool.class, "wildcard tool did not survive reload");',
     '    FixtureConnection knownConnection = FixtureConnection.load(Map.of("kind", "custom", "name", "known", "endpoint", "https://example.test"), new LoadContext());',
     '    require(knownConnection instanceof FixtureCustomConnection && "https://example.test".equals(knownConnection.save(new SaveContext()).get("endpoint")), "known connection dispatch regressed");',
+    "    try {",
+    '      FixtureToolbox.fromJson("{\\"tools\\":{\\"custom\\":{\\"kind\\":\\"vendor\\"}},\\"inheritedMapBindingTool\\":{\\"kind\\":\\"function\\",\\"name\\":\\"map\\",\\"command\\":\\"run\\"},\\"inheritedListBindingTool\\":{\\"kind\\":\\"function\\",\\"name\\":\\"list\\",\\"command\\":\\"run\\"}}");',
+    '      throw new AssertionError("missing required CustomTool.connection was accepted");',
+    "    } catch (IllegalArgumentException error) {",
+    '      require(error.getMessage().contains("tools.custom.connection") && error.getMessage().contains("missing required field"), "missing required CustomTool.connection diagnostic was not pathful");',
+    "    }",
     "    WireOptions wire = WireOptions.load(wireData, new LoadContext());",
     '    FixtureReference reference = FixtureReference.fromYaml("\\"ref-coerced\\"");',
     "    FixtureRoot reloadedRoot = FixtureRoot.fromYaml(root.toYaml());",

@@ -247,6 +247,7 @@ model FixtureHttpTool extends FixtureTool {
 
 model FixtureCustomTool extends FixtureTool {
   kind: "*";
+  connection: FixtureConnection;
   config?: Record<unknown>;
 }
 

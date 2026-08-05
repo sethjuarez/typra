@@ -337,6 +337,20 @@ function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
     const collectionHelper = type.collectionHelpers.find(helper =>
       helper.propertyName === assignment.fieldName && supportsNamedCollectionHelper(helper, polymorphicTypeNames)
     );
+    if (field?.category.kind === "complex" && !field.isOptional && !field.hasExplicitDefault) {
+      const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
+      if (wildcardDiscriminator) {
+        lines.push(`    if let discriminator = object[${swiftStringLiteral(wildcardDiscriminator)}] as? String, !discriminator.isEmpty {`);
+        lines.push(`      if object[${swiftStringLiteral(assignment.sourceName)}] == nil || object[${swiftStringLiteral(assignment.sourceName)}] is NSNull {`);
+        lines.push(`        throw TypraRuntimeError.unsupported(context.at(${swiftStringLiteral(assignment.sourceName)}).path + ": missing required field")`);
+        lines.push("      }");
+        lines.push("    }");
+      } else {
+        lines.push(`    if object[${swiftStringLiteral(assignment.sourceName)}] == nil || object[${swiftStringLiteral(assignment.sourceName)}] is NSNull {`);
+        lines.push(`      throw TypraRuntimeError.unsupported(context.at(${swiftStringLiteral(assignment.sourceName)}).path + ": missing required field")`);
+        lines.push("    }");
+      }
+    }
     lines.push(`    if let value = object[${swiftStringLiteral(assignment.sourceName)}] {`);
     lines.push(`      instance.${swiftPropertyName(assignment.fieldName)} = ${swiftLoadExpression(assignment.category, assignment.enumName, assignment.fieldName, "value", polymorphicTypeNames, collectionHelper)}`);
     lines.push("    }");
@@ -374,7 +388,7 @@ function emitNamedCollectionLoadHelper(
   lines.push(`        itemData = try ${elementType}.load(value, context: context).save()`);
   lines.push("      }");
   lines.push('      itemData["name"] = name');
-  lines.push(`      return try ${elementType}.load(itemData, context: context)`);
+  lines.push(`      return try ${elementType}.load(itemData, context: context.at(name))`);
   lines.push("    }");
   lines.push("  }");
 }
