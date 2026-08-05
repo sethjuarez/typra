@@ -801,7 +801,16 @@ function emitInputValidation(type: TypeDecl, childTypes: TypeDecl[], lines: stri
   if (closed) {
     lines.push("        Self::validate_discriminator(value)?;");
   }
-  emitFieldInputValidation(type, type.load.assignments, lines, "        ");
+  // The dispatch owns discriminator validation: validate_discriminator() when the dispatch is
+  // closed, and the Unknown/fallback arm when it is open. Validating the discriminator again as
+  // an ordinary field would additionally check it against its declared type, which for an open
+  // union (`"a" | "b" | string`) rejects the very values the open dispatch exists to absorb —
+  // making the fallback arm unreachable.
+  const discriminatorField = type.polymorphicDispatch?.discriminatorField;
+  const baseAssignments = discriminatorField === undefined
+    ? type.load.assignments
+    : type.load.assignments.filter(assignment => assignment.sourceName !== discriminatorField);
+  emitFieldInputValidation(type, baseAssignments, lines, "        ");
   if (type.polymorphicDispatch) {
     const dispatch = type.polymorphicDispatch;
     lines.push(`        match value.get("${dispatch.discriminatorField}").and_then(|candidate| candidate.as_str()).unwrap_or("") {`);
