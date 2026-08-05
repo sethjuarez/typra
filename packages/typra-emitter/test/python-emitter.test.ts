@@ -111,3 +111,59 @@ describe("Python optional collection defaults", () => {
     assert.match(source, /if obj\.input_modalities is not None:\s+result\["inputModalities"\] = obj\.input_modalities/);
   });
 });
+
+function abstractOpenConnection(): TypeDecl {
+  const connection = typeDecl([
+    field("kind", { kind: "scalar", scalarType: "string" }, false),
+    field("label", { kind: "scalar", scalarType: "string" }, true),
+  ]);
+  connection.typeName = { namespace: "Test", name: "Connection" };
+  connection.isAbstract = true;
+  connection.load.hasPolymorphicDispatch = true;
+  connection.polymorphicDispatch = {
+    discriminatorField: "kind",
+    variants: [{ value: "managed", typeName: { namespace: "Test", name: "ManagedConnection" } }],
+    defaultVariant: null,
+    isClosed: false,
+    isAbstract: true,
+  };
+  return connection;
+}
+
+describe("Python abstract open polymorphic dispatch", () => {
+  it("absorbs unknown discriminators into a carrier instead of raising", () => {
+    const type = abstractOpenConnection();
+    const decl = fileDecl(type);
+    decl.containsAbstract = true;
+    const source = emitPythonFile(decl, new PythonExprVisitor());
+
+    // The base keeps its ABC marker: the schema said @abstract and that stays true.
+    assert.match(source, /class Connection\(ABC\):/);
+    assert.match(source, /class UnknownConnection\(Connection\):/);
+    assert.doesNotMatch(source, /Unknown Connection discriminator field/);
+    assert.doesNotMatch(source, /Missing Connection discriminator property/);
+    assert.match(source, /return UnknownConnection\.load\(data, context\)/);
+
+    // The retained payload must be deep-copied and stripped of the declared fields, so a
+    // save re-emits the unknown keys without duplicating the modelled ones.
+    assert.match(source, /instance\._raw = copy\.deepcopy\(data\)/);
+    assert.match(source, /instance\._raw\.pop\("kind", None\)/);
+    assert.match(source, /instance\._raw\.pop\("label", None\)/);
+    assert.match(source, /result: dict\[str, Any\] = copy\.deepcopy\(obj\._raw\)/);
+    assert.match(source, /^import copy$/m);
+  });
+
+  it("does not emit a carrier for a closed abstract dispatch", () => {
+    // Counterpart guard: a closed discriminator has no unknown values to absorb.
+    const type = abstractOpenConnection();
+    type.polymorphicDispatch!.isClosed = true;
+    const decl = fileDecl(type);
+    decl.containsAbstract = true;
+    const source = emitPythonFile(decl, new PythonExprVisitor());
+
+    assert.doesNotMatch(source, /class UnknownConnection/);
+    assert.doesNotMatch(source, /_raw: dict\[str, Any\]/);
+    assert.match(source, /Unknown Connection discriminator field/);
+    assert.match(source, /Missing Connection discriminator property/);
+  });
+});

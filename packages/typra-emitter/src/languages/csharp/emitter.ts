@@ -146,6 +146,10 @@ export function emitCSharpClass(
   // Close class
   lines.push("}");
 
+  if (needsUnknownCarrier(type)) {
+    emitUnknownCarrier(type, lines);
+  }
+
   // Emit I<Name>Helpers interface after the class
   if (type.methods.length > 0) {
     emitHelperInterface(type, lines);
@@ -421,10 +425,12 @@ function emitProperties(type: TypeDecl, allTypes: TypeDecl[], findType: (name: s
     lines.push(`    public ${modifier}${csType} ${propName} { get; set; }${default_}`);
     lines.push("");
   }
-  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
-    lines.push("    private Dictionary<string, object?> _raw = new();");
+  if (absorbsUnknownValues(type.polymorphicDispatch)) {
+    // `protected` rather than `private`: an abstract base's unknown-value carrier is a
+    // separate subclass and has to populate these.
+    lines.push("    protected Dictionary<string, object?> _raw = new();");
     lines.push("");
-    lines.push("    private static object? CloneRawValue(object? value)");
+    lines.push("    protected static object? CloneRawValue(object? value)");
     lines.push("    {");
     lines.push("        if (value is IDictionary<string, object?> dictionary)");
     lines.push("        {");
@@ -818,10 +824,85 @@ function emitCollectionLoadHelper(
 // LoadKind (polymorphic dispatch)
 // ============================================================================
 
+/**
+ * Does this dispatch absorb unrecognized discriminator values into a carrier rather than
+ * rejecting them? Mirrors `absorbsUnknownIntoBase` in the Go emitter and the identically
+ * named predicates in the TypeScript and Python emitters, so every backend agrees on which
+ * schemas are open.
+ */
+function absorbsUnknownValues(dispatch: PolymorphicDispatchDecl | null | undefined): boolean {
+  if (!dispatch) {
+    return false;
+  }
+  if (dispatch.defaultVariant) {
+    return dispatch.defaultVariant.isSelfReference;
+  }
+  return !isClosedPolymorphicDispatch(dispatch);
+}
+
+/**
+ * An abstract base with an open discriminator has no wildcard self-variant, and C# emits
+ * `abstract class` for it, so unrecognized values need a concrete subclass to land in.
+ */
+function needsUnknownCarrier(type: TypeDecl): boolean {
+  const dispatch = type.polymorphicDispatch;
+  if (!dispatch || !type.isAbstract) {
+    return false;
+  }
+  return !dispatch.defaultVariant && !isClosedPolymorphicDispatch(dispatch);
+}
+
+function unknownCarrierName(parentName: string): string {
+  return `Unknown${parentName}`;
+}
+
+/**
+ * Emit the concrete carrier for an abstract base whose discriminator is open.
+ *
+ * Rust models polymorphism as an enum and adds an `Unknown { kind_name, raw }` variant.
+ * C# models it as class inheritance, so the equivalent is a concrete subclass: the base
+ * stays `abstract`, honouring the schema's `@abstract`, and unrecognized discriminator
+ * values land here rather than throwing.
+ *
+ * The carrier declares no discriminator property of its own. `<T>.Load` calls `LoadKind`
+ * first and then applies the base's own assignments to whatever instance came back, so the
+ * exact unrecognized value is already preserved. It needs no `Save` override either: the
+ * base's `Save` seeds its result from `_raw`.
+ */
+function emitUnknownCarrier(type: TypeDecl, lines: string[]): void {
+  const parentName = type.typeName.name;
+  const carrier = unknownCarrierName(parentName);
+
+  lines.push("");
+  lines.push("/// <summary>");
+  lines.push(`/// Carries a ${parentName} whose discriminator value matches no known subtype.`);
+  lines.push("/// The unrecognized value stays on the discriminator property and every key the schema");
+  lines.push(`/// does not declare is preserved verbatim, so an unknown ${parentName} survives a`);
+  lines.push("/// load/save round-trip unchanged.");
+  lines.push("/// </summary>");
+  lines.push(`public sealed partial class ${carrier} : ${parentName}`);
+  lines.push("{");
+  lines.push("    /// <summary>");
+  lines.push(`    /// Load an unrecognized ${parentName}, retaining its complete payload.`);
+  lines.push("    /// </summary>");
+  lines.push(`    public static new ${carrier} Load(Dictionary<string, object?> data, LoadContext? context = null)`);
+  lines.push("    {");
+  lines.push(`        var instance = new ${carrier}();`);
+  lines.push("        instance._raw = (Dictionary<string, object?>)CloneRawValue(data)!;");
+  for (const a of type.load.assignments) {
+    lines.push(`        instance._raw.Remove("${a.sourceName}");`);
+  }
+  lines.push("        return instance;");
+  lines.push("    }");
+  lines.push("}");
+  lines.push("");
+}
+
 function emitLoadKind(type: TypeDecl, lines: string[]): void {
   const dispatch = type.polymorphicDispatch!;
   const typeName = type.typeName.name;
   const isClosed = isClosedPolymorphicDispatch(dispatch);
+  const carrier = needsUnknownCarrier(type) ? unknownCarrierName(typeName) : undefined;
   lines.push("");
   lines.push("    /// <summary>");
   lines.push(`    /// Load polymorphic ${typeName} based on discriminator.`);
@@ -845,6 +926,8 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
     } else {
       lines.push(`                _ => ${dispatch.defaultVariant.typeName.name}.Load(data, context),`);
     }
+  } else if (carrier) {
+    lines.push(`                _ => ${carrier}.Load(data, context),`);
   } else if (isClosed || dispatch.isAbstract) {
     lines.push(`                _ => throw new ArgumentException($"Unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: {discriminator}"),`);
   } else {
@@ -856,7 +939,12 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
   lines.push("");
 
   // Fallback when discriminator property is missing
-  if ((isClosed || dispatch.isAbstract) && !dispatch.defaultVariant) {
+  if (carrier) {
+    // Matches the Go, TypeScript and Python backends, which absorb a missing discriminator
+    // into the same carrier they use for an unrecognized one. No vector covers this case;
+    // the choice is made for cross-backend consistency, not from a stated requirement.
+    lines.push(`        return ${carrier}.Load(data, context);`);
+  } else if ((isClosed || dispatch.isAbstract) && !dispatch.defaultVariant) {
     lines.push(`        throw new ArgumentException("Missing ${typeName} discriminator property: '${dispatch.discriminatorField}'");`);
   } else if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
     lines.push(`        throw new ArgumentException("Missing ${typeName} discriminator property: '${dispatch.discriminatorField}'");`);
@@ -931,7 +1019,7 @@ function emitSaveMethod(type: TypeDecl, allTypes: TypeDecl[], lines: string[]): 
   if (hasBase) {
     lines.push("        // Start with parent class properties");
     lines.push("        var result = base.Save(context);");
-  } else if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+  } else if (absorbsUnknownValues(type.polymorphicDispatch)) {
     lines.push("        var result = (Dictionary<string, object?>)CloneRawValue(obj._raw)!;");
   } else {
     lines.push("        var result = new Dictionary<string, object?>();");
