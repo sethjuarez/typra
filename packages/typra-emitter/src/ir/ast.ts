@@ -10,6 +10,7 @@ import {
   isTemplateInstance,
   getNamespaceFullName,
   getDiscriminator,
+  isErrorModel,
 } from "@typespec/compiler";
 import { getStateScalar, getStateValue, SampleEntry, FactoryEntry, MethodEntry, KnownAsEntry, DefaultForEntry, ParseAliasEntry } from "../decorators.js";
 import { StateKeys } from "../lib.js";
@@ -111,6 +112,7 @@ export class TypeNode {
   public properties: PropertyNode[] = [];
   public isAbstract: boolean = false;
   public isProtocol: boolean = false;
+  public isError: boolean = false;
   public discriminator: string | undefined = undefined;
   public factories: FactoryEntry[] = [];
   public methods: MethodEntry[] = [];
@@ -131,6 +133,9 @@ export class TypeNode {
         instance: child,
       }));
 
+      // Appended last so a schema-declared wildcard subtype wins the default slot below.
+      // Duplicate schema-declared literal wildcards are rejected upstream by the TypeSpec
+      // compiler itself (invalid-discriminator-value), which points at each offending model.
       if (!this.isAbstract) {
         instances = [...instances, { discriminator: this.discriminator, value: "*", instance: this }];
       }
@@ -179,8 +184,10 @@ export class PropertyNode {
   public isCollection: boolean = false;
   public isAny: boolean = false;
   public isDict: boolean = false;
+  public dictValueType: string | null = null;
 
   public defaultValue: string | number | boolean | null = null;
+  public hasExplicitDefault: boolean = false;
   public allowedValues: string[] = [];
   public parseAliases: Record<string, string[]> = {};
   /** Name of the string-literal union alias (e.g., "Role"), null if unnamed or not an enum. */
@@ -205,6 +212,7 @@ export class PropertyNode {
     this.name = property.name;
     this.description = description;
     this.property = property;
+    this.hasExplicitDefault = property.defaultValue !== undefined;
   }
 
   getSanitizedObject(): Record<string, any> {
@@ -221,8 +229,10 @@ export class PropertyNode {
       isCollection: this.isCollection,
       isAny: this.isAny,
       isDict: this.isDict,
+      dictValueType: this.dictValueType,
 
       defaultValue: this.defaultValue || "null",
+      hasExplicitDefault: this.hasExplicitDefault,
       allowedValues: this.allowedValues,
       parseAliases: this.parseAliases,
       enumName: this.enumName,
@@ -284,6 +294,7 @@ export const resolveModel = (program: Program, model: Model, visited: Set<string
     node.description = getDoc(program, innerModel) || "";
     node.isAbstract = getStateScalar<boolean>(program, StateKeys.abstracts, innerModel) || false;
     node.isProtocol = getStateScalar<boolean>(program, StateKeys.protocols, innerModel) || false;
+    node.isError = isErrorModel(program, innerModel);
     const discriminator = getDiscriminator(program, innerModel);
     node.discriminator = discriminator ? discriminator.propertyName : undefined;
     // coercion .ctor
@@ -298,6 +309,7 @@ export const resolveModel = (program: Program, model: Model, visited: Set<string
     node.childTypes = resolveModelChildren(program, model, visited, rootNamespace, rootAlias);
     node.isAbstract = getStateScalar<boolean>(program, StateKeys.abstracts, model) || false;
     node.isProtocol = getStateScalar<boolean>(program, StateKeys.protocols, model) || false;
+    node.isError = isErrorModel(program, model);
     const discriminator = getDiscriminator(program, model);
     node.discriminator = discriminator ? discriminator.propertyName : undefined;
     // coercion .ctor
@@ -471,11 +483,17 @@ export const resolveModelProperty = (program: Program, property: ModelProperty, 
 
       if (innerModel.name === "Record") {
         // Record situation -> treat as array of dictionary
+        const recordValueType = getTemplateType(innerModel);
         prop.isScalar = false;
         prop.isAny = false;
         prop.isOptional = property.optional;
         prop.isCollection = true;
         prop.isDict = true;
+        prop.dictValueType = recordValueType?.kind === "Model"
+          ? getModelType(recordValueType, rootNamespace, rootAlias).name
+          : recordValueType
+            ? getTypeName(recordValueType)
+            : "unknown";
         prop.typeName = {
           namespace: "",
           name: "dictionary"
@@ -530,6 +548,7 @@ export const resolveModelProperty = (program: Program, property: ModelProperty, 
     if (prop.typeName.name === "Record<unknown>") {
       prop.isScalar = true;
       prop.isDict = true;
+      prop.dictValueType = "unknown";
       prop.typeName = {
         namespace: "",
         name: "dictionary"
@@ -862,6 +881,8 @@ export interface BaseRenderContext {
  * Validation assertion for a single property in a test.
  */
 export interface PropertyValidation {
+  /** Original schema property name before target-language identifier normalization. */
+  sourceKey?: string;
   /** Property name in target language casing (PascalCase, snake_case, camelCase) */
   key: string;
   /** Expected value after loading */

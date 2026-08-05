@@ -127,7 +127,9 @@ export const generatePython = async (
     if (!n.base) {
       const group = n.group || "";
       const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
-      const fileContent = emitPythonFileDecl(fileDecl, visitor, group);
+      const fileContent = emitPythonFileDecl(fileDecl, visitor, group, {
+        cancellationTokenPath: emitTarget["cancellation-token-path"],
+      });
       const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
       await emitPythonFile(context, `_${n.typeName.name}.py`, fileContent, outDir, emitTarget["output-dir"]);
     }
@@ -142,7 +144,11 @@ export const generatePython = async (
   }
 
   if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
-    const scaffoldContent = emitPythonProtocolScaffolds(collectProtocolNodes(nodes), importPath);
+    const scaffoldContent = emitPythonProtocolScaffolds(
+      collectProtocolNodes(nodes),
+      importPath,
+      emitTarget["cancellation-token-path"],
+    );
     await emitPythonFile(context, "test_protocol_scaffolds.py", scaffoldContent, emitTarget["test-dir"], emitTarget["test-dir"]);
   }
 
@@ -414,10 +420,9 @@ function getCollectionTypes(node: TypeNode): Array<{ prop: PropertyNode; type: s
     .map(p => ({
       prop: p,
       type: p.type?.properties.filter(t => t.name !== "name").map(t => t.name) || [],
-      // `isNamedCollection` (structural `Record<T>|Named<..>[]` flag) keeps keyed-map codegen
-      // for a 2nd same-element-typed sibling whose `p.type` was left unresolved by the cycle
-      // guard (mirrors the shared IR lowerCollectionHelpers fix).
-      hasNameProperty: p.isNamedCollection || p.type?.properties.some(t => t.name === "name") || false,
+      // Ordinary lists remain ordered arrays even when their element has a `name` field.
+      // Only Record<T>|Named<T>[] explicitly opts into name-keyed map serialization.
+      hasNameProperty: p.isNamedCollection,
     }));
 }
 

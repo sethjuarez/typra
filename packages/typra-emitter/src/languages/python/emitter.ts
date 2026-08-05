@@ -36,6 +36,7 @@ import {
   CoercionDecl,
   PropertyCategory,
   WireFieldMapping,
+  isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
@@ -83,7 +84,16 @@ function returnType(typeStr: string): string {
 /**
  * Emit a complete Python file from a FileDecl.
  */
-export function emitPythonFile(decl: FileDecl, visitor: ExprVisitor, group: string = ""): string {
+export interface PythonEmitterOptions {
+  cancellationTokenPath?: string;
+}
+
+export function emitPythonFile(
+  decl: FileDecl,
+  visitor: ExprVisitor,
+  group: string = "",
+  options: PythonEmitterOptions = {},
+): string {
   const lines: string[] = [];
 
   // 1. Header
@@ -101,7 +111,16 @@ export function emitPythonFile(decl: FileDecl, visitor: ExprVisitor, group: stri
   const hasProtocol = decl.types.some(t => t.isProtocol);
   const hasNonProtocol = decl.types.some(t => !t.isProtocol);
   const hasMethodHelpers = decl.types.some(t => !t.isProtocol && t.methods.length > 0);
+  const hasRuntimeCancellation = decl.types.some(type =>
+    type.methods.some(method => method.runtimeCancellable),
+  );
+  const preservesRawPayload = decl.types.some(type =>
+    type.polymorphicDispatch?.defaultVariant?.isSelfReference,
+  );
 
+  if (preservesRawPayload) {
+    stdlibImports.push("import copy");
+  }
   if (decl.containsAbstract) {
     stdlibImports.push("from abc import ABC");
   }
@@ -114,6 +133,24 @@ export function emitPythonFile(decl: FileDecl, visitor: ExprVisitor, group: stri
   if (hasProtocol || hasMethodHelpers) typingImports.push("Protocol", "runtime_checkable");
   typingImports.sort();
   stdlibImports.push(`from typing import ${typingImports.join(", ")}`);
+  if (hasRuntimeCancellation) {
+    localImports.push(
+      pythonCancellationTokenImport(
+        options.cancellationTokenPath ?? "prompty.core.cancellation.CancellationToken",
+      ),
+    );
+  }
+
+  function pythonCancellationTokenImport(path: string): string {
+    const separator = path.lastIndexOf(".");
+    if (separator < 1 || separator === path.length - 1) {
+      throw new Error(`Invalid Python cancellation-token-path: ${path}`);
+    }
+    const moduleName = path.slice(0, separator);
+    const symbolName = path.slice(separator + 1);
+    const alias = symbolName === "CancellationToken" ? "" : " as CancellationToken";
+    return `from ${moduleName} import ${symbolName}${alias}`;
+  }
 
   // Context import — go up one level when inside a group subfolder
   if (hasNonProtocol) {
@@ -262,6 +299,9 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
   for (const field of type.fields) {
     lines.push(`    ${toSnakeCase(field.name)}: ${pythonTypeAnnotation(field)}${pythonDefaultValue(field)}`);
   }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("    _raw: dict[str, Any] = field(default_factory=dict, init=False, repr=False)");
+  }
 
   // load() method
   lines.push("");
@@ -337,13 +377,15 @@ function emitMethodHelpersProtocol(type: TypeDecl, lines: string[]): void {
   for (const m of type.methods) {
     const params = Object.entries(m.params)
       .map(([pName, pType]) => `${toSnakeCase(pName)}: ${protocolType(pType)}`)
-      .join(", ");
-    const paramList = params ? `, ${params}` : "";
+    if (m.runtimeCancellable) {
+      params.push("cancellation: CancellationToken | None = None");
+    }
+    const paramList = params.length > 0 ? `, ${params.join(", ")}` : "";
     const ret = protocolType(m.returns);
     const snakeName = toSnakeCase(m.name);
     // Zero-param, non-verb methods are emitted as @property — idiomatic Python
     // for accessor-style helpers (matches the C# emitter's heuristic).
-    const isProperty = Object.keys(m.params).length === 0 && !isMethodStyle(m.name);
+    const isProperty = Object.keys(m.params).length === 0 && !m.runtimeCancellable && !isMethodStyle(m.name);
     lines.push("");
     if (isProperty) {
       lines.push("    @property");
@@ -436,13 +478,16 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
   for (const method of type.methods) {
     const params = Object.entries(method.params)
       .map(([pName, pType]) => `${toSnakeCase(pName)}: ${protocolType(pType)}`)
-      .join(", ");
+    if (method.runtimeCancellable) {
+      params.push("cancellation: CancellationToken | None = None");
+    }
+    const paramList = params.length > 0 ? `, ${params.join(", ")}` : "";
     const ret = protocolType(method.returns);
 
     // Sync method
     lines.push("");
     if (method.description) {
-      lines.push(`    def ${toSnakeCase(method.name)}(self, ${params}) -> ${ret}:`);
+      lines.push(`    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`);
       lines.push(`        """${method.description}"""`);
       if (method.optional) {
         lines.push("        return None");
@@ -451,10 +496,10 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
       }
     } else {
       if (method.optional) {
-        lines.push(`    def ${toSnakeCase(method.name)}(self, ${params}) -> ${ret}:`);
+        lines.push(`    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`);
         lines.push("        return None");
       } else {
-        lines.push(`    def ${toSnakeCase(method.name)}(self, ${params}) -> ${ret}:`);
+        lines.push(`    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`);
         emitRequiredProtocolMethodBody(lines);
       }
     }
@@ -463,7 +508,7 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
     if (!method.sync) {
       lines.push("");
       if (method.description) {
-        lines.push(`    async def ${toSnakeCase(method.name)}_async(self, ${params}) -> ${ret}:`);
+        lines.push(`    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`);
         lines.push(`        """${method.description} (async variant)"""`);
         if (method.optional) {
           lines.push("        return None");
@@ -472,10 +517,10 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
         }
       } else {
         if (method.optional) {
-          lines.push(`    async def ${toSnakeCase(method.name)}_async(self, ${params}) -> ${ret}:`);
+          lines.push(`    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`);
           lines.push("        return None");
         } else {
-          lines.push(`    async def ${toSnakeCase(method.name)}_async(self, ${params}) -> ${ret}:`);
+          lines.push(`    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`);
           emitRequiredProtocolMethodBody(lines);
         }
       }
@@ -525,10 +570,14 @@ function pythonTypeAnnotation(f: FieldDecl): string {
   switch (cat.kind) {
     case "dict":
       return f.isOptional ? "dict[str, Any] | None" : "dict[str, Any]";
-    case "collection_scalar":
-      return `list[${TYPE_MAP[cat.scalarType] || "Any"}]`;
-    case "collection_complex":
-      return `list[${cat.typeName}]`;
+    case "collection_scalar": {
+      const pyType = `list[${TYPE_MAP[cat.scalarType] || "Any"}]`;
+      return f.isOptional ? `${pyType} | None` : pyType;
+    }
+    case "collection_complex": {
+      const pyType = `list[${cat.typeName}]`;
+      return f.isOptional ? `${pyType} | None` : pyType;
+    }
     case "scalar": {
       const pyType = TYPE_MAP[cat.scalarType] || "Any";
       return f.isOptional ? `${pyType} | None` : pyType;
@@ -570,7 +619,7 @@ function pythonDefaultValue(f: FieldDecl): string {
   const cat = f.category;
 
   if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
-    return " = field(default_factory=list)";
+    return f.isOptional && !f.hasExplicitDefault ? " = None" : " = field(default_factory=list)";
   }
 
   if (f.isOptional) {
@@ -634,8 +683,9 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   lines.push("");
   lines.push(`        """`);
   lines.push("");
-  lines.push("        if context is not None:");
-  lines.push("            data = context.process_input(data)");
+  lines.push("        if context is None:");
+  lines.push("            context = LoadContext()");
+  lines.push("        data = context.process_input(data)");
 
   // Coercion checks — direct property setting instead of dict construction
   if (type.load.coercions.length > 0) {
@@ -649,6 +699,15 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   lines.push("        ");
   lines.push(`        if not isinstance(data, dict):`);
   lines.push(`            raise ValueError(f"Invalid data for ${name}: {data}")`);
+
+  for (const a of type.load.assignments) {
+    const field = type.fields.find(candidate => candidate.name === a.fieldName);
+    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
+    const guard = wildcardDiscriminator ? `isinstance(data.get("${wildcardDiscriminator}"), str) and data["${wildcardDiscriminator}"] != "" and ` : "";
+    lines.push(`        if ${guard}("${a.sourceName}" not in data or data["${a.sourceName}"] is None):`);
+    lines.push(`            raise ValueError(f"{context.at('${a.sourceName}').path}: missing required field")`);
+  }
 
   // Create instance (polymorphic dispatch or direct)
   if (type.load.hasPolymorphicDispatch && type.polymorphicDispatch) {
@@ -673,6 +732,11 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
     lines.push(`        if data is not None and "${a.sourceName}" in data:`);
     lines.push(`            ${emitLoadAssignment(a)}`);
   }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("");
+    lines.push(`        if type(instance) is ${name}:`);
+    lines.push("            instance._raw = copy.deepcopy(data)");
+  }
 
   // Context post-processing
   lines.push("        if context is not None:");
@@ -694,9 +758,9 @@ function emitLoadAssignment(a: LoadAssignment): string {
     case "collection_scalar":
       return `instance.${snake} = data["${a.sourceName}"]`;
     case "collection_complex":
-      return `instance.${snake} = ${a.parentTypeName}.load_${snake}(data["${a.sourceName}"], context)`;
+      return `instance.${snake} = ${a.parentTypeName}.load_${snake}(data["${a.sourceName}"], context.at("${a.sourceName}"))`;
     case "complex":
-      return `instance.${snake} = ${cat.typeName}.load(data["${a.sourceName}"], context)`;
+      return `instance.${snake} = ${cat.typeName}.load(data["${a.sourceName}"], context.at("${a.sourceName}"))`;
   }
 }
 
@@ -753,17 +817,21 @@ function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDe
   lines.push("");
   lines.push("    @staticmethod");
   lines.push(`    def load_${snake}(data: dict | list, context: LoadContext | None) -> list[${elemName}]:`);
+  lines.push("        if context is None:");
+  lines.push(`            context = LoadContext(path="${helper.propertyName}")`);
   lines.push("        if isinstance(data, dict):");
   lines.push(`            # convert simple named ${helper.propertyName} to list of ${elemName}`);
   lines.push("            result = []");
   lines.push("            for k, v in data.items():");
+  lines.push("                if isinstance(v, list):");
+  lines.push('                    raise TypeError(f"{context.at(k).path}: invalid named collection entry category array")');
   lines.push("                if isinstance(v, dict):");
   lines.push("                    # value is an object, spread its properties");
-  lines.push(`                    result.append({"name": k, **v})`);
+  lines.push(`                    result.append(${elemName}.load({"name": k, **v}, context.at(k)))`);
   lines.push("                else:");
   lines.push("                    # value is a scalar, use it as the primary property");
-  lines.push(`                    result.append({"name": k, "${firstInnerField}": v})`);
-  lines.push("            data = result");
+  lines.push(`                    result.append(${elemName}.load({"name": k, "${firstInnerField}": v}, context.at(k)))`);
+  lines.push("            return result");
   lines.push(`        return [${elemName}.load(item, context) for item in data]`);
 }
 
@@ -778,31 +846,36 @@ function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDe
 
   if (helper.hasNameProperty) {
     lines.push("");
+    lines.push("        serialized = [dict(item.save(context)) for item in items]");
+    lines.push("        for item_data in serialized:");
+    lines.push('            if item_data.get("name") == "":');
+    lines.push('                item_data.pop("name")');
+    lines.push("");
     lines.push('        if context.collection_format == "array":');
-    lines.push("            return [item.save(context) for item in items]");
+    lines.push("            return serialized");
+    lines.push("");
+    lines.push("        names: set[str] = set()");
+    lines.push("        for item_data in serialized:");
+    lines.push('            name = item_data.get("name")');
+    lines.push("            if not isinstance(name, str) or not name or name in names:");
+    lines.push("                return serialized");
+    lines.push("            names.add(name)");
     lines.push("");
     lines.push("        # Object format: use name as key");
     lines.push("        result: dict[str, Any] = {}");
-    lines.push("        for item in items:");
-    lines.push("            item_data = item.save(context)");
-    lines.push('            name = item_data.pop("name", None)');
-    lines.push("            if name:");
-    lines.push("                # Check if we can use shorthand (only primary property set)");
-    lines.push("                if context.use_shorthand and hasattr(item, '_shorthand_property'):");
-    lines.push("                    shorthand_prop = item._shorthand_property");
-    lines.push("                    if shorthand_prop and len(item_data) == 1 and shorthand_prop in item_data:");
-    lines.push("                        result[name] = item_data[shorthand_prop]");
-    lines.push("                        continue");
-    lines.push("                result[name] = item_data");
-    lines.push("            else:");
-    lines.push('                # No name, fall back to array format for this item');
-    lines.push('                if "_unnamed" not in result:');
-    lines.push('                    result["_unnamed"] = []');
-    lines.push('                result["_unnamed"].append(item_data)');
+    lines.push("        for item, item_data in zip(items, serialized):");
+    lines.push('            name = item_data.pop("name")');
+    lines.push("            # Check if we can use shorthand (only primary property set)");
+    lines.push("            if context.use_shorthand and hasattr(item, '_shorthand_property'):");
+    lines.push("                shorthand_prop = item._shorthand_property");
+    lines.push("                if shorthand_prop and len(item_data) == 1 and shorthand_prop in item_data:");
+    lines.push("                    result[name] = item_data[shorthand_prop]");
+    lines.push("                    continue");
+    lines.push("            result[name] = item_data");
     lines.push("        return result");
   } else {
     lines.push("");
-    lines.push("        # This type doesn't have a 'name' property, so always use array format");
+    lines.push("        # The schema declares an ordered collection, so preserve array format");
     lines.push("        return [item.save(context) for item in items]");
   }
 }
@@ -818,11 +891,12 @@ function emitPolymorphicDispatch(
   lines: string[],
 ): void {
   const discSnake = toSnakeCase(dispatch.discriminatorField);
+  const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push("    @staticmethod");
   lines.push(`    def load_${discSnake}(data: dict, context: LoadContext | None) -> "${parentName}":`);
   lines.push(`        # load polymorphic ${parentName} instance`);
   lines.push(`        if data is not None and "${dispatch.discriminatorField}" in data:`);
-  lines.push(`            discriminator_value = str(data["${dispatch.discriminatorField}"]).lower()`);
+  lines.push(`            discriminator_value = str(data["${dispatch.discriminatorField}"])`);
 
   for (let i = 0; i < dispatch.variants.length; i++) {
     const v = dispatch.variants[i];
@@ -846,11 +920,11 @@ function emitPolymorphicDispatch(
   } else {
     lines.push("");
     lines.push("            else:");
-    lines.push(`                raise ValueError(f"Unknown ${parentName} discriminator value: {discriminator_value}")`);
+    lines.push(`                raise ValueError(f"Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: {discriminator_value}")`);
   }
 
   lines.push("        else:");
-  if (isAbstract) {
+  if (isClosed || isAbstract) {
     lines.push("");
     lines.push(`            raise ValueError("Missing ${parentName} discriminator property: '${dispatch.discriminatorField}'")`);
   } else {
@@ -885,6 +959,9 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
     lines.push("        # Start with parent class properties");
     lines.push("        result = super().save(context)");
     lines.push("");
+  } else if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("");
+    lines.push("        result: dict[str, Any] = copy.deepcopy(obj._raw)");
   } else {
     lines.push("");
     lines.push("        result: dict[str, Any] = {}");

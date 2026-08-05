@@ -153,6 +153,7 @@ export function lowerType(
     base: node.base,
     isAbstract: node.isAbstract,
     isProtocol: node.isProtocol,
+    isError: node.isError,
     description: node.description,
     fields,
     coercionProperty,
@@ -186,7 +187,9 @@ export function classifyProperty(
   polymorphicTypeNames: Set<string>,
 ): PropertyCategory {
   if (prop.isDict) {
-    return { kind: "dict" };
+    return prop.dictValueType
+      ? { kind: "dict", valueType: prop.dictValueType }
+      : { kind: "dict" };
   }
 
   if (prop.isCollection) {
@@ -224,6 +227,7 @@ function lowerField(
     category: classifyProperty(prop, polymorphicTypeNames),
     isOptional: prop.isOptional,
     defaultValue: prop.defaultValue,
+    hasExplicitDefault: prop.hasExplicitDefault,
     allowedValues: prop.allowedValues,
     parseAliases: prop.parseAliases,
     enumName: prop.enumName,
@@ -282,6 +286,7 @@ function lowerLoad(
     fieldName: f.name,
     category: f.category,
     isOptional: f.isOptional,
+    hasExplicitDefault: f.hasExplicitDefault,
     parentTypeName: node.typeName.name,
     enumName: f.enumName,
     allowedValues: f.allowedValues,
@@ -314,6 +319,7 @@ function lowerSave(
     fieldName: f.name,
     category: f.category,
     isOptional: f.isOptional,
+    hasExplicitDefault: f.hasExplicitDefault,
     parentTypeName: node.typeName.name,
     enumName: f.enumName,
     isOpenEnum: f.isOpenEnum,
@@ -345,13 +351,32 @@ function lowerPolymorphicDispatch(
     typeName: (t.instance as TypeNode).typeName,
   }));
 
+  const discriminatorProperty = node.properties.find(property => property.name === node.discriminator);
+
+  // A wildcard subtype declared in the schema owns unknown discriminator values, and that
+  // declaration is what makes the discriminator open — the emitter never infers it.
+  // This matters when the discriminator union itself lists "*" as a member (e.g.
+  // `union Kind { known: "known", wildcard: "*" }`), which TypeSpec accepts: allowedValues
+  // is then non-empty and the dispatch would otherwise look closed, so backends that
+  // validate closed-ness before dispatching (Rust) would reject unknown values and leave
+  // the declared wildcard arm unreachable.
+  const hasDeclaredWildcard = polyTypes.default !== undefined
+    && polyTypes.default !== null
+    && (polyTypes.default.instance as TypeNode).typeName.name !== node.typeName.name;
+  const isClosed = !hasDeclaredWildcard
+    && (discriminatorProperty?.allowedValues.length ?? 0) > 0
+    && discriminatorProperty?.isOpenEnum !== true;
+
   let defaultVariant: PolymorphicDefault | null = null;
   if (polyTypes.default) {
     const defaultNode = polyTypes.default.instance as TypeNode;
-    defaultVariant = {
-      typeName: defaultNode.typeName,
-      isSelfReference: defaultNode.typeName.name === node.typeName.name,
-    };
+    const isSelfReference = defaultNode.typeName.name === node.typeName.name;
+    if (!isClosed || !isSelfReference) {
+      defaultVariant = {
+        typeName: defaultNode.typeName,
+        isSelfReference,
+      };
+    }
   }
 
   const baseDispatch: PolymorphicDispatchDecl = {
@@ -359,6 +384,7 @@ function lowerPolymorphicDispatch(
     variants,
     defaultVariant,
     isAbstract: node.isAbstract,
+    isClosed,
   };
 
   return baseDispatch;
@@ -378,31 +404,19 @@ function lowerCollectionHelpers(node: TypeNode, registry: TypeRegistry): Collect
     .filter(p => p.isCollection && !p.isScalar && !p.isDict)
     .map(p => {
       // A collection property's `p.type` is UNSET when the same element type was already
-      // resolved via an earlier sibling property (cycle-prevention in resolveModel). Without
-      // recovering it, the 2nd+ same-element-typed collection loses its keyed-collection
-      // codegen (hasNameProperty=false, empty innerFields) and degrades to array-only
-      // save/load — e.g. Prompty.outputs vs inputs (identical `Record<Property>|Named<..>[]`
-      // alias) would emit divergent, lossy wire. Fall back to the registry's fully-resolved
-      // element TypeNode (same pattern as expansion.ts resolveObjectAgainstType).
+      // resolved via an earlier sibling property (cycle-prevention in resolveModel). Recover
+      // it for shorthand field metadata, but do not infer keyed wire semantics from a regular
+      // element field named `name`: ordinary lists must preserve duplicates and ordering.
       const elementType = p.type ?? registry.get(p.typeName.name);
-      // A `Named<T>`-injected keyed collection (`Record<T>|Named<..>[]`) carries its
-      // name-keyed-MAP-ness structurally (p.isNamedCollection), because the injected `name`
-      // field lives on the `Named<T>` wrapper — which is only resolved into `p.type` for the
-      // FIRST sibling of a given element type. A later same-typed sibling (`outputs` after
-      // `inputs`) has `p.type` undefined and the raw registry `T` lacks the injected `name`,
-      // so structural detection is the ONLY way to keep its keyed codegen. OR it in.
-      const hasNameProperty =
-        p.isNamedCollection ||
-        elementType?.properties.some(t => t.name === "name") ||
-        false;
-      // When `hasNameProperty` holds via the structural flag but the element type resolved to
-      // the raw `T` (no `name` field), its own fields ARE the inner fields (name-less), which
-      // is exactly what the `Named<T>` wrapper's non-name fields would be — so filtering
-      // `!== "name"` is correct in both cases.
+      // Only the explicit Record<T> | Named<T>[] schema shape opts into a name-keyed map.
+      // The structural flag survives when the Named<T> wrapper is unavailable on later
+      // same-element siblings.
+      const hasNameProperty = p.isNamedCollection;
       return {
         propertyName: p.name,
         elementTypeName: p.typeName,
         innerFields: elementType?.properties.filter(t => t.name !== "name").map(t => t.name) || [],
+        coercionProperty: elementType ? findCoercionProperty(elementType) : null,
         hasNameProperty,
       };
     });
@@ -446,6 +460,9 @@ function lowerMethods(node: TypeNode): MethodStubDecl[] {
     params: m.params || {},
     optional: m.optional ?? false,
     sync: m.sync ?? false,
+    runtimeCancellable: m.runtimeCancellable ?? false,
+    atomic: m.atomic ?? false,
+    nonFatal: m.nonFatal ?? false,
   }));
 }
 

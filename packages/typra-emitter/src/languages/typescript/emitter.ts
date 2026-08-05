@@ -42,6 +42,7 @@ import {
   CoercionDecl,
   PropertyCategory,
   WireDecl,
+  isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toKebabCase } from "../../ir/utilities.js";
@@ -249,7 +250,14 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
       lines.push(`  ${field.name}: ${annotation}${defaultVal};`);
     }
   }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("  private raw: Record<string, unknown> = {};");
+  }
   lines.push("");
+
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    emitRawCloneMethod(lines);
+  }
 
   // Constructor
   emitConstructor(type, lines);
@@ -264,6 +272,23 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
   // Polymorphic dispatch
   if (type.polymorphicDispatch) {
     emitPolymorphicDispatch(name, type.polymorphicDispatch, lines);
+  }
+
+  function emitRawCloneMethod(lines: string[]): void {
+    lines.push("  private static cloneRawValue(value: unknown): unknown {");
+    lines.push("    if (Array.isArray(value)) {");
+    lines.push("      return value.map(item => this.cloneRawValue(item));");
+    lines.push("    }");
+    lines.push('    if (value !== null && typeof value === "object") {');
+    lines.push("      const result: Record<string, unknown> = {};");
+    lines.push("      for (const [key, item] of Object.entries(value as Record<string, unknown>)) {");
+    lines.push("        result[key] = this.cloneRawValue(item);");
+    lines.push("      }");
+    lines.push("      return result;");
+    lines.push("    }");
+    lines.push("    return value;");
+    lines.push("  }");
+    lines.push("");
   }
 
   // Collection helpers
@@ -339,16 +364,18 @@ function emitMethodHelpersInterface(type: TypeDecl, lines: string[]): void {
     }
     const params = Object.entries(m.params)
       .map(([pName, pType]) => `${pName}: ${returnType(pType)}`)
-      .join(", ");
+    if (m.runtimeCancellable) {
+      params.push("signal?: AbortSignal");
+    }
     const ret = returnType(m.returns);
     // Zero-param non-verb methods are emitted as getter-style readonly
     // properties (matches C#/Python emitters). Callers access them without
     // parens, e.g. ``msg.text``.
-    const isGetter = Object.keys(m.params).length === 0 && !isMethodStyle(m.name);
+    const isGetter = Object.keys(m.params).length === 0 && !m.runtimeCancellable && !isMethodStyle(m.name);
     if (isGetter) {
       lines.push(`  readonly ${m.name}: ${ret};`);
     } else {
-      lines.push(`  ${m.name}(${params}): ${ret};`);
+      lines.push(`  ${m.name}(${params.join(", ")}): ${ret};`);
     }
   }
   lines.push("}");
@@ -403,14 +430,16 @@ function emitProtocolInterface(type: TypeDecl, lines: string[]): void {
     }
     const params = Object.entries(method.params)
       .map(([pName, pType]) => `${pName}: ${returnType(pType)}`)
-      .join(", ");
+    if (method.runtimeCancellable) {
+      params.push("signal?: AbortSignal");
+    }
     const ret = returnType(method.returns);
     const optMark = method.optional ? "?" : "";
 
     if (method.sync) {
-      lines.push(`  ${method.name}${optMark}(${params}): ${ret};`);
+      lines.push(`  ${method.name}${optMark}(${params.join(", ")}): ${ret};`);
     } else {
-      lines.push(`  ${method.name}${optMark}(${params}): Promise<${ret}>;`);
+      lines.push(`  ${method.name}${optMark}(${params.join(", ")}): Promise<${ret}>;`);
     }
   }
 
@@ -447,6 +476,9 @@ function tsDefaultValue(f: FieldDecl): string {
   const cat = f.category;
 
   if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
+    if (f.isOptional && !f.hasExplicitDefault) {
+      return "";
+    }
     return " = []";
   }
 
@@ -516,7 +548,13 @@ function emitConstructor(type: TypeDecl, lines: string[]): void {
 
   for (const field of type.fields) {
     const cat = field.category;
-    if (field.isOptional) {
+    if (
+      field.isOptional &&
+      field.hasExplicitDefault &&
+      (cat.kind === "collection_scalar" || cat.kind === "collection_complex")
+    ) {
+      lines.push(`    this.${field.name} = init?.${field.name} ?? [];`);
+    } else if (field.isOptional) {
       lines.push(`    if (init?.${field.name} !== undefined) {`);
       lines.push(`      this.${field.name} = init.${field.name};`);
       lines.push("    }");
@@ -579,6 +617,7 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   const name = type.typeName.name;
 
   lines.push(`  static load(data: Record<string, unknown>, context?: LoadContext): ${name} {`);
+  lines.push("    context ??= new LoadContext();");
 
   // Context pre-processing
   lines.push("    if (context) {");
@@ -594,6 +633,16 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
 
   lines.push("");
 
+  for (const a of type.load.assignments) {
+    const field = type.fields.find(candidate => candidate.name === a.fieldName);
+    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
+    const guard = wildcardDiscriminator ? `typeof data["${wildcardDiscriminator}"] === "string" && data["${wildcardDiscriminator}"] !== "" && ` : "";
+    lines.push(`    if (${guard}(data["${a.sourceName}"] === undefined || data["${a.sourceName}"] === null)) {`);
+    lines.push(`      throw new Error(\`\${context.at("${a.sourceName}").path}: missing required field\`);`);
+    lines.push("    }");
+  }
+
   // Create instance (polymorphic dispatch or direct)
   if (type.load.hasPolymorphicDispatch && type.polymorphicDispatch) {
     lines.push(`    // Load polymorphic ${name} instance`);
@@ -608,6 +657,12 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   for (const a of type.load.assignments) {
     lines.push(`    if (data["${a.sourceName}"] !== undefined && data["${a.sourceName}"] !== null) {`);
     lines.push(`      ${emitLoadAssignment(a)}`);
+    lines.push("    }");
+  }
+  if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push("");
+    lines.push(`    if (instance.constructor === ${name}) {`);
+    lines.push(`      instance.raw = ${name}.cloneRawValue(data) as Record<string, unknown>;`);
     lines.push("    }");
   }
 
@@ -645,7 +700,7 @@ function emitLoadAssignment(a: LoadAssignment): string {
       }
     }
     case "complex":
-      return `instance.${a.fieldName} = ${cat.typeName}.load(data["${a.sourceName}"] as Record<string, unknown>, context);`;
+      return `instance.${a.fieldName} = ${cat.typeName}.load(data["${a.sourceName}"] as Record<string, unknown>, context.at("${a.sourceName}"));`;
     case "collection_scalar": {
       const tsType = TYPE_MAP[cat.scalarType];
       switch (tsType) {
@@ -660,7 +715,7 @@ function emitLoadAssignment(a: LoadAssignment): string {
       }
     }
     case "collection_complex":
-      return `instance.${a.fieldName} = ${a.parentTypeName}.load${capitalize(a.fieldName)}(data["${a.sourceName}"] as unknown[], context);`;
+      return `instance.${a.fieldName} = ${a.parentTypeName}.load${capitalize(a.fieldName)}(data["${a.sourceName}"] as unknown[], context.at("${a.sourceName}"));`;
     case "dict":
       return `instance.${a.fieldName} = data["${a.sourceName}"] as Record<string, unknown>;`;
   }
@@ -788,10 +843,11 @@ function emitPolymorphicDispatch(
   dispatch: PolymorphicDispatchDecl,
   lines: string[],
 ): void {
+  const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push(`  private static loadKind(data: Record<string, unknown>, context?: LoadContext): ${parentName} {`);
   lines.push(`    const discriminatorValue = data["${dispatch.discriminatorField}"];`);
   lines.push("    if (discriminatorValue !== undefined && discriminatorValue !== null) {");
-  lines.push("      const discriminator = String(discriminatorValue).toLowerCase();");
+  lines.push("      const discriminator = String(discriminatorValue);");
   lines.push("      switch (discriminator) {");
 
   for (const v of dispatch.variants) {
@@ -809,14 +865,14 @@ function emitPolymorphicDispatch(
     }
   } else {
     lines.push("        default:");
-    lines.push(`          throw new Error(\`Unknown ${parentName} discriminator value: \${discriminator}\`);`);
+    lines.push(`          throw new Error(\`Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: \${discriminator}\`);`);
   }
 
   lines.push("      }");
   lines.push("    }");
 
   // Missing discriminator
-  if (dispatch.isAbstract) {
+  if (isClosed || dispatch.isAbstract) {
     lines.push(`    throw new Error("Missing ${parentName} discriminator property: '${dispatch.discriminatorField}'");`);
   } else {
     lines.push(`    return new ${parentName}();`);
@@ -836,17 +892,20 @@ function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDe
   const firstInnerField = helper.innerFields[0] || "kind";
 
   lines.push(`  static ${methodName}(data: Record<string, unknown>[] | unknown[], context?: LoadContext): ${elemName}[] {`);
+  lines.push(`    context ??= new LoadContext({ path: "${helper.propertyName}" });`);
   lines.push("    if (!Array.isArray(data)) {");
-  lines.push("      // Convert dict/object format to array format");
-  lines.push("      const result: Record<string, unknown>[] = [];");
+  lines.push(`      const result: ${elemName}[] = [];`);
   lines.push("      for (const [k, v] of Object.entries(data)) {");
+  lines.push("        if (Array.isArray(v)) {");
+  lines.push('          throw new TypeError(context.at(k).path + ": invalid named collection entry category array");');
+  lines.push("        }");
   lines.push("        if (typeof v === \"object\" && v !== null && !Array.isArray(v)) {");
-  lines.push(`          result.push({ name: k, ...(v as Record<string, unknown>) });`);
+  lines.push(`          result.push(${elemName}.load({ name: k, ...(v as Record<string, unknown>) }, context.at(k)));`);
   lines.push("        } else {");
-  lines.push(`          result.push({ name: k, "${firstInnerField}": v });`);
+  lines.push(`          result.push(${elemName}.load({ name: k, "${firstInnerField}": v }, context.at(k)));`);
   lines.push("        }");
   lines.push("      }");
-  lines.push("      data = result;");
+  lines.push("      return result;");
   lines.push("    }");
   lines.push(`    return data.map(item => ${elemName}.load(item as Record<string, unknown>, context));`);
   lines.push("  }");
@@ -864,31 +923,36 @@ function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDe
 
   if (helper.hasNameProperty) {
     lines.push("");
+    lines.push("    const serialized = items.map(item => ({ ...item.save(context) } as Record<string, unknown>));");
+    lines.push("    for (const itemData of serialized) {");
+    lines.push('      if (itemData["name"] === "") delete itemData["name"];');
+    lines.push("    }");
+    lines.push("");
     lines.push('    if (context.collectionFormat === "array") {');
-    lines.push("      return items.map(item => item.save(context));");
+    lines.push("      return serialized;");
+    lines.push("    }");
+    lines.push("");
+    lines.push("    const names = new Set<string>();");
+    lines.push("    for (const itemData of serialized) {");
+    lines.push('      const name = itemData["name"];');
+    lines.push('      if (typeof name !== "string" || name.length === 0 || names.has(name)) return serialized;');
+    lines.push("      names.add(name);");
     lines.push("    }");
     lines.push("");
     lines.push("    // Object format: use name as key");
     lines.push("    const result: Record<string, unknown> = {};");
-    lines.push("    for (const item of items) {");
-    lines.push("      const itemData = item.save(context) as Record<string, unknown>;");
-    lines.push('      const name = itemData["name"] as string | undefined;');
+    lines.push("    for (let index = 0; index < items.length; index++) {");
+    lines.push("      const item = items[index];");
+    lines.push("      const itemData = serialized[index];");
+    lines.push('      const name = itemData["name"] as string;');
     lines.push('      delete itemData["name"];');
-    lines.push("      if (name) {");
-    lines.push("        // Check if we can use shorthand (only primary property set)");
-    lines.push(`        const shorthand = (item.constructor as typeof ${elemName}).shorthandProperty;`);
-    lines.push("        if (context.useShorthand && shorthand && Object.keys(itemData).length === 1 && shorthand in itemData) {");
-    lines.push("          result[name] = itemData[shorthand];");
-    lines.push("          continue;");
-    lines.push("        }");
-    lines.push("        result[name] = itemData;");
-    lines.push("      } else {");
-    lines.push("        // No name, fall back to array format for this item");
-    lines.push('        if (!result["_unnamed"]) {');
-    lines.push('          result["_unnamed"] = [];');
-    lines.push("        }");
-    lines.push('        (result["_unnamed"] as unknown[]).push(itemData);');
+    lines.push("      // Check if we can use shorthand (only primary property set)");
+    lines.push(`      const shorthand = (item.constructor as typeof ${elemName}).shorthandProperty;`);
+    lines.push("      if (context.useShorthand && shorthand && Object.keys(itemData).length === 1 && shorthand in itemData) {");
+    lines.push("        result[name] = itemData[shorthand];");
+    lines.push("        continue;");
     lines.push("      }");
+    lines.push("      result[name] = itemData;");
     lines.push("    }");
     lines.push("    return result;");
   } else {
@@ -918,6 +982,8 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
   if (type.save.hasBase) {
     lines.push("    // Start with parent class properties");
     lines.push("    const result = super.save(context);");
+  } else if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
+    lines.push(`    const result = ${name}.cloneRawValue(obj.raw) as Record<string, unknown>;`);
   } else {
     lines.push("    const result: Record<string, unknown> = {};");
   }

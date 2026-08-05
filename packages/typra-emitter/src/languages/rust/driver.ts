@@ -128,6 +128,7 @@ export const generateRust = async (
       const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
       const fileContent = emitRustFileDecl(fileDecl, visitor, polymorphicTypeNames, childToParent, {
         enumParsing: emitTarget["enum-parsing"] ?? "case-sensitive",
+        cancellationTokenPath: emitTarget["cancellation-token-path"],
       });
       const fileName = toSnakeCase(n.typeName.name) + '.rs';
       const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
@@ -158,7 +159,11 @@ export const generateRust = async (
 
   if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
     const importPath = emitTarget["import-path"] || "crate";
-    const scaffoldContent = emitRustProtocolScaffolds(collectProtocolNodes(nodes), importPath);
+    const scaffoldContent = emitRustProtocolScaffolds(
+      collectProtocolNodes(nodes),
+      importPath,
+      emitTarget["cancellation-token-path"],
+    );
     await emitRustFile(context, "protocol_scaffolds_test.rs", scaffoldContent, emitTarget["test-dir"], emitTarget["test-dir"]);
     if (!testGroupModuleNames.has("")) testGroupModuleNames.set("", []);
     testGroupModuleNames.get("")!.push("protocol_scaffolds_test");
@@ -696,7 +701,7 @@ export function emitRustTest(ctx: RustTestContext): string {
             // default (materialized on load, so present on save even when the `@sample`
             // omits it, e.g. prompty's `status`/`contextState`) — must be present in the
             // sample for whole-object byte-identity vs that sample to be valid.
-            if ((!p.isOptional || p.defaultValue != null) && !(p.name in obj)) return false;
+            if ((!p.isOptional || p.hasExplicitDefault) && !(p.name in obj)) return false;
             const pv = obj[p.name];
             // Cause D (mirror image of the above): a REQUIRED field authored in the sample
             // at its zero/empty value is OMITTED by to_value — required string == "", int
@@ -752,27 +757,14 @@ export function emitRustTest(ctx: RustTestContext): string {
       // navigate into sampled collections by integer index to re-assert discriminators:
       // that is redundant and, for keyed (property-bag) collections whose canonical wire is
       // a name-keyed MAP, `value[prop][0]` navigates into an object → None and mis-fails.
-      // Element type names known to carry a `name` property (i.e. keyed collections),
-      // used by the keyed-map assertion + synthesized map-input block below. Built once to
-      // work around the cycle-prevention quirk where an element's `prop.type` is unset on a
-      // later sibling of the same element type. `isNamedCollection` is the structural flag
-      // set at IR resolution for `Record<T>|Named<..>[]` bags — authoritative even when
-      // `prop.type` (the injected-`name` wrapper) was left unresolved on a later sibling.
-      const namedElementTypes = new Set<string>();
-      for (const p of node.properties) {
-        if (p.isNamedCollection || (p.type && p.type.properties.some(t => t.name === "name"))) {
-          namedElementTypes.add(p.typeName.name);
-        }
-      }
+      // Only Record<T>|Named<T>[] explicitly opts into keyed-map wire semantics.
+      // A regular list whose element happens to have a `name` field must remain an
+      // ordered array so duplicate names are not collapsed.
       const isKeyedCollection = (prop: TypeNode["properties"][number]): boolean =>
-        prop.isCollection &&
-        (prop.isNamedCollection ||
-          (prop.type?.properties.some(t => t.name === "name") ?? false) ||
-          namedElementTypes.has(prop.typeName.name));
-      // Keyed-collection canonicalization: a collection whose element model has a
-      // `name` property saves as a canonical name-keyed MAP. This is exactly the
-      // property-bag pattern (e.g. prompty's `inputs`/`outputs`/`parameters`,
-      // declared as the union `Record<T> | Named<T>[]`) that a plain
+        prop.isCollection && prop.isNamedCollection;
+      // Keyed-collection canonicalization for the explicit property-bag pattern
+      // (e.g. prompty's `inputs`/`outputs`/`parameters`, declared as the union
+      // `Record<T> | Named<T>[]`) that a plain
       // `#[derive(serde::Serialize/Deserialize)]` on a `Vec<T>` field CANNOT
       // reproduce — the derive emits/demands a JSON array and REJECTS the canonical
       // map on load with "invalid type: map, expected a sequence". Prove the manual
@@ -922,7 +914,9 @@ export function emitRustTest(ctx: RustTestContext): string {
         out += '    let _ = instance; // load succeeded, no scalar properties to validate\n';
       }
     } else {
-      out += '    let _ = instance; // abstract type, load succeeded\n';
+      out += '    let saved = instance.to_value(&SaveContext::default());\n';
+      out += `    let reloaded = ${typeName}::load_from_value(&saved, &ctx);\n`;
+      out += '    assert_eq!(reloaded, instance, "scalar-coerced abstract models must survive save/reload");\n';
     }
     out += '}\n';
     out += '\n';

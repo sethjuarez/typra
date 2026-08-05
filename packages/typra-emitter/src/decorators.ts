@@ -139,7 +139,16 @@ export interface FactoryEntry {
   params: Record<string, string>;
 }
 
-export interface MethodEntry {
+export interface MethodOptions {
+  /** Whether runtimes expose a synthetic native cancellation parameter */
+  runtimeCancellable?: boolean;
+  /** Whether the operation is atomic (metadata/documentation only) */
+  atomic?: boolean;
+  /** Whether failures are non-fatal (metadata/documentation only) */
+  nonFatal?: boolean;
+}
+
+export interface MethodEntry extends MethodOptions {
   /** Method name (e.g., "text") */
   name: string;
   /** Return type as a string (e.g., "string") */
@@ -178,13 +187,24 @@ export function $factory(context: DecoratorContext, target: Model, name: string,
   appendStateValue<FactoryEntry>(context, StateKeys.factories, target, entry);
 }
 
-export function $method(context: DecoratorContext, target: Model, name: string, returns: string, description?: string, params?: object, optional?: boolean, sync?: boolean) {
+export function $method(
+  context: DecoratorContext,
+  target: Model,
+  name: string,
+  returns: string,
+  description?: string,
+  params?: object,
+  optional?: boolean,
+  sync?: boolean,
+  options?: object,
+) {
   const nameValue = typeof name === 'object' && name !== null && 'value' in name ? (name as StringValue).value : name as string;
   const returnsValue = typeof returns === 'object' && returns !== null && 'value' in returns ? (returns as StringValue).value : returns as string;
   const descValue = typeof description === 'object' && description !== null && 'value' in description ? (description as StringValue).value : description as string | undefined;
   const paramsValue = params ? deserializeValue(params) as Record<string, string> : {};
   const optionalValue = typeof optional === 'object' && optional !== null && 'value' in optional ? (optional as { value: boolean }).value : optional ?? false;
   const syncValue = typeof sync === 'object' && sync !== null && 'value' in sync ? (sync as { value: boolean }).value : sync ?? false;
+  const optionsValue = options ? deserializeValue(options) as MethodOptions : {};
 
   const entry: MethodEntry = {
     name: nameValue,
@@ -193,6 +213,9 @@ export function $method(context: DecoratorContext, target: Model, name: string, 
     params: paramsValue,
     optional: optionalValue,
     sync: syncValue,
+    runtimeCancellable: optionsValue.runtimeCancellable === true,
+    atomic: optionsValue.atomic === true,
+    nonFatal: optionsValue.nonFatal === true,
   };
 
   appendStateValue<MethodEntry>(context, StateKeys.methods, target, entry);

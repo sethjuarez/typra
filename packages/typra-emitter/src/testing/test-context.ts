@@ -8,7 +8,8 @@
 import { TypeNode, PropertyValidation, TestExample, CoercionTest, BaseTestContext } from "../ir/ast.js";
 import { getCombinations, scalarValue, toSnakeCase } from "../ir/utilities.js";
 import { toPascalCase } from "../ir/visitor.js";
-import { swiftPropertyName } from "../languages/swift/identifiers.js";
+import { swiftPropertyName, swiftTypeName } from "../languages/swift/identifiers.js";
+import { goFieldName } from "../languages/go/identifiers.js";
 import * as YAML from "yaml";
 
 const RUST_KEYWORDS = new Set([
@@ -46,6 +47,12 @@ export interface TestContextOptions {
   /** Escape YAML for embedding in test template (optional - for languages that need it) */
   escapeYamlForTemplate?: (yaml: string) => string;
 
+  /** Use YAML block literals for multiline strings instead of quoted folding. */
+  yamlMultilineStyle?: "block-literal";
+
+  /** Minimum encoded length at which double-quoted multiline values may be folded. */
+  yamlDoubleQuotedMinMultiLineLength?: number;
+
   /** Default scalar values for each type (used when @sample doesn't provide example) */
   scalarValues: Record<string, string>;
 
@@ -59,6 +66,9 @@ export interface TestContextOptions {
    * The returned value+delimiter replace the default.
    */
   renderEnumValue?: (enumName: string, rawValue: string, fieldName: string, isOpenEnum?: boolean) => { value: string; delimiter: string } | null;
+
+  /** Include scalar samples for complex properties that support scalar coercion. */
+  includeCoercedComplexValues?: boolean;
 }
 
 /**
@@ -100,12 +110,22 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
 
     // Create YAML document with proper string escaping
     const doc = new YAML.Document(sample);
+    let requiresJsonDoubleQuotes = false;
     YAML.visit(doc, {
       Scalar(key, yamlNode) {
         if (typeof yamlNode.value === 'string') {
           const str = yamlNode.value as string;
-          if (str.includes('\n') || str.includes('\t') || str.includes('#') || str.includes(':') || str.includes('"')) {
+          const hasTrailingHorizontalWhitespace = /[ \t]+(?:\r?\n|$)/.test(str);
+          const supportsBlockLiteral = str.includes('\n')
+            && /\S/.test(str)
+            && !/[\u2028\u2029]/.test(str)
+            && !hasTrailingHorizontalWhitespace
+            && !/(?:^|\n)[ ]*\t/.test(str);
+          if (supportsBlockLiteral && options.yamlMultilineStyle === "block-literal") {
+            yamlNode.type = 'BLOCK_LITERAL';
+          } else if (str.includes('\n') || str.includes('\t') || str.includes('#') || str.includes(':') || str.includes('"')) {
             yamlNode.type = 'QUOTE_DOUBLE';
+            requiresJsonDoubleQuotes ||= hasTrailingHorizontalWhitespace;
           }
         }
       }
@@ -118,7 +138,14 @@ function buildExamples(node: TypeNode, options: TestContextOptions): TestExample
     }
 
     // Generate YAML and optionally escape for embedding in template strings
-    let yamlStr = doc.toString({ indent: 2, lineWidth: 0 });
+    let yamlStr = doc.toString({
+      indent: 2,
+      lineWidth: 0,
+      doubleQuotedAsJSON: requiresJsonDoubleQuotes,
+      ...(options.yamlDoubleQuotedMinMultiLineLength === undefined
+        ? {}
+        : { doubleQuotedMinMultiLineLength: options.yamlDoubleQuotedMinMultiLineLength }),
+    });
     if (options.escapeYamlForTemplate) {
       yamlStr = options.escapeYamlForTemplate(yamlStr);
     }
@@ -143,7 +170,10 @@ function buildValidations(
   return Object.keys(sample)
     .filter(key => {
       const prop = node.properties.find(p => p.name === key);
-      return typeof sample[key] !== 'object' && (prop?.isScalar || prop?.enumName);
+      const supportsScalarCoercion = options.includeCoercedComplexValues
+        && (prop?.type?.coercions.length ?? 0) > 0;
+      return typeof sample[key] !== 'object'
+        && (prop?.isScalar || prop?.enumName || supportsScalarCoercion);
     })
     .map(key => {
       const prop = node.properties.find(p => p.name === key);
@@ -155,6 +185,7 @@ function buildValidations(
         const enumResult = options.renderEnumValue(prop.enumName, rawValue, key, prop.isOpenEnum);
         if (enumResult) {
           return {
+            sourceKey: key,
             key: options.renderKey(key),
             value: enumResult.value,
             delimiter: enumResult.delimiter,
@@ -176,6 +207,7 @@ function buildValidations(
       }
 
       return {
+        sourceKey: key,
         key: options.renderKey(key),
         value,
         delimiter,
@@ -215,6 +247,7 @@ function buildCoercions(node: TypeNode, options: TestContextOptions): CoercionTe
           const enumResult = options.renderEnumValue(prop.enumName, strValue, key, prop.isOpenEnum);
           if (enumResult) {
             return {
+              sourceKey: key,
               key: options.renderKey(key),
               value: enumResult.value,
               delimiter: enumResult.delimiter,
@@ -227,6 +260,7 @@ function buildCoercions(node: TypeNode, options: TestContextOptions): CoercionTe
         const needsQuotes = typeof value === 'string' && !value.includes('"') && !isValuePlaceholder;
 
         return {
+          sourceKey: key,
           key: options.renderKey(key),
           value: needsQuotes ? options.escapeString(value) : value,
           delimiter: needsQuotes ? '"' : '',
@@ -289,6 +323,7 @@ export const pythonTestOptions: TestContextOptions = {
   renderBoolean: (val: boolean) => val ? "True" : "False",
   escapeString: (str: string) => str.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),
   getDelimiter: (str: string) => str.includes('\n') ? '"""' : '"',
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   scalarValues: {
     "boolean": "False",
     "float": "3.14",
@@ -365,6 +400,7 @@ export const rustTestOptions: TestContextOptions = {
     .replace(/\r/g, '\\r')
     .replace(/\t/g, '\\t'),
   getDelimiter: (str: string) => '"',
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   renderEnumValue: (enumName: string, rawValue: string) => ({
     value: `${enumName}::${toPascalCase(rawValue)}`,
     delimiter: '',
@@ -409,14 +445,16 @@ export const swiftTestOptions: TestContextOptions = {
     .replace(/\r/g, "\\r")
     .replace(/\t/g, "\\t"),
   getDelimiter: () => '"',
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   escapeJsonForTemplate: (json: string) => json.replace(/\\/g, "\\\\"),
   escapeYamlForTemplate: (yaml: string) => yaml.replace(/\\/g, "\\\\"),
   renderEnumValue: (enumName: string, rawValue: string, _fieldName: string, isOpenEnum?: boolean) => ({
     value: isOpenEnum
-      ? `${enumName}(rawValue: "${rawValue}")`
-      : `${enumName}.${swiftPropertyName(rawValue)}`,
+      ? `${swiftTypeName(enumName)}(rawValue: "${rawValue}")`
+      : `${swiftTypeName(enumName)}.${swiftPropertyName(rawValue)}`,
     delimiter: '',
   }),
+  includeCoercedComplexValues: true,
   scalarValues: {
     "boolean": "false",
     "float": "3.14",
@@ -443,11 +481,7 @@ export const swiftTestOptions: TestContextOptions = {
  * Go test context options.
  */
 export const goTestOptions: TestContextOptions = {
-  renderKey: (key: string) => {
-    // Convert snake_case to PascalCase for exported Go fields
-    const pascal = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-    return pascal.charAt(0).toUpperCase() + pascal.slice(1);
-  },
+  renderKey: goFieldName,
   renderBoolean: (val: boolean) => val ? "true" : "false",
   escapeString: (str: string) => str
     .replace(/\\/g, '\\\\')
@@ -456,6 +490,8 @@ export const goTestOptions: TestContextOptions = {
     .replace(/\r/g, '\\r')
     .replace(/\t/g, '\\t'),
   getDelimiter: (str: string) => '"',
+  yamlMultilineStyle: "block-literal",
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   scalarValues: {
     "boolean": "false",
     "float": "3.14",

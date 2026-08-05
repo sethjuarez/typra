@@ -44,7 +44,7 @@ export type PropertyCategory =
   | { kind: "complex"; typeName: string }
   | { kind: "collection_scalar"; scalarType: string }
   | { kind: "collection_complex"; typeName: string }
-  | { kind: "dict" };
+  | { kind: "dict"; valueType?: string };
 
 // ============================================================================
 // EnumDef — a string-literal enum type
@@ -125,6 +125,8 @@ export interface TypeDecl {
   isAbstract: boolean;
   /** Whether this type is a protocol interface (Python: Protocol, TS: interface, Rust: trait, C#: interface, Go: interface) */
   isProtocol: boolean;
+  /** Whether TypeSpec marks this model with @error. */
+  isError?: boolean;
   /** Human-readable description for docstrings/comments */
   description: string;
   /** All fields defined on this type */
@@ -166,6 +168,8 @@ export interface FieldDecl {
   isOptional: boolean;
   /** Default value for the field (primitives only) */
   defaultValue: string | number | boolean | null;
+  /** Whether TypeSpec explicitly declared a default, including collection defaults such as `#[]` */
+  hasExplicitDefault?: boolean;
   /** Allowed string values (for enum-like constraints) */
   allowedValues: string[];
   /** Parse-only aliases keyed by canonical enum/string-union value */
@@ -252,6 +256,8 @@ export interface LoadAssignment {
   parseAliases: Record<string, string[]>;
   /** Default value (for fallback on missing/invalid data) */
   defaultValue: string | number | boolean | null;
+  /** Whether TypeSpec explicitly declared a default */
+  hasExplicitDefault?: boolean;
   /** Whether the enum is open (accepts arbitrary string values) */
   isOpenEnum: boolean;
 }
@@ -284,6 +290,8 @@ export interface SaveAssignment {
   category: PropertyCategory;
   /** Whether the field is optional (skip if null/None/nil) */
   isOptional: boolean;
+  /** Whether TypeSpec explicitly declared a default */
+  hasExplicitDefault?: boolean;
   /** Parent type name (for collection save helpers) */
   parentTypeName: string;
   /** Enum type name (if this field references a named enum) */
@@ -309,6 +317,13 @@ export interface PolymorphicDispatchDecl {
   defaultVariant: PolymorphicDefault | null;
   /** Whether the base type is abstract (affects error handling on unknown values) */
   isAbstract: boolean;
+  /** Whether the discriminator field is a closed enum/string union with no wildcard fallback */
+  isClosed: boolean;
+}
+
+/** Closed discriminator contracts must reject unknown values instead of selecting a fallback. */
+export function isClosedPolymorphicDispatch(dispatch: PolymorphicDispatchDecl): boolean {
+  return dispatch.isClosed;
 }
 
 /**
@@ -351,7 +366,9 @@ export interface CollectionHelperDecl {
   elementTypeName: TypeName;
   /** Field names on the element type (excluding "name" — used for shorthand detection) */
   innerFields: string[];
-  /** Whether the element type has a "name" property (enables dict format) */
+  /** Element field populated by scalar @coerce shorthand, when declared. */
+  coercionProperty?: string | null;
+  /** Whether the schema explicitly opts into a name-keyed map via Record<T> | Named<T>[] */
   hasNameProperty: boolean;
 }
 
@@ -395,6 +412,12 @@ export interface MethodStubDecl {
   optional: boolean;
   /** Whether this method is synchronous (not wrapped in async/Promise/Task) */
   sync: boolean;
+  /** Whether runtimes expose a synthetic native cancellation parameter */
+  runtimeCancellable?: boolean;
+  /** Whether the operation is atomic (metadata/documentation only) */
+  atomic?: boolean;
+  /** Whether failures are non-fatal (metadata/documentation only) */
+  nonFatal?: boolean;
 }
 
 // ============================================================================

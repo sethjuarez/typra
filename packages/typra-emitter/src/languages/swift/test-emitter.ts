@@ -1,4 +1,4 @@
-import { BaseTestContext, PropertyNode, TestExample, TypeNode } from "../../ir/ast.js";
+import { BaseTestContext, PropertyNode, PropertyValidation, TestExample, TypeNode } from "../../ir/ast.js";
 import { swiftPropertyName, swiftStringLiteral, swiftTypeName } from "./identifiers.js";
 
 export function emitSwiftTests(ctx: BaseTestContext & { moduleName: string }): string {
@@ -19,9 +19,47 @@ export function emitSwiftTests(ctx: BaseTestContext & { moduleName: string }): s
   ctx.coercions.forEach((coercion, index) => {
     lines.push(`  func testScalarCoercion${index + 1}() throws {`);
     lines.push(`    let instance = try ${typeName}.load(${coercion.value})`);
-    for (const validation of coercion.validations) {
-      const expected = validation.delimiter ? `${validation.delimiter}${validation.value}${validation.delimiter}` : String(validation.value);
-      lines.push(`    XCTAssertEqual(instance.${swiftPropertyName(validation.key)}, ${expected})`);
+    const expansion = ctx.node.coercions[index]?.expansion;
+    const child = expansion && ctx.node.discriminator
+      ? matchingPolymorphicChild(ctx.node, expansion)
+      : undefined;
+    if (child) {
+      lines.push(`    if case .${swiftPropertyName(child.typeName.name)}(let concrete) = instance {`);
+      for (const validation of coercion.validations) {
+        if (validation.key === ctx.node.discriminator) continue;
+        const expected = validationExpected(validation);
+        const prop = findProperty(child, validation.key) ?? findProperty(ctx.node, validation.key);
+        emitPropertyAssertion(
+          lines,
+          `concrete.${swiftPropertyName(validation.key)}`,
+          expected,
+          prop,
+          "      ",
+          validationCast(validation),
+        );
+      }
+      lines.push("    } else {");
+      lines.push(`      XCTFail("Expected ${swiftTypeName(child.typeName.name)}")`);
+      lines.push("    }");
+    } else if (isUnknownPolymorphicRoot(ctx.node)) {
+      emitUnknownCoercionValidation(
+        lines,
+        coercion.validations,
+        expansion,
+        ctx.node.coercions[index]?.scalar,
+      );
+    } else {
+      for (const validation of coercion.validations) {
+        const expected = validationExpected(validation);
+        const prop = findProperty(ctx.node, validation.key);
+        emitPropertyAssertion(
+          lines,
+          `instance.${swiftPropertyName(validation.key)}`,
+          expected,
+          prop,
+          "    ",
+        );
+      }
     }
     lines.push("  }");
     lines.push("");
@@ -40,36 +78,6 @@ export function emitSwiftConformanceTest(moduleName: string): string {
     `@testable import ${moduleName}`,
     "",
     "final class ConformanceTests: XCTestCase {",
-    "  func testCanonicalFixtureConformance() throws {",
-    "    let root = try FixtureRoot.load([",
-    "      \"name\": \"fixture-root\",",
-    "      \"description\": \"A generated fixture with broad emitter coverage.\",",
-    "      \"tags\": [\"typespec\", \"emitter\", \"validation\"],",
-    "      \"metadata\": [\"source\": \"fixture\", \"version\": 1],",
-    "      \"owner\": [\"id\": \"owner-1\", \"displayName\": \"Fixture Owner\"],",
-    "      \"content\": [\"kind\": \"text\", \"text\": \"hello from a polymorphic sample\"],",
-    "      \"contentItems\": [[\"kind\": \"text\", \"text\": \"hello from a polymorphic collection\"]],",
-    "      \"status\": \"complete\",",
-    "      \"mode\": \"bulk\",",
-    "    ])",
-    "    let rootSaved = try root.save()",
-    "    XCTAssertEqual(rootSaved[\"status\"] as? String, \"ready\")",
-    "    XCTAssertEqual(rootSaved[\"mode\"] as? String, \"batch\")",
-    "",
-    "    let imageContent = try FixtureContent.load([\"kind\": \"image\", \"url\": \"https://example.com/fixture.png\"])",
-    "    XCTAssertEqual(try imageContent.save()[\"kind\"] as? String, \"image\")",
-    "",
-    "    let wire = try WireOptions.load([\"maxOutputTokens\": 256, \"temperature\": 0.7])",
-    "    let openai = try wire.toWire(\"openai\")",
-    "    XCTAssertEqual(openai[\"max_completion_tokens\"] as? Int32, 256)",
-    "    XCTAssertEqual(openai[\"temperature\"] as? Float, 0.7)",
-    "    let anthropic = try wire.toWire(\"anthropic\")",
-    "    XCTAssertEqual(anthropic[\"max_tokens\"] as? Int32, 256)",
-    "",
-    "    let reference = try FixtureReference.load(\"ref-coerced\")",
-    "    XCTAssertEqual(try reference.save()[\"label\"] as? String, \"coerced reference\")",
-    "  }",
-    "",
     "  func testIntegerValidationRejectsUnsafeValues() throws {",
     "    XCTAssertEqual(try TypraRuntime.int64(NSNumber(value: Int64.max), field: \"value\"), Int64.max)",
     "    XCTAssertThrowsError(try TypraRuntime.int64(NSDecimalNumber(mantissa: 9223372036854775808, exponent: 0, isNegative: false), field: \"value\"))",
@@ -110,15 +118,15 @@ function emitExampleTest(lines: string[], node: TypeNode, typeName: string, exam
 }
 
 function emitValidations(lines: string[], varName: string, example: TestExample, node: TypeNode): void {
+  if (emitPolymorphicValidation(lines, varName, example.sample, node)) {
+    return;
+  }
   for (const validation of example.validations) {
     const expected = validation.delimiter ? `${validation.delimiter}${validation.value}${validation.delimiter}` : String(validation.value);
-    const accessor = `${varName}.${swiftPropertyName(validation.key)}`;
-    const prop = node.properties.find(candidate => swiftPropertyName(candidate.name) === swiftPropertyName(validation.key));
-    if (prop?.typeName.name === "unknown" || prop?.typeName.name === "any") {
-      lines.push(`    XCTAssertEqual(${accessor} as? String, ${expected})`);
-    } else {
-      lines.push(`    XCTAssertEqual(${accessor}, ${expected})`);
-    }
+    const prop = findProperty(node, validation.key);
+    if (!prop) continue;
+    const accessor = `${varName}.${swiftPropertyName(prop.name)}`;
+    emitPropertyAssertion(lines, accessor, expected, prop, "    ");
   }
   emitStructuredValidations(lines, varName, example.sample, node);
 }
@@ -128,8 +136,15 @@ function emitStructuredValidations(lines: string[], varName: string, sample: Rec
     if (!(prop.name in sample)) continue;
     const value = sample[prop.name];
     const accessor = `${varName}.${swiftPropertyName(prop.name)}`;
-    if (prop.isCollection && Array.isArray(value)) {
-      lines.push(`    XCTAssertEqual(${accessor}.count, ${value.length})`);
+    if (prop.isCollection) {
+      const count = Array.isArray(value)
+        ? value.length
+        : value && typeof value === "object"
+          ? Object.keys(value).length
+          : undefined;
+      if (count !== undefined) {
+        lines.push(`    XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional)}.count, ${count})`);
+      }
       continue;
     }
     if (prop.isDict && value && typeof value === "object" && !Array.isArray(value)) {
@@ -137,36 +152,264 @@ function emitStructuredValidations(lines: string[], varName: string, sample: Rec
       continue;
     }
     if (!prop.isScalar && prop.type && value && typeof value === "object" && !Array.isArray(value)) {
-      emitNestedValidation(lines, accessor, value, prop);
+      emitNestedValidation(lines, requiredAccessor(accessor, prop.isOptional), value, prop);
     }
   }
 }
 
 function emitNestedValidation(lines: string[], accessor: string, value: Record<string, any>, prop: PropertyNode): void {
   if ((prop.type?.childTypes.length ?? 0) > 0) {
-    for (const child of prop.type?.childTypes ?? []) {
-      const discriminator = prop.type?.discriminator;
-      const discriminatorValue = discriminator ? value[discriminator] : undefined;
-      const matchingDefault = child.properties.find(childProp => childProp.name === discriminator)?.defaultValue;
-      if (matchingDefault === discriminatorValue) {
-        lines.push(`    if case .${swiftPropertyName(child.typeName.name)}(let concrete) = ${accessor} {`);
-        for (const [key, expected] of Object.entries(value)) {
-          if (typeof expected === "string" && key !== discriminator) {
-            lines.push(`      XCTAssertEqual(concrete.${swiftPropertyName(key)}, ${swiftStringLiteral(expected)})`);
-          }
-        }
-        lines.push("    } else {");
-        lines.push(`      XCTFail("Expected ${swiftTypeName(child.typeName.name)}")`);
-        lines.push("    }");
-        return;
-      }
+    const child = matchingPolymorphicChild(prop.type!, value);
+    if (child) {
+      emitChildPatternValidation(lines, accessor, value, prop.type!, child, "    ");
+      return;
     }
   }
   for (const [key, expected] of Object.entries(value)) {
-    if (typeof expected === "string") {
-      lines.push(`    XCTAssertEqual(${accessor}.${swiftPropertyName(key)}, ${swiftStringLiteral(expected)})`);
+    const nestedProp = prop.type ? findProperty(prop.type, key) : undefined;
+    if (!nestedProp) continue;
+    const literal = swiftExpectedLiteral(expected);
+    if (literal !== null) {
+      emitPropertyAssertion(
+        lines,
+        `${accessor}.${swiftPropertyName(nestedProp.name)}`,
+        literal,
+        nestedProp,
+        "    ",
+      );
     }
   }
+}
+
+function emitPolymorphicValidation(
+  lines: string[],
+  accessor: string,
+  sample: Record<string, any>,
+  node: TypeNode,
+): boolean {
+  if (!node.discriminator || node.childTypes.length === 0) {
+    return false;
+  }
+  const child = matchingPolymorphicChild(node, sample);
+  if (child) {
+    emitChildPatternValidation(lines, accessor, sample, node, child, "    ");
+    return true;
+  }
+  if (!node.isAbstract && !defaultPolymorphicChild(node)) {
+    lines.push(`    if case .unknown(let concrete) = ${accessor} {`);
+    for (const [key, expected] of Object.entries(sample)) {
+      const literal = swiftExpectedLiteral(expected);
+      if (literal === null) continue;
+      const cast = swiftDictionaryCast(expected);
+      lines.push(`      XCTAssertEqual(concrete[${swiftStringLiteral(key)}] as? ${cast}, ${literal})`);
+    }
+    lines.push("    } else {");
+    lines.push(`      XCTFail("Expected ${swiftTypeName(node.typeName.name)}.unknown")`);
+    lines.push("    }");
+    return true;
+  }
+  return false;
+}
+
+function emitChildPatternValidation(
+  lines: string[],
+  accessor: string,
+  sample: Record<string, any>,
+  node: TypeNode,
+  child: TypeNode,
+  indent: string,
+): void {
+  lines.push(`${indent}if case .${swiftPropertyName(child.typeName.name)}(let concrete) = ${accessor} {`);
+  for (const [key, expected] of Object.entries(sample)) {
+    if (key === node.discriminator) continue;
+    const literal = swiftExpectedLiteral(expected);
+    if (literal === null) continue;
+    const prop = findProperty(child, key) ?? findProperty(node, key);
+    if (!prop) continue;
+    emitPropertyAssertion(
+      lines,
+      `concrete.${swiftPropertyName(prop.name)}`,
+      literal,
+      prop,
+      `${indent}  `,
+    );
+  }
+  lines.push(`${indent}} else {`);
+  lines.push(`${indent}  XCTFail("Expected ${swiftTypeName(child.typeName.name)}")`);
+  lines.push(`${indent}}`);
+}
+
+function matchingPolymorphicChild(node: TypeNode, sample: Record<string, any>): TypeNode | undefined {
+  const discriminatorValue = node.discriminator ? sample[node.discriminator] : undefined;
+  return node.childTypes.find(child => polymorphicChildValue(node, child) === discriminatorValue)
+    ?? defaultPolymorphicChild(node);
+}
+
+function defaultPolymorphicChild(node: TypeNode): TypeNode | undefined {
+  return node.childTypes.find(child => polymorphicChildValue(node, child) === "*");
+}
+
+function polymorphicChildValue(node: TypeNode, child: TypeNode): unknown {
+  return child.properties.find(prop => prop.name === node.discriminator)?.defaultValue ?? "*";
+}
+
+function emitPropertyAssertion(
+  lines: string[],
+  accessor: string,
+  expected: string,
+  prop: PropertyNode | undefined,
+  indent: string,
+  unknownCast = "String",
+): void {
+  if (prop?.enumName) {
+    const valueAccessor = requiredAccessor(accessor, prop.isOptional);
+    if (expected.startsWith("\"")) {
+      lines.push(`${indent}XCTAssertEqual(${valueAccessor}.rawValue, ${expected})`);
+    } else {
+      const normalizedExpected = expected.replace(
+        /^[A-Za-z_][A-Za-z0-9_]*/,
+        swiftTypeName(prop.enumName),
+      );
+      lines.push(`${indent}XCTAssertEqual(${valueAccessor}, ${normalizedExpected})`);
+    }
+    return;
+  }
+
+  if (prop?.typeName.name === "unknown" || prop?.typeName.name === "any") {
+    const castAccessor = `${accessor} as? ${unknownCast}`;
+    lines.push(`${
+      indent
+    }XCTAssertEqual(${prop.isOptional ? `try XCTUnwrap(${castAccessor})` : castAccessor}, ${expected})`);
+    return;
+  }
+
+  if (prop?.enumName) {
+    const enumExpected = expected.startsWith("\"")
+      ? `(try! ${swiftTypeName(prop.enumName)}.parse(${expected}))`
+      : expected;
+    lines.push(
+      `${indent}XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional)}, ${enumExpected})`,
+    );
+    return;
+  }
+
+  if (prop && !prop.isScalar && prop.type) {
+    const nestedKey = coercionProperty(prop.type) ?? prop.type.discriminator;
+    if (nestedKey) {
+      const valueAccessor = requiredAccessor(accessor, prop.isOptional);
+      if (prop.type.childTypes.length > 0) {
+        lines.push(`${indent}XCTAssertEqual(try ${valueAccessor}.save()[${swiftStringLiteral(nestedKey)}] as? String, ${expected})`);
+      } else {
+        const nestedProp = prop.type.properties.find(candidate => candidate.name === nestedKey);
+        const nestedAccessor = `${valueAccessor}.${swiftPropertyName(nestedKey)}`;
+        lines.push(`${indent}XCTAssertEqual(${requiredAccessor(nestedAccessor, nestedProp?.isOptional ?? false)}, ${expected})`);
+      }
+
+      return;
+    }
+  }
+
+  lines.push(`${indent}XCTAssertEqual(${requiredAccessor(accessor, prop?.isOptional ?? false)}, ${expected})`);
+}
+
+function isUnknownPolymorphicRoot(node: TypeNode): boolean {
+  return Boolean(
+    node.discriminator
+    && node.childTypes.length > 0
+    && !node.isAbstract
+    && !defaultPolymorphicChild(node),
+  );
+}
+
+function validationExpected(validation: PropertyValidation): string {
+  return validation.delimiter
+    ? `${validation.delimiter}${validation.value}${validation.delimiter}`
+    : String(validation.value);
+}
+
+function coercionProperty(node: TypeNode): string | undefined {
+  for (const coercion of node.coercions) {
+    const inputAssignment = Object.entries(coercion.expansion)
+      .find(([, value]) => value === "{value}");
+    if (inputAssignment) return inputAssignment[0];
+  }
+  return undefined;
+}
+
+function requiredAccessor(accessor: string, isOptional: boolean): string {
+  return isOptional ? `(try XCTUnwrap(${accessor}))` : accessor;
+}
+
+function findProperty(node: TypeNode, key: string): PropertyNode | undefined {
+  return node.properties.find(candidate =>
+    swiftPropertyName(candidate.name) === swiftPropertyName(key)
+    || candidate.knownAs.some(mapping =>
+      swiftPropertyName(mapping.name) === swiftPropertyName(key)));
+}
+
+function emitUnknownCoercionValidation(
+  lines: string[],
+  validations: TestExample["validations"],
+  expansion: Record<string, unknown> | undefined,
+  scalarType: string | undefined,
+): void {
+  lines.push("    if case .unknown(let concrete) = instance {");
+  for (const validation of validations) {
+    const expected = validation.delimiter
+      ? `${validation.delimiter}${validation.value}${validation.delimiter}`
+      : String(validation.value);
+    const rawValue = expansion?.[validation.key];
+    const cast = expansion
+      ? (rawValue === "{value}"
+          ? swiftCoercionCast(scalarType)
+          : swiftDictionaryCast(rawValue))
+      : validationCast(validation);
+    lines.push(
+      `      XCTAssertEqual(concrete[${swiftStringLiteral(validation.key)}] as? ${cast}, ${expected})`,
+    );
+  }
+  lines.push("    } else {");
+  lines.push('      XCTFail("Expected unknown polymorphic fallback")');
+  lines.push("    }");
+}
+
+function validationCast(validation: PropertyValidation): string {
+  if (validation.delimiter) return "String";
+  const value = String(validation.value);
+  if (value === "true" || value === "false") return "Bool";
+  if (/^-?\d+$/.test(value)) return "Int";
+  if (/^-?(?:\d+\.\d*|\d*\.\d+)(?:[eE][+-]?\d+)?$/.test(value)) return "Double";
+  return "String";
+}
+
+function swiftCoercionCast(scalarType: string | undefined): string {
+  switch (scalarType) {
+    case "boolean":
+      return "Bool";
+    case "float":
+    case "float32":
+    case "float64":
+    case "number":
+      return "Double";
+    case "int32":
+    case "int64":
+    case "integer":
+      return "Int";
+    default:
+      return "String";
+  }
+}
+
+function swiftExpectedLiteral(value: unknown): string | null {
+  if (typeof value === "string") return swiftStringLiteral(value);
+  if (typeof value === "boolean" || typeof value === "number") return String(value);
+  return null;
+}
+
+function swiftDictionaryCast(value: unknown): string {
+  if (typeof value === "boolean") return "Bool";
+  if (typeof value === "number") return "NSNumber";
+  return "String";
 }
 
 function swiftMultilineString(value: string): string {

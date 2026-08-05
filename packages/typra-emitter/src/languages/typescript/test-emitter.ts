@@ -70,17 +70,19 @@ export function emitTypeScriptTest(ctx: BaseTestContext & { importPath: string; 
   lines.push(`import { ${typeName} } from "${importPath}";`);
   lines.push("");
   lines.push(`describe("${typeName}", () => {`);
-  lines.push(`  describe("construction", () => {`);
-  lines.push(`    it("should create a new instance with defaults", () => {`);
-  lines.push(`      const instance = new ${typeName}();`);
-  lines.push(`      expect(instance).toBeDefined();`);
-  lines.push(`    });`);
-  lines.push("");
-  lines.push(`    it("should create a new instance with partial initialization", () => {`);
-  lines.push(`      const instance = new ${typeName}({});`);
-  lines.push(`      expect(instance).toBeDefined();`);
-  lines.push(`    });`);
-  lines.push(`  });`);
+  if (!node.isAbstract) {
+    lines.push(`  describe("construction", () => {`);
+    lines.push(`    it("should create a new instance with defaults", () => {`);
+    lines.push(`      const instance = new ${typeName}();`);
+    lines.push(`      expect(instance).toBeDefined();`);
+    lines.push(`    });`);
+    lines.push("");
+    lines.push(`    it("should create a new instance with partial initialization", () => {`);
+    lines.push(`      const instance = new ${typeName}({});`);
+    lines.push(`      expect(instance).toBeDefined();`);
+    lines.push(`    });`);
+    lines.push(`  });`);
+  }
 
   // JSON serialization
   if (examples.length > 0) {

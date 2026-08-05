@@ -88,6 +88,9 @@ describe("export surface scaffolding", () => {
       params: { checkpoint: "Checkpoint" },
       optional: false,
       sync: false,
+      runtimeCancellable: false,
+      atomic: false,
+      nonFatal: false,
     },
   ]);
   const baseTypes = [contentPart, checkpoint, hostToolRequest, eventSink, checkpointStore];
@@ -152,6 +155,9 @@ describe("export surface scaffolding", () => {
         params: { checkpoint: "Checkpoint" },
         optional: false,
         sync: false,
+        runtimeCancellable: false,
+        atomic: false,
+        nonFatal: false,
       },
     ]);
     const registry = TypeRegistry.fromTypeGraph([checkpoint, checkpointStoreWithSave]);
@@ -233,6 +239,9 @@ describe("export surface scaffolding", () => {
             params: { checkpoint: "Checkpoint" },
             optional: false,
             sync: false,
+            runtimeCancellable: false,
+            atomic: false,
+            nonFatal: false,
           },
         ],
       },
@@ -248,6 +257,9 @@ describe("export surface scaffolding", () => {
             params: { event: "unknown" },
             optional: false,
             sync: true,
+            runtimeCancellable: false,
+            atomic: false,
+            nonFatal: false,
           },
         ],
       },
@@ -320,7 +332,7 @@ describe("export surface scaffolding", () => {
         name: "save",
         returns: "void",
         description: "Save a checkpoint.",
-        params: { event: "unknown" },
+        params: { payload: "Record<unknown>", event: "unknown" },
         optional: false,
         sync: false,
       },
@@ -361,6 +373,7 @@ describe("export surface scaffolding", () => {
     const csharp = emitCSharpProtocolScaffolds([...protocols, csharpProbe], "Typra.Fixtures");
     assert.match(csharp ?? "", /internal sealed class CompileOnlyEventSink : IEventSink/);
     assert.match(csharp ?? "", /public void Emit\(object @event\)/);
+    assert.match(csharp ?? "", /internal sealed class CompileOnlyCSharpProbe[\s\S]*Dictionary<string, object\?> payload/);
     assert.match(csharp ?? "", /throw new NotSupportedException\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
     assert.match(csharp ?? "", /Task.FromException\(new NotSupportedException\("CSharpProbe\.save is a compile-only protocol scaffold\."\)\)/);
 

@@ -18,6 +18,8 @@
  */
 export function emitCSharpContext(namespace: string): string {
   return `// Copyright (c) Microsoft. All rights reserved.
+#nullable enable
+
 using System.Text.Json;
 using YamlDotNet.Serialization;
 
@@ -41,6 +43,17 @@ public class LoadContext
     /// Optional callback to transform the result after instantiation.
     /// </summary>
     public Func<object, object>? PostProcess { get; set; }
+
+    /// <summary>Current schema path used for load diagnostics.</summary>
+    public string Path { get; init; } = "";
+
+    /// <summary>Create a child context for a nested schema field.</summary>
+    public LoadContext At(string segment) => new()
+    {
+        PreProcess = PreProcess,
+        PostProcess = PostProcess,
+        Path = string.IsNullOrEmpty(Path) ? segment : $"{Path}.{segment}",
+    };
 
     /// <summary>
     /// Apply pre-processing to input data if a PreProcess callback is set.
@@ -174,6 +187,8 @@ public class SaveContext
  */
 export function emitCSharpUtils(namespace: string): string {
   return `// Copyright (c) Microsoft. All rights reserved.
+#nullable enable
+
 using System.Collections;
 using System.Reflection;
 using System.Text.Json;

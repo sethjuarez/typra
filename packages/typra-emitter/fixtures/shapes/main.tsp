@@ -1,6 +1,7 @@
 import "@typra/emitter";
 import "./model/events/session.tsp";
 import "./model/pipeline/harness.tsp";
+import "./model/pipeline/canonical-ports.tsp";
 
 namespace Typra.Fixtures;
 
@@ -25,11 +26,11 @@ model FixtureRoot {
   @doc("Nested object field")
   owner: FixtureOwner;
 
-  @sample(#{ content: #{ kind: "text", text: "hello from a polymorphic sample" } })
+  @sample(#{ content: #{ kind: "text", value: "hello from a polymorphic sample" } })
   @doc("Discriminated union field")
   content: FixtureContent;
 
-  @sample(#{ contentItems: #[#{ kind: "text", text: "hello from a polymorphic collection" }] })
+  @sample(#{ contentItems: #[#{ kind: "text", value: "hello from a polymorphic collection" }] })
   @doc("Array of discriminated union values")
   contentItems: FixtureContent[];
 
@@ -40,6 +41,9 @@ model FixtureRoot {
   @sample(#{ mode: "batch" })
   @doc("Open string union field")
   mode?: FixtureMode;
+
+  @doc("Ordered complex collection with non-unique names")
+  checkpoint?: FixtureCheckpoint;
 }
 
 model FixtureOwner {
@@ -50,16 +54,44 @@ model FixtureOwner {
   displayName?: string;
 }
 
+model FixtureUnknownRecords {
+  @sample(#{ requiredValues: #{ value: "required", nullable: null } })
+  requiredValues: Record<unknown>;
+
+  @sample(#{ optionalValues: #{ value: "optional", nullable: null } })
+  optionalValues?: Record<unknown>;
+}
+
+model FixtureToolRequest {
+  @sample(#{ id: "call-a" })
+  id: string;
+
+  @sample(#{ name: "echo" })
+  name: string;
+}
+
+model FixtureCheckpoint {
+  @sample(#{ pendingToolRequests: #[#{ id: "call-a", name: "echo" }, #{ id: "call-b", name: "echo" }] })
+  pendingToolRequests: FixtureToolRequest[];
+}
+
 @discriminator("kind")
 model FixtureContent {
-  kind: string;
+  kind: FixtureContentKind;
+}
+
+union FixtureContentKind {
+  text: "text";
+  image: "image";
+  file: "file";
+  audio: "audio";
 }
 
 model TextContent extends FixtureContent {
   kind: "text";
 
-  @sample(#{ text: "hello from text content" })
-  text: string;
+  @sample(#{ value: "hello from text content" })
+  value: string;
 }
 
 model ImageContent extends FixtureContent {
@@ -67,6 +99,46 @@ model ImageContent extends FixtureContent {
 
   @sample(#{ url: "https://example.test/image.png" })
   url: string;
+}
+
+model FileContent extends FixtureContent {
+  kind: "file";
+  value: string;
+}
+
+model AudioContent extends FixtureContent {
+  kind: "audio";
+  value: string;
+}
+
+@abstract
+@discriminator("kind")
+model FixtureAbstractContent {
+  kind: FixtureAbstractContentKind;
+}
+
+union FixtureAbstractContentKind {
+  text: "text";
+}
+
+model FixtureAbstractTextContent extends FixtureAbstractContent {
+  kind: "text";
+  text: string;
+}
+
+@doc("Locks default synthesis for polymorphic union fields, including the abstract closed union that declares no unknown case.")
+model FixturePolymorphicDefaults {
+  @sample(#{ requiredAbstractContent: #{ kind: "text", text: "closed union required field" } })
+  @doc("Required field of an abstract closed union; must default to a declared variant, never an undeclared unknown case")
+  requiredAbstractContent: FixtureAbstractContent;
+
+  @sample(#{ optionalAbstractContent: #{ kind: "text", text: "closed union optional field" } })
+  @doc("Optional field of the same abstract closed union")
+  optionalAbstractContent?: FixtureAbstractContent;
+
+  @sample(#{ requiredConnection: #{ kind: "custom", name: "defaults-connection" } })
+  @doc("Required field of an open union that does declare an unknown case")
+  requiredConnection: FixtureConnection;
 }
 
 @parseAlias("ready", #["complete"])
@@ -94,17 +166,120 @@ model FixtureReference {
   label?: string;
 }
 
+@discriminator("kind")
 model FixtureTool {
+  kind: string;
+
   @sample(#{ name: "search" })
   name: string;
 
+  description?: string;
+
+  bindings?: Record<FixtureBinding> | Named<FixtureBinding>[];
+
+}
+
+model FixtureBinding {
+  name?: string;
+  source: string;
+}
+
+@@coerce(FixtureBinding, string, #{ source: "{value}" }, "binding", "Load a binding from shorthand.", "input");
+
+model FixtureNamedPayload {
+  name?: string;
+  payload: unknown;
+}
+
+model FixtureNamedPayloadCollection {
+  items: Record<FixtureNamedPayload> | Named<FixtureNamedPayload>[];
+}
+
+model FixtureNamedProfile {
+  properties: Record<FixtureNamedPayload> | Named<FixtureNamedPayload>[];
+}
+
+model FixtureNamedInputs {
+  profile: FixtureNamedProfile;
+}
+
+model FixtureNamedRoot {
+  inputs: FixtureNamedInputs;
+}
+
+model FixtureBindingTool {
+  kind: "function";
+
+  name: string;
+
+  description?: string;
+
   @sample(#{ command: "search --query" })
   command: string;
+
+  bindings?: Record<FixtureBinding> | Named<FixtureBinding>[];
+}
+
+model FixtureFunctionTool extends FixtureTool {
+  kind: "function";
+
+  @sample(#{ command: "search --query" })
+  command: string;
+
+  @sample(#{ parameters: #[#{ name: "query", kind: "string", required: true }] })
+  parameters: Record<FixtureProperty> | Named<FixtureProperty>[];
+}
+
+model FixturePromptTool extends FixtureTool {
+  kind: "prompt";
+  prompt: string;
+}
+
+model FixtureMcpTool extends FixtureTool {
+  kind: "mcp";
+  server: string;
+}
+
+model FixtureHttpTool extends FixtureTool {
+  kind: "http";
+  endpoint: string;
+}
+
+model FixtureCustomTool extends FixtureTool {
+  kind: "*";
+  connection: FixtureConnection;
+  config?: Record<unknown>;
 }
 
 model FixtureToolbox {
-  @sample(#{ tools: #[#{ name: "search", command: "search --query" }] })
-  tools: FixtureTool[];
+  @sample(#{ tools: #[#{ kind: "function", name: "search", command: "search --query" }] })
+  tools: Record<FixtureTool> | Named<FixtureTool>[];
+
+  @sample(#{ bindingTools: #[#{ name: "binding-tool", kind: "function", command: "run", bindings: #[#{ name: "input", source: "customer.name" }] }] })
+  bindingTools: FixtureBindingTool[];
+
+  @sample(#{
+    inheritedMapBindingTool: #{
+      name: "map-binding-tool",
+      kind: "function",
+      command: "run",
+      bindings: #{ zebra: "customer.id", alpha: "customer.name" }
+    }
+  })
+  inheritedMapBindingTool: FixtureTool;
+
+  @sample(#{
+    inheritedListBindingTool: #{
+      name: "list-binding-tool",
+      kind: "function",
+      command: "run",
+      bindings: #[
+        #{ name: "alpha", source: "customer.name" },
+        #{ name: "zebra", source: "customer.id" }
+      ]
+    }
+  })
+  inheritedListBindingTool: FixtureTool;
 }
 
 model FixtureShortcut {
@@ -130,6 +305,17 @@ model FixtureStopOptions {
   stopSequences: string[];
 }
 
+model FixtureMultilineWhitespace {
+  @sample(#{ value: "first line with trailing space \nsecond line\n" })
+  @sample(#{ value: "first line with two spaces  \n\n  \nlast line with three spaces   \n" })
+  value: string;
+}
+
+model FixturePromptyWhitespace {
+  @sample(#{ value: "system:\nYou are helpful.\n\nKeep this space \nPreserve ordinary lines.\nKeep this too \nuser:{{question}}" })
+  value: string;
+}
+
 // Keyed property-bag regression (prompty's `inputs`/`outputs`/`parameters` shape): a field
 // typed as the union `Record<T> | Named<T>[]` whose CANONICAL wire form is a MAP keyed by
 // the element `name`. This exercises the `Record<T> | Named<T>[]` union-alias lowering
@@ -148,6 +334,8 @@ model FixtureBagItem {
   @sample(#{ note: "first" })
   note?: string;
 }
+
+@@coerce(FixtureBagItem, string, #{ note: "{value}" }, "item", "Load a named bag item from shorthand.", "first");
 
 // Two same-element keyed collections in ONE model — the exact prompty `inputs`/`outputs`
 // shape (both typed `Record<Property>|Named<Property>[]`). Because resolveModel visits each
@@ -179,6 +367,122 @@ model FixtureOmit {
 
   @doc("Optional scalar collection left unset → canonical wire omits it (a plain derive would emit []).")
   extras?: string[];
+
+  @doc("Optional model collection left unset → generated constructors and loaders preserve undefined.")
+  owners?: FixtureOwner[];
+}
+
+model FixtureOptionalDefaults {
+  mode?: string = "auto";
+}
+
+@error
+model FixtureInvokerError {
+  message: string;
+  component: string;
+  key: string;
+}
+
+// Prompty-like Swift generated-test regressions:
+// - optional collections must be unwrapped before assertions,
+// - polymorphic roots must be pattern-matched before payload access,
+// - compound coercion fields must validate their typed nested value.
+model ModelInfo {
+  @sample(#{ inputModalities: #["text"] })
+  inputModalities?: string[];
+
+  @sample(#{ outputModalities: #[] })
+  outputModalities?: string[] = #[];
+
+  @sample(#{ owner: #{ id: "owner-1", displayName: "Fixture Owner" } })
+  owner?: FixtureOwner;
+
+  owners?: FixtureOwner[];
+
+  defaultOwners?: FixtureOwner[] = #[];
+}
+
+@discriminator("kind")
+model FixtureConnection {
+  @sample(#{ kind: "custom", endpoint: "https://example.test" })
+  kind: string;
+
+  name?: string;
+}
+
+model FixtureCustomConnection extends FixtureConnection {
+  kind: "custom";
+  endpoint: string;
+}
+
+@@coerce(McpApprovalConfig, string, #{ kind: "{value}" }, "config", "Load an approval config from its kind.", "always");
+model McpApprovalConfig {
+  kind: string;
+}
+
+model McpApprovalMode {
+  @sample(#{ config: "always" })
+  config: McpApprovalConfig;
+}
+
+@@coerce(FixtureProperty, string, #{ kind: "string", default: "{value}" }, "property", "Load a string property from its default value.", "hello");
+@@coerce(FixtureProperty, boolean, #{ kind: "boolean", default: "{value}" }, "property", "Load a boolean property from its default value.", true);
+@@coerce(FixtureProperty, int32, #{ kind: "integer", default: "{value}" }, "property", "Load an integer property from its default value.", 7);
+@@coerce(FixtureProperty, float32, #{ kind: "number", default: "{value}" }, "property", "Load a number property from its default value.", 3.5);
+@discriminator("kind")
+model FixtureProperty {
+  kind: string;
+
+  name?: string;
+
+  description?: string;
+
+  required?: boolean;
+
+  nullable?: boolean;
+
+  default?: unknown;
+
+  example?: unknown;
+
+  enumValues?: unknown[];
+}
+
+model FixtureStringProperty extends FixtureProperty {
+  kind: "string";
+}
+
+model FixtureBooleanProperty extends FixtureProperty {
+  kind: "boolean";
+}
+
+model FixtureIntegerProperty extends FixtureProperty {
+  kind: "integer";
+}
+
+model FixtureNumberProperty extends FixtureProperty {
+  kind: "number";
+}
+
+model FixtureArrayProperty extends FixtureProperty {
+  kind: "array";
+
+  @sample(#{ items: #{ kind: "string", name: "item", required: true } })
+  items: FixtureProperty;
+}
+
+model FixtureObjectProperty extends FixtureProperty {
+  kind: "object";
+
+  @sample(#{ additionalProperties: #{ kind: "string", description: "Object value" } })
+  additionalProperties: FixtureProperty;
+}
+
+model FixtureUnionProperty extends FixtureProperty {
+  kind: "union";
+
+  @sample(#{ anyOf: #[#{ kind: "string", name: "value", nullable: true }, #{ kind: "boolean", enumValues: #[true, false] }] })
+  anyOf: FixtureProperty[];
 }
 
 @@knownAs(WireOptions.maxOutputTokens, "openai", "max_completion_tokens");

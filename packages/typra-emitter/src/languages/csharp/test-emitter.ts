@@ -22,7 +22,7 @@ export interface CSharpTestContext {
   examples: Array<{
     json: string[];
     yaml: string[];
-    validations: Array<{ key: string; value: any; startDelim: string; endDelim: string }>;
+    validations: Array<{ key: string; value: any; isExpression: boolean }>;
   }>;
   coercions: Array<{
     title: string;
@@ -47,6 +47,8 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
   const typeName = ctx.node.typeName.name;
   const L: string[] = [];
 
+  L.push('#nullable enable');
+  L.push('');
   L.push('using Xunit;');
   L.push('');
   L.push('#pragma warning disable IDE0130');
@@ -70,7 +72,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push(`        var instance = ${typeName}.FromYaml(yamlData);`);
     L.push('');
     L.push('        Assert.NotNull(instance);');
-    const yamlAssertions = emitExampleAssertions(sample.validations, 'instance');
+    const yamlAssertions = emitExampleAssertions(sample.validations, 'instance', "yaml");
     if (yamlAssertions) L.push(yamlAssertions);
     L.push('    }');
     L.push('');
@@ -83,7 +85,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push('');
     L.push(`        var instance = ${typeName}.FromJson(jsonData);`);
     L.push('        Assert.NotNull(instance);');
-    const jsonAssertions = emitExampleAssertions(sample.validations, 'instance');
+    const jsonAssertions = emitExampleAssertions(sample.validations, 'instance', "json");
     if (jsonAssertions) L.push(jsonAssertions);
     L.push('    }');
     L.push('');
@@ -103,7 +105,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push('');
     L.push(`        var reloaded = ${typeName}.FromJson(json);`);
     L.push('        Assert.NotNull(reloaded);');
-    const rtJsonAssertions = emitExampleAssertions(sample.validations, 'reloaded');
+    const rtJsonAssertions = emitExampleAssertions(sample.validations, 'reloaded', "json");
     if (rtJsonAssertions) L.push(rtJsonAssertions);
     L.push('    }');
     L.push('');
@@ -123,7 +125,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push('');
     L.push(`        var reloaded = ${typeName}.FromYaml(yaml);`);
     L.push('        Assert.NotNull(reloaded);');
-    const rtYamlAssertions = emitExampleAssertions(sample.validations, 'reloaded');
+    const rtYamlAssertions = emitExampleAssertions(sample.validations, 'reloaded', "yaml");
     if (rtYamlAssertions) L.push(rtYamlAssertions);
     L.push('    }');
     L.push('');
@@ -257,18 +259,33 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
 
 /** Render Assert.Equal / Assert.True / Assert.False lines for example validations. */
 function emitExampleAssertions(
-  validations: Array<{ key: string; value: any; startDelim: string; endDelim: string }>,
+  validations: Array<{ key: string; value: any; isExpression: boolean }>,
   varName: string,
+  format: "json" | "yaml",
 ): string {
   return validations.map(v => {
-    if (v.value === "True" || v.value === "False") {
-      return `        Assert.${v.value === "False" ? "False" : "True"}(${varName}.${v.key});`;
+    if (typeof v.value === "boolean") {
+      return `        Assert.${v.value ? "True" : "False"}(${varName}.${v.key});`;
     }
-    if (v.startDelim === '@"') {
-      return `        Assert.Equal(${v.startDelim}${v.value}${v.endDelim}.Replace("\\r\\n", "\\n"), ${varName}.${v.key});`;
+    if (v.isExpression) {
+      return `        Assert.Equal(${v.value}, ${varName}.${v.key});`;
     }
-    return `        Assert.Equal(${v.startDelim}${v.value}${v.endDelim}, ${varName}.${v.key});`;
+    const expected = typeof v.value === "string"
+      ? csharpStringLiteral(format === "yaml" ? normalizeYamlString(v.value) : v.value)
+      : `${v.value}${typeof v.value === "number" && !Number.isInteger(v.value) ? "f" : ""}`;
+    return `        Assert.Equal(${expected}, ${varName}.${v.key});`;
   }).join('\n');
+}
+
+function normalizeYamlString(value: string): string {
+  return value.replace(/[ \t]+(?=\r\n|\r|\n)/g, "");
+}
+
+function csharpStringLiteral(value: string): string {
+  return JSON.stringify(value)
+    .replace(/\u0085/g, "\\u0085")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
 
 /** Render assertion lines for coercion validations (with isFloat / bool / normal dispatch). */

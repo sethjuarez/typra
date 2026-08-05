@@ -11,6 +11,9 @@ export interface ExportSurfaceMethod {
   params: Record<string, string>;
   optional: boolean;
   sync: boolean;
+  runtimeCancellable: boolean;
+  atomic: boolean;
+  nonFatal: boolean;
 }
 
 export interface ExportSurfaceProtocol {
@@ -114,6 +117,9 @@ function buildTargetSurface(rootNamespace: string, target: EmitTarget, nodes: Ty
           params: sortRecord(method.params),
           optional: method.optional,
           sync: method.sync,
+          runtimeCancellable: method.runtimeCancellable ?? false,
+          atomic: method.atomic ?? false,
+          nonFatal: method.nonFatal ?? false,
         }))
         .sort((left, right) => left.name.localeCompare(right.name)),
     }));

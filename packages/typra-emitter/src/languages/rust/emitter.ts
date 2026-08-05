@@ -48,12 +48,14 @@ import {
   PropertyCategory,
   MethodStubDecl,
   WireDecl,
+  isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 
 export interface RustEmitterOptions {
   enumParsing?: "case-sensitive" | "case-insensitive";
+  cancellationTokenPath?: string;
 }
 
 /**
@@ -257,6 +259,9 @@ export function emitRustFile(
 ): string {
   const lines: string[] = [];
   const hasNonProtocol = file.types.some(t => !t.isProtocol);
+  const hasRuntimeCancellation = file.types.some(type =>
+    type.methods.some(method => method.runtimeCancellable),
+  );
   const group = file.group || "";
 
   // Header
@@ -269,6 +274,17 @@ export function emitRustFile(
     // From inside a group subfolder, we need to go up two levels: group → model root.
     const contextPath = group ? "super::super::context" : "super::context";
     lines.push(`use ${contextPath}::{LoadContext, SaveContext};`);
+  }
+  if (hasRuntimeCancellation) {
+    lines.push(rustCancellationTokenImport(
+      options.cancellationTokenPath ?? "crate::engine::CancellationToken",
+    ));
+  }
+
+  function rustCancellationTokenImport(path: string): string {
+    return path.endsWith("::CancellationToken")
+      ? `use ${path};`
+      : `use ${path} as CancellationToken;`;
   }
 
   // Imports — post-process for Rust specifics
@@ -426,11 +442,16 @@ function emitKindEnum(
           : []);
 
     lines.push(`    /// Wildcard / catch-all variant for unrecognized \`${dispatch.discriminatorField}\` values.`);
-    // Wildcard always has kind_name field
+    // Wildcard always has kind_name field. A self-reference fallback has no
+    // concrete child model, so retain its unmodeled payload for lossless saves.
     if (variantFields.length === 0) {
       lines.push(`    ${variantName} {`);
       lines.push(`        /// The raw \`${dispatch.discriminatorField}\` string for this unknown variant.`);
       lines.push(`        ${toSnakeCase(dispatch.discriminatorField)}_name: String,`);
+      if (isSelfRef) {
+        lines.push("        /// Unmodeled fields preserved for forward-compatible round trips.");
+        lines.push("        raw: serde_json::Map<String, serde_json::Value>,");
+      }
       lines.push(`    },`);
     } else {
       lines.push(`    ${variantName} {`);
@@ -444,6 +465,14 @@ function emitKindEnum(
       lines.push(`        ${toSnakeCase(dispatch.discriminatorField)}_name: String,`);
       lines.push(`    },`);
     }
+  } else if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+    lines.push(`    /// Lossless fallback for unrecognized \`${dispatch.discriminatorField}\` values.`);
+    lines.push("    Unknown {");
+    lines.push(`        /// The raw \`${dispatch.discriminatorField}\` string for this unknown variant.`);
+    lines.push(`        ${toSnakeCase(dispatch.discriminatorField)}_name: String,`);
+    lines.push("        /// Unmodeled fields preserved for forward-compatible round trips.");
+    lines.push("        raw: serde_json::Map<String, serde_json::Value>,");
+    lines.push("    },");
   }
 
   lines.push("}");
@@ -483,6 +512,9 @@ function emitEnumDefault(
     if (variantFields.length === 0) {
       lines.push(`        ${enumName}::${variantName} {`);
       lines.push(`            ${toSnakeCase(dispatch.discriminatorField)}_name: String::new(),`);
+      if (isSelfRef) {
+        lines.push("            raw: serde_json::Map::new(),");
+      }
       lines.push("        }");
     } else {
       lines.push(`        ${enumName}::${variantName} {`);
@@ -601,6 +633,7 @@ function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
   lines.push(`impl<'de> serde::Deserialize<'de> for ${name} {`);
   lines.push(`    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {`);
   lines.push(`        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;`);
+  lines.push("        Self::validate_input_at(&value, \"\").map_err(serde::de::Error::custom)?;");
   lines.push(`        Ok(Self::load_from_value(&value, &LoadContext::default()))`);
   lines.push(`    }`);
   lines.push(`}`);
@@ -629,6 +662,7 @@ function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
     lines.push(`impl<'de> serde::Deserialize<'de> for ${kindName} {`);
     lines.push(`    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {`);
     lines.push(`        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;`);
+    lines.push(`        ${name}::validate_input_at(&value, "").map_err(serde::de::Error::custom)?;`);
     lines.push(`        Ok(${name}::load_from_value(&value, &LoadContext::default()).${discField})`);
     lines.push(`    }`);
     lines.push(`}`);
@@ -655,13 +689,17 @@ function emitImpl(
   lines.push("");
 
   // from_json()
-  emitFromJson(name, lines);
+  emitFromJson(name, type, lines);
 
   // from_yaml()
-  emitFromYaml(name, lines);
+  emitFromYaml(name, type, lines);
 
   // load_from_value()
   emitLoadFromValue(name, type, childTypes, baseFieldNames, polymorphicTypeNames, lines);
+  emitInputValidation(type, childTypes, lines);
+  if (type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch)) {
+    emitClosedDiscriminatorValidation(type, lines);
+  }
 
   // kind_str() for polymorphic types
   if (type.polymorphicDispatch) {
@@ -719,22 +757,138 @@ function emitImpl(
 // from_json / from_yaml
 // ============================================================================
 
-function emitFromJson(name: string, lines: string[]): void {
+function emitFromJson(name: string, type: TypeDecl, lines: string[]): void {
   lines.push(`    /// Load ${name} from a JSON string.`);
   lines.push(`    pub fn from_json(json: &str, ctx: &LoadContext) -> Result<Self, serde_json::Error> {`);
   lines.push("        let value: serde_json::Value = serde_json::from_str(json)?;");
+  lines.push("        Self::validate_input_at(&value, \"\")");
+  lines.push("            .map_err(|message| <serde_json::Error as serde::de::Error>::custom(message))?;");
   lines.push("        Ok(Self::load_from_value(&value, ctx))");
   lines.push("    }");
   lines.push("");
 }
 
-function emitFromYaml(name: string, lines: string[]): void {
+function emitFromYaml(name: string, type: TypeDecl, lines: string[]): void {
   lines.push(`    /// Load ${name} from a YAML string.`);
   lines.push(`    pub fn from_yaml(yaml: &str, ctx: &LoadContext) -> Result<Self, serde_yaml::Error> {`);
   lines.push("        let value: serde_json::Value = serde_yaml::from_str(yaml)?;");
+  lines.push("        Self::validate_input_at(&value, \"\")");
+  lines.push("            .map_err(|message| <serde_yaml::Error as serde::de::Error>::custom(message))?;");
   lines.push("        Ok(Self::load_from_value(&value, ctx))");
   lines.push("    }");
   lines.push("");
+}
+
+function emitClosedDiscriminatorValidation(type: TypeDecl, lines: string[]): void {
+  const dispatch = type.polymorphicDispatch!;
+  const name = type.typeName.name;
+  const knownValues = dispatch.variants.map(variant => `"${variant.value}"`).join(" | ");
+  lines.push("    fn validate_discriminator(value: &serde_json::Value) -> Result<(), String> {");
+  lines.push(`        let discriminator = value.get("${dispatch.discriminatorField}")`);
+  lines.push("            .and_then(|candidate| candidate.as_str())");
+  lines.push(`            .ok_or_else(|| "Missing ${name} discriminator property: '${dispatch.discriminatorField}'".to_string())?;`);
+  lines.push("        match discriminator {");
+  lines.push(`            ${knownValues} => Ok(()),`);
+  lines.push(`            _ => Err(format!("Unknown ${name} discriminator field '${dispatch.discriminatorField}' value: {}", discriminator)),`);
+  lines.push("        }");
+  lines.push("    }");
+  lines.push("");
+}
+
+function emitInputValidation(type: TypeDecl, childTypes: TypeDecl[], lines: string[]): void {
+  const closed = type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch);
+  lines.push("    pub(crate) fn validate_input_at(value: &serde_json::Value, path: &str) -> Result<(), String> {");
+  if (closed) {
+    lines.push("        Self::validate_discriminator(value)?;");
+  }
+  emitFieldInputValidation(type, type.load.assignments, lines, "        ");
+  if (type.polymorphicDispatch) {
+    const dispatch = type.polymorphicDispatch;
+    lines.push(`        match value.get("${dispatch.discriminatorField}").and_then(|candidate| candidate.as_str()).unwrap_or("") {`);
+    for (const variant of dispatch.variants) {
+      const childType = childTypes.find(candidate => candidate.typeName.name === variant.typeName.name);
+      lines.push(`            "${variant.value}" => {`);
+      if (childType) emitFieldInputValidation(childType, childType.load.assignments, lines, "                ");
+      lines.push("            }");
+    }
+    if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
+      const defaultType = childTypes.find(candidate => candidate.typeName.name === dispatch.defaultVariant!.typeName.name);
+      lines.push("            _ => {");
+      lines.push(`                if value.get("${dispatch.discriminatorField}").and_then(|candidate| candidate.as_str()).is_some_and(|discriminator| !discriminator.is_empty()) {`);
+      if (defaultType) emitFieldInputValidation(defaultType, defaultType.load.assignments, lines, "                    ");
+      lines.push("                }");
+      lines.push("            }");
+    } else {
+      lines.push("            _ => {}");
+    }
+    lines.push("        }");
+  }
+  lines.push("        Ok(())");
+  lines.push("    }");
+  lines.push("");
+}
+
+function emitFieldInputValidation(
+  type: TypeDecl,
+  assignments: LoadAssignment[],
+  lines: string[],
+  indent: string,
+): void {
+  for (const assignment of assignments) {
+    const field = assignment.sourceName;
+    const category = assignment.category;
+    const helper = type.collectionHelpers.find(candidate => candidate.propertyName === field);
+    if (category.kind === "complex") {
+      const fieldDecl = type.fields.find(candidate => candidate.name === assignment.fieldName);
+      lines.push(`${indent}let child_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
+      if (fieldDecl && !fieldDecl.isOptional && !fieldDecl.hasExplicitDefault) {
+        lines.push(`${indent}let child = value.get("${field}").filter(|candidate| !candidate.is_null())`);
+        lines.push(`${indent}    .ok_or_else(|| format!("{}: missing required field", child_path))?;`);
+        lines.push(`${indent}${category.typeName}::validate_input_at(child, &child_path)?;`);
+      } else {
+        lines.push(`${indent}if let Some(child) = value.get("${field}") {`);
+        lines.push(`${indent}    ${category.typeName}::validate_input_at(child, &child_path)?;`);
+        lines.push(`${indent}}`);
+      }
+    } else if (category.kind === "collection_complex" && helper?.hasNameProperty) {
+      const shorthandField = helper.innerFields[0] || "value";
+      lines.push(`${indent}if let Some(collection) = value.get("${field}") {`);
+      lines.push(`${indent}    let collection_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
+      lines.push(`${indent}    match collection {`);
+      lines.push(`${indent}        serde_json::Value::Object(entries) => {`);
+      lines.push(`${indent}            for (name, entry) in entries {`);
+      lines.push(`${indent}                let entry_path = format!("{}.{}", collection_path, name);`);
+      lines.push(`${indent}                if entry.is_array() {`);
+      lines.push(`${indent}                    return Err(format!("{}: invalid named collection entry category array", entry_path));`);
+      lines.push(`${indent}                }`);
+      lines.push(`${indent}                let mut candidate = if entry.is_object() {`);
+      lines.push(`${indent}                    entry.clone()`);
+      lines.push(`${indent}                } else {`);
+      lines.push(`${indent}                    serde_json::json!({ "${shorthandField}": entry })`);
+      lines.push(`${indent}                };`);
+      lines.push(`${indent}                if let serde_json::Value::Object(ref mut map) = candidate {`);
+      lines.push(`${indent}                    map.insert("name".to_string(), serde_json::Value::String(name.clone()));`);
+      lines.push(`${indent}                }`);
+      lines.push(`${indent}                ${category.typeName}::validate_input_at(&candidate, &entry_path)?;`);
+      lines.push(`${indent}            }`);
+      lines.push(`${indent}        }`);
+      lines.push(`${indent}        serde_json::Value::Array(entries) => {`);
+      lines.push(`${indent}            for entry in entries {`);
+      lines.push(`${indent}                ${category.typeName}::validate_input_at(entry, &collection_path)?;`);
+      lines.push(`${indent}            }`);
+      lines.push(`${indent}        }`);
+      lines.push(`${indent}        _ => {}`);
+      lines.push(`${indent}    }`);
+      lines.push(`${indent}}`);
+    } else if (category.kind === "collection_complex") {
+      lines.push(`${indent}if let Some(entries) = value.get("${field}").and_then(|candidate| candidate.as_array()) {`);
+      lines.push(`${indent}    let collection_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
+      lines.push(`${indent}    for entry in entries {`);
+      lines.push(`${indent}        ${category.typeName}::validate_input_at(entry, &collection_path)?;`);
+      lines.push(`${indent}    }`);
+      lines.push(`${indent}}`);
+    }
+  }
 }
 
 // ============================================================================
@@ -754,6 +908,9 @@ function emitLoadFromValue(
   lines.push("    /// Calls `ctx.process_input` before field extraction.");
   lines.push("    pub fn load_from_value(value: &serde_json::Value, ctx: &LoadContext) -> Self {");
   lines.push("        let value = ctx.process_input(value.clone());");
+  lines.push("        if let Err(message) = Self::validate_input_at(&value, \"\") {");
+  lines.push('            panic!("{}", message);');
+  lines.push("        }");
 
   // Coercions
   for (const c of type.load.coercions) {
@@ -834,10 +991,15 @@ function emitCoercionBranch(
       }
       // Otherwise use the wildcard/custom variant
       if (dispatch.defaultVariant) {
-        const dvName = dispatch.defaultVariant.isSelfReference
+        const isSelfRef = dispatch.defaultVariant.isSelfReference;
+        const dvName = isSelfRef
           ? "Custom"
           : (dispatch.defaultVariant.typeName.name.replace(typeName, "") || "Custom");
-        return `${discSnake}: ${enumName}::${dvName} { ${discSnake}_name: "${a.literalValue}".to_string() }`;
+        const raw = isSelfRef ? ", raw: serde_json::Map::new()" : "";
+        return `${discSnake}: ${enumName}::${dvName} { ${discSnake}_name: "${a.literalValue}".to_string()${raw} }`;
+      }
+      if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+        return `${discSnake}: ${enumName}::Unknown { ${discSnake}_name: "${a.literalValue}".to_string(), raw: serde_json::Map::new() }`;
       }
       return `${discSnake}: ${enumName}::default()`;
     }
@@ -859,6 +1021,8 @@ function rustCoercionCheck(scalarType: string): { ifLet: string } | null {
       return { ifLet: "if let Some(s) = value.as_str()" };
     case "boolean":
       return { ifLet: "if let Some(value) = value.as_bool()" };
+    case "float32":
+      return { ifLet: "if let Some(value) = value.as_f64().map(|value| value as f32)" };
     case "float64":
     case "float":
     case "number":
@@ -931,7 +1095,18 @@ function emitPolymorphicLoad(
           ? defaultType.fields.filter(f => f.name !== dispatch.discriminatorField && !baseFieldNames.has(f.name))
           : []);
 
-    if (variantFields.length === 0) {
+    if (isSelfRef) {
+      lines.push(`            _ => ${enumName}::${variantName} {`);
+      lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
+      lines.push("                raw: {");
+      lines.push("                    let mut raw = value.as_object().cloned().unwrap_or_default();");
+      for (const fieldName of baseFieldNames) {
+        lines.push(`                    raw.remove("${fieldName}");`);
+      }
+      lines.push("                    raw");
+      lines.push("                },");
+      lines.push("            },");
+    } else if (variantFields.length === 0) {
       lines.push(`            _ => ${enumName}::${variantName} {`);
       lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
       lines.push(`            },`);
@@ -944,6 +1119,19 @@ function emitPolymorphicLoad(
       lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
       lines.push(`            },`);
     }
+  } else if (isClosedPolymorphicDispatch(dispatch)) {
+    lines.push(`            _ => panic!("Unknown ${name} discriminator field '${dispatch.discriminatorField}' value: {}", ${discSnake}_str),`);
+  } else if (dispatch.isAbstract) {
+    lines.push(`            _ => ${enumName}::Unknown {`);
+    lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
+    lines.push("                raw: {");
+    lines.push("                    let mut raw = value.as_object().cloned().unwrap_or_default();");
+    for (const fieldName of baseFieldNames) {
+      lines.push(`                    raw.remove("${fieldName}");`);
+    }
+    lines.push("                    raw");
+    lines.push("                },");
+    lines.push("            },");
   } else {
     lines.push(`            _ => ${enumName}::default(),`);
   }
@@ -998,6 +1186,8 @@ function emitKindStr(
       ? "Custom"
       : (dispatch.defaultVariant.typeName.name.replace(type.typeName.name, "") || "Custom");
     lines.push(`            ${enumName}::${variantName} { ${discSnake}_name, .. } => ${discSnake}_name.as_str(),`);
+  } else if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+    lines.push(`            ${enumName}::Unknown { ${discSnake}_name, .. } => ${discSnake}_name.as_str(),`);
   }
 
   lines.push("        }");
@@ -1078,7 +1268,8 @@ function emitVariantSave(
       const destructure = variantFields.map(f => rustFieldName(f.name)).join(", ");
       lines.push(`            ${enumName}::${variantName} { ${destructure},  .. } => {`);
       for (const field of variantFields) {
-        emitVariantSaveField(field, polymorphicTypeNames, type.typeName.name, lines);
+        const helper = childType?.collectionHelpers.find(candidate => candidate.propertyName === field.name);
+        emitVariantSaveField(field, polymorphicTypeNames, type.typeName.name, lines, helper);
       }
       lines.push("            }");
     }
@@ -1097,17 +1288,38 @@ function emitVariantSave(
           ? defaultType.fields.filter(f => f.name !== dispatch.discriminatorField && !baseFieldNames.has(f.name))
           : []);
 
-    if (variantFields.length === 0) {
+    if (isSelfRef) {
+      lines.push(`            ${enumName}::${variantName} { raw, .. } => {`);
+      lines.push("                for (key, value) in raw {");
+      const baseFieldPattern = Array.from(baseFieldNames)
+        .map(fieldName => `"${fieldName}"`)
+        .join(" | ");
+      lines.push(`                    if matches!(key.as_str(), ${baseFieldPattern}) { continue; }`);
+      lines.push("                    result.insert(key.clone(), value.clone());");
+      lines.push("                }");
+      lines.push("            }");
+    } else if (variantFields.length === 0) {
       lines.push(`            ${enumName}::${variantName} { ${discSnake}_name: _, .. } => {`);
       lines.push("            }");
     } else {
       const destructure = variantFields.map(f => rustFieldName(f.name)).join(", ");
       lines.push(`            ${enumName}::${variantName} { ${destructure}, ${discSnake}_name: _, .. } => {`);
       for (const field of variantFields) {
-        emitVariantSaveField(field, polymorphicTypeNames, type.typeName.name, lines);
+        const helper = defaultType?.collectionHelpers.find(candidate => candidate.propertyName === field.name);
+        emitVariantSaveField(field, polymorphicTypeNames, type.typeName.name, lines, helper);
       }
       lines.push("            }");
     }
+  } else if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+    lines.push(`            ${enumName}::Unknown { raw, .. } => {`);
+    lines.push("                for (key, value) in raw {");
+    const baseFieldPattern = Array.from(baseFieldNames)
+      .map(fieldName => `"${fieldName}"`)
+      .join(" | ");
+    lines.push(`                    if matches!(key.as_str(), ${baseFieldPattern}) { continue; }`);
+    lines.push("                    result.insert(key.clone(), value.clone());");
+    lines.push("                }");
+    lines.push("            }");
   }
 
   lines.push("        }");
@@ -1223,9 +1435,9 @@ function emitCollectionLoadHelper(
     const shorthandField = helper.innerFields.length > 0 ? helper.innerFields[0] : "value";
     lines.push("            serde_json::Value::Object(obj) => {");
     lines.push("                obj.iter()");
-    lines.push("                    .filter_map(|(name, value)| {");
+    lines.push("                    .map(|(name, value)| {");
     lines.push("                        if value.is_array() {");
-    lines.push("                            return None;");
+    lines.push(`                            panic!("${helper.propertyName}.{}: invalid named collection entry category array", name);`);
     lines.push("                        }");
     lines.push("                        let mut v = if value.is_object() {");
     lines.push("                            value.clone()");
@@ -1235,7 +1447,7 @@ function emitCollectionLoadHelper(
     lines.push('                        if let serde_json::Value::Object(ref mut m) = v {');
     lines.push('                            m.entry("name".to_string()).or_insert_with(|| serde_json::Value::String(name.clone()));');
     lines.push("                        }");
-    lines.push(`                        Some(${elemType}::load_from_value(&v, ctx))`);
+    lines.push(`                        ${elemType}::load_from_value(&v, ctx)`);
     lines.push("                    })");
     lines.push("                    .collect()");
     lines.push("            }");
@@ -1262,19 +1474,34 @@ function emitCollectionSaveHelper(
 
   if (helper.hasNameProperty) {
     lines.push("");
+    lines.push("        let mut serialized = items.iter().map(|item| item.to_value(ctx)).collect::<Vec<_>>();");
+    lines.push("        for item_data in &mut serialized {");
+    lines.push('            if let serde_json::Value::Object(map) = item_data {');
+    lines.push('                if matches!(map.get("name"), Some(serde_json::Value::String(name)) if name.is_empty()) { map.remove("name"); }');
+    lines.push("            }");
+    lines.push("        }");
+    lines.push("");
     lines.push('        if ctx.collection_format == "array" {');
-    lines.push("            return serde_json::Value::Array(items.iter().map(|item| item.to_value(ctx)).collect::<Vec<_>>());");
+    lines.push("            return serde_json::Value::Array(serialized);");
+    lines.push("        }");
+    lines.push("        let mut names = std::collections::HashSet::new();");
+    lines.push("        for item_data in &serialized {");
+    lines.push('            let Some(name) = item_data.get("name").and_then(|value| value.as_str()) else {');
+    lines.push("                return serde_json::Value::Array(serialized);");
+    lines.push("            };");
+    lines.push("            if name.is_empty() || !names.insert(name.to_string()) {");
+    lines.push("                return serde_json::Value::Array(serialized);");
+    lines.push("            }");
     lines.push("        }");
     lines.push("        // Object format: use name as key");
     lines.push("        let mut result = serde_json::Map::new();");
-    lines.push("        for item in items {");
-    lines.push("            let mut item_data = match item.to_value(ctx) {");
+    lines.push("        for item_data in serialized {");
+    lines.push("            let mut item_data = match item_data {");
     lines.push('                serde_json::Value::Object(m) => m,');
     lines.push('                other => { let mut m = serde_json::Map::new(); m.insert("value".to_string(), other); m },');
     lines.push("            };");
-    lines.push('            if let Some(serde_json::Value::String(name)) = item_data.remove("name") {');
-    lines.push("                result.insert(name, serde_json::Value::Object(item_data));");
-    lines.push("            }");
+    lines.push('            let serde_json::Value::String(name) = item_data.remove("name").expect("validated named collection item") else { unreachable!() };');
+    lines.push("            result.insert(name, serde_json::Value::Object(item_data));");
     lines.push("        }");
     lines.push("        serde_json::Value::Object(result)");
   } else {
@@ -1343,8 +1570,10 @@ function emitMethodTrait(type: TypeDecl, lines: string[]): void {
     }
     const params = Object.entries(method.params)
       .map(([pName, pType]) => `${toSnakeCase(pName)}: &${protocolRustType(pType)}`)
-      .join(", ");
-    const signatureParams = params ? `, ${params}` : "";
+    if (method.runtimeCancellable) {
+      params.push("cancellation: &CancellationToken");
+    }
+    const signatureParams = params.length > 0 ? `, ${params.join(", ")}` : "";
     lines.push(`    fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> ${methodReturnType(method)};`);
   }
   lines.push("}");
@@ -1396,28 +1625,31 @@ function emitProtocolTrait(type: TypeDecl, lines: string[]): void {
     }
     const params = Object.entries(method.params)
       .map(([pName, pType]) => `${toSnakeCase(pName)}: &${protocolRustType(pType)}`)
-      .join(", ");
+    if (method.runtimeCancellable) {
+      params.push("cancellation: &CancellationToken");
+    }
+    const signatureParams = params.length > 0 ? `, ${params.join(", ")}` : "";
     const ret = protocolRustType(method.returns);
 
     if (method.sync) {
       // Synchronous method
       if (method.optional) {
         // Return type already includes nullability from ? suffix — don't double-wrap
-        lines.push(`    fn ${toSnakeCase(method.name)}(&self, ${params}) -> ${ret} {`);
+        lines.push(`    fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> ${ret} {`);
         lines.push(ret === "()" ? "        ()" : "        None");
         lines.push("    }");
       } else {
-        lines.push(`    fn ${toSnakeCase(method.name)}(&self, ${params}) -> ${ret};`);
+        lines.push(`    fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> ${ret};`);
       }
     } else {
       // Async method
       if (method.optional) {
         // Default implementation returns an error — providers override with real streaming
-        lines.push(`    async fn ${toSnakeCase(method.name)}(&self, ${params}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>> {`);
+        lines.push(`    async fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>> {`);
         lines.push(`        Err("not supported".into())`);
         lines.push("    }");
       } else {
-        lines.push(`    async fn ${toSnakeCase(method.name)}(&self, ${params}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>>;`);
+        lines.push(`    async fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>>;`);
       }
     }
   }
@@ -1456,16 +1688,17 @@ function fieldType(field: FieldDecl, polymorphicTypeNames: Set<string>): string 
     }
     case "collection_scalar": {
       const elemType = RUST_TYPE_MAP[cat.scalarType] || cat.scalarType;
+      const isOptional = field.isOptional && !field.hasExplicitDefault;
       if (isValueType(cat.scalarType)) {
-        return field.isOptional ? "Option<Vec<serde_json::Value>>" : "Vec<serde_json::Value>";
+        return isOptional ? "Option<Vec<serde_json::Value>>" : "Vec<serde_json::Value>";
       }
-      return field.isOptional ? `Option<Vec<${elemType}>>` : `Vec<${elemType}>`;
+      return isOptional ? `Option<Vec<${elemType}>>` : `Vec<${elemType}>`;
     }
     case "collection_complex": {
-      if (cat.typeName === "unknown") {
-        return "Vec<serde_json::Value>";
-      }
-      return `Vec<${cat.typeName}>`;
+      const elemType = cat.typeName === "unknown" ? "serde_json::Value" : cat.typeName;
+      return field.isOptional && !field.hasExplicitDefault
+        ? `Option<Vec<${elemType}>>`
+        : `Vec<${elemType}>`;
     }
     case "dict": {
       return "serde_json::Value";
@@ -1508,7 +1741,7 @@ function fieldDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): stri
     }
     case "collection_scalar":
     case "collection_complex":
-      return field.isOptional ? "None" : "Vec::new()";
+      return field.isOptional && !field.hasExplicitDefault ? "None" : "Vec::new()";
     case "dict":
       return "serde_json::Value::Null";
   }
@@ -1545,10 +1778,19 @@ function loadExpr(a: LoadAssignment, polymorphicTypeNames: Set<string>): string 
       }
       return `value.get("${key}").filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx)).unwrap_or_default()`;
     }
-    case "collection_scalar":
-      return collectionScalarLoadExpr(key, cat.scalarType, a.isOptional);
-    case "collection_complex":
-      return `value.get("${key}").map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx)).unwrap_or_default()`;
+    case "collection_scalar": {
+      return collectionScalarLoadExpr(
+        key,
+        cat.scalarType,
+        a.isOptional && !a.hasExplicitDefault,
+      );
+    }
+    case "collection_complex": {
+      const loaded = `value.get("${key}").map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx))`;
+      return a.isOptional && !a.hasExplicitDefault
+        ? loaded
+        : `${loaded}.unwrap_or_default()`;
+    }
     case "dict":
       return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
   }
@@ -1653,11 +1895,20 @@ function variantLoadExpr(
       }
       return `value.get("${key}").filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx)).unwrap_or_default()`;
     }
-    case "collection_scalar":
-      return collectionScalarLoadExpr(key, cat.scalarType, field.isOptional);
-    case "collection_complex":
+    case "collection_scalar": {
+      return collectionScalarLoadExpr(
+        key,
+        cat.scalarType,
+        field.isOptional && !field.hasExplicitDefault,
+      );
+    }
+    case "collection_complex": {
       // Collection in a variant — use the parent type's helper
-      return `value.get("${key}").map(|v| Self::load_${toSnakeCase(field.name)}(v, ctx)).unwrap_or_default()`;
+      const loaded = `value.get("${key}").map(|v| Self::load_${toSnakeCase(field.name)}(v, ctx))`;
+      return field.isOptional && !field.hasExplicitDefault
+        ? loaded
+        : `${loaded}.unwrap_or_default()`;
+    }
     case "dict":
       return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
   }
@@ -1681,7 +1932,7 @@ function emitSaveField(
   // Named enum — serialize via .to_string()
   if (a.enumName) {
     if (a.isOptional) {
-      lines.push(`${indent}if let Some(ref val) = ${fieldRef} {`);
+      lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.to_string()));`);
       lines.push(`${indent}}`);
     } else {
@@ -1703,7 +1954,7 @@ function emitSaveField(
         return;
       }
       if (a.isOptional) {
-        lines.push(`${indent}if let Some(ref val) = ${fieldRef} {`);
+        lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    let nested = val.to_value(ctx);`);
         lines.push(`${indent}    if !nested.is_null() {`);
         lines.push(`${indent}        result.insert("${key}".to_string(), nested);`);
@@ -1720,10 +1971,13 @@ function emitSaveField(
       return;
     }
     case "collection_scalar": {
-      if (a.isOptional) {
-        lines.push(`${indent}if let Some(ref items) = ${fieldRef} {`);
+      if (a.isOptional && !a.hasExplicitDefault) {
+        lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
+      } else if (a.hasExplicitDefault) {
+        const borrowed = prefix ? `&${fieldRef}` : fieldRef;
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::to_value(${borrowed}).unwrap_or(serde_json::Value::Null));`);
       } else {
         lines.push(`${indent}if !${fieldRef}.is_empty() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(&${fieldRef}).unwrap_or(serde_json::Value::Null));`);
@@ -1732,9 +1986,18 @@ function emitSaveField(
       return;
     }
     case "collection_complex": {
-      lines.push(`${indent}if !${fieldRef}.is_empty() {`);
-      lines.push(`${indent}    result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(&${fieldRef}, ctx));`);
-      lines.push(`${indent}}`);
+      if (a.isOptional && !a.hasExplicitDefault) {
+        lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(items, ctx));`);
+        lines.push(`${indent}}`);
+      } else if (a.hasExplicitDefault) {
+        const borrowed = prefix ? `&${fieldRef}` : fieldRef;
+        lines.push(`${indent}result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(${borrowed}, ctx));`);
+      } else {
+        lines.push(`${indent}if !${fieldRef}.is_empty() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(&${fieldRef}, ctx));`);
+        lines.push(`${indent}}`);
+      }
       return;
     }
     case "dict": {
@@ -1757,7 +2020,7 @@ function emitScalarSave(
   if (isValueType(scalarType)) {
     if (scalarType !== "dictionary" && isOptional) {
       // Optional value types (any, object, unknown) are Option<Value>
-      lines.push(`${indent}if let Some(ref val) = ${fieldRef} {`);
+      lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), val.clone());`);
       lines.push(`${indent}}`);
     } else {
@@ -1772,7 +2035,7 @@ function emitScalarSave(
   switch (scalarType) {
     case "string":
       if (isOptional) {
-        lines.push(`${indent}if let Some(ref val) = ${fieldRef} {`);
+        lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.clone()));`);
         lines.push(`${indent}}`);
       } else {
@@ -1783,8 +2046,8 @@ function emitScalarSave(
       return;
     case "boolean":
       if (isOptional) {
-        lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Bool(val));`);
+        lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Bool(*val));`);
         lines.push(`${indent}}`);
       } else {
         // Always write booleans
@@ -1795,8 +2058,8 @@ function emitScalarSave(
     case "int64":
     case "integer":
       if (isOptional) {
-        lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(val)));`);
+        lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(*val)));`);
         lines.push(`${indent}}`);
       } else {
         lines.push(`${indent}if ${fieldRef} != 0 {`);
@@ -1810,8 +2073,8 @@ function emitScalarSave(
     case "number":
     case "numeric":
       if (isOptional) {
-        lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Number::from_f64(val as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`);
+        lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Number::from_f64(*val as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
       } else {
         lines.push(`${indent}if ${fieldRef} != 0.0 {`);
@@ -1830,6 +2093,7 @@ function emitVariantSaveField(
   polymorphicTypeNames: Set<string>,
   parentTypeName: string,
   lines: string[],
+  collectionHelper?: CollectionHelperDecl,
 ): void {
   const key = field.name;
   const fieldRef = rustFieldName(field.name);
@@ -1839,7 +2103,7 @@ function emitVariantSaveField(
   // Named enum — serialize via .to_string()
   if (field.enumName && field.allowedValues.length > 0) {
     if (field.isOptional) {
-      lines.push(`${indent}if let Some(ref val) = ${fieldRef} {`);
+      lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.to_string()));`);
       lines.push(`${indent}}`);
     } else {
@@ -1880,10 +2144,12 @@ function emitVariantSaveField(
       return;
     }
     case "collection_scalar": {
-      if (field.isOptional) {
-        lines.push(`${indent}if let Some(items) = ${fieldRef} {`);
+      if (field.isOptional && !field.hasExplicitDefault) {
+        lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
+      } else if (field.hasExplicitDefault) {
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::to_value(${fieldRef}).unwrap_or(serde_json::Value::Null));`);
       } else {
         lines.push(`${indent}if !${fieldRef}.is_empty() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(${fieldRef}).unwrap_or(serde_json::Value::Null));`);
@@ -1892,9 +2158,32 @@ function emitVariantSaveField(
       return;
     }
     case "collection_complex": {
-      lines.push(`${indent}if !${fieldRef}.is_empty() {`);
-      lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`);
-      lines.push(`${indent}}`);
+      if (collectionHelper?.hasNameProperty) {
+        const saveHelper = `Self::save_${toSnakeCase(field.name)}`;
+        if (field.isOptional && !field.hasExplicitDefault) {
+          lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
+          lines.push(`${indent}    result.insert("${key}".to_string(), ${saveHelper}(items, ctx));`);
+          lines.push(`${indent}}`);
+        } else if (field.hasExplicitDefault) {
+          lines.push(`${indent}result.insert("${key}".to_string(), ${saveHelper}(${fieldRef}, ctx));`);
+        } else {
+          lines.push(`${indent}if !${fieldRef}.is_empty() {`);
+          lines.push(`${indent}    result.insert("${key}".to_string(), ${saveHelper}(${fieldRef}, ctx));`);
+          lines.push(`${indent}}`);
+        }
+        return;
+      }
+      if (field.isOptional && !field.hasExplicitDefault) {
+        lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(items.iter().map(|item| item.to_value(ctx)).collect()));`);
+        lines.push(`${indent}}`);
+      } else if (field.hasExplicitDefault) {
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`);
+      } else {
+        lines.push(`${indent}if !${fieldRef}.is_empty() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`);
+        lines.push(`${indent}}`);
+      }
       return;
     }
     case "dict": {

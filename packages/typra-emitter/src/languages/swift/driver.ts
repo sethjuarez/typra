@@ -14,24 +14,9 @@ import { SwiftExprVisitor } from "./visitor.js";
 import { emitSwiftConformanceTest, emitSwiftTests } from "./test-emitter.js";
 import { emitSwiftPackage, emitSwiftProtocolScaffolds, emitSwiftRuntime, swiftModuleName } from "./scaffolding.js";
 import { swiftFileName } from "./identifiers.js";
+import { SWIFT_TYPE_MAP } from "./types.js";
 
-export const swiftTypeMapper: Record<string, string> = {
-  "string": "String",
-  "number": "Double",
-  "array": "[Any]",
-  "object": "[String: Any]",
-  "boolean": "Bool",
-  "int64": "Int64",
-  "int32": "Int32",
-  "float64": "Double",
-  "float32": "Float",
-  "integer": "Int",
-  "float": "Double",
-  "numeric": "Double",
-  "any": "Any",
-  "dictionary": "[String: Any]",
-  "unknown": "Any",
-};
+export const swiftTypeMapper: Record<string, string> = SWIFT_TYPE_MAP;
 
 export const generateSwift = async (
   context: EmitContext<TypraEmitterOptions>,
@@ -56,15 +41,22 @@ export const generateSwift = async (
   const sourceRoot = `${outputDir}/Sources/${moduleName}`;
   const testRoot = emitTarget["test-dir"];
   const packageTestPath = testRoot ? toSwiftPackagePath(relative(outputDir, testRoot)) : undefined;
-
+  const rootNodes = nodes.filter(n => !n.base);
+  const fileDecls = new Map(
+    rootNodes.map(n => [
+      `${n.typeName.namespace}.${n.typeName.name}`,
+      lowerFile(n, registry, polymorphicTypeNames),
+    ]),
+  );
+  const declarationUniverse = Array.from(fileDecls.values()).flatMap(file => file.types);
   await emitSwiftGeneratedFile(context, "Package.swift", emitSwiftPackage(moduleName, packageTestPath), outputDir, outputDir, { marker: false });
   await emitSwiftGeneratedFile(context, "TypraRuntime.swift", emitSwiftRuntime(moduleName), sourceRoot, outputDir);
 
   for (const n of nodes) {
     if (!n.base) {
       const group = n.group || "";
-      const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
-      const content = emitSwiftFile(fileDecl, visitor, polymorphicTypeNames);
+      const fileDecl = fileDecls.get(`${n.typeName.namespace}.${n.typeName.name}`)!;
+      const content = emitSwiftFile(fileDecl, visitor, polymorphicTypeNames, declarationUniverse);
       const outDir = group ? `${sourceRoot}/${group}` : sourceRoot;
       await emitSwiftGeneratedFile(context, swiftFileName(n.typeName.name), content, outDir, outputDir);
     }

@@ -17,6 +17,7 @@ import {
   TypeNode,
   PropertyNode,
 } from "../../ir/ast.js";
+import { buildGoFieldNames, goFieldName } from "./identifiers.js";
 
 // ============================================================================
 // Helpers
@@ -48,11 +49,6 @@ function emitValidation(lines: string[], varName: string, v: PropertyValidation)
     lines.push(`t.Errorf(\`Expected ${v.key} to be ${display}, got %v\`, ${varName}.${v.key})`);
     lines.push(`}`);
   }
-}
-
-function goFieldName(name: string): string {
-  const pascal = name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
-  return pascal.charAt(0).toUpperCase() + pascal.slice(1);
 }
 
 function goStringLiteral(value: string): string {
@@ -87,9 +83,32 @@ function emitExampleValidations(
   sample: TestExample,
   node: TypeNode,
   pkg: string,
+  goFieldNames?: ReadonlyMap<string, string>,
 ): void {
-  emitConcreteExampleValidations(lines, varName, sample.validations);
-  emitStructuredValidations(lines, varName, sample.sample, node, pkg);
+  const fieldNames = goFieldNames ?? buildGoFieldNames(node.properties.map(prop => prop.name));
+  const validationKeys = Object.keys(sample.sample).filter(key => {
+    const prop = node.properties.find(candidate => candidate.name === key);
+    return typeof sample.sample[key] !== "object"
+      && (prop?.isScalar || prop?.enumName);
+  });
+  emitConcreteExampleValidations(
+    lines,
+    varName,
+    sample.validations.map((validation, index) => ({
+      ...validation,
+      key: fieldNames.get(validation.sourceKey ?? validationKeys[index]) ?? validation.key,
+    })),
+  );
+  emitStructuredValidations(
+    lines,
+    varName,
+    sample.sample,
+    node,
+    pkg,
+    false,
+    reflectiveHelperName(node.typeName.name),
+    fieldNames,
+  );
 }
 
 function emitStructuredValidations(
@@ -100,11 +119,13 @@ function emitStructuredValidations(
   pkg: string,
   includeScalars = false,
   reflectiveHelper = reflectiveHelperName(node.typeName.name),
+  goFieldNames?: ReadonlyMap<string, string>,
 ): void {
+  const fieldNames = goFieldNames ?? buildGoFieldNames(node.properties.map(prop => prop.name));
   for (const prop of node.properties) {
     if (!(prop.name in sample)) continue;
     const value = sample[prop.name];
-    const fieldName = goFieldName(prop.name);
+    const fieldName = fieldNames.get(prop.name) ?? goFieldName(prop.name);
     const expr = `${varName}.${fieldName}`;
 
     if (includeScalars && prop.isScalar) {
@@ -149,7 +170,9 @@ function emitShorthandObjectValidation(
   if (!shorthandField) return;
 
   const targetProp = node.properties.find(candidate => candidate.name === shorthandField);
-  emitScalarSampleValidation(lines, `${expr}.${goFieldName(shorthandField)}`, `${fieldName}.${goFieldName(shorthandField)}`, expected, targetProp?.isOptional ?? false);
+  const targetField = buildGoFieldNames(node.properties.map(prop => prop.name)).get(shorthandField)
+    ?? goFieldName(shorthandField);
+  emitScalarSampleValidation(lines, `${expr}.${targetField}`, `${fieldName}.${targetField}`, expected, targetProp?.isOptional ?? false);
 }
 
 function emitCollectionValidation(
@@ -277,10 +300,11 @@ function emitNestedObjectValidation(
   value: Record<string, any>,
   node: TypeNode,
 ): void {
+  const fieldNames = buildGoFieldNames(node.properties.map(prop => prop.name));
   for (const prop of node.properties) {
     if (!(prop.name in value)) continue;
     const expected = value[prop.name];
-    const nestedField = goFieldName(prop.name);
+    const nestedField = fieldNames.get(prop.name) ?? goFieldName(prop.name);
     const nestedExpr = `${expr}.${nestedField}`;
 
     if (typeof expected === "string") {
@@ -288,7 +312,9 @@ function emitNestedObjectValidation(
         const shorthandField = findStringCoercionField(prop.type);
         if (shorthandField) {
           const targetProp = prop.type.properties.find(candidate => candidate.name === shorthandField);
-          emitScalarSampleValidation(lines, `${nestedExpr}.${goFieldName(shorthandField)}`, `${fieldName}.${nestedField}.${goFieldName(shorthandField)}`, expected, targetProp?.isOptional ?? false);
+          const targetField = buildGoFieldNames(prop.type.properties.map(candidate => candidate.name)).get(shorthandField)
+            ?? goFieldName(shorthandField);
+          emitScalarSampleValidation(lines, `${nestedExpr}.${targetField}`, `${fieldName}.${nestedField}.${targetField}`, expected, targetProp?.isOptional ?? false);
         }
         continue;
       }
@@ -420,7 +446,12 @@ function emitReflectiveFieldHelpers(lines: string[], helperName: string): void {
  * @param ctx - test context built by `buildBaseTestContext()`
  * @returns Complete Go test source file as a string
  */
-export function emitGoTest(ctx: BaseTestContext & { importPath: string }): string {
+export function emitGoTest(
+  ctx: BaseTestContext & {
+    importPath: string;
+    fieldNames?: ReadonlyMap<string, string>;
+  },
+): string {
   const lines: string[] = [];
   const typeName = ctx.node.typeName.name;
   const pkg = ctx.package ?? "";
@@ -457,19 +488,19 @@ export function emitGoTest(ctx: BaseTestContext & { importPath: string }): strin
     const suffix = isFirst ? "" : String(i);
 
     lines.push(""); // {% for %}\n — loop body starts with \n
-    emitLoadJSONTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract);
+    emitLoadJSONTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract, ctx.fieldNames);
     lines.push("");
-    emitLoadYAMLTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract);
+    emitLoadYAMLTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract, ctx.fieldNames);
     lines.push("");
-    emitFromJSONTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract);
+    emitFromJSONTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract, ctx.fieldNames);
     lines.push("");
-    emitFromYAMLTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract);
+    emitFromYAMLTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract, ctx.fieldNames);
     lines.push("");
-    emitRoundtripTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract);
+    emitRoundtripTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract, ctx.fieldNames);
     lines.push("");
-    emitToJSONTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract);
+    emitToJSONTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract, ctx.fieldNames);
     lines.push("");
-    emitToYAMLTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract);
+    emitToYAMLTest(lines, typeName, pkg, suffix, sample, ctx.node, isAbstract, ctx.fieldNames);
     lines.push(""); // blank line 233
   }
   lines.push(""); // {% endfor %}\n (line 234)
@@ -492,7 +523,7 @@ export function emitGoTest(ctx: BaseTestContext & { importPath: string }): strin
       const suffix = isFirst ? "" : String(i + 1);
 
       lines.push(""); // {% for %}\n — loop body starts with \n
-      emitCoercionTest(lines, typeName, pkg, suffix, alt, isAbstract);
+      emitCoercionTest(lines, typeName, pkg, suffix, alt, ctx.node, isAbstract, ctx.fieldNames);
       lines.push(""); // blank line 269
     }
     lines.push(""); // {% endfor %}\n (line 270)
@@ -605,6 +636,7 @@ function emitLoadJSONTest(
   sample: TestExample,
   node: TypeNode,
   isAbstract: boolean,
+  fieldNames?: ReadonlyMap<string, string>,
 ): void {
   lines.push(`// Test${typeName}LoadJSON${suffix} tests loading ${typeName} from JSON`);
   lines.push(`func Test${typeName}LoadJSON${suffix}(t *testing.T) {`);
@@ -615,7 +647,7 @@ function emitLoadJSONTest(
   if (isAbstract) {
     emitAbstractExampleValidations(lines, sample.validations.length > 0);
   } else {
-    emitExampleValidations(lines, "instance", sample, node, pkg);
+    emitExampleValidations(lines, "instance", sample, node, pkg, fieldNames);
   }
   lines.push("}");
 }
@@ -630,6 +662,7 @@ function emitLoadYAMLTest(
   sample: TestExample,
   node: TypeNode,
   isAbstract: boolean,
+  fieldNames?: ReadonlyMap<string, string>,
 ): void {
   lines.push(`// Test${typeName}LoadYAML${suffix} tests loading ${typeName} from YAML`);
   lines.push(`func Test${typeName}LoadYAML${suffix}(t *testing.T) {`);
@@ -640,7 +673,7 @@ function emitLoadYAMLTest(
   if (isAbstract) {
     emitAbstractExampleValidations(lines, sample.validations.length > 0);
   } else {
-    emitExampleValidations(lines, "instance", sample, node, pkg);
+    emitExampleValidations(lines, "instance", sample, node, pkg, fieldNames);
   }
   lines.push("}");
 }
@@ -655,6 +688,7 @@ function emitFromJSONTest(
   sample: TestExample,
   node: TypeNode,
   isAbstract: boolean,
+  fieldNames?: ReadonlyMap<string, string>,
 ): void {
   lines.push(`// Test${typeName}FromJSON${suffix} tests loading ${typeName} through the generated JSON helper`);
   lines.push(`func Test${typeName}FromJSON${suffix}(t *testing.T) {`);
@@ -667,7 +701,7 @@ function emitFromJSONTest(
   if (isAbstract) {
     emitAbstractExampleValidations(lines, sample.validations.length > 0);
   } else {
-    emitExampleValidations(lines, "instance", sample, node, pkg);
+    emitExampleValidations(lines, "instance", sample, node, pkg, fieldNames);
   }
   lines.push("}");
 }
@@ -682,6 +716,7 @@ function emitFromYAMLTest(
   sample: TestExample,
   node: TypeNode,
   isAbstract: boolean,
+  fieldNames?: ReadonlyMap<string, string>,
 ): void {
   lines.push(`// Test${typeName}FromYAML${suffix} tests loading ${typeName} through the generated YAML helper`);
   lines.push(`func Test${typeName}FromYAML${suffix}(t *testing.T) {`);
@@ -694,7 +729,7 @@ function emitFromYAMLTest(
   if (isAbstract) {
     emitAbstractExampleValidations(lines, sample.validations.length > 0);
   } else {
-    emitExampleValidations(lines, "instance", sample, node, pkg);
+    emitExampleValidations(lines, "instance", sample, node, pkg, fieldNames);
   }
   lines.push("}");
 }
@@ -709,6 +744,7 @@ function emitRoundtripTest(
   sample: TestExample,
   node: TypeNode,
   isAbstract: boolean,
+  fieldNames?: ReadonlyMap<string, string>,
 ): void {
   lines.push(`// Test${typeName}Roundtrip${suffix} tests load -> save -> load produces equivalent data`);
   lines.push(`func Test${typeName}Roundtrip${suffix}(t *testing.T) {`);
@@ -733,7 +769,7 @@ function emitRoundtripTest(
     lines.push(`if err != nil {`);
     lines.push(`t.Fatalf("Failed to reload ${typeName}: %v", err)`);
     lines.push(`}`);
-    emitExampleValidations(lines, "reloaded", sample, node, pkg);
+    emitExampleValidations(lines, "reloaded", sample, node, pkg, fieldNames);
   }
   lines.push("}");
 }
@@ -748,6 +784,7 @@ function emitToJSONTest(
   sample: TestExample,
   node: TypeNode,
   isAbstract: boolean,
+  fieldNames?: ReadonlyMap<string, string>,
 ): void {
   lines.push(`// Test${typeName}ToJSON${suffix} tests that ToJSON produces valid JSON`);
   lines.push(`func Test${typeName}ToJSON${suffix}(t *testing.T) {`);
@@ -774,7 +811,7 @@ function emitToJSONTest(
     lines.push(`if err != nil {`);
     lines.push(`t.Fatalf("Failed to reload generated JSON: %v", err)`);
     lines.push(`}`);
-    emitExampleValidations(lines, "reloaded", sample, node, pkg);
+    emitExampleValidations(lines, "reloaded", sample, node, pkg, fieldNames);
   }
 
   lines.push("}");
@@ -790,6 +827,7 @@ function emitToYAMLTest(
   sample: TestExample,
   node: TypeNode,
   isAbstract: boolean,
+  fieldNames?: ReadonlyMap<string, string>,
 ): void {
   lines.push(`// Test${typeName}ToYAML${suffix} tests that ToYAML produces valid YAML`);
   lines.push(`func Test${typeName}ToYAML${suffix}(t *testing.T) {`);
@@ -816,7 +854,7 @@ function emitToYAMLTest(
     lines.push(`if err != nil {`);
     lines.push(`t.Fatalf("Failed to reload generated YAML: %v", err)`);
     lines.push(`}`);
-    emitExampleValidations(lines, "reloaded", sample, node, pkg);
+    emitExampleValidations(lines, "reloaded", sample, node, pkg, fieldNames);
   }
 
   lines.push("}");
@@ -832,9 +870,16 @@ function emitCoercionTest(
   pkg: string,
   suffix: string,
   alt: CoercionTest,
+  node: TypeNode,
   isAbstract: boolean,
+  goFieldNames?: ReadonlyMap<string, string>,
 ): void {
   const title = capitalize(alt.title);
+  const fieldNames = goFieldNames ?? buildGoFieldNames(node.properties.map(prop => prop.name));
+  const validations = alt.validations.map(validation => ({
+    ...validation,
+    key: fieldNames.get(validation.sourceKey ?? "") ?? validation.key,
+  }));
 
   lines.push(`// Test${typeName}From${title}${suffix} tests loading ${typeName} from ${alt.scalarType}`);
   lines.push(`func Test${typeName}From${title}${suffix}(t *testing.T) {`);
@@ -850,7 +895,7 @@ function emitCoercionTest(
       lines.push("// Note: Validation skipped for polymorphic base types - test child types directly");
     }
   } else {
-    emitConcreteExampleValidations(lines, "instance", alt.validations);
+    emitConcreteExampleValidations(lines, "instance", validations);
   }
   lines.push("");
   lines.push(`jsonBytes, err := json.Marshal(${alt.value})`);
@@ -864,7 +909,7 @@ function emitCoercionTest(
   if (isAbstract) {
     lines.push("_ = fromJSON // Load succeeded, exact type depends on discriminator");
   } else {
-    emitConcreteExampleValidations(lines, "fromJSON", alt.validations);
+    emitConcreteExampleValidations(lines, "fromJSON", validations);
   }
   lines.push("");
   lines.push(`yamlBytes, err := yaml.Marshal(${alt.value})`);
@@ -878,7 +923,7 @@ function emitCoercionTest(
   if (isAbstract) {
     lines.push("_ = fromYAML // Load succeeded, exact type depends on discriminator");
   } else {
-    emitConcreteExampleValidations(lines, "fromYAML", alt.validations);
+    emitConcreteExampleValidations(lines, "fromYAML", validations);
   }
 
   lines.push("}");

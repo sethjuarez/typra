@@ -1,25 +1,25 @@
 import { execFileSync } from "child_process";
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
-import { EmitContext, resolvePath } from "@typespec/compiler";
+import { emitFile, EmitContext, resolvePath } from "@typespec/compiler";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { collectPolymorphicTypeNames, lowerFile } from "../../ir/lower.js";
-import { toPascalCase } from "../../ir/visitor.js";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import { buildBaseTestContext, TestContextOptions } from "../../testing/test-context.js";
-import { emitJavaFileContent } from "./emitter.js";
+import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper, ensureJavaEditableSeamMarker } from "./emitter.js";
 import { emitJavaContext, emitJavaJson, emitJavaMaps, emitJavaSaveContext, emitJavaYaml } from "./scaffolding.js";
 import { emitJavaTest, emitJavaTestRunner, javaTestClassName } from "./test-emitter.js";
 import { JavaExprVisitor } from "./visitor.js";
 import { collectProtocolNodes, emitJavaProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
+import { javaEnumTypeName, javaTypeName } from "./identifiers.js";
 
-const javaTestOptions: TestContextOptions = {
+export const javaTestOptions: TestContextOptions = {
   renderKey: (key: string) => key,
   renderBoolean: (value: boolean) => value ? "true" : "false",
-  escapeString: (value: string) => value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r"),
+  escapeString: (value: string) => value,
   getDelimiter: () => '"',
   scalarValues: {
     boolean: "false",
@@ -42,7 +42,7 @@ const javaTestOptions: TestContextOptions = {
     number: "Double",
   },
   renderEnumValue: (enumName, rawValue, _fieldName, isOpenEnum) => isOpenEnum ? null : ({
-    value: `${enumName}.fromValue(${JSON.stringify(rawValue)})`,
+    value: `${javaEnumTypeName(enumName)}.fromValue(${JSON.stringify(rawValue)})`,
     delimiter: "",
   }),
 };
@@ -59,6 +59,8 @@ export const generateJava = async (
   const visitor = new JavaExprVisitor(registry);
   const packageName = javaPackageName(emitTarget.namespace ?? emitTarget["package-name"] ?? node.typeName.namespace);
   const polymorphicTypeNames = collectPolymorphicTypeNames(node, registry);
+  const fileDecls = nodes.map(n => lowerFile(n, registry, polymorphicTypeNames));
+  const allTypeDecls = fileDecls.flatMap(fileDecl => fileDecl.types);
 
   await emitJavaFile(context, "LoadContext.java", emitJavaContext(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
   await emitJavaFile(context, "SaveContext.java", emitJavaSaveContext(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
@@ -66,11 +68,34 @@ export const generateJava = async (
   await emitJavaFile(context, "TypraJson.java", emitJavaJson(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
   await emitJavaFile(context, "TypraYaml.java", emitJavaYaml(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
 
+  const enums = new Map<string, ReturnType<typeof lowerFile>["enums"][number]>();
+  for (const fileDecl of fileDecls) {
+    for (const enumDef of fileDecl.enums) {
+      if (!enumDef.isOpen) enums.set(javaEnumTypeName(enumDef.name), enumDef);
+    }
+  }
+  for (const [enumName, enumDef] of enums) {
+    await emitJavaFile(context, `${enumName}.java`, emitJavaEnum(enumDef, packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
+  }
+
   const testClassNames: string[] = [];
-  for (const n of nodes) {
-    const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
-    const fileContent = emitJavaFileContent([fileDecl.types[0]], packageName, visitor, polymorphicTypeNames, fileDecl.enums);
-    await emitJavaFile(context, `${toPascalCase(n.typeName.name)}.java`, fileContent, emitTarget["output-dir"], emitTarget["output-dir"]);
+  const helperFiles = new Set<string>();
+  for (let index = 0; index < nodes.length; index++) {
+    const n = nodes[index];
+    const fileContent = emitJavaFileContent(
+      [fileDecls[index].types[0]],
+      packageName,
+      visitor,
+      polymorphicTypeNames,
+      [],
+      allTypeDecls,
+    );
+    await emitJavaFile(context, `${javaTypeName(n.typeName.name)}.java`, fileContent, emitTarget["output-dir"], emitTarget["output-dir"]);
+    const helper = emitJavaMethodHelper(fileDecls[index].types[0], packageName);
+    if (helper) {
+      helperFiles.add(helper.filename);
+      await emitJavaMethodHelperIfMissing(context, helper.filename, helper.source, emitTarget["output-dir"]);
+    }
 
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const testClass = javaTestClassName(n.typeName.name);
@@ -93,7 +118,7 @@ export const generateJava = async (
   }
 
   if (emitTarget.format !== false) {
-    formatJavaFiles(resolve(process.cwd(), emitTarget["output-dir"] ?? context.emitterOutputDir));
+    formatJavaFiles(resolve(process.cwd(), emitTarget["output-dir"] ?? context.emitterOutputDir), helperFiles);
   }
 
 };
@@ -113,10 +138,30 @@ async function emitJavaFile(
   await emitGeneratedFile(context, filePath, content, { outputRoot: outputRoot || outputDir });
 }
 
-function formatJavaFiles(outputDir: string): void {
+async function emitJavaMethodHelperIfMissing(
+  context: EmitContext<TypraEmitterOptions>,
+  filename: string,
+  content: string,
+  outputDir?: string,
+): Promise<void> {
+  const filePath = resolvePath(outputDir || `${context.emitterOutputDir}/java`, filename);
+  if (!existsSync(filePath)) {
+    await emitFile(context.program, { path: filePath, content });
+    return;
+  }
+
+  // Seam files created before the marker contract stay unmarked forever under create-once,
+  // which leaves them outside the cleaner allow-list. Prepend the marker without touching
+  // any hand-written body.
+  const migrated = ensureJavaEditableSeamMarker(readFileSync(filePath, "utf8"));
+  if (migrated === null) return;
+  await emitFile(context.program, { path: filePath, content: migrated });
+}
+
+function formatJavaFiles(outputDir: string, excludedFiles: Set<string>): void {
   if (!existsSync(outputDir)) return;
   const javaFiles = readdirSync(outputDir)
-    .filter(file => file.endsWith(".java"))
+    .filter(file => file.endsWith(".java") && !excludedFiles.has(file))
     .map(file => resolve(outputDir, file));
   if (javaFiles.length === 0) return;
 

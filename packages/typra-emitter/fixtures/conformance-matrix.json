@@ -14,7 +14,7 @@
               "\"name\": \"metadata\"",
               "\"name\": \"owner\"",
               "\"name\": \"content\"",
-              "\"text\": \"hello from a polymorphic sample\""
+              "\"value\": \"hello from a polymorphic sample\""
             ]
           }
         ],
@@ -116,8 +116,8 @@
             "path": "generated/fixtures/swift/Sources/TypraFixtures/fixture_root.swift",
             "snippets": [
               "public var tags: [String] = []",
-              "instance.owner = try FixtureOwner.load(value, context: context)",
-              "instance.content = try FixtureContent.load(value, context: context)",
+              "instance.owner = try FixtureOwner.load(value, context: context.at(\"owner\"))",
+              "instance.content = try FixtureContent.load(value, context: context.at(\"content\"))",
               "result[\"content\"] = try self.content.save(context)"
             ]
           }
@@ -126,7 +126,7 @@
     },
     {
       "id": "polymorphic-content-dispatch",
-      "description": "FixtureContent dispatches the text/image discriminator consistently and serializes discriminator-specific data.",
+      "description": "FixtureContent dispatches the closed text/image/file/audio discriminator consistently and serializes discriminator-specific data.",
       "evidence": {
         "json-ast": [
           {
@@ -134,7 +134,9 @@
             "snippets": [
               "\"discriminator\": \"kind\"",
               "\"name\": \"TextContent\"",
-              "\"name\": \"ImageContent\""
+              "\"name\": \"ImageContent\"",
+              "\"name\": \"FileContent\"",
+              "\"name\": \"AudioContent\""
             ]
           }
         ],
@@ -145,7 +147,7 @@
               "case \"text\":",
               "return TextContent.load(data, context);",
               "case \"image\":",
-              "result[\"text\"] = obj.text;"
+              "result[\"value\"] = obj.value;"
             ]
           }
         ],
@@ -156,7 +158,7 @@
               "if discriminator_value == \"text\":",
               "return TextContent.load(data, context)",
               "elif discriminator_value == \"image\":",
-              "result[\"text\"] = obj.text"
+              "result[\"value\"] = obj.value"
             ]
           }
         ],
@@ -172,7 +174,7 @@
             "path": "generated/fixtures/csharp/TextContent.cs",
             "snippets": [
               "public override Dictionary<string, object?> Save",
-              "result[\"text\"] = obj.Text;"
+              "result[\"value\"] = obj.Value;"
             ]
           }
         ],
@@ -183,7 +185,7 @@
               "case \"text\":",
               "return LoadTextContent(data, ctx)",
               "case \"image\":",
-              "result[\"text\"] = obj.Text"
+              "result[\"value\"] = obj.Value"
             ]
           }
         ],
@@ -200,7 +202,7 @@
             "path": "generated/fixtures/java/TextContent.java",
             "snippets": [
               "extends FixtureContent",
-              "result.put(\"text\", serializeScalar(obj.text));"
+              "result.put(\"value\", serializeScalar(obj.value));"
             ]
           }
         ],
@@ -211,7 +213,7 @@
               "FixtureContentKind::TextContent",
               "\"text\" => FixtureContentKind::TextContent",
               "result.insert(\"kind\".to_string()",
-              "result.insert(\"text\".to_string()"
+              "result.insert(\"value\".to_string()"
             ]
           }
         ],
@@ -219,8 +221,8 @@
           {
             "path": "generated/fixtures/swift/Sources/TypraFixtures/fixture_content.swift",
             "snippets": [
-              "case \"text\": return .textContent(try TextContent.load(data, context: context))",
-              "case \"image\": return .imageContent(try ImageContent.load(data, context: context))",
+              "case \"text\": return .textContent(try TextContent.load(normalizedData, context: context))",
+              "case \"image\": return .imageContent(try ImageContent.load(normalizedData, context: context))",
               "case .textContent(let value): return try value.save(context)"
             ]
           }

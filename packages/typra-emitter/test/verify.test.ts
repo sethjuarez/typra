@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { EmitContext, Program } from "@typespec/compiler";
@@ -389,6 +389,48 @@ describe("generated output report", () => {
       "Review removed marker-owned files and accept the generated baseline if the removal is expected.",
     ]);
   });
+
+  it("allow-lists editable seams instead of deleting or warning about them", async () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "typra-seam-"));
+    const seamFile = path.join(tempRoot, "MessageMethods.java");
+    const seamContent = [
+      "// <typra-editable-seam>",
+      "// Typra editable seam. This file is created once and is safe to edit.",
+      "package test;",
+      "",
+      "public final class MessageMethods {",
+      '  public static String text(Message self) { return "hand-written"; }',
+      "}",
+      "",
+    ].join("\n");
+    writeFileSync(seamFile, seamContent);
+    const context = makeReportContext({ "deterministic-output": true });
+    const manifest: GeneratedManifest = {
+      emitter: "typra-emitter",
+      version: 1,
+      generatedAt: "1970-01-01T00:00:00.000Z",
+      files: [],
+    };
+
+    // An empty generated payload is what drives the cleaner's ownership decision.
+    await emitGeneratedFile(context, seamFile, "");
+    const report = buildGeneratedOutputReport(context, manifest);
+
+    // The consumer's file and its hand-written body must survive untouched.
+    assert.equal(existsSync(seamFile), true);
+    assert.equal(readFileSync(seamFile, "utf8"), seamContent);
+
+    assert.equal(report.skippedFiles[0].ownership, "editable-seam-owned");
+    assert.equal(report.skippedFiles[0].status, "preserved-editable-seam");
+    assert.equal(report.summary.preservedEditableSeamFiles, 1);
+    assert.equal(report.preservedEditableSeamFiles.length, 1);
+
+    // Allow-listed means clean: no ambiguous "unmarked" warning, no review churn.
+    assert.equal(report.summary.preservedUnmarkedSkippedFiles, 0);
+    assert.equal(report.summary.warnings, 0);
+    assert.equal(report.summary.hygiene, "clean");
+    assert.equal(report.cleanup.status, "safe-noop");
+  });
 });
 
 function makeMetadata(): TypraMetadataSet {
@@ -456,6 +498,9 @@ function makeSnapshot(): ExportSurfaceSnapshot {
                 params: { event: "unknown" },
                 optional: false,
                 sync: true,
+                runtimeCancellable: false,
+                atomic: false,
+                nonFatal: false,
               },
             ],
           },

@@ -1,5 +1,6 @@
-import { ArrayLiteral, Construct, Expr, TypeRegistry, VariantConstruct } from "../../ir/expansion.js";
-import { assertNever, ExprVisitor, toPascalCase } from "../../ir/visitor.js";
+import { ArrayLiteral, Construct, Expr, FieldAssignment, TypeRegistry, VariantConstruct } from "../../ir/expansion.js";
+import { assertNever, ExprVisitor } from "../../ir/visitor.js";
+import { javaEnumTypeName, javaPropertyName, javaTypeName } from "./identifiers.js";
 
 export class JavaExprVisitor implements ExprVisitor {
   registry?: TypeRegistry;
@@ -19,7 +20,7 @@ export class JavaExprVisitor implements ExprVisitor {
       case "null":
         return "null";
       case "param":
-        return expr.name;
+        return javaPropertyName(expr.name);
       case "construct":
         return this.visitConstruct(expr);
       case "variant":
@@ -29,7 +30,7 @@ export class JavaExprVisitor implements ExprVisitor {
       case "dict":
         return `TypraMaps.mapOf(${expr.entries.map(e => `"${e.key}", ${this.visitExpr(e.value)}`).join(", ")})`;
       case "field_read":
-        return `${expr.objectName}.${expr.fieldName}`;
+        return `${javaPropertyName(expr.objectName)}.${javaPropertyName(expr.fieldName)}`;
       default:
         return assertNever(expr);
     }
@@ -43,11 +44,34 @@ export class JavaExprVisitor implements ExprVisitor {
     return this.constructWithFields(expr.variantTypeName.name, expr.fields);
   }
 
-  private constructWithFields(typeName: string, fields: Construct["fields"]): string {
+  private constructWithFields(rawTypeName: string, fields: Construct["fields"]): string {
+    const typeName = javaTypeName(rawTypeName);
     if (fields.length === 0) {
       return `new ${typeName}()`;
     }
-    return `new ${typeName}() {{ ${fields.map(f => `this.${f.propertyName} = ${this.visitExpr(f.value)};`).join(" ")} }}`;
+    return `new ${typeName}() {{ ${fields.map(field =>
+      `this.${javaPropertyName(field.propertyName)} = ${this.visitFieldValue(rawTypeName, field)};`
+    ).join(" ")} }}`;
+  }
+
+  private visitFieldValue(typeName: string, field: FieldAssignment): string {
+    const property = this.registry?.get(typeName)?.properties.find(candidate => candidate.name === field.propertyName);
+    if (field.value.kind === "string" && property?.enumName && !property.isOpenEnum) {
+      return `${javaEnumTypeName(property.enumName)}.fromValue("${this.escapeString(field.value.value)}")`;
+    }
+    if (field.value.kind === "number" && property) {
+      return this.numberLiteral(field.value.value, property.typeName.name);
+    }
+    return this.visitExpr(field.value);
+  }
+
+  private numberLiteral(value: number, typeName: string): string {
+    if (typeName === "int64") return `${value}L`;
+    if (typeName === "float32") return `${Number.isInteger(value) ? `${value}.0` : value}f`;
+    if (["number", "float", "numeric", "float64"].includes(typeName)) {
+      return `${Number.isInteger(value) ? `${value}.0` : value}d`;
+    }
+    return String(value);
   }
 
   private visitArray(expr: ArrayLiteral): string {
@@ -58,4 +82,3 @@ export class JavaExprVisitor implements ExprVisitor {
     return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\n/g, "\\n");
   }
 }
-

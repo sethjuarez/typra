@@ -173,18 +173,13 @@ const renderTests = (node: TypeNode, namespace: string): string => {
           return {
             key: renderName(key),
             value: `${csEnumName}.${memberName}`,
-            startDelim: '',
-            endDelim: '',
+            isExpression: true,
           };
         }
-        const needsVerbatim = typeof val === 'string' && (val.includes('\n') || val.includes('"'));
         return {
           key: renderName(key),
-          value: typeof val === 'boolean' ? (val ? "True" : "False") :
-            (needsVerbatim ? (val as string).replace(/"/g, '""') : val),
-          startDelim: typeof val === 'string' ? (needsVerbatim ? '@"' : '"') : '',
-          endDelim: typeof val === 'string' ? '"' :
-            typeof val === 'number' && !Number.isInteger(val) ? 'f' : '',
+          value: val,
+          isExpression: false,
         };
       }),
     };

@@ -11,6 +11,7 @@ export interface EmitTarget {
   "package-name"?: string;
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
   "protocol-scaffolds"?: "none" | "compile-only";
+  "cancellation-token-path"?: string;
 }
 export interface TypraEmitterOptions {
   "root-object": string;
@@ -89,6 +90,11 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             nullable: true,
             default: "none",
             description: "Opt-in generated test scaffolds for protocol conformance. 'compile-only' emits test-dir-only implementations that compile but do not provide runtime fake behavior."
+          },
+          "cancellation-token-path": {
+            type: "string",
+            nullable: true,
+            description: "Full runtime-native cancellation token symbol path. Rust uses :: separators; Python uses dotted module.symbol syntax."
           }
         },
         required: ["type"]
