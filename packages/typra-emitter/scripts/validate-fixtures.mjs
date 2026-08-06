@@ -2693,6 +2693,48 @@ final class ConformanceValidateTests: XCTestCase {
     let encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
     print("TYPRA_CONFORMANCE:" + String(decoding: encoded, as: UTF8.self))
   }
+
+  // An open discriminator must absorb a value that no subtype claims, carry the
+  // whole payload verbatim, and replay it on save. Every other backend runner
+  // asserts this; swift did not, which is the same "asserted somewhere, but not
+  // everywhere" gap that let the toWire defect reach a release.
+  func testUnknownDiscriminatorCarrierRoundTrips() throws {
+    let input: [String: Any] = [
+      "kind": "future-auth",
+      "name": "future",
+      "config": ["nested": [1, NSNull(), ["enabled": true]]],
+      "nullable": NSNull(),
+    ]
+    let saved = try FixtureConnection.load(input).save()
+    XCTAssertEqual(saved["kind"] as? String, "future-auth", "unknown carrier lost its discriminator")
+    XCTAssertEqual(saved["name"] as? String, "future", "unknown carrier lost a modeled field")
+    XCTAssertTrue(saved["nullable"] is NSNull, "unknown carrier dropped an explicit null")
+    XCTAssertNotNil(saved["config"], "unknown carrier dropped an unmodeled nested field")
+
+    let reloaded = try FixtureConnection.load(saved).save()
+    let first = try JSONSerialization.data(withJSONObject: saved, options: [.sortedKeys])
+    let second = try JSONSerialization.data(withJSONObject: reloaded, options: [.sortedKeys])
+    XCTAssertEqual(first, second, "unknown carrier payload did not survive a reload")
+  }
+
+  // Both declared named-collection forms load equivalently, while an array-valued
+  // entry in the name-keyed object form is rejected. Locking both halves together
+  // keeps a fix for one from silently breaking the other.
+  func testNamedCollectionHonoursBothDeclaredForms() throws {
+    let listForm = try FixtureNamedPayloadCollection.load(["items": [["name": "alpha", "payload": "one"]]])
+    let objectForm = try FixtureNamedPayloadCollection.load(["items": ["alpha": ["payload": "one"]]])
+    XCTAssertEqual(listForm.items.count, 1, "list form did not load a single entry")
+    XCTAssertEqual(objectForm.items.count, 1, "name-keyed object form did not load a single entry")
+    XCTAssertEqual(listForm.items.first?.name, "alpha", "list form lost the entry name")
+    XCTAssertEqual(objectForm.items.first?.name, "alpha", "name-keyed object form did not adopt the key as the name")
+
+    XCTAssertThrowsError(try FixtureNamedPayloadCollection.load(["items": ["alpha": ["one", "two"]]])) { error in
+      XCTAssertTrue(
+        String(describing: error).contains("category array"),
+        "array-valued entry in name-keyed object form was not rejected as a category array"
+      )
+    }
+  }
 }
 `);
 
