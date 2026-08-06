@@ -68,6 +68,15 @@ const fixtureRootSample = {
     falseFlag: false,
     emptyItems: [],
   },
+  // absentText is deliberately omitted: an absent optional must stay off the wire, while the
+  // explicitly-zero optionals below must stay on it. See FixtureOptionalStates in main.tsp.
+  optionalStates: {
+    presentText: "present",
+    emptyText: "",
+    zeroCount: 0,
+    falseFlag: false,
+    emptyItems: [],
+  },
 };
 // One canonical conformance input, embedded into every target program.
 //

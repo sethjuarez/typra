@@ -46,6 +46,10 @@ model FixtureRoot {
   @doc("Required fields held at their type zero values")
   zeroValues: FixtureZeroValues;
 
+  @sample(#{ optionalStates: #{ presentText: "present", emptyText: "", zeroCount: 0, falseFlag: false, emptyItems: #[] } })
+  @doc("Optional fields distinguishing absent from explicitly present at a zero value")
+  optionalStates: FixtureOptionalStates;
+
   @doc("Ordered complex collection with non-unique names")
   checkpoint?: FixtureCheckpoint;
 }
@@ -80,6 +84,49 @@ model FixtureZeroValues {
   @sample(#{ emptyItems: #[] })
   @doc("Required collection at its zero value")
   emptyItems: string[];
+}
+
+@doc("""
+Optional fields that distinguish absent from explicitly present at a zero value.
+
+An optional field has three wire states that must not be conflated: absent, present at a zero
+value, and present at a non-zero value. A backend that guards its save path on emptiness rather
+than on presence collapses "explicitly empty" into "absent", which changes the meaning of the
+document and disagrees with backends that guard on presence.
+
+This is the mirror of FixtureZeroValues, and it exists so the two cannot be satisfied by the same
+wrong answer. A backend that drops every save guard passes FixtureZeroValues but fails here on
+absentText; a backend that keeps an emptiness guard on required fields fails FixtureZeroValues.
+Together the two rule out both uniform policies: emit-everything and omit-when-empty.
+
+They do not, however, rule out a backend that echoes input key presence for every field, required
+ones included. That implementation passes both, because each required key was present in the input
+it was handed. Catching it needs an assertion that saves a natively constructed value rather than
+one parsed from this document, which the conformance runners cannot express today. Tracked on #113.
+""")
+model FixtureOptionalStates {
+  @sample(#{ presentText: "present" })
+  @doc("Optional string present at a non-zero value")
+  presentText?: string;
+
+  @sample(#{ emptyText: "" })
+  @doc("Optional string explicitly present at its zero value")
+  emptyText?: string;
+
+  @sample(#{ zeroCount: 0 })
+  @doc("Optional integer explicitly present at its zero value")
+  zeroCount?: int32;
+
+  @sample(#{ falseFlag: false })
+  @doc("Optional boolean explicitly present at its zero value")
+  falseFlag?: boolean;
+
+  @sample(#{ emptyItems: #[] })
+  @doc("Optional collection explicitly present at its zero value")
+  emptyItems?: string[];
+
+  @doc("Optional string absent from the sample, which must not appear on the wire")
+  absentText?: string;
 }
 
 model FixtureOwner {
