@@ -6,6 +6,30 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## 0.4.27
+
+### Fixed
+
+- **`toWire` emitted fields for providers that declare no mapping** (#84). The Swift backend fell
+  back to the schema field name for any provider absent from a field's `@knownAs` map, so a payload
+  requested for one provider carried fields declared only for another — in the fixture schema an
+  `anthropic` payload carried the openai-only `temperature`. A provider with no mappings at all
+  received the entire model instead of an empty payload. The Java backend was correct for a
+  non-empty unmapped provider but seeded its `include` flag from `target.isEmpty()`, so an empty or
+  null provider received every field under its schema name. Both backends now key emission on the
+  requested provider actually having a mapping, matching TypeScript, Python, Go, Rust and C#.
+
+### Changed
+
+- Swift gained an executable-conformance runner. It was previously the only conformance-matrix
+  target whose static snippet evidence was asserted but whose behaviour was never compared against
+  the canonical cross-backend output — which is why the defect above survived. All seven targets are
+  now behaviourally verified.
+- The `provider-wire-mapping` conformance case previously asserted only the mapped case, leaving the
+  omission rule unlocked in every backend. It now asserts the provider-presence check for all seven
+  targets, and every executable-conformance runner probes an unmapped provider and an empty provider
+  string, both of which must produce an empty payload.
+
 ## 0.4.26
 
 ### Fixed

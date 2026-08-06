@@ -567,6 +567,12 @@ function emitToWire(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<s
   lines.push("  }");
 }
 
+/**
+ * A wire field is emitted only when the requested provider actually maps it. Falling back to the
+ * schema name for an unmapped provider leaks fields into payloads that never declared them — the
+ * fixture contract maps `temperature` for openai only, so an anthropic payload must not carry it.
+ * This mirrors the rule every other backend applies (Go: `if wireName, ok := mapping[provider]`).
+ */
 function emitWireField(
   mapping: WireFieldMapping,
   lines: string[],
@@ -575,17 +581,17 @@ function emitWireField(
 ): void {
   const source = `self.${swiftPropertyName(mapping.fieldName)}`;
   const target = `wireName${swiftTypeName(mapping.fieldName)}`;
-  lines.push(`    let ${target}: String`);
+  lines.push(`    let ${target}: String?`);
   lines.push("    switch provider {");
   for (const [provider, wireName] of Object.entries(mapping.wireNames)) {
     lines.push(`    case ${swiftStringLiteral(provider)}: ${target} = ${swiftStringLiteral(wireName)}`);
   }
-  lines.push(`    default: ${target} = ${swiftStringLiteral(mapping.fieldName)}`);
+  lines.push(`    default: ${target} = nil`);
   lines.push("    }");
   if (mapping.isOptional) {
-    lines.push(`    if let value = ${source} { result[${target}] = ${swiftSaveExpression(mapping.category, null, "value", polymorphicTypeNames, collectionHelper)} }`);
+    lines.push(`    if let wireKey = ${target}, let value = ${source} { result[wireKey] = ${swiftSaveExpression(mapping.category, null, "value", polymorphicTypeNames, collectionHelper)} }`);
   } else {
-    lines.push(`    result[${target}] = ${swiftSaveExpression(mapping.category, null, source, polymorphicTypeNames, collectionHelper)}`);
+    lines.push(`    if let wireKey = ${target} { result[wireKey] = ${swiftSaveExpression(mapping.category, null, source, polymorphicTypeNames, collectionHelper)} }`);
   }
 }
 
