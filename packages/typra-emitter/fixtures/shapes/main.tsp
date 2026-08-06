@@ -62,6 +62,10 @@ model FixtureRoot {
   @doc("Discriminator values that no subtype claims outright")
   discriminatorEdges: FixtureDiscriminatorEdges;
 
+  @sample(#{ collectionCardinality: #{ repeatedTags: #["alpha", "beta", "alpha"], singleTag: #["only"], mixedContent: #[#{ kind: "image", url: "https://example.test/first.png" }, #{ kind: "text", value: "second element" }, #{ kind: "text", value: "third element" }], listForm: #[#{ name: "alpha", first: "alpha first", second: "alpha second" }, #{ name: "beta", first: "beta first", second: "beta second" }], mapForm: #{ delta: #{ first: "delta first", second: "delta second" }, epsilon: #{ first: "epsilon first", second: "epsilon second" } }, singleListForm: #[#{ name: "solo", first: "solo first", second: "solo second" }], singleMapForm: #{ lone: #{ first: "lone first", second: "lone second" } }, emptyForm: #[] } })
+  @doc("Collections at zero, one and many entries across both keyed-collection input forms")
+  collectionCardinality: FixtureCollectionCardinality;
+
   @doc("Ordered complex collection with non-unique names")
   checkpoint?: FixtureCheckpoint;
 }
@@ -290,6 +294,101 @@ model FixtureDiscriminatorEdges {
   @sample(#{ namedOpenUnknown: #{ kind: "vendor-specific", label: "unrecognized named open kind" } })
   @doc("Unrecognized kind carried through a named open union discriminator")
   namedOpenUnknown: FixtureNamedOpenBase;
+}
+
+model FixtureCardinalityItem {
+  @sample(#{ name: "alpha" })
+  @doc("Key of this entry when the collection is written in its keyed map form")
+  name: string;
+
+  @sample(#{ first: "first value" })
+  first: string;
+
+  @sample(#{ second: "second value" })
+  second: string;
+}
+
+@doc("""
+Collections at zero, one and many entries.
+
+Cardinality is where a collection stops behaving like a collection. At zero a backend may drop
+the field or write null instead of an empty collection; at one it may unwrap the collection to
+its element; at many it may reorder, deduplicate or truncate. A defect of that kind can be
+self-consistent within one target, in which case a same-language round-trip still round-trips
+green and only comparison against a shared canonical result sees it.
+
+Every collection previously carried by the shared sample held zero or one entry, and tags, the
+sole many case, is a flat array of scalars. So the many case had never been exercised through
+the differential oracle for a polymorphic collection or for a keyed one.
+
+repeatedTags repeats a value, so a backend modelling a collection as a set loses the repeat and
+one that sorts loses the order. singleTag asserts that a one-element array is still saved as an
+array rather than unwrapped to its element; accepting a bare scalar as collection input is a
+different axis and is not covered here, because no target performs that widening. mixedContent
+dispatches a different subtype per element, turning an element ordering or per-element dispatch
+defect into a value difference rather than a crash. It is the first heterogeneous polymorphic
+array in the shared sample: the existing contentItems carries a single subtype.
+
+The remaining fields are the keyed dual form, `Record<T> | Named<T>[]`, which accepts either a
+list of named items or a map keyed by name. No value of that shape had ever appeared in the
+shared sample: FixtureTool.bindings is reachable from FixtureRoot but is optional and was never
+populated, so every keyed collection was covered exclusively by same-language assertions. Given
+unique, non-empty names, both input forms canonicalize to the same map-shaped saved output with
+`name` lifted out of the entry body and into the key; a duplicated or empty name silently falls
+back to list form instead, which is a separate axis and is not covered here. The map input form
+is the path behind the data-loss defect recorded on FixtureBag. Because the map form omits
+`name` from its entry bodies, it also covers promotion of the map key back into the entry.
+
+Both input forms are sampled at one entry as well as at many, because the keyed collection has
+its own save path in every target and a singleton defect there would not be caught by singleTag.
+
+FixtureCardinalityItem exists rather than reusing FixtureBagItem because that model declares a
+shorthand property, which collapses an entry whose only remaining field is that property down to
+a bare scalar. Keyed collections also drop `name` from the entry body once it is the key. Both
+behaviours are worth testing, but not here: bundling them into this class would mean a failure
+could be cardinality, key promotion or shorthand collapse, and the point of a class is that a
+failure names one thing. Two non-key fields make the shorthand path unreachable.
+
+Order within a keyed collection is deliberately not asserted, and the sample names are already
+in sorted order so that this class does not depend on the answer. A keyed collection is written
+through a name-keyed map, and the targets do not agree on whether a map preserves insertion
+order: it round-trips list order in some and sorts or randomises it in others. That is a real
+contract gap rather than a property of cardinality, and it is tracked in issue #134. Array
+order, which the targets do agree on, is asserted by repeatedTags and mixedContent. Duplicate
+names within a keyed collection are a further separate axis and are not covered here.
+""")
+model FixtureCollectionCardinality {
+  @sample(#{ repeatedTags: #["alpha", "beta", "alpha"] })
+  @doc("Scalar array at many carrying a repeat, so ordering and duplicates both have to survive")
+  repeatedTags: string[];
+
+  @sample(#{ singleTag: #["only"] })
+  @doc("Single-element array that must stay a collection rather than collapse to its element")
+  singleTag: string[];
+
+  @sample(#{ mixedContent: #[#{ kind: "image", url: "https://example.test/first.png" }, #{ kind: "text", value: "second element" }, #{ kind: "text", value: "third element" }] })
+  @doc("Polymorphic array at many whose elements are not all the same subtype")
+  mixedContent: FixtureContent[];
+
+  @sample(#{ listForm: #[#{ name: "alpha", first: "alpha first", second: "alpha second" }, #{ name: "beta", first: "beta first", second: "beta second" }] })
+  @doc("Keyed dual-form collection supplied in list form at many")
+  listForm: Record<FixtureCardinalityItem> | Named<FixtureCardinalityItem>[];
+
+  @sample(#{ mapForm: #{ delta: #{ first: "delta first", second: "delta second" }, epsilon: #{ first: "epsilon first", second: "epsilon second" } } })
+  @doc("The same keyed collection supplied in map form at many, with the key promoted to name")
+  mapForm: Record<FixtureCardinalityItem> | Named<FixtureCardinalityItem>[];
+
+  @sample(#{ singleListForm: #[#{ name: "solo", first: "solo first", second: "solo second" }] })
+  @doc("Keyed collection in list form at one entry, which must not unwrap to a bare entry")
+  singleListForm: Record<FixtureCardinalityItem> | Named<FixtureCardinalityItem>[];
+
+  @sample(#{ singleMapForm: #{ lone: #{ first: "lone first", second: "lone second" } } })
+  @doc("Keyed collection in map form at one entry, which must not unwrap to a bare entry")
+  singleMapForm: Record<FixtureCardinalityItem> | Named<FixtureCardinalityItem>[];
+
+  @sample(#{ emptyForm: #[] })
+  @doc("The same keyed collection at zero entries")
+  emptyForm: Record<FixtureCardinalityItem> | Named<FixtureCardinalityItem>[];
 }
 
 model FixtureOwner {

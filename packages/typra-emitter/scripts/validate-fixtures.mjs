@@ -113,6 +113,32 @@ const fixtureRootSample = {
     unclaimedClosed: { kind: "plain", label: "permitted but unclaimed" },
     namedOpenUnknown: { kind: "vendor-specific", label: "unrecognized named open kind" },
   },
+  // Collections at zero, one and many. The keyed dual-form fields accept either a list of named
+  // items or a map keyed by name; given unique, non-empty names both forms canonicalize to the
+  // same map-shaped saved output. Array order is compared; key order within the saved keyed map
+  // is not, because the normalizer sorts object keys. See FixtureCollectionCardinality in main.tsp.
+  collectionCardinality: {
+    repeatedTags: ["alpha", "beta", "alpha"],
+    singleTag: ["only"],
+    mixedContent: [
+      { kind: "image", url: "https://example.test/first.png" },
+      { kind: "text", value: "second element" },
+      { kind: "text", value: "third element" },
+    ],
+    listForm: [
+      { name: "alpha", first: "alpha first", second: "alpha second" },
+      { name: "beta", first: "beta first", second: "beta second" },
+    ],
+    mapForm: {
+      delta: { first: "delta first", second: "delta second" },
+      epsilon: { first: "epsilon first", second: "epsilon second" },
+    },
+    singleListForm: [{ name: "solo", first: "solo first", second: "solo second" }],
+    singleMapForm: {
+      lone: { first: "lone first", second: "lone second" },
+    },
+    emptyForm: [],
+  },
 };
 // One canonical conformance input, embedded into every target program.
 //
@@ -145,6 +171,21 @@ const fixtureRootExpected = {
   ...fixtureRootSample,
   status: "ready",
   mode: "batch",
+  // A keyed collection is written in its map form regardless of which form it was read from, so
+  // the list-form inputs converge on the shape the map-form inputs were given in, and the entry
+  // name moves from the body to the key. That canonicalization holds because these names are
+  // unique and non-empty; a duplicated or empty name would fall back to list form instead.
+  collectionCardinality: {
+    ...fixtureRootSample.collectionCardinality,
+    listForm: {
+      alpha: { first: "alpha first", second: "alpha second" },
+      beta: { first: "beta first", second: "beta second" },
+    },
+    singleListForm: {
+      solo: { first: "solo first", second: "solo second" },
+    },
+    emptyForm: {},
+  },
 };
 const conformanceCanonical = {
   root: fixtureRootExpected,
