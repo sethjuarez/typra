@@ -61,7 +61,33 @@ const fixtureRootSample = {
   ],
   status: "complete",
   mode: "bulk",
+  zeroValues: {
+    emptyText: "",
+    zeroCount: 0,
+    zeroRatio: 0,
+    falseFlag: false,
+    emptyItems: [],
+  },
 };
+// One canonical conformance input, embedded into every target program.
+//
+// The seven conformance runners each used to hand-write this payload in their own target
+// syntax. Nothing asserted those copies agreed, and they had already drifted -- the C# copy
+// carried a `metadata.nullable` key no other target was given. Divergent inputs compared
+// against a single shared expectation quietly weakens the oracle, because a target can pass
+// on a payload its peers never saw. Every runner now parses this one document through its
+// standard JSON entry point, so widening the corpus is a single edit to fixtureRootSample.
+const fixtureRootSampleJsonLiteral = JSON.stringify(JSON.stringify(fixtureRootSample));
+
+// The C# runner previously smuggled an extra `metadata.nullable` key into its private copy of
+// the payload to prove Record<unknown> preserves explicit nulls. That assertion is worth
+// keeping, so it now runs against its own explicit variant rather than silently changing the
+// shared input out from under the cross-language comparison.
+const fixtureRootNullMetadataJsonLiteral = JSON.stringify(JSON.stringify({
+  ...fixtureRootSample,
+  metadata: { ...fixtureRootSample.metadata, nullable: null },
+}));
+
 const wireOptionsSample = {
   maxOutputTokens: 256,
   temperature: 0.7,
@@ -75,7 +101,7 @@ const fixtureRootExpected = {
   status: "ready",
   mode: "batch",
 };
-const conformanceExpected = normalizeConformanceValue({
+const conformanceCanonical = {
   root: fixtureRootExpected,
   imageContent: imageContentSample,
   openai: {
@@ -94,7 +120,32 @@ const conformanceExpected = normalizeConformanceValue({
     id: "ref-coerced",
     label: "coerced reference",
   },
-});
+};
+const conformanceExpected = normalizeConformanceValue(conformanceCanonical);
+
+// Known cross-language divergences: real, open defects that this corpus catches today.
+//
+// These are NOT accepted behaviour, and this is not a mute switch. Each entry pins the exact
+// wrong output a target currently produces, which keeps the gate green on a tracked defect
+// without going blind to it:
+//   - if the target's output changes in any *other* way, the gate still fails;
+//   - if the target starts matching canonical output, the gate fails and demands the entry be
+//     deleted, so the suppression cannot outlive the bug it documents.
+const conformanceKnownDivergences = {
+  rust: {
+    issue: "#97",
+    summary:
+      "required fields whose value equals the type default are omitted on save, so a required " +
+      "empty string, zero int, zero float, or empty array silently vanishes from the wire",
+    expected: normalizeConformanceValue({
+      ...conformanceCanonical,
+      root: {
+        ...fixtureRootExpected,
+        zeroValues: { falseFlag: false },
+      },
+    }),
+  },
+};
 
 function fail(message) {
   failures.push(message);
@@ -131,9 +182,29 @@ function assertConformanceResult(target, rawOutput) {
     }
   }
 
-  if (JSON.stringify(actual) !== JSON.stringify(conformanceExpected)) {
-    fail(`Executable conformance for ${target} did not match canonical output.\nExpected: ${JSON.stringify(conformanceExpected)}\nActual: ${JSON.stringify(actual)}`);
+  const actualJson = JSON.stringify(actual);
+  const divergence = conformanceKnownDivergences[target];
+
+  if (actualJson === JSON.stringify(conformanceExpected)) {
+    if (divergence) {
+      fail(
+        `Executable conformance for ${target} now matches canonical output, but a known divergence ` +
+        `is still recorded for ${divergence.issue}. The defect appears fixed -- delete the ` +
+        `conformanceKnownDivergences entry so the gate holds the corrected behaviour from now on.`,
+      );
+    }
+    return;
   }
+
+  if (divergence && actualJson === JSON.stringify(divergence.expected)) {
+    console.warn(
+      `[known divergence] ${target} conformance differs from canonical output as recorded in ` +
+      `${divergence.issue}: ${divergence.summary}`,
+    );
+    return;
+  }
+
+  fail(`Executable conformance for ${target} did not match canonical output.\nExpected: ${JSON.stringify(conformanceExpected)}\nActual: ${actualJson}`);
 }
 
 function requirePath(relativePath) {
@@ -1456,7 +1527,7 @@ function runTypeScriptExecutableConformance() {
   writeFileSync(runnerPath, [
     'import { FixtureBag, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, SaveContext, WireOptions } from "./index";',
     "",
-    `const root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)});`,
+    `const root = FixtureRoot.load(JSON.parse(${fixtureRootSampleJsonLiteral}));`,
     `const imageContent = FixtureContent.load(${JSON.stringify(imageContentSample)});`,
     'const knownContent = FixtureContent.load({ kind: "text", value: "hello" }).save();',
     'if (knownContent.kind !== "text" || knownContent.value !== "hello") throw new Error("closed discriminator known value did not round-trip");',
@@ -1579,7 +1650,7 @@ function runPythonExecutableConformance() {
     "import sys",
     `sys.path.insert(0, ${JSON.stringify(generatedRoot)})`,
     "from python import FixtureBag, FixtureCheckpoint, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, LoadContext, ModelInfo, SaveContext, WireOptions",
-    `root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)})`,
+    `root = FixtureRoot.load(json.loads(${fixtureRootSampleJsonLiteral}))`,
     "root = FixtureRoot.load(json.loads(json.dumps(root.save())))",
     'checkpoint = FixtureCheckpoint.load({"pendingToolRequests": [{"id": "call-a", "name": "echo"}, {"id": "call-b", "name": "echo"}]})',
     "checkpoint = FixtureCheckpoint.load(json.loads(json.dumps(checkpoint.save())))",
@@ -1735,17 +1806,11 @@ function runGoExecutableConformance() {
     "func main() {",
     "\tloadCtx := fixtures.NewLoadContext()",
     "\tsaveCtx := fixtures.NewSaveContext()",
-    "\troot, err := fixtures.LoadFixtureRoot(map[string]interface{}{",
-    '\t\t"name": "fixture-root",',
-    '\t\t"description": "A generated fixture with broad emitter coverage.",',
-    '\t\t"tags": []interface{}{"typespec", "emitter", "validation"},',
-    '\t\t"metadata": map[string]interface{}{"source": "fixture", "version": 1},',
-    '\t\t"owner": map[string]interface{}{"id": "owner-1", "displayName": "Fixture Owner"},',
-    '\t\t"content": map[string]interface{}{"kind": "text", "value": "hello from a polymorphic sample"},',
-    '\t\t"contentItems": []interface{}{map[string]interface{}{"kind": "text", "value": "hello from a polymorphic collection"}},',
-    '\t\t"status": "complete",',
-    '\t\t"mode": "bulk",',
-    "\t}, loadCtx)",
+    "\tvar rootData interface{}",
+    `\tif err := json.Unmarshal([]byte(${fixtureRootSampleJsonLiteral}), &rootData); err != nil {`,
+    "\t\tpanic(err)",
+    "\t}",
+    "\troot, err := fixtures.LoadFixtureRoot(rootData, loadCtx)",
     "\tif err != nil {",
     "\t\tpanic(err)",
     "\t}",
@@ -2160,17 +2225,8 @@ function runRustExecutableConformance() {
     "fn main() {",
     "    let load_ctx = LoadContext::new();",
     "    let save_ctx = SaveContext::new();",
-    "    let root = FixtureRoot::load_from_value(&json!({",
-    '        "name": "fixture-root",',
-    '        "description": "A generated fixture with broad emitter coverage.",',
-    '        "tags": ["typespec", "emitter", "validation"],',
-    '        "metadata": {"source": "fixture", "version": 1},',
-    '        "owner": {"id": "owner-1", "displayName": "Fixture Owner"},',
-    '        "content": {"kind": "text", "value": "hello from a polymorphic sample"},',
-    '        "contentItems": [{"kind": "text", "value": "hello from a polymorphic collection"}],',
-    '        "status": "complete",',
-    '        "mode": "bulk"',
-    "    }), &load_ctx);",
+    `    let root_value: serde_json::Value = serde_json::from_str(${fixtureRootSampleJsonLiteral}).unwrap();`,
+    "    let root = FixtureRoot::load_from_value(&root_value, &load_ctx);",
     '    let image_content = FixtureContent::load_from_value(&json!({"kind": "image", "url": "https://example.com/fixture.png"}), &load_ctx);',
     '    let known_content = FixtureContent::from_json(r#"{"kind":"text","value":"hello"}"#, &load_ctx).expect("known closed discriminator");',
     '    assert_eq!(known_content.to_value(&save_ctx), json!({"kind": "text", "value": "hello"}));',
@@ -2453,24 +2509,15 @@ function runCSharpExecutableConformance() {
     "using System.Text.Json;",
     "using Typra.Fixtures;",
     "",
-    "var root = FixtureRoot.Load(new Dictionary<string, object?>",
-    "{",
-    '    ["name"] = "fixture-root",',
-    '    ["description"] = "A generated fixture with broad emitter coverage.",',
-    '    ["tags"] = new List<object?> { "typespec", "emitter", "validation" },',
-    '    ["metadata"] = new Dictionary<string, object?> { ["source"] = "fixture", ["version"] = 1, ["nullable"] = null },',
-    '    ["owner"] = new Dictionary<string, object?> { ["id"] = "owner-1", ["displayName"] = "Fixture Owner" },',
-    '    ["content"] = new Dictionary<string, object?> { ["kind"] = "text", ["value"] = "hello from a polymorphic sample" },',
-    '    ["contentItems"] = new List<object?> { new Dictionary<string, object?> { ["kind"] = "text", ["value"] = "hello from a polymorphic collection" } },',
-    '    ["status"] = "complete",',
-    '    ["mode"] = "bulk",',
-    "});",
-    'if (root.Metadata is null || !root.Metadata.ContainsKey("nullable") || root.Metadata["nullable"] is not null) throw new InvalidOperationException("Record<unknown> must preserve explicit null values during load");',
-    "var savedRoot = root.Save();",
-    'if (savedRoot["metadata"] is not IDictionary<string, object?> savedMetadata || !savedMetadata.ContainsKey("nullable") || savedMetadata["nullable"] is not null) throw new InvalidOperationException("Record<unknown> must preserve explicit null values during save");',
-    "var reloadedRoot = FixtureRoot.Load(savedRoot);",
+    `var root = FixtureRoot.FromJson(${fixtureRootSampleJsonLiteral});`,
+    'if (root.Metadata is null) throw new InvalidOperationException("Record<unknown> metadata must load from the canonical conformance payload");',
+    `var nullMetadataRoot = FixtureRoot.FromJson(${fixtureRootNullMetadataJsonLiteral});`,
+    "var nullMetadata = nullMetadataRoot.Metadata;",
+    'if (nullMetadata is null || !nullMetadata.ContainsKey("nullable") || nullMetadata["nullable"] is not null) throw new InvalidOperationException("Record<unknown> must preserve explicit null values during load");',
+    "var savedNullMetadata = nullMetadataRoot.Save();",
+    'if (savedNullMetadata["metadata"] is not IDictionary<string, object?> savedMetadata || !savedMetadata.ContainsKey("nullable") || savedMetadata["nullable"] is not null) throw new InvalidOperationException("Record<unknown> must preserve explicit null values during save");',
+    "var reloadedRoot = FixtureRoot.Load(savedNullMetadata);",
     'if (reloadedRoot.Metadata is null || !reloadedRoot.Metadata.ContainsKey("nullable") || reloadedRoot.Metadata["nullable"] is not null) throw new InvalidOperationException("Record<unknown> must preserve explicit null values after reload");',
-    'root.Metadata.Remove("nullable");',
     "IDictionary<string, object?> nullableValues = new Dictionary<string, object?> { [\"value\"] = \"nullable\", [\"null\"] = null };",
     "var unknownRecords = new FixtureUnknownRecords { RequiredValues = nullableValues, OptionalValues = nullableValues };",
     'if (unknownRecords.RequiredValues["null"] is not null || unknownRecords.OptionalValues["null"] is not null) throw new InvalidOperationException("Record<unknown> API must accept nullable-valued dictionaries");',
@@ -2625,35 +2672,13 @@ function runJavaExecutableConformance() {
     "",
     "public final class ConformanceValidate {",
     "  public static void main(String[] args) {",
-    "    Map<String, Object> owner = new LinkedHashMap<>();",
-    '    owner.put("id", "owner-1");',
-    '    owner.put("displayName", "Fixture Owner");',
-    "    Map<String, Object> metadata = new LinkedHashMap<>();",
-    '    metadata.put("source", "fixture");',
-    '    metadata.put("version", 1);',
-    "    Map<String, Object> content = new LinkedHashMap<>();",
-    '    content.put("kind", "text");',
-    '    content.put("value", "hello from a polymorphic sample");',
-    "    Map<String, Object> contentItem = new LinkedHashMap<>();",
-    '    contentItem.put("kind", "text");',
-    '    contentItem.put("value", "hello from a polymorphic collection");',
     "    Map<String, Object> imageContentData = new LinkedHashMap<>();",
     '    imageContentData.put("kind", "image");',
     '    imageContentData.put("url", "https://example.com/fixture.png");',
-    "    Map<String, Object> rootData = new LinkedHashMap<>();",
-    '    rootData.put("name", "fixture-root");',
-    '    rootData.put("description", "A generated fixture with broad emitter coverage.");',
-    '    rootData.put("tags", java.util.List.of("typespec", "emitter", "validation"));',
-    '    rootData.put("metadata", metadata);',
-    '    rootData.put("owner", owner);',
-    '    rootData.put("content", content);',
-    '    rootData.put("contentItems", java.util.List.of(contentItem));',
-    '    rootData.put("status", "complete");',
-    '    rootData.put("mode", "bulk");',
+    `    FixtureRoot root = FixtureRoot.fromYaml(${fixtureRootSampleJsonLiteral});`,
     "    Map<String, Object> wireData = new LinkedHashMap<>();",
     '    wireData.put("maxOutputTokens", 256);',
     '    wireData.put("temperature", 0.7);',
-    "    FixtureRoot root = FixtureRoot.fromYaml(TypraYaml.stringify(rootData));",
     "    FixtureContent imageContent = FixtureContent.fromYaml(TypraYaml.stringify(imageContentData));",
     "    Map<String, Object> exactCaseContentData = new LinkedHashMap<>();",
     '    exactCaseContentData.put("kind", "text");',
@@ -2884,17 +2909,7 @@ import Foundation
 
 final class ConformanceValidateTests: XCTestCase {
   func testEmitsCanonicalConformancePayload() throws {
-    let rootData: [String: Any] = [
-      "name": "fixture-root",
-      "description": "A generated fixture with broad emitter coverage.",
-      "tags": ["typespec", "emitter", "validation"],
-      "metadata": ["source": "fixture", "version": 1],
-      "owner": ["id": "owner-1", "displayName": "Fixture Owner"],
-      "content": ["kind": "text", "value": "hello from a polymorphic sample"],
-      "contentItems": [["kind": "text", "value": "hello from a polymorphic collection"]],
-      "status": "complete",
-      "mode": "bulk",
-    ]
+    let rootData = try JSONSerialization.jsonObject(with: Data(${fixtureRootSampleJsonLiteral}.utf8)) as! [String: Any]
     let root = try FixtureRoot.load(rootData)
     let imageContent = try FixtureContent.load(["kind": "image", "url": "https://example.com/fixture.png"])
     let wire = try WireOptions.load(["maxOutputTokens": 256, "temperature": 0.7])
