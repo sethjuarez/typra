@@ -10,7 +10,7 @@ import { existsSync, readdirSync } from "fs";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { CSharpExprVisitor } from "./visitor.js";
 import { lowerType, collectPolymorphicTypeNames } from "../../ir/lower.js";
-import { emitCSharpClass, emitCSharpEnum } from "./emitter.js";
+import { emitCSharpClass, emitCSharpEnum, isCSharpSinglePrecision } from "./emitter.js";
 import { emitCSharpContext, emitCSharpUtils } from "./scaffolding.js";
 import { emitCSharpTest } from "./test-emitter.js";
 import { toPascalCase } from "../../ir/visitor.js";
@@ -223,6 +223,11 @@ export const renderTests = (node: TypeNode, namespace: string, resolveType: Type
     examples,
     coercions,
     factories: node.factories,
+    singlePrecisionKeys: new Set(
+      node.properties
+        .filter(p => p.isScalar && !p.isCollection && isCSharpSinglePrecision(p.typeName.name))
+        .map(p => renderName(p.name)),
+    ),
     renderName,
     renderCsharpFactoryMethodName: (factoryName: string) => renderCsharpFactoryMethodName(factoryName, node),
     renderCsharpFactoryTestValue,

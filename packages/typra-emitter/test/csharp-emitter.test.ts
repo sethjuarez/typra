@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { TypeDecl } from "../src/ir/declarations.js";
-import { emitCSharpClass } from "../src/languages/csharp/emitter.js";
+import { emitCSharpClass, isCSharpSinglePrecision } from "../src/languages/csharp/emitter.js";
 import { CSharpExprVisitor } from "../src/languages/csharp/visitor.js";
 
 describe("C# emitter guarded scalar loads", () => {
@@ -318,5 +318,23 @@ describe("C# abstract open polymorphic dispatch", () => {
     assert.doesNotMatch(source, /_raw/);
     assert.match(source, /Unknown Connection discriminator field/);
     assert.match(source, /Missing Connection discriminator property/);
+  });
+});
+
+describe("C# numeric scalar width parity", () => {
+  it("maps every 64-bit TypeSpec scalar to double, matching the other six backends", () => {
+    // TS number, Python float, Go float64, Rust f64, Java Double and Swift Double
+    // are all 64-bit. C# must not narrow these to System.Single.
+    for (const scalar of ["float", "numeric", "number", "float64"]) {
+      assert.equal(
+        isCSharpSinglePrecision(scalar),
+        false,
+        `${scalar} must map to a 64-bit C# type`,
+      );
+    }
+  });
+
+  it("keeps float32 on 32-bit float", () => {
+    assert.equal(isCSharpSinglePrecision("float32"), true);
   });
 });

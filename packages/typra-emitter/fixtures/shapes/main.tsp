@@ -614,4 +614,10 @@ model WireOptions {
 
   @sample(#{ temperature: 0.7 })
   temperature?: float32;
+
+  @sample(#{ topP: 0.9 })
+  topP?: float;
+
+  @sample(#{ repetitionPenalty: 1.5 })
+  repetitionPenalty?: numeric;
 }
