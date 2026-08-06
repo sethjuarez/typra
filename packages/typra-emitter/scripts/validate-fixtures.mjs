@@ -99,6 +99,20 @@ const fixtureRootSample = {
     astralText: "emoji 🙂 tail",
     paddedText: "  padded  ",
   },
+  // Discriminator values no subtype claims outright. wildcardSelected is the shape behind the
+  // original missing-required-field defect: connection is a required complex field on a subtype
+  // whose discriminator is a wildcard. See FixtureDiscriminatorEdges in main.tsp.
+  discriminatorEdges: {
+    wildcardSelected: {
+      kind: "vendor-extension",
+      name: "wildcard-selected tool",
+      connection: { kind: "custom", endpoint: "https://example.test" },
+      config: { enabled: true },
+    },
+    openUnknown: { kind: "vendor-unrecognized", label: "absorbed by the open base" },
+    unclaimedClosed: { kind: "plain", label: "permitted but unclaimed" },
+    namedOpenUnknown: { kind: "vendor-specific", label: "unrecognized named open kind" },
+  },
 };
 // One canonical conformance input, embedded into every target program.
 //

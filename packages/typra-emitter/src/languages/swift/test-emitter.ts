@@ -164,6 +164,8 @@ function emitNestedValidation(lines: string[], accessor: string, value: Record<s
       emitChildPatternValidation(lines, accessor, value, prop.type!, child, "    ");
       return;
     }
+    emitUnknownPatternValidation(lines, accessor, value, prop.type!, "    ");
+    return;
   }
   for (const [key, expected] of Object.entries(value)) {
     const nestedProp = prop.type ? findProperty(prop.type, key) : undefined;
@@ -195,20 +197,41 @@ function emitPolymorphicValidation(
     emitChildPatternValidation(lines, accessor, sample, node, child, "    ");
     return true;
   }
-  if (!node.isAbstract && !defaultPolymorphicChild(node)) {
-    lines.push(`    if case .unknown(let concrete) = ${accessor} {`);
-    for (const [key, expected] of Object.entries(sample)) {
-      const literal = swiftExpectedLiteral(expected);
-      if (literal === null) continue;
-      const cast = swiftDictionaryCast(expected);
-      lines.push(`      XCTAssertEqual(concrete[${swiftStringLiteral(key)}] as? ${cast}, ${literal})`);
-    }
-    lines.push("    } else {");
-    lines.push(`      XCTFail("Expected ${swiftTypeName(node.typeName.name)}.unknown")`);
-    lines.push("    }");
-    return true;
+  emitUnknownPatternValidation(lines, accessor, sample, node, "    ");
+  return true;
+}
+
+/**
+ * Assert against the `.unknown` arm of a polymorphic enum.
+ *
+ * A discriminated base is emitted as an enum, never a struct, so a sample whose discriminator no
+ * subtype claims has no members to reach through — it lands in `.unknown([String: Any])` and must
+ * be matched as such. Abstractness does not enter into it: the model emitter gates the `.unknown`
+ * case on the absence of a wildcard subtype, not on whether the base is abstract.
+ *
+ * Callers must have already established that no subtype claims the discriminator; a wildcard
+ * subtype always claims it, so reaching here means the enum carries an `.unknown` case. The one
+ * shape this does not cover is a closed-rejecting dispatch, which omits `.unknown` entirely — a
+ * sample like that cannot load in the first place, and TypeNode does not carry the closedness flag
+ * the model emitter uses, so it is left to fail loudly rather than be guessed at here.
+ */
+function emitUnknownPatternValidation(
+  lines: string[],
+  accessor: string,
+  sample: Record<string, any>,
+  node: TypeNode,
+  indent: string,
+): void {
+  lines.push(`${indent}if case .unknown(let concrete) = ${accessor} {`);
+  for (const [key, expected] of Object.entries(sample)) {
+    const literal = swiftExpectedLiteral(expected);
+    if (literal === null) continue;
+    const cast = swiftDictionaryCast(expected);
+    lines.push(`${indent}  XCTAssertEqual(concrete[${swiftStringLiteral(key)}] as? ${cast}, ${literal})`);
   }
-  return false;
+  lines.push(`${indent}} else {`);
+  lines.push(`${indent}  XCTFail("Expected ${swiftTypeName(node.typeName.name)}.unknown")`);
+  lines.push(`${indent}}`);
 }
 
 function emitChildPatternValidation(
