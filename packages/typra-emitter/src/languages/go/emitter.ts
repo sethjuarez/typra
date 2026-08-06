@@ -490,17 +490,9 @@ function emitLoadFunction(
   for (const assign of type.load.assignments) {
     const field = type.fields.find(candidate => candidate.name === assign.fieldName);
     if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
-    const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
-    if (wildcardDiscriminator) {
-      lines.push(`\t\tif discriminatorValue, hasDiscriminator := m["${wildcardDiscriminator}"].(string); hasDiscriminator && discriminatorValue != "" {`);
-    }
-    const indent = wildcardDiscriminator ? "\t\t\t" : "\t\t";
-    lines.push(`${indent}if requiredValue, exists := m["${assign.sourceName}"]; !exists || requiredValue == nil {`);
-    lines.push(`${indent}\treturn result, fmt.Errorf("%s: missing required field", ctx.At("${assign.sourceName}").Path)`);
-    lines.push(`${indent}}`);
-    if (wildcardDiscriminator) {
-      lines.push("\t\t}");
-    }
+    lines.push(`\t\tif requiredValue, exists := m["${assign.sourceName}"]; !exists || requiredValue == nil {`);
+    lines.push(`\t\t\treturn result, fmt.Errorf("%s: missing required field", ctx.At("${assign.sourceName}").Path)`);
+    lines.push("\t\t}");
   }
 
   for (const assign of type.load.assignments) {
@@ -539,6 +531,14 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   for (const variant of dispatch.variants) {
     lines.push(`\t\t\t\tcase "${variant.value}":`);
     lines.push(`\t\t\t\t\treturn Load${variant.typeName.name}(data, ctx)`);
+  }
+
+  // A blank discriminator is not a variant selector — it is the absence of a kind. Breaking out
+  // of the switch lets it fall through to this backend's existing missing-discriminator
+  // behaviour instead of being absorbed by the wildcard/default arm as a fabricated instance.
+  if (!dispatch.variants.some(variant => variant.value === "")) {
+    lines.push('\t\t\t\tcase "":');
+    lines.push("\t\t\t\t\t// blank discriminator: not a variant selector");
   }
 
   // Default variant

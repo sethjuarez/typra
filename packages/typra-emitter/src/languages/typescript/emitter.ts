@@ -690,9 +690,7 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   for (const a of type.load.assignments) {
     const field = type.fields.find(candidate => candidate.name === a.fieldName);
     if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
-    const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
-    const guard = wildcardDiscriminator ? `typeof data["${wildcardDiscriminator}"] === "string" && data["${wildcardDiscriminator}"] !== "" && ` : "";
-    lines.push(`    if (${guard}(data["${a.sourceName}"] === undefined || data["${a.sourceName}"] === null)) {`);
+    lines.push(`    if (data["${a.sourceName}"] === undefined || data["${a.sourceName}"] === null) {`);
     lines.push(`      throw new Error(\`\${context.at("${a.sourceName}").path}: missing required field\`);`);
     lines.push("    }");
   }
@@ -941,7 +939,10 @@ function emitPolymorphicDispatch(
   const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push(`  private static loadKind(data: Record<string, unknown>, context?: LoadContext): ${parentName} {`);
   lines.push(`    const discriminatorValue = data["${dispatch.discriminatorField}"];`);
-  lines.push("    if (discriminatorValue !== undefined && discriminatorValue !== null) {");
+  // A blank discriminator is not a variant selector — it is the absence of a kind. Routing it
+  // here (rather than into the wildcard/default arm) reuses this backend's existing
+  // missing-discriminator behaviour instead of fabricating a wildcard instance.
+  lines.push('    if (discriminatorValue !== undefined && discriminatorValue !== null && String(discriminatorValue) !== "") {');
   lines.push("      const discriminator = String(discriminatorValue);");
   lines.push("      switch (discriminator) {");
 

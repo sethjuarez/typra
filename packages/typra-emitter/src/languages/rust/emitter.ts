@@ -830,7 +830,14 @@ function emitInputValidation(type: TypeDecl, childTypes: TypeDecl[], lines: stri
     if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
       const defaultType = childTypes.find(candidate => candidate.typeName.name === dispatch.defaultVariant!.typeName.name);
       lines.push("            _ => {");
-      lines.push(`                if value.get("${dispatch.discriminatorField}").and_then(|candidate| candidate.as_str()).is_some_and(|discriminator| !discriminator.is_empty()) {`);
+      // A blank or absent discriminator is the only way the Rust enum can carry a *base*
+      // instance of an open discriminated type — the enum has no base case, so such payloads
+      // land on the wildcard variant and its variant-only required fields do not apply.
+      // Every other discriminator value (including a non-string one, which would previously
+      // slip through `as_str()`) genuinely selects the wildcard variant, so the required-field
+      // check must run. See issue #105 on giving Swift/Rust a base representation, which
+      // would let this become unconditional (#104).
+      lines.push(`                if value.get("${dispatch.discriminatorField}").is_some_and(|candidate| !candidate.is_null() && candidate.as_str() != Some("")) {`);
       if (defaultType) emitFieldInputValidation(defaultType, defaultType.load.assignments, lines, "                    ");
       lines.push("                }");
       lines.push("            }");
