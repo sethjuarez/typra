@@ -1,0 +1,10 @@
+{
+  "packages": {
+    "packages/typra-emitter": {
+      "release-type": "node",
+      "package-name": "@typra/emitter",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true
+    }
+  }
+}

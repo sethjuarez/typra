@@ -1,0 +1,36 @@
+name: Conventional PR title
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+
+jobs:
+  commitlint:
+    name: Lint PR title
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+
+      - name: Lint PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$PR_TITLE" |
+            npx --yes \
+              --package=@commitlint/cli@21.2.1 \
+              --package=@commitlint/config-conventional@21.2.0 \
+              commitlint --config .github/commitlint.config.mjs
