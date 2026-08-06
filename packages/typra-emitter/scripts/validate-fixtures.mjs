@@ -885,6 +885,22 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     }
   }
 
+  func testEntryShorthandRoundTripsThroughNamedCollections() throws {
+    let bag = try FixtureBag.load([
+      "items": ["alpha": ["note": "first"]],
+      "secondItems": ["beta": "second"],
+    ])
+    XCTAssertEqual(bag.items.count, 1, "named object collection must load into an ordered list")
+    XCTAssertEqual(bag.items.first?.name, "alpha", "named object collection must adopt the key as name")
+    XCTAssertEqual(bag.secondItems.first?.note, "second", "named scalar shorthand must load into the primary field")
+
+    let objectBag = try bag.save()["items"] as? [String: Any]
+    XCTAssertEqual(objectBag?["alpha"] as? String, "first", "default object save must use shorthand")
+
+    let expandedBag = try bag.save(SaveContext(useShorthand: false))["items"] as? [String: Any]
+    XCTAssertNotNil(expandedBag?["alpha"] as? [String: Any], "useShorthand=false must preserve the item object")
+  }
+
   func testMissingRequiredCustomToolConnectionIsRejectedPathfully() throws {
     do {
       _ = try FixtureToolbox.fromJSON("""
@@ -1297,7 +1313,7 @@ function runTypeScriptExecutableConformance() {
   const configPath = path.join(sourceDir, "tsconfig.conformance.json");
   const outDir = path.join(sourceDir, ".typra-conformance");
   writeFileSync(runnerPath, [
-    'import { FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, SaveContext, WireOptions } from "./index";',
+    'import { FixtureBag, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, SaveContext, WireOptions } from "./index";',
     "",
     `const root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)});`,
     `const imageContent = FixtureContent.load(${JSON.stringify(imageContentSample)});`,
@@ -1361,6 +1377,13 @@ function runTypeScriptExecutableConformance() {
     'if (!Array.isArray(duplicateSaved.items) || duplicateSaved.items.length !== 2) throw new Error("duplicate named collection lost entries");',
     'if (!Array.isArray(uniqueNamed.save(new SaveContext({ collectionFormat: "array" })).items)) throw new Error("explicit array format was ignored");',
     'try { FixtureNamedRoot.load({ inputs: { profile: { properties: { arrayEntry: [] } } } }); throw new Error("array-valued named entry was accepted"); } catch (error) { const message = String(error); if (!message.includes("inputs.profile.properties.arrayEntry") || !message.includes("array")) throw error; }',
+    'const bag = FixtureBag.load({ items: { alpha: { note: "first" } }, secondItems: { beta: "second" } });',
+    'if (bag.items.length !== 1 || bag.items[0].name !== "alpha") throw new Error("named object collection must load into an ordered list");',
+    'if (bag.secondItems[0].note !== "second") throw new Error("named scalar shorthand must load into the primary field");',
+    'const objectBag = bag.save();',
+    'if ((objectBag.items as any).alpha !== "first") throw new Error("default object save must use shorthand");',
+    'const expandedBag = bag.save(new SaveContext({ useShorthand: false }));',
+    'if (typeof (expandedBag.items as any).alpha !== "object") throw new Error("useShorthand=false must preserve the item object");',
     "console.log(JSON.stringify({",
     "  root: root.save(),",
     "  imageContent: imageContent.save(),",
@@ -1414,7 +1437,7 @@ function runPythonExecutableConformance() {
     "import json",
     "import sys",
     `sys.path.insert(0, ${JSON.stringify(generatedRoot)})`,
-    "from python import FixtureCheckpoint, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, LoadContext, ModelInfo, SaveContext, WireOptions",
+    "from python import FixtureBag, FixtureCheckpoint, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, LoadContext, ModelInfo, SaveContext, WireOptions",
     `root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)})`,
     "root = FixtureRoot.load(json.loads(json.dumps(root.save())))",
     'checkpoint = FixtureCheckpoint.load({"pendingToolRequests": [{"id": "call-a", "name": "echo"}, {"id": "call-b", "name": "echo"}]})',
@@ -1480,6 +1503,13 @@ function runPythonExecutableConformance() {
     'duplicate_saved = FixtureNamedPayloadCollection.load({"items": [{"name": "dup", "payload": 1}, {"name": "dup", "payload": 2}]}).save()',
     'assert isinstance(duplicate_saved["items"], list) and len(duplicate_saved["items"]) == 2',
     'assert isinstance(unique_named.save(SaveContext(collection_format="array"))["items"], list)',
+    'bag = FixtureBag.load({"items": {"alpha": {"note": "first"}}, "secondItems": {"beta": "second"}})',
+    'assert len(bag.items) == 1 and bag.items[0].name == "alpha", "named object collection must load into an ordered list"',
+    'assert bag.second_items[0].note == "second", "named scalar shorthand must load into the primary field"',
+    "object_bag = bag.save()",
+    'assert object_bag["items"]["alpha"] == "first", "default object save must use shorthand"',
+    "expanded_bag = bag.save(SaveContext(use_shorthand=False))",
+    'assert isinstance(expanded_bag["items"]["alpha"], dict), "useShorthand=False must preserve the item object"',
     "try:",
     '    FixtureNamedRoot.load({"inputs": {"profile": {"properties": {"arrayEntry": []}}}})',
     "except TypeError as error:",
@@ -1897,6 +1927,17 @@ function runGoExecutableConformance() {
     '\tarrayCtx := fixtures.NewSaveContext()',
     '\tarrayCtx.CollectionFormat = fixtures.CollectionFormatArray',
     '\tif _, ok := uniqueNamed.Save(arrayCtx)["items"].([]interface{}); !ok { panic("explicit array format was ignored") }',
+    '\tbag, bagErr := fixtures.LoadFixtureBag(map[string]interface{}{"items": map[string]interface{}{"alpha": map[string]interface{}{"note": "first"}}, "secondItems": map[string]interface{}{"beta": "second"}}, loadCtx)',
+    "\tif bagErr != nil { panic(bagErr) }",
+    '\tif len(bag.Items) != 1 || bag.Items[0].Name != "alpha" { panic("named object collection must load into an ordered list") }',
+    '\tif bag.SecondItems[0].Note == nil || *bag.SecondItems[0].Note != "second" { panic("named scalar shorthand must load into the primary field") }',
+    '\tobjectBagItems, ok := bag.Save(saveCtx)["items"].(map[string]interface{})',
+    '\tif !ok || objectBagItems["alpha"] != "first" { panic("default object save must use shorthand") }',
+    "\texpandCtx := fixtures.NewSaveContext()",
+    "\texpandCtx.UseShorthand = false",
+    '\texpandedBagItems, ok := bag.Save(expandCtx)["items"].(map[string]interface{})',
+    '\tif !ok { panic("useShorthand=false must keep the object collection form") }',
+    '\tif _, ok := expandedBagItems["alpha"].(map[string]interface{}); !ok { panic("useShorthand=false must preserve the item object") }',
     '\t_, namedErr := fixtures.LoadFixtureNamedRoot(map[string]interface{}{"inputs": map[string]interface{}{"profile": map[string]interface{}{"properties": map[string]interface{}{"arrayEntry": []interface{}{}}}}}, loadCtx)',
     '\tif namedErr == nil || !strings.Contains(namedErr.Error(), "inputs.profile.properties.arrayEntry") || !strings.Contains(namedErr.Error(), "array") { panic("array-valued named entry was accepted") }',
     "\timageContentSaved := imageContent.(interface {",
@@ -2079,6 +2120,14 @@ function runRustExecutableConformance() {
     '    let mut array_ctx = SaveContext::new();',
     '    array_ctx.collection_format = "array".to_string();',
     '    assert!(unique_named.to_value(&array_ctx).get("items").unwrap().is_array());',
+    '    let bag = FixtureBag::load_from_value(&json!({"items": {"alpha": {"note": "first"}}, "secondItems": {"beta": "second"}}), &load_ctx);',
+    '    assert_eq!(bag.items.len(), 1, "named object collection must load into an ordered list");',
+    '    assert_eq!(bag.items[0].name, "alpha", "named object collection must adopt the key as name");',
+    '    assert_eq!(bag.second_items[0].note.as_deref(), Some("second"), "named scalar shorthand must load into the primary field");',
+    '    assert_eq!(bag.to_value(&save_ctx).get("items").unwrap(), &json!({"alpha": "first"}), "default object save must use shorthand");',
+    "    let mut expand_ctx = SaveContext::new();",
+    "    expand_ctx.use_shorthand = false;",
+    '    assert_eq!(bag.to_value(&expand_ctx).get("items").unwrap(), &json!({"alpha": {"note": "first"}}), "use_shorthand=false must preserve the item object");',
     '    let error = FixtureNamedRoot::from_json(r#"{"inputs":{"profile":{"properties":{"arrayEntry":[]}}}}"#, &load_ctx).expect_err("array-valued named entry");',
     '    let message = error.to_string();',
     '    assert!(message.contains("inputs.profile.properties.arrayEntry") && message.contains("array"), "{message}");',
@@ -2373,6 +2422,11 @@ function runCSharpExecutableConformance() {
     'var arrayFunctionTool = FixtureFunctionTool.FromJson("""{"kind":"function","name":"convert","command":"convert","bindings":[{"name":"unit","source":"preferred_unit"}]}""");',
     'if (arrayFunctionTool.Bindings is not { Count: 1 } || arrayFunctionTool.Bindings[0].Name != "unit" || arrayFunctionTool.Bindings[0].Source != "preferred_unit") throw new InvalidOperationException("array-form bindings regressed");',
     'if (uniqueNamed.Save(new SaveContext { CollectionFormat = "array" })["items"] is not IList<Dictionary<string, object?>>) throw new InvalidOperationException("explicit array format was ignored");',
+    'var bag = FixtureBag.FromJson("""{"items":{"alpha":{"note":"first"}},"secondItems":{"beta":"second"}}""");',
+    'if (bag.Items.Count != 1 || bag.Items[0].Name != "alpha") throw new InvalidOperationException("named object collection must load into an ordered list");',
+    'if (bag.SecondItems[0].Note != "second") throw new InvalidOperationException("named scalar shorthand must load into the primary field");',
+    'if (bag.Save()["items"] is not IDictionary<string, object?> bagItems || bagItems["alpha"] as string != "first") throw new InvalidOperationException("default object save must use shorthand");',
+    'if (bag.Save(new SaveContext { UseShorthand = false })["items"] is not IDictionary<string, object?> expandedBagItems || expandedBagItems["alpha"] is not IDictionary<string, object?>) throw new InvalidOperationException("useShorthand=false must preserve the item object");',
     'try { FixtureNamedRoot.FromJson("""{"inputs":{"profile":{"properties":{"arrayEntry":[]}}}}"""); throw new InvalidOperationException("array-valued named entry was accepted"); } catch (ArgumentException error) { if (!error.Message.Contains("inputs.profile.properties.arrayEntry") || !error.Message.Contains("array")) throw; }',
     "// Issue #47: a failure inside an array element must carry the element index, so a",
     "// diagnostic cannot silently degrade to naming only the field.",
