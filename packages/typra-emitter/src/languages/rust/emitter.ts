@@ -1628,6 +1628,19 @@ function emitCollectionSaveHelper(
     lines.push('                other => { let mut m = serde_json::Map::new(); m.insert("value".to_string(), other); m },');
     lines.push("            };");
     lines.push('            let serde_json::Value::String(name) = item_data.remove("name").expect("validated named collection item") else { unreachable!() };');
+    if (helper.coercionProperty) {
+      // Mirror of the shared save-side contract: when the only surviving field is the
+      // scalar-coercion target, the entry collapses back to the bare scalar it loaded
+      // from. Without this the Rust backend emitted the expanded object form while
+      // every other backend emitted shorthand, so a name-keyed collection did not
+      // round-trip byte-identically across languages.
+      lines.push("            if ctx.use_shorthand && item_data.len() == 1 {");
+      lines.push(`                if let Some(shorthand) = item_data.get(${JSON.stringify(helper.coercionProperty)}) {`);
+      lines.push("                    result.insert(name, shorthand.clone());");
+      lines.push("                    continue;");
+      lines.push("                }");
+      lines.push("            }");
+    }
     lines.push("            result.insert(name, serde_json::Value::Object(item_data));");
     lines.push("        }");
     lines.push("        serde_json::Value::Object(result)");

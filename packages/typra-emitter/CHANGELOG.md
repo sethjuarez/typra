@@ -6,6 +6,27 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## 0.4.29
+
+### Fixed
+
+- **The Rust backend ignored entry shorthand when saving name-keyed collections** (#89).
+  A collection entry whose only field was the scalar-coercion target was written back as an
+  expanded object — `{"alpha": {"note": "first"}}` — while TypeScript, Python, Go, C#, Java and
+  Swift all collapsed it to the bare scalar `{"alpha": "first"}`. Rust honoured `@entryShorthand`
+  on load but never on save, so the two halves of the same generated file disagreed and a
+  name-keyed collection did not round-trip byte-identically across languages.
+  `emitCollectionSaveHelper()` now mirrors the shared save-side contract: when `use_shorthand`
+  is set and the only surviving field is the coercion target, the entry collapses back to the
+  scalar. Types with no scalar coercion target are unaffected.
+
+### Testing
+
+- The `entry-shorthand` executable-conformance probe, previously asserted only by the Java
+  runner, is now asserted by all seven. That was the last remaining gap in per-runner contract
+  coverage, and porting it is what surfaced #89 — the third defect in a row found by
+  cross-runner parity rather than by consumer feedback.
+
 ## 0.4.28
 
 ### Fixed
