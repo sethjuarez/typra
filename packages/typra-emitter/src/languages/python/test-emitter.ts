@@ -42,6 +42,21 @@ function factoryParamTestValue(typeStr: string): string {
 }
 
 /**
+ * Render a bare (undelimited) scalar literal as Python source.
+ *
+ * Coercion values reach the test emitter already rendered as JSON literals, so the boolean
+ * and null spellings are `true`/`false`/`null`. Those are not Python and produce a
+ * `NameError` at collection time. Only undelimited values go through here: a delimited
+ * value is a string, where `"true"` must stay the string `"true"`.
+ */
+function pythonScalarLiteral(value: unknown): string {
+  if (value === true || value === "true") return "True";
+  if (value === false || value === "false") return "False";
+  if (value === null || value === "null") return "None";
+  return `${value}`;
+}
+
+/**
  * Render a single validation assertion line for a Python test.
  */
 function renderValidation(v: PropertyValidation, varName: string): string {
@@ -52,7 +67,9 @@ function renderValidation(v: PropertyValidation, varName: string): string {
   } else {
     const expected = typeof v.value === "string" && /[\r\n\t]/.test(v.value)
       ? `"${v.value.replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t")}"`
-      : `${v.delimiter}${v.value}${v.delimiter}`;
+      : v.delimiter === ""
+        ? pythonScalarLiteral(v.value)
+        : `${v.delimiter}${v.value}${v.delimiter}`;
     return `    assert ${varName}.${v.key} == ${expected}`;
   }
 }
@@ -365,7 +382,7 @@ export function emitPythonTest(ctx: BaseTestContext & { classCtx: PythonClassCon
   if (coercions.length > 0) {
     for (const alt of coercions) {
       lines.push(`def test_load_${typeNameLower}_from_${alt.scalarType}():`);
-      lines.push(`    instance = ${typeName}.load(${alt.value})`);
+      lines.push(`    instance = ${typeName}.load(${pythonScalarLiteral(alt.value)})`);
       lines.push(`    assert instance is not None`);
       for (const v of alt.validations) {
         lines.push(renderValidation(v, 'instance'));
@@ -383,14 +400,32 @@ export function emitPythonTest(ctx: BaseTestContext & { classCtx: PythonClassCon
         .map(([_, pType]) => factoryParamTestValue(pType))
         .join(', ');
 
+      // `sets` values may embed `{param}` placeholders resolved at call time. The generated
+      // call passes concrete test values, so the assertions must compare against those
+      // substituted results — asserting the raw template compares against a literal "{id}".
+      // Mirrors the same substitution in the C# test emitter.
+      const paramLiterals = new Map<string, string>();
+      for (const [pName, pType] of Object.entries(factory.params)) {
+        const rendered = factoryParamTestValue(pType);
+        paramLiterals.set(
+          pName,
+          rendered.length > 1 && rendered.startsWith('"') && rendered.endsWith('"')
+            ? rendered.slice(1, -1)
+            : rendered,
+        );
+      }
+      const substituteParams = (raw: string): string =>
+        raw.replace(/\{(\w+)\}/g, (match, param) => paramLiterals.get(param) ?? match);
+
       lines.push(`def test_factory_${factorySnake}_${typeNameLower}():`);
       lines.push(`    """Test that ${factory.name}() factory creates a valid instance."""`);
       lines.push(`    instance = ${typeName}.${safeName}(${params})`);
       lines.push(`    assert instance is not None`);
       lines.push(`    assert isinstance(instance, ${typeName})`);
 
-      for (const [propName, value] of Object.entries(factory.sets)) {
+      for (const [propName, rawValue] of Object.entries(factory.sets)) {
         const snakeProp = toSnakeCase(propName);
+        const value = typeof rawValue === 'string' ? substituteParams(rawValue) : rawValue;
         if (value === true) {
           lines.push(`    assert instance.${snakeProp}`);
         } else if (value === false) {
