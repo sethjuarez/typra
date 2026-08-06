@@ -17,13 +17,9 @@ import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import { collectProtocolNodes, emitTypeScriptProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
 
 /**
- * Stale-file deletion is intentionally disabled until manifest cleanup is enabled.
+ * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the
+ * previous run's manifest to decide ownership rather than guessing from file names.
  */
-function cleanupFlatTypeFiles(relDir: string | undefined, isTypeFile: (name: string) => boolean): void {
-  void relDir;
-  void isTypeFile;
-  return;
-}
 
 /**
  * Generate TypeScript code from TypeSpec models.
@@ -44,14 +40,6 @@ export const generateTypeScript = async (
   // Determine namespace: use override or default
   const originalNamespace = node.typeName.namespace;
   const tsNamespace = emitTarget.namespace ?? originalNamespace.replace(/\.Core$/, "");
-
-  // Stale flat-file cleanup is disabled in this slice.
-  cleanupFlatTypeFiles(emitTarget["output-dir"], name =>
-    name.endsWith(".ts") && name !== "context.ts" && name !== "index.ts" && name !== "eslint.config.js"
-  );
-  cleanupFlatTypeFiles(emitTarget["test-dir"], name =>
-    name.endsWith(".ts") && name !== "context.test.ts"
-  );
 
   // Emit context classes (LoadContext, SaveContext)
   const contextCode = emitTypeScriptContext();

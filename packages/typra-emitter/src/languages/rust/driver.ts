@@ -54,13 +54,9 @@ function rustFieldName(name: string): string {
 
 
 /**
- * Stale-file deletion is intentionally disabled until manifest cleanup is enabled.
+ * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the
+ * previous run's manifest to decide ownership rather than guessing from file names.
  */
-function cleanupFlatTypeFiles(relDir: string | undefined, isTypeFile: (name: string) => boolean): void {
-  void relDir;
-  void isTypeFile;
-  return;
-}
 
 /**
  * Main entry point for Rust code generation.
@@ -73,14 +69,6 @@ export const generateRust = async (
 ): Promise<void> => {
   const allTypes = Array.from(enumerateTypes(node));
   const nodes = filterNodes(allTypes, options);
-
-  // Stale flat-file cleanup is disabled in this slice.
-  cleanupFlatTypeFiles(emitTarget["output-dir"], name =>
-    name.endsWith(".rs") && name !== "context.rs" && name !== "mod.rs" && name !== "lib.rs"
-  );
-  cleanupFlatTypeFiles(emitTarget["test-dir"], name =>
-    name.endsWith(".rs") && name !== "mod.rs" && name !== "main.rs"
-  );
 
   // Build the expression IR infrastructure for this compilation
   const registry = TypeRegistry.fromTypeGraph(allTypes);
