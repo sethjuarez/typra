@@ -6,6 +6,27 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## 0.4.25
+
+### Fixed
+
+- **C# generated conversion tests omitted required fields and failed against their own generated
+  loaders** (#80). `csharp/driver.ts` built test payloads locally from `@sample` decorators alone
+  instead of going through `buildBaseTestContext`, so it never ran the `withRequiredComplexSamples`
+  completion step the other six backends get. A required complex property carrying no `@sample` was
+  silently dropped from the fixture, and the generated validation then rejected the very payload the
+  generator produced. In prompty this failed 48 tests across 8 auto-generated test classes.
+  `withRequiredComplexSamples` is now exported and C# calls it, threading in the `TypeRegistry` it
+  already had — the same resolver every other backend passes.
+
+### Testing
+
+- `test/test-context.test.ts` gained a `csharp driver — generated fixtures satisfy generated loaders`
+  block driving the real `renderTests` from `csharp/driver.ts`: one test asserting a required complex
+  property reaches the emitted fixture, and a counterpart guard asserting an optional one stays out.
+  Covering the driver rather than the shared helper is deliberate — the helper was already correct
+  and already tested; the defect was a backend not calling it.
+
 ## 0.4.24
 
 ### Fixed
