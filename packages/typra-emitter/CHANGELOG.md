@@ -6,6 +6,31 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## 0.4.26
+
+### Fixed
+
+- **Generated output was never pruned, so removed types left orphaned files behind** (#82). When a
+  type stopped being emitted, its generated source and generated test stayed on disk, kept
+  compiling, and kept running — a generated test for a deleted type becomes a phantom failure in
+  the consumer that reads as an emitter regression. A run only knows what it emitted, so the
+  previous run's manifest is the only record of what used to exist. `pruneStaleGeneratedFiles` now
+  reads that manifest before the new one replaces it and removes what the current run no longer
+  produces.
+
+  Deletion is ownership-based and mirrors the ladder already used by `removeSkippedGeneratedFile`:
+  a file is removed only when the previous manifest recorded it as marker-owned, it is absent from
+  this run, and it still carries the generated marker on disk. Editable seams are preserved,
+  consumer-replaced files (marker gone) are preserved with a warning, and anything still emitted is
+  untouched. An unreadable manifest deletes nothing.
+
+### Changed
+
+- Retired the stubbed `cleanupFlatTypeFiles` no-ops in the csharp, python, rust and typescript
+  drivers. They were placeholders waiting on exactly this manifest cleanup, and guessed ownership
+  from file names. Pruning is language-agnostic, so the single central pass covers every backend —
+  including java and swift, which never had a stub at all.
+
 ## 0.4.25
 
 ### Fixed

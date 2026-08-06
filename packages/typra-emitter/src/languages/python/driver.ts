@@ -48,13 +48,9 @@ export const pythonTypeMapper: Record<string, string> = {
 };
 
 /**
- * Stale-file deletion is intentionally disabled until manifest cleanup is enabled.
+ * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the
+ * previous run's manifest to decide ownership rather than guessing from file names.
  */
-function cleanupFlatTypeFiles(relDir: string | undefined, isTypeFile: (name: string) => boolean): void {
-  void relDir;
-  void isTypeFile;
-  return;
-}
 
 /**
  * Main entry point for Python code generation.
@@ -78,10 +74,6 @@ export const generatePython = async (
 
   // Import path for test files — defaults to packageName, can be overridden via import-path config
   const importPath = emitTarget["import-path"] || packageName;
-
-  // Stale flat-file cleanup is disabled in this slice.
-  cleanupFlatTypeFiles(emitTarget["output-dir"], name => /^_.+\.py$/.test(name) && name !== "_context.py");
-  cleanupFlatTypeFiles(emitTarget["test-dir"], name => /^test_.+\.py$/.test(name) && name !== "test_context.py");
 
   // Emit py.typed marker for PEP 561 compliance
   await emitPythonFile(context, 'py.typed', '', emitTarget["output-dir"], emitTarget["output-dir"], { allowEmpty: true });

@@ -19,13 +19,9 @@ import { collectProtocolNodes, emitCSharpProtocolScaffolds, shouldEmitCompileOnl
 import { withRequiredComplexSamples, TypeResolver } from "../../testing/test-context.js";
 
 /**
- * Stale-file deletion is intentionally disabled until manifest cleanup is enabled.
+ * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the
+ * previous run's manifest to decide ownership rather than guessing from file names.
  */
-function cleanupFlatTypeFiles(relDir: string | undefined, isTypeFile: (name: string) => boolean): void {
-  void relDir;
-  void isTypeFile;
-  return;
-}
 
 function cleanupGeneratedCSharpFiles(relDir: string | undefined): void {
   void relDir;
@@ -38,13 +34,6 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
 
   cleanupGeneratedCSharpFiles(emitTarget["output-dir"]);
   cleanupGeneratedCSharpFiles(emitTarget["test-dir"]);
-
-  // Stale flat-file cleanup is disabled in this slice.
-  const isCsTypeFile = (name: string) =>
-    name.endsWith(".cs") && name !== "Context.cs" && name !== "Utils.cs" &&
-    !name.endsWith("Helpers.cs") && !name.endsWith("Extensions.cs");
-  cleanupFlatTypeFiles(emitTarget["output-dir"], isCsTypeFile);
-  cleanupFlatTypeFiles(emitTarget["test-dir"], isCsTypeFile);
 
   // Build the expression IR infrastructure
   const registry = TypeRegistry.fromTypeGraph(allTypes);
