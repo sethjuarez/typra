@@ -6,6 +6,39 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## 0.4.30
+
+### Fixed
+
+- **The C# backend generated conversion tests that did not compile against its own generated
+  models** (#91). `src/languages/csharp/driver.ts` builds its test validations by hand rather
+  than through the shared `buildValidations()` in `src/testing/test-context.ts`, and its filter
+  consulted only the sample payload — never the node's properties. Any non-object `@sample` key
+  became an assertion, including keys that are not members of the emitted class: a polymorphic
+  base whose `@sample` carries a subtype payload asserted `instance.Endpoint` on a base that has
+  no such property (CS1061), and a complex property populated through a scalar coercion compared
+  a string to the complex type, binding the wrong `Assert.Equal` overload (CS1503). The shared
+  predicate is now applied, so only genuine scalar and enum properties are asserted. The field
+  remains in the generated payload, so the coercion is still exercised — matching Go, Rust,
+  Java, TypeScript and Python, which all include the field but skip the assertion.
+- **Generated C# factory tests asserted unsubstituted `{param}` templates** (#91). `@factory`
+  `sets` values may embed placeholders resolved from the call arguments, but the emitted test
+  compared against the raw template, so `FixtureReference.Named("test", "test")` asserted
+  `"{id}"` and could never pass. The call arguments are now substituted before the assertion is
+  emitted.
+- **The C# type map had no entry for `float` or `numeric`, and mapped `number` to 32-bit
+  `float`.** C# was the only backend of seven missing these: TypeScript, Python, Go, Rust, Java
+  and Swift all resolve `float`, `numeric` and `number` to a 64-bit double, while C# fell
+  through to `object` for the first two and silently narrowed the third. All three now map to
+  `double`. Generated test literals track the declared width — a fractional literal is suffixed
+  `f` only for genuine 32-bit fields, since `0.9f` widens to `0.8999999761581421` and would fail
+  its own generated assertion against a `double?`.
+
+### Added
+
+- `fixtures/shapes/main.tsp` now exercises plain `float` and `numeric` scalars, which no fixture
+  previously covered — the gap that let the C# numeric defect survive.
+
 ## 0.4.29
 
 ### Fixed

@@ -31,6 +31,8 @@ export interface CSharpTestContext {
     validations: Array<{ key: string; value: any; delimiter: string }>;
   }>;
   factories: FactoryEntry[];
+  /** Property keys whose C# type is 32-bit `float`, so their test literals need an `f` suffix. */
+  singlePrecisionKeys: ReadonlySet<string>;
   renderName: (name: string) => string;
   renderCsharpFactoryMethodName: (factoryName: string) => string;
   renderCsharpFactoryTestValue: (typeStr: string) => string;
@@ -72,7 +74,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push(`        var instance = ${typeName}.FromYaml(yamlData);`);
     L.push('');
     L.push('        Assert.NotNull(instance);');
-    const yamlAssertions = emitExampleAssertions(sample.validations, 'instance', "yaml");
+    const yamlAssertions = emitExampleAssertions(sample.validations, 'instance', "yaml", ctx.singlePrecisionKeys);
     if (yamlAssertions) L.push(yamlAssertions);
     L.push('    }');
     L.push('');
@@ -85,7 +87,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push('');
     L.push(`        var instance = ${typeName}.FromJson(jsonData);`);
     L.push('        Assert.NotNull(instance);');
-    const jsonAssertions = emitExampleAssertions(sample.validations, 'instance', "json");
+    const jsonAssertions = emitExampleAssertions(sample.validations, 'instance', "json", ctx.singlePrecisionKeys);
     if (jsonAssertions) L.push(jsonAssertions);
     L.push('    }');
     L.push('');
@@ -105,7 +107,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push('');
     L.push(`        var reloaded = ${typeName}.FromJson(json);`);
     L.push('        Assert.NotNull(reloaded);');
-    const rtJsonAssertions = emitExampleAssertions(sample.validations, 'reloaded', "json");
+    const rtJsonAssertions = emitExampleAssertions(sample.validations, 'reloaded', "json", ctx.singlePrecisionKeys);
     if (rtJsonAssertions) L.push(rtJsonAssertions);
     L.push('    }');
     L.push('');
@@ -125,7 +127,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push('');
     L.push(`        var reloaded = ${typeName}.FromYaml(yaml);`);
     L.push('        Assert.NotNull(reloaded);');
-    const rtYamlAssertions = emitExampleAssertions(sample.validations, 'reloaded', "yaml");
+    const rtYamlAssertions = emitExampleAssertions(sample.validations, 'reloaded', "yaml", ctx.singlePrecisionKeys);
     if (rtYamlAssertions) L.push(rtYamlAssertions);
     L.push('    }');
     L.push('');
@@ -215,6 +217,22 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
         .map(pType => ctx.renderCsharpFactoryTestValue(pType))
         .join(', ');
 
+      // `sets` values may embed `{param}` placeholders resolved at call time. The generated
+      // call passes concrete test values, so the assertions must compare against those
+      // substituted results — asserting the raw template compares against a literal "{id}".
+      const paramLiterals = new Map<string, string>();
+      for (const [pName, pType] of Object.entries(factory.params)) {
+        const rendered = ctx.renderCsharpFactoryTestValue(pType);
+        paramLiterals.set(
+          pName,
+          rendered.length > 1 && rendered.startsWith('"') && rendered.endsWith('"')
+            ? rendered.slice(1, -1)
+            : rendered,
+        );
+      }
+      const substituteParams = (raw: string): string =>
+        raw.replace(/\{(\w+)\}/g, (match, param) => paramLiterals.get(param) ?? match);
+
       L.push('');
       L.push('    [Fact]');
       L.push(`    public void Factory${methodName}()`);
@@ -222,7 +240,8 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
       L.push(`        var instance = ${typeName}.${methodName}(${paramValues});`);
       L.push('        Assert.NotNull(instance);');
 
-      for (const [propName, value] of Object.entries(factory.sets)) {
+      for (const [propName, rawValue] of Object.entries(factory.sets)) {
+        const value = typeof rawValue === 'string' ? substituteParams(rawValue) : rawValue;
         if (value === true) {
           L.push(`        Assert.True(instance.${ctx.renderName(propName)});`);
         } else if (value === false) {
@@ -262,6 +281,7 @@ function emitExampleAssertions(
   validations: Array<{ key: string; value: any; isExpression: boolean }>,
   varName: string,
   format: "json" | "yaml",
+  singlePrecisionKeys: ReadonlySet<string>,
 ): string {
   return validations.map(v => {
     if (typeof v.value === "boolean") {
@@ -270,9 +290,11 @@ function emitExampleAssertions(
     if (v.isExpression) {
       return `        Assert.Equal(${v.value}, ${varName}.${v.key});`;
     }
+    const needsFloatSuffix =
+      typeof v.value === "number" && !Number.isInteger(v.value) && singlePrecisionKeys.has(v.key);
     const expected = typeof v.value === "string"
       ? csharpStringLiteral(format === "yaml" ? normalizeYamlString(v.value) : v.value)
-      : `${v.value}${typeof v.value === "number" && !Number.isInteger(v.value) ? "f" : ""}`;
+      : `${v.value}${needsFloatSuffix ? "f" : ""}`;
     return `        Assert.Equal(${expected}, ${varName}.${v.key});`;
   }).join('\n');
 }

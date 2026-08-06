@@ -53,12 +53,14 @@ import { csharpIdentifier } from "./identifiers.js";
 
 const CSHARP_TYPE_MAP: Record<string, string> = {
   string: "string",
-  number: "float",
+  number: "double",
   boolean: "bool",
   int32: "int",
   int64: "long",
+  float: "double",
   float32: "float",
   float64: "double",
+  numeric: "double",
   integer: "int",
   object: "object",
   unknown: "object",
@@ -76,6 +78,18 @@ const CONVERT_MAP: Record<string, string> = {
 };
 
 const NON_NULLABLE_VALUE_TYPES = new Set(["bool", "int", "long", "float", "double"]);
+
+/**
+ * True when a TypeSpec scalar maps to C#'s 32-bit `float` (System.Single).
+ *
+ * Generated test literals must carry an `f` suffix for these and none for
+ * 64-bit fields: `0.9f` widens to 0.8999999761581421 as a double, so an
+ * unsuffixed literal compared against a `float?` — or a suffixed one compared
+ * against a `double?` — fails on precision alone.
+ */
+export function isCSharpSinglePrecision(scalarType: string): boolean {
+  return CSHARP_TYPE_MAP[scalarType] === "float";
+}
 
 function csharpString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
