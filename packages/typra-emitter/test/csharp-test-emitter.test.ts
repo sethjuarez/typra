@@ -5,7 +5,7 @@ import { TypeNode } from "../src/ir/ast.js";
 import { emitCSharpTest } from "../src/languages/csharp/test-emitter.js";
 
 describe("C# test emitter", () => {
-  it("matches YAML trailing-space normalization while JSON preserves raw strings", () => {
+  it("preserves raw strings byte-exactly in both JSON and YAML assertions", () => {
     const node = {
       typeName: { namespace: "Prompty", name: "Prompty" },
       properties: [],
@@ -32,19 +32,21 @@ describe("C# test emitter", () => {
     });
 
     assert.match(code, /^#nullable enable$/m);
+    // C# no longer folds double-quoted multiline YAML scalars, so the trailing space
+    // survives the round trip and the YAML assertion is identical to the JSON one.
+    // Previously the YAML variant was trailing-space normalized to compensate for the
+    // space the fold silently dropped. See #93.
     const assertions = code.match(/Assert\.Equal\("[^"]+", instance\.Instructions\);/g);
     assert.deepEqual(assertions, [
-      'Assert.Equal("first line with trailing space\\nsecond line \\u2028third line", instance.Instructions);',
+      'Assert.Equal("first line with trailing space \\nsecond line \\u2028third line", instance.Instructions);',
       'Assert.Equal("first line with trailing space \\nsecond line \\u2028third line", instance.Instructions);',
     ]);
-    assert.match(
-      code,
-      /Assert\.Equal\("first line with trailing space \\nsecond line \\u2028third line", reloaded\.Instructions\);/,
-    );
-    assert.match(
-      code,
-      /Assert\.Equal\("first line with trailing space\\nsecond line \\u2028third line", reloaded\.Instructions\);/,
-    );
+    const roundtrips = code.match(/Assert\.Equal\("[^"]+", reloaded\.Instructions\);/g);
+    assert.deepEqual(roundtrips, [
+      'Assert.Equal("first line with trailing space \\nsecond line \\u2028third line", reloaded.Instructions);',
+      'Assert.Equal("first line with trailing space \\nsecond line \\u2028third line", reloaded.Instructions);',
+    ]);
+    // The trailing space must be inside the literal, never dangling at end-of-line.
     assert.doesNotMatch(code, /first line with trailing space $/m);
   });
 
