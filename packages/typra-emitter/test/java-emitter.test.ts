@@ -901,3 +901,53 @@ describe("Java emitter runtime semantics", () => {
     assert.match(source, /this\(preSave, postSave, "object", true\);/);
   });
 });
+
+describe("Java provider wire mapping", () => {
+  function wireDecl(): TypeDecl {
+    const decl = typeDecl([
+      field("maxOutputTokens", "string", { isOptional: true }),
+      field("temperature", "string", { isOptional: true }),
+    ]);
+    addAssignments(decl);
+    decl.wire = {
+      providers: ["openai", "anthropic"],
+      mappings: [
+        {
+          fieldName: "maxOutputTokens",
+          category: { kind: "scalar", scalarType: "string" },
+          isOptional: true,
+          parentTypeName: decl.typeName.name,
+          wireNames: { openai: "max_completion_tokens", anthropic: "max_tokens" },
+        },
+        {
+          fieldName: "temperature",
+          category: { kind: "scalar", scalarType: "string" },
+          isOptional: true,
+          parentTypeName: decl.typeName.name,
+          wireNames: { openai: "temperature" },
+        },
+      ],
+    } as TypeDecl["wire"];
+    return decl;
+  }
+
+  it("omits fields the requested provider does not map", () => {
+    // Every other backend keys emission on the provider having a mapping. Seeding wireName with
+    // the schema field name leaked unmapped fields, including for a null or empty provider.
+    const source = emitJavaFileContent([wireDecl()], "test", new JavaExprVisitor(), new Set());
+
+    assert.match(source, /String wireName = null;/);
+    assert.doesNotMatch(source, /String wireName = "temperature";/);
+    assert.doesNotMatch(source, /boolean include/);
+    assert.match(source, /if \(wireName != null && this\.temperature != null\)/);
+  });
+
+  it("still emits fields the requested provider does map", () => {
+    // Counterpart guard: omission must key on the missing mapping, not disable wire mapping.
+    const source = emitJavaFileContent([wireDecl()], "test", new JavaExprVisitor(), new Set());
+
+    assert.match(source, /if \(target\.equals\("openai"\)\) \{ wireName = "max_completion_tokens";/);
+    assert.match(source, /if \(target\.equals\("anthropic"\)\) \{ wireName = "max_tokens";/);
+    assert.match(source, /if \(target\.equals\("openai"\)\) \{ wireName = "temperature";/);
+  });
+});

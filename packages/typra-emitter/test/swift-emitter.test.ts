@@ -954,3 +954,52 @@ describe("Swift generated tests", () => {
     assert.match(source, /testIntegerValidationRejectsUnsafeValues/);
   });
 });
+
+describe("Swift provider wire mapping", () => {
+  function wireType(): TypeDecl {
+    const type = typeDecl("WireOptions");
+    addStringField(type, "maxOutputTokens", true);
+    addStringField(type, "temperature", true);
+    type.wire = {
+      providers: ["openai", "anthropic"],
+      mappings: [
+        {
+          fieldName: "maxOutputTokens",
+          category: { kind: "scalar", scalarType: "string" },
+          isOptional: true,
+          parentTypeName: "WireOptions",
+          wireNames: { openai: "max_completion_tokens", anthropic: "max_tokens" },
+        },
+        {
+          fieldName: "temperature",
+          category: { kind: "scalar", scalarType: "string" },
+          isOptional: true,
+          parentTypeName: "WireOptions",
+          wireNames: { openai: "temperature" },
+        },
+      ],
+    } as TypeDecl["wire"];
+    return type;
+  }
+
+  it("omits a field for providers that do not map it", () => {
+    // `temperature` is mapped for openai only, so an anthropic payload must not carry it.
+    // Falling back to the schema name leaks the field into every unmapped provider.
+    const source = emitSwiftFile(fileDecl(wireType()), new SwiftExprVisitor(), new Set());
+
+    assert.match(source, /let wireNameTemperature: String\?/);
+    assert.match(source, /default: wireNameTemperature = nil/);
+    assert.match(source, /if let wireKey = wireNameTemperature, let value = self\.temperature \{ result\[wireKey\] = value \}/);
+    assert.doesNotMatch(source, /default: wireNameTemperature = "temperature"/);
+  });
+
+  it("still emits a field for providers that do map it", () => {
+    // Counterpart guard: omission must key on the provider having no mapping, not suppress
+    // provider wire mapping altogether.
+    const source = emitSwiftFile(fileDecl(wireType()), new SwiftExprVisitor(), new Set());
+
+    assert.match(source, /case "openai": wireNameMaxOutputTokens = "max_completion_tokens"/);
+    assert.match(source, /case "anthropic": wireNameMaxOutputTokens = "max_tokens"/);
+    assert.match(source, /case "openai": wireNameTemperature = "temperature"/);
+  });
+});

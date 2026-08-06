@@ -672,18 +672,22 @@ function emitRawPayloadHelpers(lines: string[]): void {
   lines.push("");
 }
 
+/**
+ * A wire field is emitted only when the requested provider actually maps it, matching every other
+ * backend (Go: `if wireName, ok := mapping[provider]`). Defaulting to the schema field name leaks
+ * fields into payloads for providers — or for an empty/null provider — that never declared them.
+ */
 function emitToWire(wire: WireDecl, lines: string[]): void {
   lines.push("  public Map<String, Object> toWire(String provider) {");
   lines.push("    Map<String, Object> result = new LinkedHashMap<>();");
   lines.push("    String target = provider == null ? \"\" : provider;");
   for (const field of wire.mappings) {
     lines.push("    {");
-    lines.push(`      String wireName = "${escapeJava(field.fieldName)}";`);
-    lines.push(`      boolean include = ${Object.keys(field.wireNames).length === 0 ? "true" : "target.isEmpty()"};`);
+    lines.push(`      String wireName = null;`);
     for (const [provider, name] of Object.entries(field.wireNames)) {
-      lines.push(`      if (target.equals("${escapeJava(provider)}")) { wireName = "${escapeJava(name)}"; include = true; }`);
+      lines.push(`      if (target.equals("${escapeJava(provider)}")) { wireName = "${escapeJava(name)}"; }`);
     }
-    lines.push(`      if (include && this.${javaPropertyName(field.fieldName)} != null) result.put(wireName, serializeScalar(this.${javaPropertyName(field.fieldName)}));`);
+    lines.push(`      if (wireName != null && this.${javaPropertyName(field.fieldName)} != null) result.put(wireName, serializeScalar(this.${javaPropertyName(field.fieldName)}));`);
     lines.push("    }");
   }
   lines.push("    return result;");
