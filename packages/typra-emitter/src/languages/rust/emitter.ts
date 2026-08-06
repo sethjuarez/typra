@@ -2114,7 +2114,8 @@ function emitSaveField(
     case "complex": {
       if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
         // Struct fields keep Value::Null as the "absent" sentinel (see fieldType).
-        if (a.isOptional) {
+        // Save may omit exactly the fields that load does not require.
+        if (a.isOptional || a.hasExplicitDefault) {
           lines.push(`${indent}if !${fieldRef}.is_null() {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
           lines.push(`${indent}}`);
@@ -2282,9 +2283,14 @@ function emitVariantSaveField(
       return;
     case "complex": {
       if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
+        // Save may omit exactly the fields that load does not require.
         if (field.isOptional) {
           lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), val.clone());`);
+          lines.push(`${indent}}`);
+        } else if (field.hasExplicitDefault) {
+          lines.push(`${indent}if !${fieldRef}.is_null() {`);
+          lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
           lines.push(`${indent}}`);
         } else {
           lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
