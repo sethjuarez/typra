@@ -6,7 +6,7 @@ import type { EnumDef, TypeDecl } from "../src/ir/declarations.js";
 import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { javaTestOptions } from "../src/languages/java/driver.js";
-import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper, ensureJavaEditableSeamMarker } from "../src/languages/java/emitter.js";
+import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper, emitJavaUnknownCarrier, ensureJavaEditableSeamMarker } from "../src/languages/java/emitter.js";
 import { emitJavaSaveContext } from "../src/languages/java/scaffolding.js";
 import { emitJavaTest } from "../src/languages/java/test-emitter.js";
 import {
@@ -231,6 +231,93 @@ describe("Java emitter runtime semantics", () => {
     assert.match(customSource, /Tool\.loadBaseInto\(result, map, ctx\);/);
     assert.doesNotMatch(customSource, /map\.containsKey\("kind"\)/);
     assert.doesNotMatch(customSource, /result\.put\("kind"/);
+  });
+
+  it("absorbs an unrecognized discriminator on an abstract open base instead of rejecting it", () => {
+    const base = typeDecl([field("kind", "string"), field("label", "string", { isOptional: true })]);
+    base.typeName = { namespace: "Test", name: "OpenBase" };
+    base.isAbstract = true;
+    base.polymorphicDispatch = {
+      discriminatorField: "kind",
+      variants: [{ value: "managed", typeName: { namespace: "Test", name: "ManagedThing" } }],
+      defaultVariant: null,
+      isAbstract: true,
+      isClosed: false,
+    };
+    addAssignments(base);
+
+    const baseSource = emitJavaFileContent([base], "test", new JavaExprVisitor(), new Set(), [], [base]);
+    const carrier = emitJavaUnknownCarrier(base, "test");
+
+    // Abstract is about instantiability, not about closedness: an unrecognized kind on an open
+    // base must load, so the base hands it to a concrete carrier before it can reach the throw.
+    assert.match(baseSource, /return UnknownOpenBase\.load\(data, ctx\);/);
+    assert.match(baseSource, /Cannot instantiate abstract OpenBase/);
+    // The carrier subclasses the base, so the base must expose the payload field and the clone
+    // helpers it stores through.
+    assert.match(baseSource, /protected Map<String, Object> rawPayload;/);
+    assert.match(baseSource, /protected static Map<String, Object> cloneRawMap\(/);
+    assert.match(baseSource, /obj\.rawPayload == null \? new LinkedHashMap<>\(\) : cloneRawMap\(obj\.rawPayload\)/);
+
+    assert.ok(carrier);
+    assert.equal(carrier.filename, "UnknownOpenBase.java");
+    assert.match(carrier.source, /public final class UnknownOpenBase extends OpenBase/);
+    assert.match(carrier.source, /result\.rawPayload = OpenBase\.cloneRawMap\(map\);/);
+    // Declared fields are loaded through loadBaseInto, so leaving them in the payload as well
+    // would emit them twice.
+    assert.match(carrier.source, /result\.rawPayload\.remove\("kind"\);/);
+    assert.match(carrier.source, /result\.rawPayload\.remove\("label"\);/);
+    assert.match(carrier.source, /OpenBase\.loadBaseInto\(result, map, ctx\);/);
+  });
+
+  it("emits no unknown carrier when a wildcard subtype or a closed discriminator already decides", () => {
+    const wildcard = typeDecl([field("kind", "string")]);
+    wildcard.typeName = { namespace: "Test", name: "WildcardBase" };
+    wildcard.isAbstract = true;
+    wildcard.polymorphicDispatch = {
+      discriminatorField: "kind",
+      variants: [],
+      defaultVariant: { typeName: { namespace: "Test", name: "CustomThing" }, isSelfReference: false },
+      isAbstract: true,
+      isClosed: false,
+    };
+    addAssignments(wildcard);
+
+    const closed = typeDecl([field("kind", "string")]);
+    closed.typeName = { namespace: "Test", name: "ClosedBase" };
+    closed.isAbstract = true;
+    closed.polymorphicDispatch = {
+      discriminatorField: "kind",
+      variants: [{ value: "managed", typeName: { namespace: "Test", name: "ManagedThing" } }],
+      defaultVariant: null,
+      isAbstract: true,
+      isClosed: true,
+    };
+    addAssignments(closed);
+
+    const concrete = typeDecl([field("kind", "string")]);
+    concrete.typeName = { namespace: "Test", name: "ConcreteBase" };
+    concrete.polymorphicDispatch = {
+      discriminatorField: "kind",
+      variants: [{ value: "managed", typeName: { namespace: "Test", name: "ManagedThing" } }],
+      defaultVariant: { typeName: { namespace: "Test", name: "ConcreteBase" }, isSelfReference: true },
+      isAbstract: false,
+      isClosed: false,
+    };
+    addAssignments(concrete);
+
+    // A wildcard subtype already absorbs unrecognized values, a closed discriminator is meant to
+    // reject them, and a non-abstract base absorbs them into itself. A carrier in any of these
+    // cases would be dead code at best and would defeat the rejection at worst.
+    assert.equal(emitJavaUnknownCarrier(wildcard, "test"), undefined);
+    assert.equal(emitJavaUnknownCarrier(closed, "test"), undefined);
+    assert.equal(emitJavaUnknownCarrier(concrete, "test"), undefined);
+    // Payload visibility is uniform across every retaining class. Java forbids hiding an inherited
+    // static method with weaker access, so a subclass that also retains a payload could not
+    // compile against a more visible helper on its base.
+    const concreteSource = emitJavaFileContent([concrete], "test", new JavaExprVisitor(), new Set(), [], [concrete]);
+    assert.match(concreteSource, /protected Map<String, Object> rawPayload;/);
+    assert.match(concreteSource, /protected static Map<String, Object> cloneRawMap\(/);
   });
 
   describe("Java generated tests", () => {
@@ -622,7 +709,7 @@ describe("Java emitter runtime semantics", () => {
 
       const source = emitJavaFileContent([base], "test", new JavaExprVisitor(), new Set(["Connection"]));
 
-      assert.match(source, /private Map<String, Object> rawPayload;/);
+      assert.match(source, /protected Map<String, Object> rawPayload;/);
       assert.match(source, /result\.rawPayload = cloneRawMap\(map\);/);
       assert.match(source, /result\.rawPayload\.remove\("kind"\);/);
       assert.match(source, /result\.rawPayload\.remove\("name"\);/);

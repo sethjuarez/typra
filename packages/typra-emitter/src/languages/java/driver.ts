@@ -9,7 +9,7 @@ import { TypeRegistry } from "../../ir/expansion.js";
 import { collectPolymorphicTypeNames, lowerFile } from "../../ir/lower.js";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import { buildBaseTestContext, TestContextOptions } from "../../testing/test-context.js";
-import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper, ensureJavaEditableSeamMarker } from "./emitter.js";
+import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper, emitJavaUnknownCarrier, ensureJavaEditableSeamMarker } from "./emitter.js";
 import { emitJavaContext, emitJavaJson, emitJavaMaps, emitJavaSaveContext, emitJavaYaml } from "./scaffolding.js";
 import { emitJavaTest, emitJavaTestRunner, javaTestClassName } from "./test-emitter.js";
 import { JavaExprVisitor } from "./visitor.js";
@@ -91,6 +91,10 @@ export const generateJava = async (
       allTypeDecls,
     );
     await emitJavaFile(context, `${javaTypeName(n.typeName.name)}.java`, fileContent, emitTarget["output-dir"], emitTarget["output-dir"]);
+    const carrier = emitJavaUnknownCarrier(fileDecls[index].types[0], packageName);
+    if (carrier) {
+      await emitJavaFile(context, carrier.filename, carrier.source, emitTarget["output-dir"], emitTarget["output-dir"]);
+    }
     const helper = emitJavaMethodHelper(fileDecls[index].types[0], packageName);
     if (helper) {
       helperFiles.add(helper.filename);
