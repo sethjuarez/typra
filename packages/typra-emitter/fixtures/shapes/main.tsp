@@ -50,6 +50,10 @@ model FixtureRoot {
   @doc("Optional fields distinguishing absent from explicitly present at a zero value")
   optionalStates: FixtureOptionalStates;
 
+  @sample(#{ numericBounds: #{ int32Min: -2147483648, int32Max: 2147483647, negativeCount: -42, wholeRatio: 2, preciseRatio: -0.125 } })
+  @doc("Numeric fields at the boundaries of their declared types")
+  numericBounds: FixtureNumericBounds;
+
   @doc("Ordered complex collection with non-unique names")
   checkpoint?: FixtureCheckpoint;
 }
@@ -127,6 +131,48 @@ model FixtureOptionalStates {
 
   @doc("Optional string absent from the sample, which must not appear on the wire")
   absentText?: string;
+}
+
+@doc("""
+Numeric fields at the boundaries of their declared types.
+
+The seven targets do not share a numeric model. int32 is a distinct type in Rust, Go, C#, Java
+and Swift, is an ordinary arbitrary-precision integer in Python, and is a float64 in TypeScript.
+A backend that narrows a declared int32, truncates a float, or routes either through a string
+representation produces a document its peers disagree with.
+
+int32Min and int32Max are the exact two's-complement extremes, which catch a backend that parses
+them into a narrower type. Both are exactly representable in float64, so passing through a wider
+floating-point intermediate is lossless: that is not what this case detects. wholeRatio is a
+float64 holding an integral value; JSON cannot distinguish it from an integer, so it catches a
+target that quotes it or changes its value, but not one that stores it natively as an integer --
+Python loads it as an int and passes. preciseRatio is negative and exactly representable, so it
+detects sign loss, fraction loss and truncation.
+
+The oracle rounds to 6dp, so a mismatch that survives normalization is genuine, but a divergence
+below 5e-7 is invisible to it. Detecting a narrowing to float32 would need a value float32 cannot
+represent; none of these qualify, so that is not covered here.
+""")
+model FixtureNumericBounds {
+  @sample(#{ int32Min: -2147483648 })
+  @doc("Signed 32-bit integer at its minimum")
+  int32Min: int32;
+
+  @sample(#{ int32Max: 2147483647 })
+  @doc("Signed 32-bit integer at its maximum")
+  int32Max: int32;
+
+  @sample(#{ negativeCount: -42 })
+  @doc("Ordinary negative integer")
+  negativeCount: int32;
+
+  @sample(#{ wholeRatio: 2 })
+  @doc("Float holding an integral value, which must stay a JSON number")
+  wholeRatio: float64;
+
+  @sample(#{ preciseRatio: -0.125 })
+  @doc("Negative float exactly representable in binary floating point")
+  preciseRatio: float64;
 }
 
 model FixtureOwner {
