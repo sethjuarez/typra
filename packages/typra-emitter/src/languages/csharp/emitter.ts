@@ -656,9 +656,7 @@ function emitLoadMethod(
   for (const assign of type.load.assignments) {
     const field = type.fields.find(candidate => candidate.name === assign.fieldName);
     if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
-    const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
-    const guard = wildcardDiscriminator ? `!string.IsNullOrEmpty(data.GetValueOrDefault("${wildcardDiscriminator}")?.ToString()) && ` : "";
-    lines.push(`        if (${guard}(!data.TryGetValue("${assign.sourceName}", out var required${toPascalCase(assign.fieldName)}Value) || required${toPascalCase(assign.fieldName)}Value is null))`);
+    lines.push(`        if (!data.TryGetValue("${assign.sourceName}", out var required${toPascalCase(assign.fieldName)}Value) || required${toPascalCase(assign.fieldName)}Value is null)`);
     lines.push("        {");
     lines.push(`            throw new ArgumentException($"{context!.At("${assign.sourceName}").Path}: missing required field");`);
     lines.push("        }");
@@ -935,7 +933,7 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
   lines.push("    /// </summary>");
   lines.push(`    private static ${typeName} LoadKind(Dictionary<string, object?> data, LoadContext? context)`);
   lines.push("    {");
-  lines.push(`        if (data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) && discriminatorValue is not null)`);
+  lines.push(`        if (data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) && discriminatorValue is not null && discriminatorValue.ToString() != "")`);
   lines.push("        {");
   lines.push("            var discriminator = discriminatorValue.ToString();");
   lines.push("            return discriminator switch");

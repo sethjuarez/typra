@@ -760,9 +760,7 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   for (const a of type.load.assignments) {
     const field = type.fields.find(candidate => candidate.name === a.fieldName);
     if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
-    const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
-    const guard = wildcardDiscriminator ? `isinstance(data.get("${wildcardDiscriminator}"), str) and data["${wildcardDiscriminator}"] != "" and ` : "";
-    lines.push(`        if ${guard}("${a.sourceName}" not in data or data["${a.sourceName}"] is None):`);
+    lines.push(`        if "${a.sourceName}" not in data or data["${a.sourceName}"] is None:`);
     lines.push(`            raise ValueError(f"{context.at('${a.sourceName}').path}: missing required field")`);
   }
 
@@ -1057,7 +1055,7 @@ function emitPolymorphicDispatch(
   lines.push("    @staticmethod");
   lines.push(`    def load_${discSnake}(data: dict, context: LoadContext | None) -> "${parentName}":`);
   lines.push(`        # load polymorphic ${parentName} instance`);
-  lines.push(`        if data is not None and "${dispatch.discriminatorField}" in data:`);
+  lines.push(`        if data is not None and data.get("${dispatch.discriminatorField}") is not None and str(data["${dispatch.discriminatorField}"]) != "":`);
   lines.push(`            discriminator_value = str(data["${dispatch.discriminatorField}"])`);
 
   for (let i = 0; i < dispatch.variants.length; i++) {

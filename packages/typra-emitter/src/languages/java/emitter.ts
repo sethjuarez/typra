@@ -292,9 +292,7 @@ function emitLoadBaseInto(
     );
     if (field?.category.kind === "complex" && !field.isOptional && !field.hasExplicitDefault) {
       const wireName = escapeJava(assignment.sourceName);
-      const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
-      const guard = wildcardDiscriminator ? `map.get("${escapeJava(wildcardDiscriminator)}") instanceof String discriminator && !discriminator.isEmpty() && ` : "";
-      lines.push(`    if (${guard}(!map.containsKey("${wireName}") || map.get("${wireName}") == null)) {`);
+      lines.push(`    if (!map.containsKey("${wireName}") || map.get("${wireName}") == null) {`);
       lines.push(`      throw new IllegalArgumentException(ctx.at("${wireName}").path + ": missing required field");`);
       lines.push("    }");
     }
@@ -379,7 +377,7 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push("    if (data instanceof Map<?, ?> dispatchMap) {");
   lines.push(`      Object discriminator = dispatchMap.get("${escapeJava(dispatch.discriminatorField)}");`);
-  lines.push("      if (discriminator != null) {");
+  lines.push('      if (discriminator != null && !String.valueOf(discriminator).isEmpty()) {');
   lines.push("        switch (String.valueOf(discriminator)) {");
   for (const variant of dispatch.variants) {
     lines.push(`          case "${escapeJava(variant.value)}":`);

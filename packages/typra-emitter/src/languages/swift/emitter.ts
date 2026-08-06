@@ -340,7 +340,14 @@ function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
     if (field?.category.kind === "complex" && !field.isOptional && !field.hasExplicitDefault) {
       const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
       if (wildcardDiscriminator) {
-        lines.push(`    if let discriminator = object[${swiftStringLiteral(wildcardDiscriminator)}] as? String, !discriminator.isEmpty {`);
+        // A blank or absent discriminator is the only way the Swift enum can carry a *base*
+        // instance of an open discriminated type — the enum has no base case, so such payloads
+        // land on the wildcard variant and its variant-only required fields do not apply.
+        // Every other discriminator value (including a non-string one) genuinely selects the
+        // wildcard variant, so the required-field check must run. See issue #105 on giving
+        // Swift/Rust a base representation, which would let this become unconditional (#104).
+        const disc = swiftStringLiteral(wildcardDiscriminator);
+        lines.push(`    if !(object[${disc}] == nil || object[${disc}] is NSNull || (object[${disc}] as? String)?.isEmpty == true) {`);
         lines.push(`      if object[${swiftStringLiteral(assignment.sourceName)}] == nil || object[${swiftStringLiteral(assignment.sourceName)}] is NSNull {`);
         lines.push(`        throw TypraRuntimeError.unsupported(context.at(${swiftStringLiteral(assignment.sourceName)}).path + ": missing required field")`);
         lines.push("      }");
