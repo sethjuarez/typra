@@ -74,7 +74,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push(`        var instance = ${typeName}.FromYaml(yamlData);`);
     L.push('');
     L.push('        Assert.NotNull(instance);');
-    const yamlAssertions = emitExampleAssertions(sample.validations, 'instance', "yaml", ctx.singlePrecisionKeys);
+    const yamlAssertions = emitExampleAssertions(sample.validations, 'instance', ctx.singlePrecisionKeys);
     if (yamlAssertions) L.push(yamlAssertions);
     L.push('    }');
     L.push('');
@@ -87,7 +87,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push('');
     L.push(`        var instance = ${typeName}.FromJson(jsonData);`);
     L.push('        Assert.NotNull(instance);');
-    const jsonAssertions = emitExampleAssertions(sample.validations, 'instance', "json", ctx.singlePrecisionKeys);
+    const jsonAssertions = emitExampleAssertions(sample.validations, 'instance', ctx.singlePrecisionKeys);
     if (jsonAssertions) L.push(jsonAssertions);
     L.push('    }');
     L.push('');
@@ -107,7 +107,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push('');
     L.push(`        var reloaded = ${typeName}.FromJson(json);`);
     L.push('        Assert.NotNull(reloaded);');
-    const rtJsonAssertions = emitExampleAssertions(sample.validations, 'reloaded', "json", ctx.singlePrecisionKeys);
+    const rtJsonAssertions = emitExampleAssertions(sample.validations, 'reloaded', ctx.singlePrecisionKeys);
     if (rtJsonAssertions) L.push(rtJsonAssertions);
     L.push('    }');
     L.push('');
@@ -127,7 +127,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push('');
     L.push(`        var reloaded = ${typeName}.FromYaml(yaml);`);
     L.push('        Assert.NotNull(reloaded);');
-    const rtYamlAssertions = emitExampleAssertions(sample.validations, 'reloaded', "yaml", ctx.singlePrecisionKeys);
+    const rtYamlAssertions = emitExampleAssertions(sample.validations, 'reloaded', ctx.singlePrecisionKeys);
     if (rtYamlAssertions) L.push(rtYamlAssertions);
     L.push('    }');
     L.push('');
@@ -280,7 +280,6 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
 function emitExampleAssertions(
   validations: Array<{ key: string; value: any; isExpression: boolean }>,
   varName: string,
-  format: "json" | "yaml",
   singlePrecisionKeys: ReadonlySet<string>,
 ): string {
   return validations.map(v => {
@@ -293,14 +292,10 @@ function emitExampleAssertions(
     const needsFloatSuffix =
       typeof v.value === "number" && !Number.isInteger(v.value) && singlePrecisionKeys.has(v.key);
     const expected = typeof v.value === "string"
-      ? csharpStringLiteral(format === "yaml" ? normalizeYamlString(v.value) : v.value)
+      ? csharpStringLiteral(v.value)
       : `${v.value}${needsFloatSuffix ? "f" : ""}`;
     return `        Assert.Equal(${expected}, ${varName}.${v.key});`;
   }).join('\n');
-}
-
-function normalizeYamlString(value: string): string {
-  return value.replace(/[ \t]+(?=\r\n|\r|\n)/g, "");
 }
 
 function csharpStringLiteral(value: string): string {

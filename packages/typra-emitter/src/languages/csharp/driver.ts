@@ -159,7 +159,17 @@ export const renderTests = (node: TypeNode, namespace: string, resolveType: Type
     });
     return {
       json: JSON.stringify(sample, null, 2).split('\n'),
-      yaml: doc.toString({ indent: 2, lineWidth: 0 }).split('\n'),
+      // `doubleQuotedMinMultiLineLength` (yaml's default is 40) folds a long double-quoted
+      // scalar across lines using `\` line continuations. A space adjacent to such a fold is
+      // not recoverable on reload, so the value silently loses one space per folded break.
+      // Every backend that goes through `buildBaseTestContext` opts out of this via
+      // `yamlDoubleQuotedMinMultiLineLength`; because this driver hand-rolls the document it
+      // never inherited that, and its generated multiline fixtures did not round-trip. See #93.
+      yaml: doc.toString({
+        indent: 2,
+        lineWidth: 0,
+        doubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
+      }).split('\n'),
       // Mirror the shared `buildValidations` filter in src/testing/test-context.ts: a
       // validation is only emitted for a key that is genuinely a scalar (or enum) property
       // of this node. Filtering on the sample alone asserts properties that do not exist on

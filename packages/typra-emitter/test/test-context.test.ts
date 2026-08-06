@@ -194,4 +194,28 @@ describe("csharp driver — generated fixtures satisfy generated loaders", () =>
     const rendered = renderCSharp(node, [detail]);
     assert.ok(!rendered.includes("detail-code"), "optional complex field must stay absent");
   });
+
+  it("emits a multiline double-quoted scalar unfolded so spaces survive the round trip", () => {
+    const raw = "first line with two spaces  \n\n  \nlast line with three spaces   \n";
+    const node = makeType("Root", [
+      makeProp("value", "string", { isScalar: true, sample: { value: raw } }),
+    ]);
+
+    const rendered = renderCSharp(node, []);
+
+    // yaml folds a long double-quoted scalar using `\` line continuations, and a space
+    // adjacent to a fold is not recoverable on reload — the value loses one space per
+    // folded break. Every other backend opts out via `yamlDoubleQuotedMinMultiLineLength`;
+    // this driver hand-rolls the document, so it has to opt out explicitly. See #93.
+    assert.doesNotMatch(
+      rendered,
+      /\\$/m,
+      "YAML fixture must not fold a double-quoted scalar across lines",
+    );
+    // The assertion and the payload must agree on the raw value, byte for byte.
+    assert.match(
+      rendered,
+      /Assert\.Equal\("first line with two spaces {2}\\n\\n {2}\\nlast line with three spaces {3}\\n", instance\.Value\);/,
+    );
+  });
 });

@@ -1118,11 +1118,28 @@ function runCSharpConsumerNullabilityBuild() {
   }
 }
 
-function runCSharpNullabilityTestsBuild() {
+/**
+ * Tests the gate knowingly tolerates, each tied to a filed defect.
+ *
+ * This list is asserted in BOTH directions: an unlisted failure fails the gate, and a listed
+ * test that starts passing also fails the gate. That second half is what stops the list from
+ * rotting into a permanent mute — fixing the underlying issue forces the entry to be removed.
+ */
+const CSHARP_KNOWN_TEST_FAILURES = new Map([
+  ["Typra.Fixtures.FixtureToolConversionTests.LoadJsonInput", 92],
+  ["Typra.Fixtures.FixtureToolConversionTests.LoadYamlInput", 92],
+  ["Typra.Fixtures.FixtureToolConversionTests.RoundtripJson", 92],
+  ["Typra.Fixtures.FixtureToolConversionTests.RoundtripYaml", 92],
+  ["Typra.Fixtures.FixtureToolConversionTests.ToJsonProducesValidJson", 92],
+  ["Typra.Fixtures.FixtureToolConversionTests.ToYamlProducesValidYaml", 92],
+]);
+
+function runCSharpGeneratedTests() {
   const sourceDir = path.join(generatedRoot, "csharp");
-  const testPath = path.join(sourceDir, "tests", "FixtureUnknownRecordsConversionTests.cs");
-  if (!existsSync(testPath)) {
-    fail("No generated C# unknown-record nullability test found to build.");
+  const testsDir = path.join(sourceDir, "tests");
+  const testFiles = existsSync(testsDir) ? walkFiles(testsDir, file => file.endsWith(".cs")) : [];
+  if (testFiles.length === 0) {
+    fail("No generated C# tests found to build.");
     return;
   }
 
@@ -1131,6 +1148,8 @@ function runCSharpNullabilityTestsBuild() {
   const outputRoot = mkdtempSync(path.join(tmpdir(), "typra-csharp-tests-"));
   const binDir = path.join(outputRoot, "bin");
   const objDir = path.join(outputRoot, "obj");
+  // Every generated test compiles and runs. Restricting this to a hand-picked file hid the
+  // other backends' worth of coverage: 65 generated test files existed and 1 was built. See #94.
   writeFileSync(projectPath, [
     '<Project Sdk="Microsoft.NET.Sdk">',
     "  <PropertyGroup>",
@@ -1142,8 +1161,6 @@ function runCSharpNullabilityTestsBuild() {
     "    <IsPackable>false</IsPackable>",
     "  </PropertyGroup>",
     "  <ItemGroup>",
-    '    <Compile Remove="tests/**/*.cs" />',
-    '    <Compile Include="tests/FixtureUnknownRecordsConversionTests.cs" />',
     '    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />',
     '    <PackageReference Include="xunit" Version="2.9.3" />',
     '    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />',
@@ -1154,12 +1171,52 @@ function runCSharpNullabilityTestsBuild() {
   ].join("\n"));
   writeFileSync(stubsPath, buildCSharpValidationStubs(sourceDir));
   try {
-    runCommand(
-      "Generated C# nullability tests build",
-      "dotnet",
-      ["build", projectPath, "--nologo", "--verbosity", "quiet", "-p:BaseOutputPath=" + `${binDir}${path.sep}`, "-p:BaseIntermediateOutputPath=" + `${objDir}${path.sep}`],
-      { cwd: sourceDir },
-    );
+    if (!commandExists("dotnet")) {
+      fail("Generated C# tests cannot run because dotnet is not available.");
+      return;
+    }
+    let output = "";
+    let crashed = null;
+    try {
+      output = execFileSync(
+        "dotnet",
+        [
+          "test", projectPath, "--nologo", "--verbosity", "normal",
+          "-p:BaseOutputPath=" + `${binDir}${path.sep}`,
+          "-p:BaseIntermediateOutputPath=" + `${objDir}${path.sep}`,
+        ],
+        { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+    } catch (error) {
+      output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`;
+      crashed = error;
+    }
+
+    const failed = new Set();
+    for (const match of output.matchAll(/^\s*(?:X|Failed)\s+(\S+?)(?:\s|\[|$)/gm)) {
+      failed.add(match[1]);
+    }
+    // A build break produces no per-test lines at all, so it must not read as "nothing failed".
+    if (crashed && failed.size === 0) {
+      fail(`Generated C# tests failed to build or run:\n${output.trim() || crashed.message}`);
+      return;
+    }
+
+    const unexpected = [...failed].filter(name => !CSHARP_KNOWN_TEST_FAILURES.has(name));
+    if (unexpected.length > 0) {
+      fail(
+        "Generated C# tests failed:\n"
+        + unexpected.map(name => `  ${name}`).join("\n"),
+      );
+    }
+    const fixed = [...CSHARP_KNOWN_TEST_FAILURES.keys()].filter(name => !failed.has(name));
+    if (fixed.length > 0) {
+      fail(
+        "Generated C# tests listed as known failures now pass. Remove them from "
+        + "CSHARP_KNOWN_TEST_FAILURES in scripts/validate-fixtures.mjs:\n"
+        + fixed.map(name => `  ${name} (#${CSHARP_KNOWN_TEST_FAILURES.get(name)})`).join("\n"),
+      );
+    }
   } finally {
     for (const tempPath of [projectPath, stubsPath]) {
       if (existsSync(tempPath)) {
@@ -3442,7 +3499,7 @@ runRustTests();
 runSwiftTests();
 runCSharpBuild();
 runCSharpConsumerNullabilityBuild();
-runCSharpNullabilityTestsBuild();
+runCSharpGeneratedTests();
 runCSharpProtocolScaffoldBuild();
 runJavaBuild();
 runJavaGeneratedTests();
