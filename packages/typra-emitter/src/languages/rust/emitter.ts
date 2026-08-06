@@ -2114,9 +2114,14 @@ function emitSaveField(
     case "complex": {
       if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
         // Struct fields keep Value::Null as the "absent" sentinel (see fieldType).
-        lines.push(`${indent}if !${fieldRef}.is_null() {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
-        lines.push(`${indent}}`);
+        // Save may omit exactly the fields that load does not require.
+        if (a.isOptional || a.hasExplicitDefault) {
+          lines.push(`${indent}if !${fieldRef}.is_null() {`);
+          lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+          lines.push(`${indent}}`);
+        } else {
+          lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+        }
         return;
       }
       if (a.isOptional) {
@@ -2129,9 +2134,7 @@ function emitSaveField(
       } else {
         lines.push(`${indent}{`);
         lines.push(`${indent}    let nested = ${fieldRef}.to_value(ctx);`);
-        lines.push(`${indent}    if !nested.is_null() {`);
-        lines.push(`${indent}        result.insert("${key}".to_string(), nested);`);
-        lines.push(`${indent}    }`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), nested);`);
         lines.push(`${indent}}`);
       }
       return;
@@ -2145,9 +2148,7 @@ function emitSaveField(
         const borrowed = prefix ? `&${fieldRef}` : fieldRef;
         lines.push(`${indent}result.insert("${key}".to_string(), serde_json::to_value(${borrowed}).unwrap_or(serde_json::Value::Null));`);
       } else {
-        lines.push(`${indent}if !${fieldRef}.is_empty() {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(&${fieldRef}).unwrap_or(serde_json::Value::Null));`);
-        lines.push(`${indent}}`);
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::to_value(&${fieldRef}).unwrap_or(serde_json::Value::Null));`);
       }
       return;
     }
@@ -2160,16 +2161,18 @@ function emitSaveField(
         const borrowed = prefix ? `&${fieldRef}` : fieldRef;
         lines.push(`${indent}result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(${borrowed}, ctx));`);
       } else {
-        lines.push(`${indent}if !${fieldRef}.is_empty() {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(&${fieldRef}, ctx));`);
-        lines.push(`${indent}}`);
+        lines.push(`${indent}result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(&${fieldRef}, ctx));`);
       }
       return;
     }
     case "dict": {
-      lines.push(`${indent}if !${fieldRef}.is_null() {`);
-      lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
-      lines.push(`${indent}}`);
+      if (a.isOptional) {
+        lines.push(`${indent}if !${fieldRef}.is_null() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+        lines.push(`${indent}}`);
+      } else {
+        lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+      }
       return;
     }
   }
@@ -2189,11 +2192,13 @@ function emitScalarSave(
       lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), val.clone());`);
       lines.push(`${indent}}`);
-    } else {
-      // Required value types or dictionary (always Value, never Option)
+    } else if (isOptional) {
+      // Optional dictionary fields use Value::Null as the absent sentinel.
       lines.push(`${indent}if !${fieldRef}.is_null() {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
       lines.push(`${indent}}`);
+    } else {
+      lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
     }
     return;
   }
@@ -2205,9 +2210,7 @@ function emitScalarSave(
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.clone()));`);
         lines.push(`${indent}}`);
       } else {
-        lines.push(`${indent}if !${fieldRef}.is_empty() {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(${fieldRef}.clone()));`);
-        lines.push(`${indent}}`);
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::Value::String(${fieldRef}.clone()));`);
       }
       return;
     case "boolean":
@@ -2228,9 +2231,7 @@ function emitScalarSave(
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(*val)));`);
         lines.push(`${indent}}`);
       } else {
-        lines.push(`${indent}if ${fieldRef} != 0 {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(${fieldRef})));`);
-        lines.push(`${indent}}`);
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(${fieldRef})));`);
       }
       return;
     case "float32":
@@ -2243,9 +2244,7 @@ function emitScalarSave(
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Number::from_f64(*val as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
       } else {
-        lines.push(`${indent}if ${fieldRef} != 0.0 {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Number::from_f64(${fieldRef} as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`);
-        lines.push(`${indent}}`);
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::Number::from_f64(${fieldRef} as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`);
       }
       return;
   }
@@ -2284,14 +2283,17 @@ function emitVariantSaveField(
       return;
     case "complex": {
       if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
+        // Save may omit exactly the fields that load does not require.
         if (field.isOptional) {
           lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), val.clone());`);
           lines.push(`${indent}}`);
-        } else {
+        } else if (field.hasExplicitDefault) {
           lines.push(`${indent}if !${fieldRef}.is_null() {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
           lines.push(`${indent}}`);
+        } else {
+          lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
         }
         return;
       }
@@ -2302,9 +2304,7 @@ function emitVariantSaveField(
       } else {
         lines.push(`${indent}{`);
         lines.push(`${indent}    let nested = ${fieldRef}.to_value(ctx);`);
-        lines.push(`${indent}    if !nested.is_null() {`);
-        lines.push(`${indent}        result.insert("${key}".to_string(), nested);`);
-        lines.push(`${indent}    }`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), nested);`);
         lines.push(`${indent}}`);
       }
       return;
@@ -2317,9 +2317,7 @@ function emitVariantSaveField(
       } else if (field.hasExplicitDefault) {
         lines.push(`${indent}result.insert("${key}".to_string(), serde_json::to_value(${fieldRef}).unwrap_or(serde_json::Value::Null));`);
       } else {
-        lines.push(`${indent}if !${fieldRef}.is_empty() {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(${fieldRef}).unwrap_or(serde_json::Value::Null));`);
-        lines.push(`${indent}}`);
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::to_value(${fieldRef}).unwrap_or(serde_json::Value::Null));`);
       }
       return;
     }
@@ -2333,9 +2331,7 @@ function emitVariantSaveField(
         } else if (field.hasExplicitDefault) {
           lines.push(`${indent}result.insert("${key}".to_string(), ${saveHelper}(${fieldRef}, ctx));`);
         } else {
-          lines.push(`${indent}if !${fieldRef}.is_empty() {`);
-          lines.push(`${indent}    result.insert("${key}".to_string(), ${saveHelper}(${fieldRef}, ctx));`);
-          lines.push(`${indent}}`);
+          lines.push(`${indent}result.insert("${key}".to_string(), ${saveHelper}(${fieldRef}, ctx));`);
         }
         return;
       }
@@ -2346,16 +2342,18 @@ function emitVariantSaveField(
       } else if (field.hasExplicitDefault) {
         lines.push(`${indent}result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`);
       } else {
-        lines.push(`${indent}if !${fieldRef}.is_empty() {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`);
-        lines.push(`${indent}}`);
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`);
       }
       return;
     }
     case "dict": {
-      lines.push(`${indent}if !${fieldRef}.is_null() {`);
-      lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
-      lines.push(`${indent}}`);
+      if (field.isOptional) {
+        lines.push(`${indent}if !${fieldRef}.is_null() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+        lines.push(`${indent}}`);
+      } else {
+        lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+      }
       return;
     }
   }
@@ -2375,10 +2373,12 @@ function emitVariantScalarSave(
       lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), val.clone());`);
       lines.push(`${indent}}`);
-    } else {
+    } else if (isOptional) {
       lines.push(`${indent}if !${fieldRef}.is_null() {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
       lines.push(`${indent}}`);
+    } else {
+      lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
     }
     return;
   }
@@ -2390,9 +2390,7 @@ function emitVariantScalarSave(
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.clone()));`);
         lines.push(`${indent}}`);
       } else {
-        lines.push(`${indent}if !${fieldRef}.is_empty() {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(${fieldRef}.clone()));`);
-        lines.push(`${indent}}`);
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::Value::String(${fieldRef}.clone()));`);
       }
       return;
     case "boolean":
@@ -2412,9 +2410,7 @@ function emitVariantScalarSave(
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(*val)));`);
         lines.push(`${indent}}`);
       } else {
-        lines.push(`${indent}if *${fieldRef} != 0 {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(*${fieldRef})));`);
-        lines.push(`${indent}}`);
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(*${fieldRef})));`);
       }
       return;
     case "float32":
@@ -2427,9 +2423,7 @@ function emitVariantScalarSave(
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Number::from_f64(*val as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
       } else {
-        lines.push(`${indent}if *${fieldRef} != 0.0 {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Number::from_f64(*${fieldRef} as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`);
-        lines.push(`${indent}}`);
+        lines.push(`${indent}result.insert("${key}".to_string(), serde_json::Number::from_f64(*${fieldRef} as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`);
       }
       return;
   }

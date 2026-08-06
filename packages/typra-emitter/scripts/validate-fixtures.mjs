@@ -131,21 +131,7 @@ const conformanceExpected = normalizeConformanceValue(conformanceCanonical);
 //   - if the target's output changes in any *other* way, the gate still fails;
 //   - if the target starts matching canonical output, the gate fails and demands the entry be
 //     deleted, so the suppression cannot outlive the bug it documents.
-const conformanceKnownDivergences = {
-  rust: {
-    issue: "#97",
-    summary:
-      "required fields whose value equals the type default are omitted on save, so a required " +
-      "empty string, zero int, zero float, or empty array silently vanishes from the wire",
-    expected: normalizeConformanceValue({
-      ...conformanceCanonical,
-      root: {
-        ...fixtureRootExpected,
-        zeroValues: { falseFlag: false },
-      },
-    }),
-  },
-};
+const conformanceKnownDivergences = {};
 
 function fail(message) {
   failures.push(message);
