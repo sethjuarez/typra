@@ -54,6 +54,10 @@ model FixtureRoot {
   @doc("Numeric fields at the boundaries of their declared types")
   numericBounds: FixtureNumericBounds;
 
+  @sample(#{ adversarialText: #{ tabbed: "column\tseparated", multiline: "first line\nsecond line", quoted: "she said \"hello\" once", backslashed: "back\\slash and \\\"escaped\\\" text", unicodeText: "café — naïve ✓", astralText: "emoji 🙂 tail", paddedText: "  padded  " } })
+  @doc("Strings carrying characters a serializer must escape or encode")
+  adversarialText: FixtureAdversarialText;
+
   @doc("Ordered complex collection with non-unique names")
   checkpoint?: FixtureCheckpoint;
 }
@@ -173,6 +177,66 @@ model FixtureNumericBounds {
   @sample(#{ preciseRatio: -0.125 })
   @doc("Negative float exactly representable in binary floating point")
   preciseRatio: float64;
+}
+
+@doc("""
+Strings carrying characters that a serializer has to escape or encode rather than copy.
+
+The seven targets do not share a string model. Java and C# hold UTF-16 code units, Go and Rust
+hold UTF-8 bytes, Python holds code points, and Swift holds grapheme clusters. A backend that
+copies a string straight into its output rather than escaping it, or that re-encodes it through a
+narrower charset, produces a document its peers disagree with. No field reachable from FixtureRoot
+previously contained a character that required escaping, so every earlier case in the differential
+sample was satisfied by a plain copy. Other models in this file do carry newlines, but they are
+exercised by per-target generated tests rather than by the cross-language comparison, which is why
+a writer defect could survive them.
+
+tabbed is the sharpest of these. RFC 8259 forbids an unescaped character below U+0020 inside a
+string, so a writer that passes TAB through emits a document that is not JSON at all, and strict
+parsers reject it outright rather than reading a wrong value. multiline, quoted and backslashed
+cover the escapes a hand-written writer is most likely to implement and a hand-written reader is
+most likely to mishandle in the other direction.
+
+unicodeText is non-ASCII inside the basic multilingual plane, and astralText is above it, so it
+occupies one code point but two UTF-16 code units. Both assert preservation only: this case never
+takes a length, an index or a substring, so it does not distinguish a backend that counts in code
+units from one that counts in code points or grapheme clusters. It does catch a backend that drops
+a surrogate pair, or that routes output through a charset the character cannot survive. paddedText
+holds significant leading and trailing spaces, which a reader layered over a line-oriented format
+is apt to strip.
+
+Not covered here: multi-scalar grapheme clusters and unpaired combining marks, which are valid
+Unicode this case simply does not contain, and lone surrogates and overlong encodings, which are
+malformed input and belong with error-path assertions rather than with round-trip ones.
+""")
+model FixtureAdversarialText {
+  @sample(#{ tabbed: "column\tseparated" })
+  @doc("Embedded TAB, which RFC 8259 requires be escaped rather than copied")
+  tabbed: string;
+
+  @sample(#{ multiline: "first line\nsecond line" })
+  @doc("Embedded newline, which must not terminate the value")
+  multiline: string;
+
+  @sample(#{ quoted: "she said \"hello\" once" })
+  @doc("Embedded double quotes, which must not terminate the value")
+  quoted: string;
+
+  @sample(#{ backslashed: "back\\slash and \\\"escaped\\\" text" })
+  @doc("Embedded backslashes, including a literal escape sequence that must survive verbatim")
+  backslashed: string;
+
+  @sample(#{ unicodeText: "café — naïve ✓" })
+  @doc("Non-ASCII inside the basic multilingual plane")
+  unicodeText: string;
+
+  @sample(#{ astralText: "emoji 🙂 tail" })
+  @doc("Character above the BMP, one code point but two UTF-16 code units")
+  astralText: string;
+
+  @sample(#{ paddedText: "  padded  " })
+  @doc("Significant leading and trailing whitespace, which must not be stripped")
+  paddedText: string;
 }
 
 model FixtureOwner {
