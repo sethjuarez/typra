@@ -889,8 +889,9 @@ function emitFieldInputValidation(
       lines.push(`${indent}            }`);
       lines.push(`${indent}        }`);
       lines.push(`${indent}        serde_json::Value::Array(entries) => {`);
-      lines.push(`${indent}            for entry in entries {`);
-      lines.push(`${indent}                ${category.typeName}::validate_input_at(entry, &collection_path)?;`);
+      lines.push(`${indent}            for (index, entry) in entries.iter().enumerate() {`);
+      lines.push(`${indent}                let entry_path = format!("{}[{}]", collection_path, index);`);
+      lines.push(`${indent}                ${category.typeName}::validate_input_at(entry, &entry_path)?;`);
       lines.push(`${indent}            }`);
       lines.push(`${indent}        }`);
       lines.push(`${indent}        _ => {}`);
@@ -899,8 +900,9 @@ function emitFieldInputValidation(
     } else if (category.kind === "collection_complex") {
       lines.push(`${indent}if let Some(entries) = value.get("${field}").and_then(|candidate| candidate.as_array()) {`);
       lines.push(`${indent}    let collection_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
-      lines.push(`${indent}    for entry in entries {`);
-      lines.push(`${indent}        ${category.typeName}::validate_input_at(entry, &collection_path)?;`);
+      lines.push(`${indent}    for (index, entry) in entries.iter().enumerate() {`);
+      lines.push(`${indent}        let entry_path = format!("{}[{}]", collection_path, index);`);
+      lines.push(`${indent}        ${category.typeName}::validate_input_at(entry, &entry_path)?;`);
       lines.push(`${indent}    }`);
       lines.push(`${indent}}`);
     }

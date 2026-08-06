@@ -219,7 +219,12 @@ describe("Swift polymorphic enums", () => {
 
     assert.match(source, /instance\.bindings = try loadBindings\(value, context: context\.at\("bindings"\)\)/);
     assert.match(source, /public struct Binding: TypraModel \{[\s\S]*public var name: String\? = nil/);
-    assert.match(source, /if let values = data as\? \[Any\] \{\s+return try values\.map \{ try Binding\.load\(\$0, context: context\) \}/);
+    // Issue #87: an array element must load under an indexed path so a diagnostic
+  // identifies which element failed, matching the other backends.
+  assert.match(
+    source,
+    /if let values = data as\? \[Any\] \{\s+return try values\.enumerated\(\)\.map \{ try Binding\.load\(\$1, context: context\.atIndex\(\$0\)\) \}/,
+  );
     assert.match(source, /let values = try TypraRuntime\.dictionary\(data, field: "bindings"\)/);
     assert.match(source, /return try values\.keys\.sorted\(\)\.map \{ name in/);
     assert.match(source, /itemData\["name"\] = name\s+return try Binding\.load\(itemData, context: context\.at\(name\)\)/);

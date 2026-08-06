@@ -1414,7 +1414,7 @@ function runPythonExecutableConformance() {
     "import json",
     "import sys",
     `sys.path.insert(0, ${JSON.stringify(generatedRoot)})`,
-    "from python import FixtureCheckpoint, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, LoadContext, ModelInfo, SaveContext, WireOptions",
+    "from python import FixtureCheckpoint, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, LoadContext, ModelInfo, SaveContext, WireOptions",
     `root = FixtureRoot.load(${JSON.stringify(fixtureRootSample)})`,
     "root = FixtureRoot.load(json.loads(json.dumps(root.save())))",
     'checkpoint = FixtureCheckpoint.load({"pendingToolRequests": [{"id": "call-a", "name": "echo"}, {"id": "call-b", "name": "echo"}]})',
@@ -1487,6 +1487,14 @@ function runPythonExecutableConformance() {
     '    assert "inputs.profile.properties.arrayEntry" in message and "array" in message',
     "else:",
     '    raise AssertionError("array-valued named entry was accepted")',
+    "# Issue #47: a failure inside an array element must carry the element index, so a",
+    "# diagnostic cannot silently degrade to naming only the field.",
+    "try:",
+    '    FixtureIndexedList.load({"entries": [{"label": "first", "detail": {"code": "ok"}}, {"label": "second"}]})',
+    "except Exception as error:",
+    '    assert "entries[1].detail" in str(error), "array element diagnostic lost the element index: " + str(error)',
+    "else:",
+    '    raise AssertionError("missing required field inside an array element was accepted")',
     "print(json.dumps({",
     '    "root": root.save(),',
     '    "imageContent": image_content.save(),',
@@ -2074,6 +2082,11 @@ function runRustExecutableConformance() {
     '    let error = FixtureNamedRoot::from_json(r#"{"inputs":{"profile":{"properties":{"arrayEntry":[]}}}}"#, &load_ctx).expect_err("array-valued named entry");',
     '    let message = error.to_string();',
     '    assert!(message.contains("inputs.profile.properties.arrayEntry") && message.contains("array"), "{message}");',
+    "    // Issue #47: a failure inside an array element must carry the element index, so a",
+    "    // diagnostic cannot silently degrade to naming only the field.",
+    '    let indexed_error = FixtureIndexedList::from_json(r#"{"entries":[{"label":"first","detail":{"code":"ok"}},{"label":"second"}]}"#, &load_ctx).expect_err("missing required field inside an array element");',
+    "    let indexed_message = indexed_error.to_string();",
+    '    assert!(indexed_message.contains("entries[1].detail"), "array element diagnostic lost the element index: {indexed_message}");',
     "    println!(\"{}\", json!({",
     '        "root": root.to_value(&save_ctx),',
     '        "imageContent": image_content.to_value(&save_ctx),',
@@ -2361,6 +2374,9 @@ function runCSharpExecutableConformance() {
     'if (arrayFunctionTool.Bindings is not { Count: 1 } || arrayFunctionTool.Bindings[0].Name != "unit" || arrayFunctionTool.Bindings[0].Source != "preferred_unit") throw new InvalidOperationException("array-form bindings regressed");',
     'if (uniqueNamed.Save(new SaveContext { CollectionFormat = "array" })["items"] is not IList<Dictionary<string, object?>>) throw new InvalidOperationException("explicit array format was ignored");',
     'try { FixtureNamedRoot.FromJson("""{"inputs":{"profile":{"properties":{"arrayEntry":[]}}}}"""); throw new InvalidOperationException("array-valued named entry was accepted"); } catch (ArgumentException error) { if (!error.Message.Contains("inputs.profile.properties.arrayEntry") || !error.Message.Contains("array")) throw; }',
+    "// Issue #47: a failure inside an array element must carry the element index, so a",
+    "// diagnostic cannot silently degrade to naming only the field.",
+    'try { FixtureIndexedList.FromJson("""{"entries":[{"label":"first","detail":{"code":"ok"}},{"label":"second"}]}"""); throw new InvalidOperationException("missing required field inside an array element was accepted"); } catch (ArgumentException error) { if (!error.Message.Contains("entries[1].detail")) throw new InvalidOperationException("array element diagnostic lost the element index: " + error.Message); }',
     "Console.WriteLine(JsonSerializer.Serialize(new Dictionary<string, object?>",
     "{",
     '    ["root"] = root.Save(),',
@@ -2555,6 +2571,15 @@ function runJavaExecutableConformance() {
     '      require(error.getMessage().contains("inputs.profile.properties.arrayEntry") && error.getMessage().contains("array"), "array-valued named entry error lost recursive path");',
     "    }",
     "",
+    "    // Issue #47: a failure inside an array element must carry the element index, so a",
+    "    // diagnostic cannot silently degrade to naming only the field.",
+    "    try {",
+    '      FixtureIndexedList.load(Map.of("entries", List.of(Map.of("label", "first", "detail", Map.of("code", "ok")), Map.of("label", "second"))), new LoadContext());',
+    '      throw new AssertionError("missing required field inside an array element was accepted");',
+    "    } catch (IllegalArgumentException error) {",
+    '      require(error.getMessage().contains("entries[1].detail"), "array element diagnostic lost the element index: " + error.getMessage());',
+    "    }",
+    "",
     "    FixtureUnionProperty union = new FixtureUnionProperty();",
     "    union.anyOf.add(new FixtureProperty());",
     '    require(union.save(new SaveContext()).get("anyOf") instanceof List<?>, "ordinary Property collections must remain arrays");',
@@ -2732,6 +2757,23 @@ final class ConformanceValidateTests: XCTestCase {
       XCTAssertTrue(
         String(describing: error).contains("category array"),
         "array-valued entry in name-keyed object form was not rejected as a category array"
+      )
+    }
+  }
+
+  // Issue #47: a failure inside an array element must carry the element index, so a
+  // diagnostic cannot silently degrade to naming only the field.
+  func testArrayElementDiagnosticCarriesTheIndex() throws {
+    let input: [String: Any] = [
+      "entries": [
+        ["label": "first", "detail": ["code": "ok"]],
+        ["label": "second"],
+      ]
+    ]
+    XCTAssertThrowsError(try FixtureIndexedList.load(input)) { error in
+      XCTAssertTrue(
+        String(describing: error).contains("entries[1].detail"),
+        "array element diagnostic lost the element index"
       )
     }
   }
