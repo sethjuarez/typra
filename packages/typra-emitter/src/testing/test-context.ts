@@ -167,8 +167,12 @@ function synthesizeRequiredValue(
  * `buildExamples` derives a payload from `@sample` decorators alone, so a required complex
  * property that declares none is silently dropped — and the generated validation then
  * rejects the very payload the generator produced.
+ *
+ * Exported because C# renders its conversion tests through its own driver rather than
+ * `buildBaseTestContext`; it must complete payloads through this same helper so every
+ * backend's generated fixtures stay in agreement.
  */
-function withRequiredComplexSamples(
+export function withRequiredComplexSamples(
   sample: Record<string, any>,
   node: TypeNode,
   resolveType: TypeResolver,

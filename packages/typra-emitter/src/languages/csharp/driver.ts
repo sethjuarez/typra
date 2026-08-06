@@ -16,6 +16,7 @@ import { emitCSharpTest } from "./test-emitter.js";
 import { toPascalCase } from "../../ir/visitor.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import { collectProtocolNodes, emitCSharpProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
+import { withRequiredComplexSamples, TypeResolver } from "../../testing/test-context.js";
 
 /**
  * Stale-file deletion is intentionally disabled until manifest cleanup is enabled.
@@ -103,7 +104,7 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
     await emitCsharpFile(context, n, classCode, `${n.typeName.name}.cs`, outDir, emitTarget["output-dir"]);
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const testDir = n.group ? `${emitTarget["test-dir"]}/${n.group}` : emitTarget["test-dir"];
-      await emitCsharpFile(context, n, renderTests(n, csharpNamespace), `${n.typeName.name}ConversionTests.cs`, testDir, emitTarget["test-dir"]);
+      await emitCsharpFile(context, n, renderTests(n, csharpNamespace, name => registry.get(name)), `${n.typeName.name}ConversionTests.cs`, testDir, emitTarget["test-dir"]);
     }
   }
 
@@ -130,7 +131,13 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
 
 // --- Test-rendering helpers ---
 
-const renderTests = (node: TypeNode, namespace: string): string => {
+/**
+ * Render the conversion-test file for one type.
+ *
+ * Exported for regression coverage: the payload completion below is easy to drop when this
+ * driver diverges from the shared `buildBaseTestContext` path the other backends use.
+ */
+export const renderTests = (node: TypeNode, namespace: string, resolveType: TypeResolver): string => {
   const samples = node.properties.filter(p => p.samples && p.samples.length > 0).map(p => {
     return p.samples?.map(s => ({
       ...s.sample,
@@ -143,7 +150,11 @@ const renderTests = (node: TypeNode, namespace: string): string => {
       [];
 
   const examples = combinations.map(c => {
-    const sample = Object.assign({}, ...c);
+    // Complete the payload with required complex fields the `@sample` combinations left out,
+    // exactly as `buildBaseTestContext` does for every other backend. Without this the
+    // generated fixture omits fields the generated loader requires, so the emitted test is
+    // rejected by the emitted validation.
+    const sample = withRequiredComplexSamples(Object.assign({}, ...c), node, resolveType);
     // Create YAML document and customize string scalar style for values with special chars
     const doc = new YAML.Document(sample);
     YAML.visit(doc, {
