@@ -4,6 +4,7 @@ import { Model, ModelProperty } from "@typespec/compiler";
 
 import { TypeNode, PropertyNode } from "../src/ir/ast.js";
 import { buildBaseTestContext, goTestOptions } from "../src/testing/test-context.js";
+import { renderTests } from "../src/languages/csharp/driver.js";
 
 interface PropOptions {
   isScalar?: boolean;
@@ -153,5 +154,44 @@ describe("test context — required complex sample synthesis", () => {
     node.properties.push(makeProp("child", "Tree", { type: node }));
 
     assert.ok(!("child" in sampleFor(node, [node])), "self-reference must not be synthesized");
+  });
+});
+
+describe("csharp driver — generated fixtures satisfy generated loaders", () => {
+  function renderCSharp(node: TypeNode, types: TypeNode[]): string {
+    const byName = new Map(types.map(type => [type.typeName.name, type]));
+    return renderTests(node, "Test.Namespace", name => byName.get(name));
+  }
+
+  it("includes a required complex property that declares no @sample", () => {
+    const detail = makeType("Detail", [
+      makeProp("code", "string", { isScalar: true, sample: { code: "detail-code" } }),
+    ]);
+    const node = makeType("Root", [
+      makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),
+      makeProp("detail", "Detail", { type: detail }),
+    ]);
+
+    // C# renders its conversion tests through its own driver rather than
+    // `buildBaseTestContext`. When that path skips payload completion the emitted fixture
+    // omits a field the emitted loader requires, so the generated test fails against the
+    // generated validation shipped beside it.
+    const rendered = renderCSharp(node, [detail]);
+    assert.match(rendered, /detail-code/, "required complex payload must reach the C# fixture");
+  });
+
+  it("leaves an optional complex property out of the fixture", () => {
+    const detail = makeType("Detail", [
+      makeProp("code", "string", { isScalar: true, sample: { code: "detail-code" } }),
+    ]);
+    const node = makeType("Root", [
+      makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),
+      makeProp("detail", "Detail", { isOptional: true, type: detail }),
+    ]);
+
+    // Counterpart guard: nothing rejects an omitted optional, so synthesizing one would
+    // assert coverage the schema never asked for.
+    const rendered = renderCSharp(node, [detail]);
+    assert.ok(!rendered.includes("detail-code"), "optional complex field must stay absent");
   });
 });
