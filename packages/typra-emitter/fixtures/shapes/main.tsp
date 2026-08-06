@@ -42,8 +42,44 @@ model FixtureRoot {
   @doc("Open string union field")
   mode?: FixtureMode;
 
+  @sample(#{ zeroValues: #{ emptyText: "", zeroCount: 0, zeroRatio: 0, falseFlag: false, emptyItems: #[] } })
+  @doc("Required fields held at their type zero values")
+  zeroValues: FixtureZeroValues;
+
   @doc("Ordered complex collection with non-unique names")
   checkpoint?: FixtureCheckpoint;
+}
+
+@doc("""
+Required scalars and collections held at their type zero values.
+
+A required field must appear on the wire regardless of its value. Backends that omit a field
+when it compares equal to its type default silently violate the contract they were generated
+from, and disagree with backends that do not. Same-language round-trip cannot detect this: a
+backend that drops "" on save and rehydrates a missing required string as "" round-trips
+green while its output is wrong. Only cross-language comparison catches it, which is why
+these live in the conformance corpus rather than in a per-target test.
+""")
+model FixtureZeroValues {
+  @sample(#{ emptyText: "" })
+  @doc("Required string at its zero value")
+  emptyText: string;
+
+  @sample(#{ zeroCount: 0 })
+  @doc("Required integer at its zero value")
+  zeroCount: int32;
+
+  @sample(#{ zeroRatio: 0 })
+  @doc("Required float at its zero value")
+  zeroRatio: float64;
+
+  @sample(#{ falseFlag: false })
+  @doc("Required boolean at its zero value")
+  falseFlag: boolean;
+
+  @sample(#{ emptyItems: #[] })
+  @doc("Required collection at its zero value")
+  emptyItems: string[];
 }
 
 model FixtureOwner {
