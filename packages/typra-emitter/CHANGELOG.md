@@ -6,6 +6,27 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## 0.4.28
+
+### Fixed
+
+- **Array-element diagnostics lost the element index in the Rust, C# and Swift backends** (#87).
+  Loading a list whose second element omitted a required field reported `entries.detail: missing
+  required field` in those three backends, while TypeScript, Go, Python and Java correctly reported
+  `entries[1].detail`. With many entries every failure produced an identical path, so a diagnostic
+  could not identify which element was at fault. TypeScript, Go, Python and Java thread a per-element
+  context (`atIndex` / `AtIndex` / `at_index`); Rust reused the collection path for every element,
+  and C# and Swift passed the parent context unchanged. Their load contexts never defined an index
+  helper at all. Rust now formats an indexed path in both the plain-array and named-collection array
+  forms, and the C# and Swift load contexts gained the index helper their call sites now use.
+
+### Changed
+
+- The generated executable-conformance runners now assert the element-index contract in all seven
+  backends. It was previously asserted only in TypeScript and Go, which is why the Rust, C# and
+  Swift regressions went unnoticed — no consuming runtime reads these diagnostic strings, so the
+  degradation was invisible downstream in every language.
+
 ## 0.4.27
 
 ### Fixed

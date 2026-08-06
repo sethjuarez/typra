@@ -815,13 +815,15 @@ function emitCollectionLoadHelper(
   lines.push("        }");
   lines.push("        else if (data is IEnumerable<object> list)");
   lines.push("        {");
+  lines.push("            var itemIndex = 0;");
   lines.push("            foreach (var item in list)");
   lines.push("            {");
   lines.push(`                var itemDict = item.GetDictionary(${elemType}.ShorthandProperty);`);
   lines.push("                if (itemDict.Count > 0)");
   lines.push("                {");
-  lines.push(`                    result.Add(${elemType}.Load(itemDict, context));`);
+  lines.push(`                    result.Add(${elemType}.Load(itemDict, context?.AtIndex(itemIndex)));`);
   lines.push("                }");
+  lines.push("                itemIndex++;");
   lines.push("            }");
   lines.push("        }");
   lines.push("");

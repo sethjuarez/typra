@@ -13,6 +13,7 @@ export function emitSwiftRuntime(moduleName: string): string {
     "  public let path: String",
     '  public init(path: String = "") { self.path = path }',
     '  public func at(_ segment: String) -> LoadContext { LoadContext(path: path.isEmpty ? segment : "\\(path).\\(segment)") }',
+  '  public func atIndex(_ index: Int) -> LoadContext { LoadContext(path: "\\(path)[\\(index)]") }',
     "}",
     "",
     "public struct SaveContext {",

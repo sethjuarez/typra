@@ -373,7 +373,9 @@ function emitNamedCollectionLoadHelper(
   const elementType = swiftTypeName(helper.elementTypeName.name);
   lines.push(`  private static func ${methodName}(_ data: Any, context: LoadContext) throws -> [${elementType}] {`);
   lines.push("    if let values = data as? [Any] {");
-  lines.push(`      return try values.map { try ${elementType}.load($0, context: context) }`);
+  lines.push(
+    `      return try values.enumerated().map { try ${elementType}.load($1, context: context.atIndex($0)) }`,
+  );
   lines.push("    }");
   lines.push(`    let values = try TypraRuntime.dictionary(data, field: ${swiftStringLiteral(helper.propertyName)})`);
   lines.push("    return try values.keys.sorted().map { name in");
@@ -744,7 +746,7 @@ function swiftLoadExpression(
       if (collectionHelper?.hasNameProperty) {
         return `try load${swiftTypeName(collectionHelper.propertyName)}(${valueExpr}, context: context.at(${swiftStringLiteral(fieldName)}))`;
       }
-      return `try TypraRuntime.array(${valueExpr}, field: ${swiftStringLiteral(fieldName)}).map { try ${swiftTypeName(category.typeName)}.load($0, context: context.at(${swiftStringLiteral(fieldName)})) }`;
+      return `try TypraRuntime.array(${valueExpr}, field: ${swiftStringLiteral(fieldName)}).enumerated().map { try ${swiftTypeName(category.typeName)}.load($1, context: context.at(${swiftStringLiteral(fieldName)}).atIndex($0)) }`;
     case "dict":
       return `try TypraRuntime.dictionary(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
   }
