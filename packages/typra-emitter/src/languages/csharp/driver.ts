@@ -160,8 +160,15 @@ export const renderTests = (node: TypeNode, namespace: string, resolveType: Type
     return {
       json: JSON.stringify(sample, null, 2).split('\n'),
       yaml: doc.toString({ indent: 2, lineWidth: 0 }).split('\n'),
-      // get all scalars in the sample - using 'validations' (plural) for consistency across languages
-      validations: Object.keys(sample).filter(key => typeof sample[key] !== 'object').map(key => {
+      // Mirror the shared `buildValidations` filter in src/testing/test-context.ts: a
+      // validation is only emitted for a key that is genuinely a scalar (or enum) property
+      // of this node. Filtering on the sample alone asserts properties that do not exist on
+      // the emitted class — a polymorphic base whose `@sample` shows a subtype payload, or a
+      // complex field populated through a scalar coercion — and the generated test then
+      // fails to compile against the generated loader.
+      validations: Object.keys(sample).filter(
+        key => isCSharpAssertableSampleKey(key, sample[key], node),
+      ).map(key => {
         const val = sample[key];
         // Check if this field is a closed enum — if so, use EnumName.MemberName syntax
         // Skip discriminator fields — their enums are excluded from generation
@@ -232,6 +239,24 @@ export const renderTests = (node: TypeNode, namespace: string, resolveType: Type
     renderCsharpFactoryMethodName: (factoryName: string) => renderCsharpFactoryMethodName(factoryName, node),
     renderCsharpFactoryTestValue,
   });
+};
+
+/**
+ * Whether a `@sample` key should become an assertion in the generated conversion test.
+ *
+ * Mirrors the shared `buildValidations` filter in src/testing/test-context.ts: only a key that
+ * is genuinely a scalar (or enum) property of this node is assertable. Filtering on the sample
+ * alone asserts members that do not exist on the emitted class — a polymorphic base whose
+ * `@sample` carries a subtype payload, or a complex field populated through a scalar coercion —
+ * and the generated test then fails to compile against the generated loader.
+ */
+export const isCSharpAssertableSampleKey = (
+  key: string,
+  value: unknown,
+  node: TypeNode,
+): boolean => {
+  const prop = node.properties.find(p => p.name === key);
+  return typeof value !== 'object' && Boolean(prop?.isScalar || prop?.enumName);
 };
 
 const renderName = (name: string): string => {

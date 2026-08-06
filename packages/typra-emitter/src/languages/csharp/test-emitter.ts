@@ -217,6 +217,22 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
         .map(pType => ctx.renderCsharpFactoryTestValue(pType))
         .join(', ');
 
+      // `sets` values may embed `{param}` placeholders resolved at call time. The generated
+      // call passes concrete test values, so the assertions must compare against those
+      // substituted results — asserting the raw template compares against a literal "{id}".
+      const paramLiterals = new Map<string, string>();
+      for (const [pName, pType] of Object.entries(factory.params)) {
+        const rendered = ctx.renderCsharpFactoryTestValue(pType);
+        paramLiterals.set(
+          pName,
+          rendered.length > 1 && rendered.startsWith('"') && rendered.endsWith('"')
+            ? rendered.slice(1, -1)
+            : rendered,
+        );
+      }
+      const substituteParams = (raw: string): string =>
+        raw.replace(/\{(\w+)\}/g, (match, param) => paramLiterals.get(param) ?? match);
+
       L.push('');
       L.push('    [Fact]');
       L.push(`    public void Factory${methodName}()`);
@@ -224,7 +240,8 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
       L.push(`        var instance = ${typeName}.${methodName}(${paramValues});`);
       L.push('        Assert.NotNull(instance);');
 
-      for (const [propName, value] of Object.entries(factory.sets)) {
+      for (const [propName, rawValue] of Object.entries(factory.sets)) {
+        const value = typeof rawValue === 'string' ? substituteParams(rawValue) : rawValue;
         if (value === true) {
           L.push(`        Assert.True(instance.${ctx.renderName(propName)});`);
         } else if (value === false) {

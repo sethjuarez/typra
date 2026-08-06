@@ -79,4 +79,33 @@ describe("C# test emitter", () => {
     assert.match(code, /Assert\.Equal\(0\.9, instance\.TopP\);/);
     assert.doesNotMatch(code, /Assert\.Equal\(0\.9f, instance\.TopP\);/);
   });
+
+  it("substitutes factory parameter placeholders in generated assertions", () => {
+    const node = {
+      typeName: { namespace: "Fixtures", name: "FixtureReference" },
+      properties: [],
+    } as unknown as TypeNode;
+    const code = emitCSharpTest({
+      node,
+      namespace: "Fixtures.Tests",
+      examples: [],
+      coercions: [],
+      factories: [{
+        name: "named",
+        params: { id: "string", label: "string" },
+        // `sets` values are templates resolved from the call arguments at runtime.
+        sets: { id: "{id}", label: "{label}" },
+      }],
+      singlePrecisionKeys: new Set<string>(),
+      renderName: name => name.charAt(0).toUpperCase() + name.slice(1),
+      renderCsharpFactoryMethodName: name => name.charAt(0).toUpperCase() + name.slice(1),
+      renderCsharpFactoryTestValue: () => '"test"',
+    });
+
+    // The generated call passes "test" for both params, so the assertions must compare
+    // against the substituted result — asserting the raw "{id}" template always fails.
+    assert.match(code, /Assert\.Equal\("test", instance\.Id\);/);
+    assert.match(code, /Assert\.Equal\("test", instance\.Label\);/);
+    assert.doesNotMatch(code, /\{id\}|\{label\}/);
+  });
 });
