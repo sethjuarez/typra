@@ -526,6 +526,95 @@ function runPythonCompile() {
   runCommand("Generated Python source syntax validation", "python", ["-m", "py_compile", ...sourceFiles]);
 }
 
+/**
+ * Tests the gate knowingly tolerates, each tied to a filed defect.
+ *
+ * Asserted in BOTH directions, exactly like the C# list: an unlisted failure fails the gate,
+ * and a listed test that starts passing also fails the gate, so fixing the underlying issue
+ * forces the entry out instead of leaving a permanent mute behind.
+ */
+// Intentionally empty: every generated Python test passes.
+const PYTHON_KNOWN_TEST_FAILURES = new Map();
+
+/**
+ * Runs the generated Python tests. Compiling them proved nothing about whether they pass —
+ * Python was the last backend whose generated suite was never executed, which is how the
+ * literal and factory defects fixed in #107 reached main unnoticed. See #96.
+ */
+function runPythonGeneratedTests() {
+  const sourceDir = path.join(generatedRoot, "python");
+  const testsDir = path.join(sourceDir, "tests");
+  const testFiles = existsSync(testsDir) ? walkFiles(testsDir, file => file.endsWith(".py")) : [];
+  if (testFiles.length === 0) {
+    fail("No generated Python tests found to run.");
+    return;
+  }
+  if (!commandExists("python")) {
+    fail("Generated Python tests cannot run because python is not available.");
+    return;
+  }
+
+  // The generated tests import the package as `fixtures`, but it is emitted into a directory
+  // named `python`, so it is only importable from a tree where that directory is named
+  // `fixtures`. Stage a copy rather than a symlink: symlinks need elevation on Windows.
+  const stageRoot = mkdtempSync(path.join(tmpdir(), "typra-python-tests-"));
+  const packageDir = path.join(stageRoot, "fixtures");
+  try {
+    cpSync(sourceDir, packageDir, {
+      recursive: true,
+      filter: source => !path.basename(source).startsWith("__pycache__")
+        && path.basename(source) !== ".pytest_cache",
+    });
+
+    let output = "";
+    let crashed = null;
+    try {
+      output = execFileSync(
+        "python",
+        ["-m", "pytest", path.join(packageDir, "tests"), "-q", "-p", "no:cacheprovider"],
+        {
+          cwd: stageRoot,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { ...process.env, PYTHONPATH: stageRoot, PYTHONDONTWRITEBYTECODE: "1" },
+        },
+      );
+    } catch (error) {
+      output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`;
+      crashed = error;
+    }
+
+    const failed = new Set();
+    for (const match of output.matchAll(/^(?:FAILED|ERROR)\s+(\S+?)(?:\s|$)/gm)) {
+      // pytest prints paths relative to whatever rootdir it infers, so anchor the key to the
+      // tests directory instead. A list entry must not break because rootdir moved.
+      failed.add(match[1].replace(/^.*?tests[\\/]/, ""));
+    }
+    // A collection error produces no per-test lines, so it must not read as "nothing failed".
+    if (crashed && failed.size === 0) {
+      fail(`Generated Python tests failed to collect or run:\n${output.trim() || crashed.message}`);
+      return;
+    }
+
+    const unexpected = [...failed].filter(name => !PYTHON_KNOWN_TEST_FAILURES.has(name));
+    if (unexpected.length > 0) {
+      fail("Generated Python tests failed:\n" + unexpected.map(name => `  ${name}`).join("\n"));
+    }
+    const fixed = [...PYTHON_KNOWN_TEST_FAILURES.keys()].filter(name => !failed.has(name));
+    if (fixed.length > 0) {
+      fail(
+        "Generated Python tests listed as known failures now pass. Remove them from "
+        + "PYTHON_KNOWN_TEST_FAILURES in scripts/validate-fixtures.mjs:\n"
+        + fixed.map(name => `  ${name} (#${PYTHON_KNOWN_TEST_FAILURES.get(name)})`).join("\n"),
+      );
+    }
+  } finally {
+    if (existsSync(stageRoot)) {
+      rmSync(stageRoot, { recursive: true, force: true });
+    }
+  }
+}
+
 function runGoTests() {
   const sourceDir = path.join(generatedRoot, "go");
   const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".go"));
@@ -3489,6 +3578,7 @@ runTypraVerify();
 runTypraConsumerSmoke();
 runGeneratedTypeScriptCompile();
 runPythonCompile();
+runPythonGeneratedTests();
 runGoTests();
 runRustTests();
 runSwiftTests();
