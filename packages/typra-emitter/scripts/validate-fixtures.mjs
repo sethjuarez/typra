@@ -87,6 +87,18 @@ const fixtureRootSample = {
     wholeRatio: 2,
     preciseRatio: -0.125,
   },
+  // Characters a serializer must escape or encode rather than copy. TAB is the sharpest: RFC 8259
+  // forbids an unescaped character below U+0020, so a writer that copies it emits a document that
+  // is not JSON. See FixtureAdversarialText in main.tsp for what this case does and does not cover.
+  adversarialText: {
+    tabbed: "column\tseparated",
+    multiline: "first line\nsecond line",
+    quoted: 'she said "hello" once',
+    backslashed: 'back\\slash and \\"escaped\\" text',
+    unicodeText: "café — naïve ✓",
+    astralText: "emoji 🙂 tail",
+    paddedText: "  padded  ",
+  },
 };
 // One canonical conformance input, embedded into every target program.
 //
@@ -2820,6 +2832,14 @@ function runJavaExecutableConformance() {
     '    require(new FixtureRoot().save(new SaveContext()).containsKey("status"), "required enums must always serialize");',
     '    require(((Number) TypraJson.parse("1")).longValue() == 1L, "JSON integer parsing must retain its numeric value");',
     '    require(((Number) TypraYaml.parse("1")).longValue() == 1L, "YAML integer parsing must retain its numeric value");',
+    "    // The fixture corpus reaches the named escapes but not the general control-character",
+    "    // branch, so U+0001 is checked directly: it must not be copied verbatim, and it must",
+    "    // survive a round trip through the writer and the reader.",
+    "    String controlSample = \"a\" + ((char) 1) + \"b\";",
+    "    String encodedControl = TypraJson.stringify(controlSample);",
+    "    require(encodedControl.indexOf((char) 1) < 0, \"control characters must not be copied verbatim into JSON output\");",
+    "    require(controlSample.equals(TypraJson.parse(encodedControl)), \"control characters must round-trip through JSON\");",
+    "",
     "    Map<String, Object> output = new LinkedHashMap<>();",
     '    output.put("root", reloadedRoot.save(new SaveContext()));',
     '    output.put("imageContent", reloadedImageContent.save(new SaveContext()));',
@@ -2828,7 +2848,13 @@ function runJavaExecutableConformance() {
     '    output.put("unmapped", wire.toWire("unmapped-provider"));',
     '    output.put("emptyProvider", wire.toWire(""));',
     '    output.put("reference", reloadedReference.save(new SaveContext()));',
-    "    System.out.println(TypraJson.stringify(output));",
+    "    System.out.flush();",
+    "    // stdout defaults to the platform charset, which is not UTF-8 on Windows, so the payload",
+    "    // is written through an explicit UTF-8 stream. Without this the non-ASCII strings arrive",
+    "    // mangled and a harness encoding artifact is misread as an emitter divergence.",
+    "    java.io.PrintStream utf8Out = new java.io.PrintStream(new java.io.FileOutputStream(java.io.FileDescriptor.out), true, java.nio.charset.StandardCharsets.UTF_8);",
+    "    utf8Out.println(TypraJson.stringify(output));",
+    "    utf8Out.flush();",
     "  }",
     "",
     "  private static void require(boolean condition, String message) {",
