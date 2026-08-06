@@ -58,6 +58,10 @@ model FixtureRoot {
   @doc("Strings carrying characters a serializer must escape or encode")
   adversarialText: FixtureAdversarialText;
 
+  @sample(#{ discriminatorEdges: #{ wildcardSelected: #{ kind: "vendor-extension", name: "wildcard-selected tool", connection: #{ kind: "custom", endpoint: "https://example.test" }, config: #{ enabled: true } }, openUnknown: #{ kind: "vendor-unrecognized", label: "absorbed by the open base" }, unclaimedClosed: #{ kind: "plain", label: "permitted but unclaimed" }, namedOpenUnknown: #{ kind: "vendor-specific", label: "unrecognized named open kind" } } })
+  @doc("Discriminator values that no subtype claims outright")
+  discriminatorEdges: FixtureDiscriminatorEdges;
+
   @doc("Ordered complex collection with non-unique names")
   checkpoint?: FixtureCheckpoint;
 }
@@ -237,6 +241,55 @@ model FixtureAdversarialText {
   @sample(#{ paddedText: "  padded  " })
   @doc("Significant leading and trailing whitespace, which must not be stripped")
   paddedText: string;
+}
+
+@doc("""
+Discriminator values that no subtype claims outright.
+
+Dispatching on a discriminator has three outcomes that must stay distinct: a value a subtype
+claims, a value no subtype claims that a wildcard subtype absorbs, and a value no subtype claims
+at all which the base itself must carry. Collapsing any pair of these either loses data or
+rejects a document a peer accepts.
+
+Every field reachable from FixtureRoot previously carried a discriminator value that a subtype
+claimed directly, so the differential comparison had only ever dispatched down the recognized
+path. The unrecognized paths were exercised only by per-target assertions, each written against
+its own expectations in its own language. Those are same-language round trips, and by the same
+argument that motivates FixtureZeroValues they cannot detect a choice that is self-consistent in
+every target and different between them. Putting these shapes in the shared sample turns that
+into cross-language agreement.
+
+wildcardSelected carries a kind no subtype declares, which the wildcard subtype must absorb while
+preserving the original value rather than rewriting it to the wildcard marker. It is the shape
+behind the original missing-required-field defect: its connection is a required complex field on
+the wildcard subtype, so a backend that relaxes a required-field check in the presence of a
+wildcard discriminator diverges here. openUnknown and namedOpenUnknown are unrecognized values on
+open discriminators, which the base must carry. unclaimedClosed is the closed-union case from
+issue #37: the value is permitted by the union yet claimed by no subtype, and a closed union is
+not the same thing as an exhaustive dispatch.
+
+These are all well-formed documents that must load. Discriminators that are absent, blank or of
+the wrong type are a separate axis and are not covered here: whether they fail the load or are
+treated as merely unrecognized depends on the dispatch, and the targets are not known to agree.
+Preservation of undeclared extra fields alongside an unrecognized discriminator is likewise a
+separate axis and is not covered here.
+""")
+model FixtureDiscriminatorEdges {
+  @sample(#{ wildcardSelected: #{ kind: "vendor-extension", name: "wildcard-selected tool", connection: #{ kind: "custom", endpoint: "https://example.test" }, config: #{ enabled: true } } })
+  @doc("Unrecognized kind absorbed by a wildcard subtype carrying a required complex field")
+  wildcardSelected: FixtureTool;
+
+  @sample(#{ openUnknown: #{ kind: "vendor-unrecognized", label: "absorbed by the open base" } })
+  @doc("Unrecognized kind carried by an abstract open base")
+  openUnknown: FixtureAbstractOpenConnection;
+
+  @sample(#{ unclaimedClosed: #{ kind: "plain", label: "permitted but unclaimed" } })
+  @doc("Closed-union value permitted by the union but claimed by no subtype")
+  unclaimedClosed: FixtureUnclaimedBase;
+
+  @sample(#{ namedOpenUnknown: #{ kind: "vendor-specific", label: "unrecognized named open kind" } })
+  @doc("Unrecognized kind carried through a named open union discriminator")
+  namedOpenUnknown: FixtureNamedOpenBase;
 }
 
 model FixtureOwner {
