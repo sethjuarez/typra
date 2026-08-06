@@ -77,6 +77,16 @@ const fixtureRootSample = {
     falseFlag: false,
     emptyItems: [],
   },
+  // int32 extremes plus an integral and a negative float. A mismatch that survives the 6dp
+  // rounding in normalizeConformanceValue is genuine; a divergence below 5e-7 is not visible to
+  // it, and narrowing to float32 is not covered. See FixtureNumericBounds in main.tsp.
+  numericBounds: {
+    int32Min: -2147483648,
+    int32Max: 2147483647,
+    negativeCount: -42,
+    wholeRatio: 2,
+    preciseRatio: -0.125,
+  },
 };
 // One canonical conformance input, embedded into every target program.
 //
