@@ -231,7 +231,7 @@
     },
     {
       "id": "provider-wire-mapping",
-      "description": "WireOptions maps semantic fields to provider-specific wire names for OpenAI and Anthropic.",
+      "description": "WireOptions maps semantic fields to provider-specific wire names for OpenAI and Anthropic, and omits any field the requested provider does not map. temperature is declared for OpenAI only, so an Anthropic payload must not carry it under any name.",
       "evidence": {
         "json-ast": [
           {
@@ -250,6 +250,8 @@
             "snippets": [
               "toWire(provider: string)",
               "\"maxOutputTokens\": { \"openai\": \"max_completion_tokens\", \"anthropic\": \"max_tokens\" }",
+              "\"temperature\": { \"openai\": \"temperature\" }",
+              "if (mapping?.[provider]) {",
               "result[mapping[provider]] = value"
             ]
           }
@@ -260,6 +262,8 @@
             "snippets": [
               "def to_wire(self, provider: str) -> dict[str, Any]:",
               "\"maxOutputTokens\": {\"openai\": \"max_completion_tokens\", \"anthropic\": \"max_tokens\"}",
+              "\"temperature\": {\"openai\": \"temperature\"}",
+              "if mapping is not None and provider in mapping:",
               "result[mapping[provider]] = value"
             ]
           }
@@ -270,6 +274,8 @@
             "snippets": [
               "public Dictionary<string, object?> ToWire(string provider)",
               "[\"maxOutputTokens\"] = new Dictionary<string, string> { [\"openai\"] = \"max_completion_tokens\", [\"anthropic\"] = \"max_tokens\" }",
+              "[\"temperature\"] = new Dictionary<string, string> { [\"openai\"] = \"temperature\" }",
+              "if (wireMap.TryGetValue(key, out var mapping) && mapping.TryGetValue(provider, out var wireName))",
               "result[wireName] = value;"
             ]
           }
@@ -280,6 +286,8 @@
             "snippets": [
               "func (obj *WireOptions) ToWire(provider string) map[string]interface{}",
               "\"maxOutputTokens\": {\"openai\": \"max_completion_tokens\", \"anthropic\": \"max_tokens\"}",
+              "\"temperature\":     {\"openai\": \"temperature\"}",
+              "if wireName, ok := mapping[provider]; ok {",
               "result[wireName] = value"
             ]
           },
@@ -298,8 +306,10 @@
             "path": "generated/fixtures/java/WireOptions.java",
             "snippets": [
               "public Map<String, Object> toWire(String provider)",
-              "if (target.equals(\"openai\")) { wireName = \"max_completion_tokens\"; include = true; }",
-              "if (target.equals(\"anthropic\")) { wireName = \"max_tokens\"; include = true; }"
+              "String wireName = null;",
+              "if (target.equals(\"openai\")) { wireName = \"max_completion_tokens\"; }",
+              "if (target.equals(\"anthropic\")) { wireName = \"max_tokens\"; }",
+              "if (wireName != null && this.temperature != null)"
             ]
           }
         ],
@@ -309,6 +319,8 @@
             "snippets": [
               "pub fn to_wire(&self, provider: &str) -> serde_json::Value",
               "(\"maxOutputTokens\", std::collections::HashMap::from([(\"openai\", \"max_completion_tokens\"), (\"anthropic\", \"max_tokens\")]))",
+              "(\"temperature\", std::collections::HashMap::from([(\"openai\", \"temperature\")]))",
+              "if let Some(wire_name) = mapping.get(provider) {",
               "result.insert(wire_name.to_string(), value)"
             ]
           }
@@ -319,7 +331,9 @@
             "snippets": [
               "public func toWire(_ provider: String, context: SaveContext = SaveContext()) throws -> [String: Any]",
               "case \"openai\": wireNameMaxOutputTokens = \"max_completion_tokens\"",
-              "case \"anthropic\": wireNameMaxOutputTokens = \"max_tokens\""
+              "case \"anthropic\": wireNameMaxOutputTokens = \"max_tokens\"",
+              "default: wireNameTemperature = nil",
+              "if let wireKey = wireNameTemperature, let value = self.temperature"
             ]
           }
         ]

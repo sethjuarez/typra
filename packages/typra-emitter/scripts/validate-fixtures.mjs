@@ -85,6 +85,11 @@ const conformanceExpected = normalizeConformanceValue({
   anthropic: {
     max_tokens: 256,
   },
+  // A provider with no @knownAs mapping at all must produce an empty payload, as must an empty
+  // provider string. Emitting fields under their schema names for an unmapped or empty provider
+  // is a defect (swift emitted for any unmapped provider; java emitted for the empty provider).
+  unmapped: {},
+  emptyProvider: {},
   reference: {
     id: "ref-coerced",
     label: "coerced reference",
@@ -1361,6 +1366,8 @@ function runTypeScriptExecutableConformance() {
     "  imageContent: imageContent.save(),",
     '  openai: wire.toWire("openai"),',
     '  anthropic: wire.toWire("anthropic"),',
+    '  unmapped: wire.toWire("unmapped-provider"),',
+    '  emptyProvider: wire.toWire(""),',
     "  reference: reference.save(),",
     "}));",
     "",
@@ -1485,6 +1492,8 @@ function runPythonExecutableConformance() {
     '    "imageContent": image_content.save(),',
     '    "openai": wire.to_wire("openai"),',
     '    "anthropic": wire.to_wire("anthropic"),',
+    '    "unmapped": wire.to_wire("unmapped-provider"),',
+    '    "emptyProvider": wire.to_wire(""),',
     '    "reference": reference.save(),',
     "}, sort_keys=True))",
     "",
@@ -1890,6 +1899,8 @@ function runGoExecutableConformance() {
     '\t\t"imageContent": imageContentSaved,',
     '\t\t"openai": wire.ToWire("openai"),',
     '\t\t"anthropic": wire.ToWire("anthropic"),',
+    '\t\t"unmapped": wire.ToWire("unmapped-provider"),',
+    '\t\t"emptyProvider": wire.ToWire(""),',
     '\t\t"reference": reference.Save(saveCtx),',
     "\t})",
     "\tif err != nil {",
@@ -2068,6 +2079,8 @@ function runRustExecutableConformance() {
     '        "imageContent": image_content.to_value(&save_ctx),',
     '        "openai": wire.to_wire("openai"),',
     '        "anthropic": wire.to_wire("anthropic"),',
+    '        "unmapped": wire.to_wire("unmapped-provider"),',
+    '        "emptyProvider": wire.to_wire(""),',
     '        "reference": reference.to_value(&save_ctx)',
     "    }));",
     "}",
@@ -2354,6 +2367,8 @@ function runCSharpExecutableConformance() {
     '    ["imageContent"] = imageContent.Save(),',
     '    ["openai"] = wire.ToWire("openai"),',
     '    ["anthropic"] = wire.ToWire("anthropic"),',
+    '    ["unmapped"] = wire.ToWire("unmapped-provider"),',
+    '    ["emptyProvider"] = wire.ToWire(""),',
     '    ["reference"] = reference.Save(),',
     "}));",
     "",
@@ -2560,6 +2575,8 @@ function runJavaExecutableConformance() {
     '    output.put("imageContent", reloadedImageContent.save(new SaveContext()));',
     '    output.put("openai", wire.toWire("openai"));',
     '    output.put("anthropic", wire.toWire("anthropic"));',
+    '    output.put("unmapped", wire.toWire("unmapped-provider"));',
+    '    output.put("emptyProvider", wire.toWire(""));',
     '    output.put("reference", reloadedReference.save(new SaveContext()));',
     "    System.out.println(TypraJson.stringify(output));",
     "  }",
@@ -2590,6 +2607,123 @@ function runJavaExecutableConformance() {
   }
 }
 
+function swiftToolchainEnv() {
+  const env = { ...process.env };
+  if (process.platform === "win32" && !env.SDKROOT) {
+    const sdkRoot = findSwiftWindowsSdk();
+    if (sdkRoot) {
+      env.SDKROOT = sdkRoot;
+    }
+  }
+  if (process.platform === "win32") {
+    const gitExecPath = findWindowsGitExecPath();
+    if (gitExecPath) {
+      env.GIT_EXEC_PATH = gitExecPath;
+    }
+    env.GIT_CONFIG_COUNT = "1";
+    env.GIT_CONFIG_KEY_0 = "safe.bareRepository";
+    env.GIT_CONFIG_VALUE_0 = "all";
+  }
+  return env;
+}
+
+/**
+ * Swift was the only conformance-matrix target with no executable conformance run: its sources
+ * compiled and its generated package tests ran, but nothing ever checked that the Swift backend
+ * produces the same canonical output as the other six. Conformance evidence was asserted for a
+ * backend whose behaviour was never compared.
+ *
+ * The canonical payload is emitted from inside an XCTest rather than a separate executable target
+ * so that the generated `Package.swift` is not rewritten, reusing the same toolchain plumbing as
+ * `runSwiftTests`. `swift test` interleaves its own progress output, so the payload is tagged with
+ * a sentinel and extracted rather than read off the last line.
+ */
+function runSwiftExecutableConformance() {
+  const sourceDir = path.join(generatedRoot, "swift");
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".swift"));
+  if (sourceFiles.length === 0) {
+    fail("No generated Swift files found for executable conformance.");
+    return;
+  }
+
+  if (!commandExists("swift")) {
+    if (process.env.CI_SWIFT_REQUIRED === "1") {
+      fail("Generated Swift executable conformance cannot run because swift is not available.");
+    } else {
+      console.warn("Warning: swift is not available. Skipping generated Swift executable conformance.");
+    }
+    return;
+  }
+
+  const runnerPath = path.join(sourceDir, "Tests", "TypraFixturesTests", "ConformanceValidateTests.swift");
+  const buildDir = mkdtempSync(path.join(tmpdir(), "typra-swift-conformance-"));
+
+  writeFileSync(runnerPath, `import XCTest
+import Foundation
+@testable import TypraFixtures
+
+final class ConformanceValidateTests: XCTestCase {
+  func testEmitsCanonicalConformancePayload() throws {
+    let rootData: [String: Any] = [
+      "name": "fixture-root",
+      "description": "A generated fixture with broad emitter coverage.",
+      "tags": ["typespec", "emitter", "validation"],
+      "metadata": ["source": "fixture", "version": 1],
+      "owner": ["id": "owner-1", "displayName": "Fixture Owner"],
+      "content": ["kind": "text", "value": "hello from a polymorphic sample"],
+      "contentItems": [["kind": "text", "value": "hello from a polymorphic collection"]],
+      "status": "complete",
+      "mode": "bulk",
+    ]
+    let root = try FixtureRoot.load(rootData)
+    let imageContent = try FixtureContent.load(["kind": "image", "url": "https://example.com/fixture.png"])
+    let wire = try WireOptions.load(["maxOutputTokens": 256, "temperature": 0.7])
+    let reference = try FixtureReference.fromYAML("\\"ref-coerced\\"")
+
+    let payload: [String: Any] = [
+      "root": try root.save(),
+      "imageContent": try imageContent.save(),
+      "openai": try wire.toWire("openai"),
+      "anthropic": try wire.toWire("anthropic"),
+      "unmapped": try wire.toWire("unmapped-provider"),
+      "emptyProvider": try wire.toWire(""),
+      "reference": try reference.save(),
+    ]
+
+    let encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+    print("TYPRA_CONFORMANCE:" + String(decoding: encoded, as: UTF8.self))
+  }
+}
+`);
+
+  try {
+    const output = execFileSync(
+      "swift",
+      ["test", "--package-path", sourceDir, "--scratch-path", buildDir, "--filter", "ConformanceValidateTests"],
+      { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: swiftToolchainEnv() },
+    );
+    assertConformanceResult("swift", extractConformancePayload(output));
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated Swift executable conformance failed:\n${output || error.message}`);
+  } finally {
+    if (existsSync(runnerPath)) {
+      unlinkSync(runnerPath);
+    }
+    rmSync(buildDir, { recursive: true, force: true });
+  }
+}
+
+/** Pulls the sentinel-tagged payload out of a test runner's interleaved output. */
+function extractConformancePayload(rawOutput) {
+  const marker = "TYPRA_CONFORMANCE:";
+  const line = rawOutput.split(/\r?\n/).find(entry => entry.includes(marker));
+  if (!line) {
+    return rawOutput;
+  }
+  return line.slice(line.indexOf(marker) + marker.length).trim();
+}
+
 function mkdirp(dir) {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -2604,6 +2738,7 @@ function runExecutableConformance() {
   runRustUnknownAbstractConformance();
   runCSharpExecutableConformance();
   runJavaExecutableConformance();
+  runSwiftExecutableConformance();
 }
 
 function assertGeneratedTargets() {
