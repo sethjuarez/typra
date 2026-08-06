@@ -146,6 +146,59 @@ describe("test context — required complex sample synthesis", () => {
     assert.deepEqual(sampleFor(node, [base, text]).content, { kind: "text", value: "hello" });
   });
 
+  it("names a concrete variant when the root node is itself a polymorphic base", () => {
+    const text = makeType("TextContent", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "text" }),
+      makeProp("value", "string", { isScalar: true, sample: { value: "hello" } }),
+    ]);
+    const node = makeType("Content", [
+      makeProp("kind", "ContentKind", { allowedValues: ["text"] }),
+      makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),
+    ], { discriminator: "kind", childTypes: [text] });
+
+    // The root sample is as unloadable as a nested one when it omits the discriminator, and
+    // the backends disagree about what to do with it, so complete it the same way (#92).
+    assert.deepEqual(sampleFor(node, [node, text]), {
+      label: "root",
+      kind: "text",
+      value: "hello",
+    });
+  });
+
+  it("keeps an author-supplied discriminator instead of renaming the variant", () => {
+    const text = makeType("TextContent", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "text" }),
+    ]);
+    const image = makeType("ImageContent", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "image" }),
+    ]);
+    const node = makeType("Content", [
+      makeProp("kind", "ContentKind", { allowedValues: ["text", "image"], sample: { kind: "image" } }),
+    ], { discriminator: "kind", childTypes: [text, image] });
+
+    // Completion only fills gaps; a sampled discriminator already selects a variant.
+    assert.equal(sampleFor(node, [node, text, image]).kind, "image");
+  });
+
+  it("skips a wildcard variant when naming a concrete type", () => {
+    const custom = makeType("CustomContent", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "*" }),
+    ]);
+    const text = makeType("TextContent", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "text" }),
+    ]);
+    const base = makeType("Content", [
+      makeProp("kind", "ContentKind", { allowedValues: ["text"] }),
+    ], { discriminator: "kind", childTypes: [custom, text], isAbstract: true });
+    const node = makeType("Root", [
+      makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),
+      makeProp("content", "Content", { type: base }),
+    ]);
+
+    // `*` is a routing rule, not a value; emitting it would name no variant at all.
+    assert.deepEqual(sampleFor(node, [base, custom, text]).content, { kind: "text" });
+  });
+
   it("stops at a self-referential required property instead of recursing forever", () => {
     const node = makeType("Tree", [
       makeProp("label", "string", { isScalar: true, sample: { label: "root" } }),

@@ -109,6 +109,12 @@ const WIRE_SCALAR_DEFAULTS: Record<string, unknown> = {
  * Returns `undefined` when nothing can be derived, leaving the property absent rather than
  * emitting a payload that is confidently wrong.
  */
+/** The literal a concrete variant pins for its base's discriminator, if it pins one. */
+function discriminatorLiteral(child: TypeNode, discriminator: string): string | undefined {
+  const prop = child.properties.find(candidate => candidate.name === discriminator);
+  return typeof prop?.defaultValue === "string" ? prop.defaultValue : undefined;
+}
+
 function synthesizeComplexSample(
   type: TypeNode,
   resolveType: TypeResolver,
@@ -123,8 +129,15 @@ function synthesizeComplexSample(
   const nested = new Set(seen).add(key);
 
   // A polymorphic base cannot be described without naming a concrete variant, so build the
-  // payload from the first declared child; its discriminator literal comes along with it.
-  const concrete = type.discriminator && type.childTypes.length > 0 ? type.childTypes[0] : type;
+  // payload from a declared child; its discriminator literal comes along with it. Prefer a
+  // child that pins a real literal: a wildcard variant's discriminator is `*`, which is a
+  // routing rule rather than a value, and emitting it would hand the loaders a fabricated
+  // string that names nothing.
+  const concrete =
+    type.discriminator && type.childTypes.length > 0
+      ? (type.childTypes.find(child => discriminatorLiteral(child, type.discriminator!) !== "*")
+        ?? type.childTypes[0])
+      : type;
 
   const payload: Record<string, any> = {};
   for (const prop of concrete.properties) {
@@ -179,6 +192,20 @@ export function withRequiredComplexSamples(
 ): Record<string, any> {
   const seed = new Set<string>([`${node.typeName.namespace}.${node.typeName.name}`]);
   const completed = { ...sample };
+
+  // A discriminated base declares its discriminator as a required property, so a payload that
+  // omits it is invalid against the schema no matter how each loader chooses to react — and
+  // the backends do not agree: C# throws while the other six invent a base instance (#92).
+  // Complete it from the first declared child exactly as `synthesizeComplexSample` does for a
+  // nested polymorphic property, so the fixture dispatches to a real variant instead of
+  // exercising seven different opinions about an invalid document. Keys the `@sample`
+  // combination already supplied win, so this only fills genuine gaps.
+  if (node.discriminator && !(node.discriminator in completed) && node.childTypes.length > 0) {
+    const variant = synthesizeComplexSample(node, resolveType, new Set());
+    for (const [key, value] of Object.entries(variant ?? {})) {
+      if (!(key in completed)) completed[key] = value;
+    }
+  }
 
   for (const prop of node.properties) {
     if (prop.name in completed) continue;

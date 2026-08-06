@@ -1125,14 +1125,9 @@ function runCSharpConsumerNullabilityBuild() {
  * test that starts passing also fails the gate. That second half is what stops the list from
  * rotting into a permanent mute — fixing the underlying issue forces the entry to be removed.
  */
-const CSHARP_KNOWN_TEST_FAILURES = new Map([
-  ["Typra.Fixtures.FixtureToolConversionTests.LoadJsonInput", 92],
-  ["Typra.Fixtures.FixtureToolConversionTests.LoadYamlInput", 92],
-  ["Typra.Fixtures.FixtureToolConversionTests.RoundtripJson", 92],
-  ["Typra.Fixtures.FixtureToolConversionTests.RoundtripYaml", 92],
-  ["Typra.Fixtures.FixtureToolConversionTests.ToJsonProducesValidJson", 92],
-  ["Typra.Fixtures.FixtureToolConversionTests.ToYamlProducesValidYaml", 92],
-]);
+// Intentionally empty: every generated C# test passes. An entry here mutes one test and must
+// cite the issue that will remove it.
+const CSHARP_KNOWN_TEST_FAILURES = new Map();
 
 function runCSharpGeneratedTests() {
   const sourceDir = path.join(generatedRoot, "csharp");
