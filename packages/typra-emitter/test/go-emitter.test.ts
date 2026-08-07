@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { CoercionDecl, TypeDecl } from "../src/ir/declarations.js";
+import type { CoercionDecl, CollectionHelperDecl, TypeDecl } from "../src/ir/declarations.js";
 import { emitGoFileContent } from "../src/languages/go/emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
 
@@ -44,6 +44,49 @@ function emit(coercions: CoercionDecl[]): string {
   );
 }
 
+function helperWith(hasNameProperty: boolean): CollectionHelperDecl {
+  return {
+    propertyName: "entries",
+    elementTypeName: { namespace: "Test", name: "Property" },
+    innerFields: ["default"],
+    coercionProperty: "default",
+    entryShorthand: {
+      valueField: "default",
+      cases: [
+        { scalarType: "integer", assignments: [{ fieldName: "kind", literalValue: "integer" }] },
+        { scalarType: "float32", assignments: [{ fieldName: "kind", literalValue: "number" }] },
+      ],
+    },
+    hasNameProperty,
+  } as unknown as CollectionHelperDecl;
+}
+
+function emitWithHelper(helper: CollectionHelperDecl): string {
+  const type = typeWith([]);
+  const assignment = {
+    sourceName: "entries",
+    fieldName: "entries",
+    category: { kind: "collection_complex", typeName: "Property" },
+    isOptional: false,
+    parentTypeName: "Property",
+    enumName: null,
+    allowedValues: [],
+    parseAliases: {},
+    defaultValue: null,
+    isOpenEnum: false,
+  } as unknown as TypeDecl["load"]["assignments"][number];
+  return emitGoFileContent(
+    [{
+      ...type,
+      collectionHelpers: [helper],
+      load: { ...type.load, assignments: [assignment] },
+    } as TypeDecl],
+    "model",
+    new GoExprVisitor(),
+    new Set<string>(),
+  );
+}
+
 describe("Go emitter numeric coercion bridging", () => {
   it("bridges decoder-native float64 and int for mixed integral/fractional coercions", () => {
     const out = emit([coercion("integer", "integer"), coercion("float32", "float")]);
@@ -80,5 +123,24 @@ describe("Go emitter numeric coercion bridging", () => {
     assert.ok(out.includes("case string:"), "expected the declared string coercion");
     assert.ok(!out.includes("case float64:"), "string-only coercions need no numeric bridge");
     assert.ok(!out.includes("case int:"), "string-only coercions need no numeric bridge");
+  });
+});
+
+describe("Go emitter entry-shorthand math import", () => {
+  // The entry-shorthand arms that call math.Trunc are emitted only for a name-keyed
+  // collection. A plain array helper emits no such arm, so requesting the import would
+  // leave the generated file with an unused import, which Go rejects at build time.
+  it("omits the math import for a plain array helper", () => {
+    const out = emitWithHelper(helperWith(false));
+
+    assert.ok(!out.includes("math.Trunc"), "a plain array helper emits no shorthand arms");
+    assert.ok(!out.includes('"math"'), "the math import must not be emitted when unused");
+  });
+
+  it("keeps the math import for a name-keyed helper that discriminates integrality", () => {
+    const out = emitWithHelper(helperWith(true));
+
+    assert.ok(out.includes("math.Trunc"), "a name-keyed helper discriminates integrality");
+    assert.ok(out.includes('"math"'), "expected the math import to be plumbed through");
   });
 });
