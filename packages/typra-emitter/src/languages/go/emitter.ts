@@ -123,11 +123,19 @@ export function emitGoFileContent(
     needsRequiredComplexValidation;
   // math.Trunc is only referenced when a type coerces from both a whole-number and a
   // fractional scalar, since that is the only case needing integral discrimination.
+  //
+  // The entry-shorthand arms that reference math.Trunc are emitted only for a name-keyed
+  // collection (see emitLoadCollectionComplex), so this term has to carry the same
+  // hasNameProperty guard. Without it a plain array of an element type that declares an
+  // entry shorthand over both integral and fractional scalars requests the import while
+  // emitting no use of it, and Go rejects the file for an unused import.
   const needsMath = types.some(type =>
     type.load.coercions.some(c => INTEGRAL_SCALAR_TYPES.has(c.scalarType))
     && type.load.coercions.some(c => FRACTIONAL_SCALAR_TYPES.has(c.scalarType))
     && !type.load.coercions.some(c => (GO_TYPE_MAP[c.scalarType] || c.scalarType) === "float64")
-  ) || types.some(type => type.collectionHelpers.some(entryShorthandNeedsMath));
+  ) || types.some(type =>
+    type.collectionHelpers.some(helper => helper.hasNameProperty && entryShorthandNeedsMath(helper))
+  );
   if (hasNonProtocol) {
     emitHeader(lines, packageName, group, needsFmt, needsContext, needsNamedCollections, needsMath);
   } else {
@@ -1021,6 +1029,10 @@ function entryShorthandNeedsMath(helper: CollectionHelperDecl): boolean {
  * same bridge the direct-coercion path uses, and for the same decoder reason.
  * `math.Trunc` is preferred over `float64(int64(v))` because the latter is
  * undefined for magnitudes at or above 2^63.
+ *
+ * These arms are emitted only for a name-keyed collection, so `needsMath` in the
+ * header decision must apply the same `hasNameProperty` guard. Keep the two in step:
+ * requesting the import without emitting a use makes the generated file fail to build.
  */
 function emitGoEntryShorthandArms(helper: CollectionHelperDecl, lines: string[]): void {
   const shorthand = helper.entryShorthand;
