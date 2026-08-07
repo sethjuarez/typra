@@ -66,6 +66,10 @@ model FixtureRoot {
   @doc("Collections at zero, one and many entries across both keyed-collection input forms")
   collectionCardinality: FixtureCollectionCardinality;
 
+  @sample(#{ deepNesting: #{ propertyTree: #{ kind: "object", name: "tree-root", description: "root of the nested tree", additionalProperties: #{ kind: "array", name: "level-one-array", items: #{ kind: "union", name: "level-two-union", anyOf: #[#{ kind: "string", name: "level-three-string", required: true }, #{ kind: "object", name: "level-three-object", additionalProperties: #{ kind: "integer", name: "level-four-integer", nullable: true } }] } } }, branchTrees: #[#{ kind: "string", name: "shallow-leaf" }, #{ kind: "array", name: "one-deep", items: #{ kind: "boolean", name: "nested-boolean" } }, #{ kind: "union", name: "two-deep", anyOf: #[#{ kind: "number", name: "union-number" }, #{ kind: "array", name: "union-array", items: #{ kind: "string", name: "deepest-string" } }] }] } })
+  @doc("Polymorphic dispatch chained several levels deep, including through a collection")
+  deepNesting: FixtureDeepNesting;
+
   @doc("Ordered complex collection with non-unique names")
   checkpoint?: FixtureCheckpoint;
 }
@@ -389,6 +393,51 @@ model FixtureCollectionCardinality {
   @sample(#{ emptyForm: #[] })
   @doc("The same keyed collection at zero entries")
   emptyForm: Record<FixtureCardinalityItem> | Named<FixtureCardinalityItem>[];
+}
+
+@doc("""
+Polymorphic dispatch nested several levels deep.
+
+Every polymorphic value in the shared sample sits at depth one or two: content is a subtype,
+and discriminatorEdges.wildcardSelected is a subtype carrying another subtype. A backend can
+dispatch correctly at the top level and still lose the discriminator further down, carry a
+nested value as raw JSON instead of a typed subtype, stop recursing past a fixed depth, or
+fail to thread its save context through a nested save so an inner collection is written in a
+different format than the outer one. None of those are visible at depth two.
+
+FixtureProperty is the only genuinely recursive model in this fixture surface: it is a
+discriminated base whose array subtype holds another FixtureProperty, whose object subtype
+holds another, and whose union subtype holds a collection of them. It is reachable from
+FixtureRoot through FixtureToolbox.tools -> FixtureFunctionTool.parameters, but that path was
+never populated in the shared sample, so recursive polymorphic dispatch had been covered
+exclusively by per-target assertions - Swift XCTAsserts and Go panics that compare a target
+against itself and cannot see a shared wrong answer.
+
+propertyTree nests object -> array -> union -> object -> integer, so five dispatch decisions
+are chained and a collection sits in the middle of the chain. Each level names a distinct
+subtype, so a backend that truncates recursion or substitutes a base instance loses a
+specific, identifiable level rather than failing wholesale.
+
+branchTrees puts trees of differing shape and depth in one collection, so per-element dispatch
+has to stay correct while the recursion depth changes between elements. An element that is a
+leaf sits next to one that is three levels deep, which is the case that catches a backend
+reusing state between elements.
+
+Scalar coercion into FixtureProperty is deliberately not exercised: that base declares both a
+coercion table and an entry shorthand, so a bare scalar in a property position expands into a
+kind-tagged object. That is a real and separate mechanism, and every value here is written as
+a full object so that a failure in this class names nesting depth alone. fallbackItems is
+likewise omitted, because a union of a base and its Named wrapper is carried as raw JSON
+rather than dispatched, which would mix an untyped path into a class about typed dispatch.
+""")
+model FixtureDeepNesting {
+  @sample(#{ propertyTree: #{ kind: "object", name: "tree-root", description: "root of the nested tree", additionalProperties: #{ kind: "array", name: "level-one-array", items: #{ kind: "union", name: "level-two-union", anyOf: #[#{ kind: "string", name: "level-three-string", required: true }, #{ kind: "object", name: "level-three-object", additionalProperties: #{ kind: "integer", name: "level-four-integer", nullable: true } }] } } } })
+  @doc("Recursive polymorphic tree five dispatch levels deep with a collection in the chain")
+  propertyTree: FixtureProperty;
+
+  @sample(#{ branchTrees: #[#{ kind: "string", name: "shallow-leaf" }, #{ kind: "array", name: "one-deep", items: #{ kind: "boolean", name: "nested-boolean" } }, #{ kind: "union", name: "two-deep", anyOf: #[#{ kind: "number", name: "union-number" }, #{ kind: "array", name: "union-array", items: #{ kind: "string", name: "deepest-string" } }] }] })
+  @doc("Collection whose elements dispatch to different subtypes at different recursion depths")
+  branchTrees: FixtureProperty[];
 }
 
 model FixtureOwner {

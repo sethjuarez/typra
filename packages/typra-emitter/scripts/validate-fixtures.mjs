@@ -139,6 +139,46 @@ const fixtureRootSample = {
     },
     emptyForm: [],
   },
+  // Polymorphic dispatch chained several levels deep. propertyTree nests
+  // object -> array -> union -> object -> integer, so five dispatch decisions are chained with a
+  // collection in the middle; branchTrees varies recursion depth between elements of one
+  // collection. Every value is written as a full kind-tagged object so that scalar coercion into
+  // FixtureProperty stays out of this class. See FixtureDeepNesting in main.tsp.
+  deepNesting: {
+    propertyTree: {
+      kind: "object",
+      name: "tree-root",
+      description: "root of the nested tree",
+      additionalProperties: {
+        kind: "array",
+        name: "level-one-array",
+        items: {
+          kind: "union",
+          name: "level-two-union",
+          anyOf: [
+            { kind: "string", name: "level-three-string", required: true },
+            {
+              kind: "object",
+              name: "level-three-object",
+              additionalProperties: { kind: "integer", name: "level-four-integer", nullable: true },
+            },
+          ],
+        },
+      },
+    },
+    branchTrees: [
+      { kind: "string", name: "shallow-leaf" },
+      { kind: "array", name: "one-deep", items: { kind: "boolean", name: "nested-boolean" } },
+      {
+        kind: "union",
+        name: "two-deep",
+        anyOf: [
+          { kind: "number", name: "union-number" },
+          { kind: "array", name: "union-array", items: { kind: "string", name: "deepest-string" } },
+        ],
+      },
+    ],
+  },
 };
 // One canonical conformance input, embedded into every target program.
 //
