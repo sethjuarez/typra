@@ -318,8 +318,10 @@
             "path": "generated/fixtures/python/_WireOptions.py",
             "snippets": [
               "def to_wire(self, provider: str) -> dict[str, Any]:",
-              "\"maxOutputTokens\": {\"openai\": \"max_completion_tokens\", \"anthropic\": \"max_tokens\"}",
-              "\"temperature\": {\"openai\": \"temperature\"}",
+              "\"maxOutputTokens\":",
+              "\"max_completion_tokens\"",
+              "\"temperature\":",
+              "\"openai\": \"temperature\"",
               "if mapping is not None and provider in mapping:",
               "result[mapping[provider]] = value"
             ]

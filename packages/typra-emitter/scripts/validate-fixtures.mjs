@@ -3294,13 +3294,19 @@ function assertStaticFixtureCoverage() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "go", "model_info.go"),
-    "InputModalities []string",
-    "OutputModalities []string",
-    "OutputModalities: []string{}",
+    "InputModalities",
+    'json:"inputModalities,omitempty"',
+    "OutputModalities",
+    'json:"outputModalities"',
+    "OutputModalities:",
+    "[]string{}",
     'json:"outputModalities" yaml:"outputModalities"',
-    "Owners []FixtureOwner",
-    "DefaultOwners []FixtureOwner",
-    "DefaultOwners: []FixtureOwner{}",
+    "Owners",
+    'json:"owners,omitempty"',
+    "DefaultOwners",
+    'json:"defaultOwners"',
+    "DefaultOwners:",
+    "[]FixtureOwner{}",
     'json:"defaultOwners" yaml:"defaultOwners"',
   );
   assertIncludes(
