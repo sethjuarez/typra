@@ -50,9 +50,10 @@
     },
     {
       "id": "complex-default-required-presence",
-      "status": "known-gap",
-      "issue": "#125",
-      "description": "Defaults on complex properties must not disable required-field enforcement."
+      "status": "enforced",
+      "verification": "unit-test",
+      "test": "packages/typra-emitter/test/generate.test.ts",
+      "description": "Unsupported defaults that cannot be emitted portably fail compilation instead of disabling required-field enforcement."
     },
     {
       "id": "typed-record-values",

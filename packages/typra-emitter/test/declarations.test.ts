@@ -10,10 +10,10 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { Model, ModelProperty } from "@typespec/compiler";
+import { Model, ModelProperty, Program } from "@typespec/compiler";
 
 import { TypeRegistry } from "../src/ir/expansion.js";
-import { TypeNode, PropertyNode } from "../src/ir/ast.js";
+import { TypeNode, PropertyNode, resolveProperty } from "../src/ir/ast.js";
 import {
   classifyProperty,
   lowerFile,
@@ -36,6 +36,8 @@ import { PythonExprVisitor } from "../src/languages/python/visitor.js";
 import { emitCSharpClass } from "../src/languages/csharp/emitter.js";
 import { CSharpExprVisitor } from "../src/languages/csharp/visitor.js";
 import { buildBaseTestContext, goTestOptions } from "../src/testing/test-context.js";
+
+type CapturedDiagnostic = { code: string; message: string; severity: string; target?: unknown };
 
 // ============================================================================
 // Test fixtures (same as expansion.test.ts)
@@ -119,6 +121,43 @@ describe("closed polymorphic dispatch", () => {
     };
     assert.equal(isClosedPolymorphicDispatch({ ...base, isClosed: true }), true);
     assert.equal(isClosedPolymorphicDispatch({ ...base, isClosed: false }), false);
+  });
+
+  describe("property lowering diagnostics", () => {
+    it("rejects complex defaults so they cannot disable required-field guards", () => {
+      const diagnostics: CapturedDiagnostic[] = [];
+      const stateMaps = new Map<symbol, Map<unknown, unknown>>();
+      const program = {
+        reportDiagnostic(diagnostic: CapturedDiagnostic) {
+          diagnostics.push(diagnostic);
+        },
+        stateMap(key: symbol) {
+          let values = stateMaps.get(key);
+          if (!values) {
+            values = new Map();
+            stateMaps.set(key, values);
+          }
+          return values;
+        },
+      } as unknown as Program;
+      const owner = { kind: "Model", name: "FixtureOwner", derivedModels: [] } as unknown as Model;
+      const property = {
+        kind: "ModelProperty",
+        name: "owner",
+        optional: false,
+        type: owner,
+        defaultValue: { valueKind: "ObjectValue", value: {} },
+      } as unknown as ModelProperty;
+
+      const lowered = resolveProperty(program, property, new Set(["FixtureOwner"]), "Test", "");
+
+      assert.equal(diagnostics.length, 1);
+      assert.equal(diagnostics[0].code, "typra-emitter-unsupported-complex-default");
+      assert.equal(diagnostics[0].severity, "error");
+      assert.match(diagnostics[0].message, /does not support complex object defaults/);
+      assert.equal(lowered.hasExplicitDefault, false);
+      assert.equal(lowered.defaultValue, null);
+    });
   });
 
   it("lowers closed enums separately from open abstract discriminators", () => {

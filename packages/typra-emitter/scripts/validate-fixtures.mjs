@@ -423,15 +423,23 @@ function assertConformanceMatrix() {
     ruleIds.add(rule.id);
 
     if (rule.status === "enforced") {
-      if (!rule.case) {
-        fail(`Enforced conformance rule ${rule.id} must reference a case.`);
-      } else if (!caseIds.has(rule.case)) {
-        fail(`Enforced conformance rule ${rule.id} references unknown case ${rule.case}.`);
+      if (rule.verification === "fixture-evidence") {
+        if (!rule.case) {
+          fail(`Enforced fixture-evidence rule ${rule.id} must reference a case.`);
+        } else if (!caseIds.has(rule.case)) {
+          fail(`Enforced conformance rule ${rule.id} references unknown case ${rule.case}.`);
+        } else {
+          enforcedCases.add(rule.case);
+        }
+      } else if (rule.verification === "unit-test") {
+        if (Object.prototype.hasOwnProperty.call(rule, "case")) {
+          fail(`Unit-test conformance rule ${rule.id} must not reference a fixture case.`);
+        }
+        if (typeof rule.test !== "string" || !existsSync(path.join(packageRoot, "..", "..", rule.test))) {
+          fail(`Unit-test conformance rule ${rule.id} must reference an existing test file.`);
+        }
       } else {
-        enforcedCases.add(rule.case);
-      }
-      if (rule.verification !== "fixture-evidence") {
-        fail(`Enforced conformance rule ${rule.id} must declare verification as fixture-evidence.`);
+        fail(`Enforced conformance rule ${rule.id} must declare verification as fixture-evidence or unit-test.`);
       }
     } else if (rule.status === "known-gap") {
       if (Object.prototype.hasOwnProperty.call(rule, "case")) {
