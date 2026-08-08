@@ -344,8 +344,10 @@
             "path": "generated/fixtures/go/wire_options.go",
             "snippets": [
               "func (obj *WireOptions) ToWire(provider string) map[string]interface{}",
-              "\"maxOutputTokens\": {\"openai\": \"max_completion_tokens\", \"anthropic\": \"max_tokens\"}",
-              "\"temperature\": {\"openai\": \"temperature\"}",
+              "\"maxOutputTokens\":",
+              "\"max_completion_tokens\"",
+              "\"temperature\":",
+              "\"openai\": \"temperature\"",
               "if wireName, ok := mapping[provider]; ok {",
               "result[wireName] = value"
             ]
