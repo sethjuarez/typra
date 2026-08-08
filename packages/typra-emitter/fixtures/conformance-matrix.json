@@ -63,9 +63,10 @@
     },
     {
       "id": "java-yaml-escaping",
-      "status": "known-gap",
-      "issue": "#129",
-      "description": "Java YAML escaping and parsing of control/unicode sequences need executable coverage."
+      "status": "enforced",
+      "verification": "unit-test",
+      "test": "packages/typra-emitter/test/java-emitter.test.ts",
+      "description": "Java YAML escaping and parsing of control/unicode sequences are covered by generated runtime test assertions."
     }
   ],
   "cases": [
