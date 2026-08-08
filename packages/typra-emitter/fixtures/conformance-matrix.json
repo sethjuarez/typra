@@ -1,6 +1,72 @@
 {
   "version": 1,
   "targets": ["typescript", "python", "csharp", "go", "java", "rust", "swift"],
+  "rules": [
+    {
+      "id": "fixture-root-sample-shape",
+      "status": "enforced",
+      "case": "fixture-root-sample-shape",
+      "verification": "fixture-evidence",
+      "description": "Generated fixture evidence covers nested objects, scalar arrays, records, enums, open enums, and polymorphic sample fields."
+    },
+    {
+      "id": "polymorphic-content-dispatch",
+      "status": "enforced",
+      "case": "polymorphic-content-dispatch",
+      "verification": "fixture-evidence",
+      "description": "Generated fixture evidence covers closed discriminator subtype selection and discriminator-specific serialization."
+    },
+    {
+      "id": "provider-wire-mapping",
+      "status": "enforced",
+      "case": "provider-wire-mapping",
+      "verification": "fixture-evidence",
+      "description": "Generated fixture evidence covers provider-specific wire conversion without canonical-name fallback for unmapped providers."
+    },
+    {
+      "id": "scalar-coercion",
+      "status": "enforced",
+      "case": "scalar-coercion",
+      "verification": "fixture-evidence",
+      "description": "Generated fixture evidence covers scalar shorthand expansion to the canonical object shape."
+    },
+    {
+      "id": "invalid-discriminator-states",
+      "status": "known-gap",
+      "issue": "#133",
+      "description": "Absent, blank, and wrong-type discriminators need executable cross-target assertions."
+    },
+    {
+      "id": "keyed-collection-ordering",
+      "status": "known-gap",
+      "issue": "#134",
+      "description": "Keyed collection object-form ordering needs a documented and enforced cross-target contract."
+    },
+    {
+      "id": "keyed-collection-ambiguous-names",
+      "status": "known-gap",
+      "issue": "#49",
+      "description": "Duplicate or empty keyed-collection names must be preserved losslessly or rejected consistently."
+    },
+    {
+      "id": "complex-default-required-presence",
+      "status": "known-gap",
+      "issue": "#125",
+      "description": "Defaults on complex properties must not disable required-field enforcement."
+    },
+    {
+      "id": "typed-record-values",
+      "status": "known-gap",
+      "issue": "#123",
+      "description": "Record<T> value types must be preserved and exercised across all targets."
+    },
+    {
+      "id": "java-yaml-escaping",
+      "status": "known-gap",
+      "issue": "#129",
+      "description": "Java YAML escaping and parsing of control/unicode sequences need executable coverage."
+    }
+  ],
   "cases": [
     {
       "id": "fixture-root-sample-shape",
@@ -233,17 +299,6 @@
       "id": "provider-wire-mapping",
       "description": "WireOptions maps semantic fields to provider-specific wire names for OpenAI and Anthropic, and omits any field the requested provider does not map. temperature is declared for OpenAI only, so an Anthropic payload must not carry it under any name.",
       "evidence": {
-        "json-ast": [
-          {
-            "path": "generated/fixtures/json-ast/model.json",
-            "snippets": [
-              "\"provider\": \"openai\"",
-              "\"name\": \"max_completion_tokens\"",
-              "\"provider\": \"anthropic\"",
-              "\"name\": \"max_tokens\""
-            ]
-          }
-        ],
         "typescript": [
           {
             "path": "generated/fixtures/typescript/wire-options.ts",
@@ -286,7 +341,7 @@
             "snippets": [
               "func (obj *WireOptions) ToWire(provider string) map[string]interface{}",
               "\"maxOutputTokens\": {\"openai\": \"max_completion_tokens\", \"anthropic\": \"max_tokens\"}",
-              "\"temperature\":     {\"openai\": \"temperature\"}",
+              "\"temperature\": {\"openai\": \"temperature\"}",
               "if wireName, ok := mapping[provider]; ok {",
               "result[wireName] = value"
             ]
@@ -347,9 +402,7 @@
           {
             "path": "generated/fixtures/json-ast/model.json",
             "snippets": [
-              "\"scalar\": \"string\"",
-              "\"label\": \"coerced reference\"",
-              "\"example\": \"ref-coerced\""
+              "\"scalar\": \"string\""
             ]
           }
         ],

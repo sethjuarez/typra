@@ -16,6 +16,7 @@
   "scripts": {
     "build": "npm run build --workspace @typra/emitter",
     "test": "npm run test --workspace @typra/emitter",
+    "check:toolchain": "node scripts/check-toolchain.mjs",
     "generate:fixtures": "npm run generate:fixtures --workspace @typra/emitter",
     "validate:fixtures": "npm run validate:fixtures --workspace @typra/emitter",
     "pack:dry-run": "npm pack --workspace @typra/emitter --dry-run"

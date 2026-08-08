@@ -81,3 +81,9 @@ The harness runs `install`, then `generate`, then `verify` (when present), then 
 ## Recommended CI gate
 
 For committed generated output, set `deterministic-output: true`, compile with TypeSpec, run target tests, then run `typra-verify` against the committed baseline before accepting generated changes.
+
+For local validation, run `npm run check:toolchain` first. Fixture validation
+executes generated code across Python plus `pytest`/PyYAML, Go/gofmt, Java, C#,
+Rust, and Swift, so missing or outdated language tools should be fixed before
+treating validation output as an emitter regression. This check gates fixture
+validation, not the TypeScript build or unit suite.

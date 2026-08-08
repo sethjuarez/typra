@@ -126,6 +126,13 @@ Set `deterministic-output: true` for committed generated output. That stabilizes
 generated metadata, normalizes text artifacts to LF, trims trailing whitespace,
 and keeps final newlines stable for CI diffs.
 
+Generated targets are expected to follow one language-neutral runtime contract:
+required fields fail when missing, optional zero values stay distinct from
+absence, polymorphic dispatch behaves consistently, provider wire mappings never
+fall back to canonical names for unmapped providers, and keyed collections do
+not promise object-key order. See the docs page on runtime semantics for the
+full contract.
+
 ## Core TypeSpec concepts
 
 Typra adds decorators for runtime concerns that TypeSpec does not model by
@@ -281,6 +288,7 @@ npm ci
 npm run build
 npm test
 npm run generate:fixtures
+npm run check:toolchain
 npm run validate:fixtures
 npm run pack:dry-run
 ```
@@ -288,6 +296,13 @@ npm run pack:dry-run
 CI also runs a TypeSpec compatibility matrix for each explicitly supported
 `@typespec/compiler` and `@typespec/json-schema` version pair. Add a matrix row
 before widening the package peer range.
+
+`npm run check:toolchain` reports the local tools needed by
+`validate:fixtures`: Node.js, npm, Python plus `pytest`/PyYAML, Go/gofmt,
+Java/javac, .NET, Swift, and Cargo. It intentionally gates fixture validation,
+not the TypeScript build or unit suite. Run it before interpreting
+fixture-validation failures so missing or outdated local toolchains do not look
+like emitter regressions.
 
 After building, check the local CLI with:
 

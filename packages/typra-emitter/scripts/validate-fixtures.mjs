@@ -393,14 +393,70 @@ function assertConformanceMatrix() {
     fail("Conformance matrix must declare at least one case.");
     return;
   }
+  if (!Array.isArray(matrix.rules) || matrix.rules.length === 0) {
+    fail("Conformance matrix must declare at least one semantic rule.");
+    return;
+  }
 
+  const caseIds = new Set();
   for (const conformanceCase of matrix.cases) {
     if (!conformanceCase.id) {
       fail("Conformance matrix contains a case without an id.");
       continue;
     }
+    if (caseIds.has(conformanceCase.id)) {
+      fail(`Conformance matrix contains duplicate case id: ${conformanceCase.id}`);
+    }
+    caseIds.add(conformanceCase.id);
+  }
 
-    for (const target of matrix.targets) {
+  const enforcedCases = new Set();
+  const ruleIds = new Set();
+  for (const rule of matrix.rules) {
+    if (!rule.id) {
+      fail("Conformance matrix contains a rule without an id.");
+      continue;
+    }
+    if (ruleIds.has(rule.id)) {
+      fail(`Conformance matrix contains duplicate rule id: ${rule.id}`);
+    }
+    ruleIds.add(rule.id);
+
+    if (rule.status === "enforced") {
+      if (!rule.case) {
+        fail(`Enforced conformance rule ${rule.id} must reference a case.`);
+      } else if (!caseIds.has(rule.case)) {
+        fail(`Enforced conformance rule ${rule.id} references unknown case ${rule.case}.`);
+      } else {
+        enforcedCases.add(rule.case);
+      }
+      if (rule.verification !== "fixture-evidence") {
+        fail(`Enforced conformance rule ${rule.id} must declare verification as fixture-evidence.`);
+      }
+    } else if (rule.status === "known-gap") {
+      if (Object.prototype.hasOwnProperty.call(rule, "case")) {
+        fail(`Known-gap conformance rule ${rule.id} must not reference a case until it is promoted to enforced.`);
+      }
+      if (caseIds.has(rule.id)) {
+        fail(`Known-gap conformance rule ${rule.id} collides with an existing case id.`);
+      }
+      if (typeof rule.issue !== "string" || !/^#\d+$/.test(rule.issue)) {
+        fail(`Known-gap conformance rule ${rule.id} must reference a GitHub issue like #123.`);
+      }
+    } else {
+      fail(`Conformance rule ${rule.id} has unsupported status: ${rule.status}`);
+    }
+  }
+
+  for (const conformanceCase of matrix.cases) {
+    if (!enforcedCases.has(conformanceCase.id)) {
+      fail(`Conformance case ${conformanceCase.id} is not referenced by an enforced rule.`);
+    }
+  }
+
+  for (const conformanceCase of matrix.cases) {
+    const evidenceTargets = [...new Set([...matrix.targets, ...Object.keys(conformanceCase.evidence ?? {})])];
+    for (const target of evidenceTargets) {
       const evidence = conformanceCase.evidence?.[target];
       if (!Array.isArray(evidence) || evidence.length === 0) {
         fail(`Conformance case ${conformanceCase.id} is missing evidence for target ${target}.`);
@@ -670,6 +726,18 @@ function commandExists(command) {
   }
 }
 
+function resolveCommand(candidates) {
+  return candidates.find(command => commandExists(command));
+}
+
+function requirePythonCommand(label) {
+  const command = resolveCommand(["python3", "python"]);
+  if (!command) {
+    fail(`${label} cannot run because neither python nor python3 is available.`);
+  }
+  return command;
+}
+
 function runCommand(label, command, args, options = {}) {
   if (!commandExists(command)) {
     fail(`${label} cannot run because ${command} is not available.`);
@@ -706,7 +774,9 @@ function runPythonCompile() {
     fail("No generated Python files found to compile.");
     return;
   }
-  runCommand("Generated Python source syntax validation", "python", ["-m", "py_compile", ...sourceFiles]);
+  const python = requirePythonCommand("Generated Python source syntax validation");
+  if (!python) return;
+  runCommand("Generated Python source syntax validation", python, ["-m", "py_compile", ...sourceFiles]);
 }
 
 /**
@@ -732,10 +802,8 @@ function runPythonGeneratedTests() {
     fail("No generated Python tests found to run.");
     return;
   }
-  if (!commandExists("python")) {
-    fail("Generated Python tests cannot run because python is not available.");
-    return;
-  }
+  const python = requirePythonCommand("Generated Python tests");
+  if (!python) return;
 
   // The generated tests import the package as `fixtures`, but it is emitted into a directory
   // named `python`, so it is only importable from a tree where that directory is named
@@ -753,7 +821,7 @@ function runPythonGeneratedTests() {
     let crashed = null;
     try {
       output = execFileSync(
-        "python",
+        python,
         ["-m", "pytest", path.join(packageDir, "tests"), "-q", "-p", "no:cacheprovider"],
         {
           cwd: stageRoot,
@@ -900,22 +968,7 @@ function runSwiftTests() {
     "TypraFixturesTests",
     "InheritedPropertyRoundTripTests.swift",
   );
-  const env = { ...process.env };
-  if (process.platform === "win32" && !env.SDKROOT) {
-    const sdkRoot = findSwiftWindowsSdk();
-    if (sdkRoot) {
-      env.SDKROOT = sdkRoot;
-    }
-  }
-  if (process.platform === "win32") {
-    const gitExecPath = findWindowsGitExecPath();
-    if (gitExecPath) {
-      env.GIT_EXEC_PATH = gitExecPath;
-    }
-    env.GIT_CONFIG_COUNT = "1";
-    env.GIT_CONFIG_KEY_0 = "safe.bareRepository";
-    env.GIT_CONFIG_VALUE_0 = "all";
-  }
+  const env = swiftToolchainEnv();
   writeFileSync(inheritedPropertyTest, `import XCTest
 @testable import TypraFixtures
 
@@ -1865,13 +1918,11 @@ function runPythonExecutableConformance() {
     fail("No generated Python directory found for executable conformance.");
     return;
   }
-  if (!commandExists("python")) {
-    fail("Generated Python executable conformance cannot run because python is not available.");
-    return;
-  }
+  const python = requirePythonCommand("Generated Python executable conformance");
+  if (!python) return;
 
   try {
-    const output = execFileSync("python", ["-c", runner], { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    const output = execFileSync(python, ["-c", runner], { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
     assertConformanceResult("python", output);
   } catch (error) {
     const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
@@ -2978,6 +3029,14 @@ function runJavaExecutableConformance() {
   }
 }
 
+function appendGitConfig(env, key, value) {
+  const index = Number.parseInt(env.GIT_CONFIG_COUNT ?? "0", 10);
+  const nextIndex = Number.isFinite(index) && index >= 0 ? index : 0;
+  env.GIT_CONFIG_COUNT = String(nextIndex + 1);
+  env[`GIT_CONFIG_KEY_${nextIndex}`] = key;
+  env[`GIT_CONFIG_VALUE_${nextIndex}`] = value;
+}
+
 function swiftToolchainEnv() {
   const env = { ...process.env };
   if (process.platform === "win32" && !env.SDKROOT) {
@@ -2991,10 +3050,8 @@ function swiftToolchainEnv() {
     if (gitExecPath) {
       env.GIT_EXEC_PATH = gitExecPath;
     }
-    env.GIT_CONFIG_COUNT = "1";
-    env.GIT_CONFIG_KEY_0 = "safe.bareRepository";
-    env.GIT_CONFIG_VALUE_0 = "all";
   }
+  appendGitConfig(env, "safe.bareRepository", "all");
   return env;
 }
 
@@ -3229,13 +3286,13 @@ function assertStaticFixtureCoverage() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "go", "model_info.go"),
-    "InputModalities  []string",
+    "InputModalities []string",
     "OutputModalities []string",
     "OutputModalities: []string{}",
     'json:"outputModalities" yaml:"outputModalities"',
-    "Owners           []FixtureOwner",
-    "DefaultOwners    []FixtureOwner",
-    "DefaultOwners:    []FixtureOwner{}",
+    "Owners []FixtureOwner",
+    "DefaultOwners []FixtureOwner",
+    "DefaultOwners: []FixtureOwner{}",
     'json:"defaultOwners" yaml:"defaultOwners"',
   );
   assertIncludes(
