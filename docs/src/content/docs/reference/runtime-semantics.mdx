@@ -1,0 +1,106 @@
+---
+title: Runtime semantics
+description: Shared emitted-runtime behavior every Typra target is expected to implement.
+draft: false
+---
+
+Typra treats TypeSpec as the source of truth. Every emitted runtime may use
+idiomatic types and helpers, but it must preserve the same contract semantics as
+the other targets.
+
+This page is the language-neutral target contract for generated `load`, `save`,
+JSON/YAML helpers, provider wire mapping, and polymorphic dispatch. Some current
+backends may still diverge while Typra is being regularized. Those gaps should
+be explicit in diagnostics, the conformance matrix, or a tracked known failure.
+
+## Required and optional fields
+
+- A required TypeSpec property must be present when loading object-shaped data.
+  Missing required fields must fail; generated runtimes must not fabricate a
+  value to make construction succeed.
+- Defaults do not satisfy required-field presence. Until complex defaults are
+  supported end-to-end, a default on a model-typed or collection-typed property
+  is a portability error rather than an implicit object factory.
+- Optional properties have distinct wire states: absent, present with a value,
+  and present with an explicitly empty value such as `""`, `0`, `false`, or
+  `[]`. Saving must not collapse explicit zero values into absence.
+- Required zero values are still required values. Saving a required string,
+  number, boolean, or collection at its zero value must emit the field.
+
+## Nulls and unknown values
+
+- `null` is accepted only where the lowered contract explicitly permits it or
+  where the field type is an unknown/dictionary-shaped carrier. Otherwise it is
+  a load error.
+- Regular models are not an unbounded extension bag. Unknown fields may be
+  ignored unless a feature explicitly preserves them.
+- Unknown discriminator carriers are different: when an open discriminated base
+  accepts an unclaimed discriminator value, the carrier must preserve the raw
+  payload, including unknown fields and explicit nulls, so save/reload is stable.
+
+## Scalars, records, and collections
+
+- Scalar coercions are load-only expansions from an allowed scalar shorthand to
+  the canonical object shape. Saving emits the canonical object form unless a
+  target API explicitly asks for shorthand.
+- `Record<T>` preserves `T`. A typed record must load and save values using the
+  same element semantics as a normal property of type `T`.
+- Arrays are ordered. Runtimes must preserve array element order.
+- Keyed collections are semantically maps when saved in object form. Object key
+  order is not part of the contract. If a caller needs order, it must use an
+  array/list representation and the target API must make that choice explicit.
+- Duplicate or empty names in a keyed collection must not silently overwrite
+  earlier entries. The target contract is to preserve list form or reject the
+  ambiguous value with a pathful error. Falling back to list form is acceptable
+  only if the duplicate or empty-name entries are preserved losslessly; current
+  gaps should stay tracked until every backend implements that behavior.
+
+## Polymorphic dispatch
+
+- Discriminated load requires a present, non-blank string discriminator.
+  Missing, blank, or wrong-type discriminator values are load errors. Current
+  open-base behavior that absorbs these invalid discriminator states is a known
+  regularization gap, not the target contract.
+- A discriminator value claimed by a subtype loads that subtype.
+- A discriminator value claimed by a wildcard subtype loads the wildcard subtype
+  and must still enforce that subtype's required fields.
+- A well-formed but unclaimed discriminator value on an open base loads an
+  unknown carrier that preserves the raw payload.
+- An unclaimed value on a closed base is a load error.
+- Saving a known subtype emits its canonical discriminator value. Saving an
+  unknown carrier replays the original discriminator and preserved payload.
+
+## Enums and parse aliases
+
+- Closed string unions accept only declared values and parse aliases.
+- Open string unions preserve declared known values while allowing target-native
+  representation of unknown strings.
+- `@parseAlias` is parse-only. Loading accepts aliases; saving emits the
+  canonical TypeSpec value.
+
+## Provider wire mappings
+
+- Canonical model properties keep their TypeSpec names in normal `save` output.
+- Provider wire conversion emits only fields that have a mapping for the
+  requested provider.
+- A provider with no mapping, including the empty provider string, produces an
+  empty wire payload rather than falling back to canonical property names.
+- Provider defaults apply only in the provider-specific wire surface they are
+  declared for. They must not change canonical model load/save behavior.
+
+## Error behavior and diagnostics
+
+- Invalid input must fail visibly. Generated runtimes should not silently return
+  partial objects, default required fields, or swallow nested load errors.
+- Diagnostics should include the deepest known field path, including array
+  indexes and keyed collection names, so downstream agents can repair the
+  original TypeSpec or payload.
+- If a TypeSpec shape cannot be represented portably across targets, Typra
+  should emit an actionable diagnostic instead of generating divergent behavior.
+
+## Review rule
+
+Every semantic rule above should have fixture evidence and, where possible,
+executable conformance across every supported runtime. A backend that diverges
+from this contract must be tracked as a known failure tied to an issue, not left
+as implicit target behavior.

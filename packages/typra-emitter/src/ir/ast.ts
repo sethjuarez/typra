@@ -398,19 +398,37 @@ export const resolveModelChildren = (program: Program, model: Model, visited: Se
   });
 };
 
+function reportUnsupportedDefault(program: Program, property: ModelProperty, prop: PropertyNode, reason: string): void {
+  if (property.defaultValue === undefined) return;
+
+  program.reportDiagnostic({
+    code: "typra-emitter-unsupported-complex-default",
+    message: `Property '${property.name}' has an unsupported default. ${reason}`,
+    severity: "error",
+    target: property,
+  });
+  prop.hasExplicitDefault = false;
+  prop.defaultValue = null;
+}
+
 export const resolveProperty = (program: Program, property: ModelProperty, visited: Set<string>, rootNamespace: string, rootAlias: string): PropertyNode => {
+  let prop: PropertyNode;
   switch (property.type.kind) {
     case "Scalar":
-      return resolveScalarProperty(program, property, property.type);
+      prop = resolveScalarProperty(program, property, property.type);
+      break;
     case "Model":
-      return resolveModelProperty(program, property, property.type, visited, rootNamespace, rootAlias);
+      prop = resolveModelProperty(program, property, property.type, visited, rootNamespace, rootAlias);
+      break;
     case "Union":
-      return resolveUnionProperty(program, property, property.type, visited, rootNamespace, rootAlias);
+      prop = resolveUnionProperty(program, property, property.type, visited, rootNamespace, rootAlias);
+      break;
     case "Intrinsic":
-      return resolveIntrinsicProperty(program, property, property.type, visited);
+      prop = resolveIntrinsicProperty(program, property, property.type, visited);
+      break;
     case "String":
       // this is for default values in discriminated types
-      const prop = new PropertyNode(
+      prop = new PropertyNode(
         property,
         getDoc(program, property) || ""
       );
@@ -426,7 +444,7 @@ export const resolveProperty = (program: Program, property: ModelProperty, visit
       prop.isOptional = property.optional;
       prop.isCollection = false;
 
-      return prop;
+      break;
 
     default:
       program.reportDiagnostic({
@@ -435,8 +453,26 @@ export const resolveProperty = (program: Program, property: ModelProperty, visit
         severity: "error",
         target: property
       });
-      return new PropertyNode(property, getDoc(program, property) || "");
+      prop = new PropertyNode(property, getDoc(program, property) || "");
+      break;
   }
+  if (property.defaultValue?.valueKind === "ObjectValue") {
+    reportUnsupportedDefault(
+      program,
+      property,
+      prop,
+      "Typra does not support complex object defaults yet; remove the default so runtime behavior stays portable.",
+    );
+  }
+  if (!property.optional && prop.hasExplicitDefault && prop.defaultValue === null) {
+    reportUnsupportedDefault(
+      program,
+      property,
+      prop,
+      "Typra could not materialize this required-field default; remove the default so required-field validation stays portable.",
+    );
+  }
+  return prop;
 };
 
 export const resolveScalarProperty = (program: Program, property: ModelProperty, scalar: Scalar): PropertyNode => {
@@ -520,7 +556,6 @@ export const resolveModelProperty = (program: Program, property: ModelProperty, 
     property,
     getDoc(program, property) || ""
   );
-
   if (model.name === "Array") {
 
     const innerModel = getTemplateModel(model);

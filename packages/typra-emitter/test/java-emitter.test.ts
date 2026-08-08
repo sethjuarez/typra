@@ -7,7 +7,7 @@ import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { javaTestOptions } from "../src/languages/java/driver.js";
 import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper, emitJavaUnknownCarrier, ensureJavaEditableSeamMarker } from "../src/languages/java/emitter.js";
-import { emitJavaSaveContext } from "../src/languages/java/scaffolding.js";
+import { emitJavaSaveContext, emitJavaYaml } from "../src/languages/java/scaffolding.js";
 import { emitJavaTest } from "../src/languages/java/test-emitter.js";
 import {
   javaEnumTypeName,
@@ -378,6 +378,43 @@ describe("Java emitter runtime semantics", () => {
       assert.match(source, /assertEquals\(2\.5, instance1\.bindings\.get\(1\)\.weight, "Expected bindings\.beta\.weight"\);/);
       assert.match(source, /assertEquals\("expanded", instance1\.bindings\.get\(2\)\.value, "Expected instance1\.bindings\.get\(2\)\.value"\);/);
       assert.match(source, /assertEquals\(3, instance1\.bindings\.get\(2\)\.weight, "Expected instance1\.bindings\.get\(2\)\.weight"\);/);
+    });
+
+    it("emits YAML control-character roundtrip assertions", () => {
+      const node = new TypeNode({ name: "YamlExample" } as Model, "");
+      node.typeName = { namespace: "Test", name: "YamlExample" };
+
+      const source = emitJavaTest({
+        node,
+        isAbstract: false,
+        package: "test",
+        examples: [{
+          sample: {},
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [],
+        }],
+        coercions: [],
+        factories: [],
+      });
+
+      assert.match(source, /TypraYaml\.stringify\(yamlControl\)/);
+      assert.match(source, /YAML should unicode-escape C0 controls/);
+      assert.match(source, /TypraYaml\.parse/);
+      assert.match(source, /\\\\uD83D\\\\uDE42/);
+      assert.match(source, /YAML should reject unknown escapes/);
+    });
+  });
+
+  describe("TypraYaml scaffolding", () => {
+    it("escapes all YAML control characters and rejects unsupported escape sequences", () => {
+      const source = emitJavaYaml("test");
+
+      assert.match(source, /result\.append\(String\.format\("\\\\u%04x", \(int\) current\)\)/);
+      assert.match(source, /case 'b' -> result\.append\('\\b'\);/);
+      assert.match(source, /case 'f' -> result\.append\('\\f'\);/);
+      assert.match(source, /case 'u' -> \{/);
+      assert.match(source, /throw error\("Unsupported YAML escape sequence"\)/);
     });
 
     it("uses legal local identifiers for nested union downcasts", () => {
