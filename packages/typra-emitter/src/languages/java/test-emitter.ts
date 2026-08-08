@@ -38,6 +38,7 @@ export function emitJavaTest(ctx: BaseTestContext): string {
     });
     emitInvalidJsonTest(lines, typeName);
     emitInvalidYamlTest(lines, typeName);
+    emitYamlEscapingTest(lines);
   }
 
   ctx.coercions.forEach((coercion, index) => {
@@ -93,6 +94,22 @@ function emitInvalidJsonTest(lines: string[], typeName: string): void {
 function emitInvalidYamlTest(lines: string[], typeName: string): void {
   lines.push("");
   lines.push(`    assertThrows(() -> ${typeName}.fromYaml(":\\n  broken"), "${typeName}.fromYaml should reject malformed YAML");`);
+}
+
+function emitYamlEscapingTest(lines: string[]): void {
+  lines.push("");
+  lines.push("    java.util.Map<String, Object> yamlControl = new java.util.LinkedHashMap<>();");
+  lines.push("    String yamlControlValue = new String(new int[] { 0x0001, 0x0008, 0x000c, 0x1f642 }, 0, 4);");
+  lines.push('    yamlControl.put("value", yamlControlValue);');
+  lines.push("    String yamlControlText = TypraYaml.stringify(yamlControl);");
+  lines.push(`    assertTrue(yamlControlText.contains(${javaString("\\u0001")}), "YAML should unicode-escape C0 controls");`);
+  lines.push(`    assertTrue(yamlControlText.contains(${javaString("\\b")}), "YAML should escape backspace");`);
+  lines.push(`    assertTrue(yamlControlText.contains(${javaString("\\f")}), "YAML should escape form feed");`);
+  lines.push(`    Object yamlParsed = TypraYaml.parse(${javaString('value: "\\b\\f\\u0001\\uD83D\\uDE42"')});`);
+  lines.push('    Object yamlValue = ((java.util.Map<?, ?>) yamlParsed).get("value");');
+  lines.push("    String yamlParsedExpected = new String(new int[] { 0x0008, 0x000c, 0x0001, 0x1f642 }, 0, 4);");
+  lines.push('    assertEquals(yamlParsedExpected, yamlValue, "YAML should decode named and unicode escapes");');
+  lines.push(`    assertThrows(() -> TypraYaml.parse(${javaString('value: "\\x"')}), "YAML should reject unknown escapes");`);
 }
 
 function emitCoercionTest(
