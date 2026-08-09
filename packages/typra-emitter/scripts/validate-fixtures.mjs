@@ -23,6 +23,11 @@ import {
   compareExpectedExecution,
   TOOLCHAIN_UNAVAILABLE,
 } from "./validation-execution.mjs";
+import {
+  buildPropertyCorpus,
+  formatPropertyCaseFailure,
+  parsePropertySeed,
+} from "./property-corpus.mjs";
 
 const packageRoot = process.cwd();
 
@@ -353,8 +358,22 @@ const fixtureRootExpected = {
     emptyForm: {},
   },
 };
+const PROPERTY_CORPUS_SEED = parsePropertySeed(process.env.TYPRA_PROPERTY_SEED);
+const PROPERTY_CORPUS_CASE_COUNT = Number.parseInt(
+  process.env.TYPRA_PROPERTY_CASE_COUNT ?? "8",
+  10,
+);
+const propertyCorpus = buildFixtureRootPropertyCorpus();
+const propertyCorpusJsonLiteral = JSON.stringify(JSON.stringify(propertyCorpus));
+const conformancePropertyCases = propertyCorpus.map((entry) => ({
+  id: entry.id,
+  seed: entry.seed,
+  caseId: entry.caseId,
+  root: entry.input,
+}));
 const conformanceCanonical = {
   root: fixtureRootExpected,
+  propertyCases: conformancePropertyCases,
   imageContent: imageContentSample,
   openai: {
     max_completion_tokens: 256,
@@ -474,6 +493,29 @@ function normalizeConformanceValue(value) {
   return value;
 }
 
+function buildFixtureRootPropertyCorpus() {
+  if (!Number.isSafeInteger(PROPERTY_CORPUS_CASE_COUNT) || PROPERTY_CORPUS_CASE_COUNT < 1) {
+    throw new Error(
+      `Invalid TYPRA_PROPERTY_CASE_COUNT: ${process.env.TYPRA_PROPERTY_CASE_COUNT}`,
+    );
+  }
+  const modelPath = path.join(generatedRoot, "json-ast", "model.json");
+  const model = JSON.parse(readFileSync(modelPath, "utf8"));
+  const corpus = buildPropertyCorpus(model, {
+    rootType: "FixtureRoot",
+    seed: PROPERTY_CORPUS_SEED,
+    caseCount: PROPERTY_CORPUS_CASE_COUNT,
+    maxDepth: 5,
+    onlyCase: process.env.TYPRA_PROPERTY_CASE,
+  });
+  if (corpus.length === 0) {
+    throw new Error(
+      `TYPRA_PROPERTY_CASE did not match any generated property corpus case: ${process.env.TYPRA_PROPERTY_CASE}`,
+    );
+  }
+  return corpus;
+}
+
 function assertConformanceResult(target, rawOutput) {
   let actual;
   try {
@@ -517,8 +559,10 @@ function assertConformanceResult(target, rawOutput) {
     return;
   }
 
+  const propertyFailure = formatPropertyCaseFailure(conformanceExpected, actual);
   fail(
-    `Executable conformance for ${target} did not match canonical output.\nExpected: ${JSON.stringify(conformanceExpected)}\nActual: ${actualJson}`,
+    `Executable conformance for ${target} did not match canonical output.\nExpected: ${JSON.stringify(conformanceExpected)}\nActual: ${actualJson}` +
+      (propertyFailure ? `\n${propertyFailure}` : ""),
   );
 }
 
@@ -2819,6 +2863,7 @@ function runTypeScriptExecutableConformance() {
     [
       'import { FixtureBag, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, SaveContext, WireOptions } from "./index";',
       "",
+      `const propertyCases = JSON.parse(${propertyCorpusJsonLiteral}) as Array<{ id: string; seed: string; caseId: string; input: Record<string, unknown> }>;`,
       `const root = FixtureRoot.load(JSON.parse(${fixtureRootSampleJsonLiteral}));`,
       `const imageContent = FixtureContent.load(${JSON.stringify(imageContentSample)});`,
       'const knownContent = FixtureContent.load({ kind: "text", value: "hello" }).save();',
@@ -2890,6 +2935,7 @@ function runTypeScriptExecutableConformance() {
       'if (typeof (expandedBag.items as any).alpha !== "object") throw new Error("useShorthand=false must preserve the item object");',
       "console.log(JSON.stringify({",
       "  root: root.save(),",
+      "  propertyCases: propertyCases.map((entry) => ({ id: entry.id, seed: entry.seed, caseId: entry.caseId, root: FixtureRoot.load(entry.input).save() })),",
       "  imageContent: imageContent.save(),",
       '  openai: wire.toWire("openai"),',
       '  anthropic: wire.toWire("anthropic"),',
@@ -3051,6 +3097,7 @@ function runPythonExecutableConformance(
     "import sys",
     `sys.path.insert(0, ${JSON.stringify(path.dirname(sourceDir))})`,
     `from ${packageName} import FixtureBag, FixtureCheckpoint, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, LoadContext, ModelInfo, SaveContext, WireOptions`,
+    `property_cases = json.loads(${propertyCorpusJsonLiteral})`,
     `root = FixtureRoot.load(json.loads(${fixtureRootSampleJsonLiteral}))`,
     "root = FixtureRoot.load(json.loads(json.dumps(root.save())))",
     'checkpoint = FixtureCheckpoint.load({"pendingToolRequests": [{"id": "call-a", "name": "echo"}, {"id": "call-b", "name": "echo"}]})',
@@ -3140,6 +3187,7 @@ function runPythonExecutableConformance(
     '    raise AssertionError("missing required field inside an array element was accepted")',
     "print(json.dumps({",
     '    "root": root.save(),',
+    '    "propertyCases": [{"id": entry["id"], "seed": entry["seed"], "caseId": entry["caseId"], "root": FixtureRoot.load(entry["input"]).save()} for entry in property_cases],',
     '    "imageContent": image_content.save(),',
     '    "openai": wire.to_wire("openai"),',
     '    "anthropic": wire.to_wire("anthropic"),',
@@ -3222,6 +3270,21 @@ function runGoExecutableConformance() {
       "\tvar rootData interface{}",
       `\tif err := json.Unmarshal([]byte(${fixtureRootSampleJsonLiteral}), &rootData); err != nil {`,
       "\t\tpanic(err)",
+      "\t}",
+      "\tvar propertyCases []map[string]interface{}",
+      `\tif err := json.Unmarshal([]byte(${propertyCorpusJsonLiteral}), &propertyCases); err != nil {`,
+      "\t\tpanic(err)",
+      "\t}",
+      "\tpropertyOutputs := []map[string]interface{}{}",
+      "\tfor _, entry := range propertyCases {",
+      '\t\tloaded, err := fixtures.LoadFixtureRoot(entry["input"], loadCtx)',
+      "\t\tif err != nil { panic(err) }",
+      "\t\tpropertyOutputs = append(propertyOutputs, map[string]interface{}{",
+      '\t\t\t"id": entry["id"],',
+      '\t\t\t"seed": entry["seed"],',
+      '\t\t\t"caseId": entry["caseId"],',
+      '\t\t\t"root": loaded.Save(saveCtx),',
+      "\t\t})",
       "\t}",
       "\troot, err := fixtures.LoadFixtureRoot(rootData, loadCtx)",
       "\tif err != nil {",
@@ -3564,6 +3627,7 @@ function runGoExecutableConformance() {
       "\t}).Save(saveCtx)",
       "\tencoded, err := json.Marshal(map[string]interface{}{",
       '\t\t"root": root.Save(saveCtx),',
+      '\t\t"propertyCases": propertyOutputs,',
       '\t\t"imageContent": imageContentSaved,',
       '\t\t"openai": wire.ToWire("openai"),',
       '\t\t"anthropic": wire.ToWire("anthropic"),',
@@ -3657,6 +3721,16 @@ function runRustExecutableConformance() {
       "    let load_ctx = LoadContext::new();",
       "    let save_ctx = SaveContext::new();",
       `    let root_value: serde_json::Value = serde_json::from_str(${fixtureRootSampleJsonLiteral}).unwrap();`,
+      `    let property_cases: Vec<serde_json::Value> = serde_json::from_str(${propertyCorpusJsonLiteral}).unwrap();`,
+      "    let property_outputs: Vec<serde_json::Value> = property_cases.iter().map(|entry| {",
+      "        let root = FixtureRoot::load_from_value(&entry[\"input\"], &load_ctx);",
+      "        json!({",
+      "            \"id\": entry[\"id\"].clone(),",
+      "            \"seed\": entry[\"seed\"].clone(),",
+      "            \"caseId\": entry[\"caseId\"].clone(),",
+      "            \"root\": root.to_value(&save_ctx)",
+      "        })",
+      "    }).collect();",
       "    let root = FixtureRoot::load_from_value(&root_value, &load_ctx);",
       '    let image_content = FixtureContent::load_from_value(&json!({"kind": "image", "url": "https://example.com/fixture.png"}), &load_ctx);',
       '    let known_content = FixtureContent::from_json(r#"{"kind":"text","value":"hello"}"#, &load_ctx).expect("known closed discriminator");',
@@ -3766,6 +3840,7 @@ function runRustExecutableConformance() {
       '    assert!(indexed_message.contains("entries[1].detail"), "array element diagnostic lost the element index: {indexed_message}");',
       '    println!("{}", json!({',
       '        "root": root.to_value(&save_ctx),',
+      '        "propertyCases": property_outputs,',
       '        "imageContent": image_content.to_value(&save_ctx),',
       '        "openai": wire.to_wire("openai"),',
       '        "anthropic": wire.to_wire("anthropic"),',
@@ -3977,6 +4052,19 @@ function runCSharpExecutableConformance() {
       "using Typra.Fixtures;",
       "",
       `var root = FixtureRoot.FromJson(${fixtureRootSampleJsonLiteral});`,
+      `using var propertyDocument = JsonDocument.Parse(${propertyCorpusJsonLiteral});`,
+      "var propertyOutputs = new List<Dictionary<string, object?>>();",
+      "foreach (var entry in propertyDocument.RootElement.EnumerateArray())",
+      "{",
+      "    var propertyRoot = FixtureRoot.FromJson(entry.GetProperty(\"input\").GetRawText());",
+      "    propertyOutputs.Add(new Dictionary<string, object?>",
+      "    {",
+      "        [\"id\"] = entry.GetProperty(\"id\").GetString(),",
+      "        [\"seed\"] = entry.GetProperty(\"seed\").GetString(),",
+      "        [\"caseId\"] = entry.GetProperty(\"caseId\").GetString(),",
+      "        [\"root\"] = propertyRoot.Save(),",
+      "    });",
+      "}",
       'if (root.Metadata is null) throw new InvalidOperationException("Record<unknown> metadata must load from the canonical conformance payload");',
       `var nullMetadataRoot = FixtureRoot.FromJson(${fixtureRootNullMetadataJsonLiteral});`,
       "var nullMetadata = nullMetadataRoot.Metadata;",
@@ -4089,6 +4177,7 @@ function runCSharpExecutableConformance() {
       "Console.WriteLine(JsonSerializer.Serialize(new Dictionary<string, object?>",
       "{",
       '    ["root"] = root.Save(),',
+      '    ["propertyCases"] = propertyOutputs,',
       '    ["imageContent"] = imageContent.Save(),',
       '    ["openai"] = wire.ToWire("openai"),',
       '    ["anthropic"] = wire.ToWire("anthropic"),',
@@ -4153,6 +4242,18 @@ function runJavaExecutableConformance() {
       '    imageContentData.put("kind", "image");',
       '    imageContentData.put("url", "https://example.com/fixture.png");',
       `    FixtureRoot root = FixtureRoot.fromYaml(${fixtureRootSampleJsonLiteral});`,
+      `    List<Object> propertyCases = (List<Object>) TypraJson.parse(${propertyCorpusJsonLiteral});`,
+      "    List<Object> propertyOutputs = new java.util.ArrayList<>();",
+      "    for (Object rawEntry : propertyCases) {",
+      "      Map<String, Object> entry = (Map<String, Object>) rawEntry;",
+      "      FixtureRoot propertyRoot = FixtureRoot.load((Map<String, Object>) entry.get(\"input\"), new LoadContext());",
+      "      Map<String, Object> propertyOutput = new LinkedHashMap<>();",
+      "      propertyOutput.put(\"id\", entry.get(\"id\"));",
+      "      propertyOutput.put(\"seed\", entry.get(\"seed\"));",
+      "      propertyOutput.put(\"caseId\", entry.get(\"caseId\"));",
+      "      propertyOutput.put(\"root\", propertyRoot.save(new SaveContext()));",
+      "      propertyOutputs.add(propertyOutput);",
+      "    }",
       "    Map<String, Object> wireData = new LinkedHashMap<>();",
       '    wireData.put("maxOutputTokens", 256);',
       '    wireData.put("temperature", 0.7);',
@@ -4302,6 +4403,7 @@ function runJavaExecutableConformance() {
       "",
       "    Map<String, Object> output = new LinkedHashMap<>();",
       '    output.put("root", reloadedRoot.save(new SaveContext()));',
+      '    output.put("propertyCases", propertyOutputs);',
       '    output.put("imageContent", reloadedImageContent.save(new SaveContext()));',
       '    output.put("openai", wire.toWire("openai"));',
       '    output.put("anthropic", wire.toWire("anthropic"));',
@@ -4436,6 +4538,16 @@ import Foundation
 final class ConformanceValidateTests: XCTestCase {
   func testEmitsCanonicalConformancePayload() throws {
     let rootData = try JSONSerialization.jsonObject(with: Data(${fixtureRootSampleJsonLiteral}.utf8)) as! [String: Any]
+    let propertyCases = try JSONSerialization.jsonObject(with: Data(${propertyCorpusJsonLiteral}.utf8)) as! [[String: Any]]
+    let propertyOutputs = try propertyCases.map { entry -> [String: Any] in
+      let propertyRoot = try FixtureRoot.load(entry["input"] as! [String: Any])
+      return [
+        "id": entry["id"]!,
+        "seed": entry["seed"]!,
+        "caseId": entry["caseId"]!,
+        "root": try propertyRoot.save(),
+      ]
+    }
     let root = try FixtureRoot.load(rootData)
     let imageContent = try FixtureContent.load(["kind": "image", "url": "https://example.com/fixture.png"])
     let wire = try WireOptions.load(["maxOutputTokens": 256, "temperature": 0.7])
@@ -4443,6 +4555,7 @@ final class ConformanceValidateTests: XCTestCase {
 
     let payload: [String: Any] = [
       "root": try root.save(),
+      "propertyCases": propertyOutputs,
       "imageContent": try imageContent.save(),
       "openai": try wire.toWire("openai"),
       "anthropic": try wire.toWire("anthropic"),
@@ -4452,7 +4565,8 @@ final class ConformanceValidateTests: XCTestCase {
     ]
 
     let encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-    print("TYPRA_CONFORMANCE:" + String(decoding: encoded, as: UTF8.self))
+    let outputPath = ProcessInfo.processInfo.environment["TYPRA_CONFORMANCE_OUTPUT"]!
+    try encoded.write(to: URL(fileURLWithPath: outputPath))
   }
 
   // An open discriminator must absorb a value that no subtype claims, carry the
@@ -4516,9 +4630,10 @@ final class ConformanceValidateTests: XCTestCase {
 }
 `,
   );
+  const payloadPath = path.join(buildDir, "conformance.json");
 
   try {
-    const output = execFileSync(
+    execFileSync(
       "swift",
       [
         "test",
@@ -4533,10 +4648,10 @@ final class ConformanceValidateTests: XCTestCase {
         cwd: sourceDir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
-        env: swiftToolchainEnv(),
+        env: { ...swiftToolchainEnv(), TYPRA_CONFORMANCE_OUTPUT: payloadPath },
       },
     );
-    assertConformanceResult("swift", extractConformancePayload(output));
+    assertConformanceResult("swift", readFileSync(payloadPath, "utf8"));
   } catch (error) {
     const output =
       `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
@@ -4552,15 +4667,6 @@ final class ConformanceValidateTests: XCTestCase {
 }
 
 /** Pulls the sentinel-tagged payload out of a test runner's interleaved output. */
-function extractConformancePayload(rawOutput) {
-  const marker = "TYPRA_CONFORMANCE:";
-  const line = rawOutput.split(/\r?\n/).find((entry) => entry.includes(marker));
-  if (!line) {
-    return rawOutput;
-  }
-  return line.slice(line.indexOf(marker) + marker.length).trim();
-}
-
 function mkdirp(dir) {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
