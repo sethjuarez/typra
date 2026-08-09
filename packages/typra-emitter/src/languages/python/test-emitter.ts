@@ -353,6 +353,13 @@ export function emitPythonTest(
       lines.push(`    assert instance.model_dump() == saved_data`);
       lines.push(`    assert json.loads(instance.model_dump_json()) == saved_data`);
       lines.push(`    assert ${typeName}.model_validate(original_data).save() == saved_data`);
+      lines.push(`    assert ${typeName}.model_validate_json(json_data).save() == saved_data`);
+      lines.push(`    try:`);
+      lines.push(`        ${typeName}.model_validate_strings(original_data)`);
+      lines.push(`    except TypeError as error:`);
+      lines.push(`        assert "model_validate_strings" in str(error)`);
+      lines.push(`    else:`);
+      lines.push(`        raise AssertionError("model_validate_strings bypassed Typra load")`);
     }
     lines.push(`    reloaded = ${typeName}.load(saved_data)`);
     lines.push(`    assert reloaded is not None`);

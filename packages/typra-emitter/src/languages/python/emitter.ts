@@ -131,6 +131,9 @@ export function emitPythonFile(
   if (preservesRawPayload) {
     stdlibImports.push("import copy");
   }
+  if (usePydantic && hasNonProtocol) {
+    stdlibImports.push("import json");
+  }
   if (decl.containsAbstract) {
     stdlibImports.push("from abc import ABC");
   }
@@ -291,6 +294,8 @@ const PYDANTIC_RESERVED_FIELD_NAMES = new Set([
   "model_dump",
   "model_dump_json",
   "model_validate",
+  "model_validate_json",
+  "model_validate_strings",
 ]);
 
 function assertNoPydanticReservedFieldNames(type: TypeDecl): void {
@@ -306,9 +311,29 @@ function assertNoPydanticReservedFieldNames(type: TypeDecl): void {
   }
 }
 
+function assertNoPydanticReservedFactoryNames(type: TypeDecl, fieldNames: Set<string>): void {
+  for (const factory of type.factories) {
+    const methodName = pythonFactoryMethodName(factory.name, fieldNames);
+    if (PYDANTIC_RESERVED_FIELD_NAMES.has(methodName)) {
+      throw new Error(
+        `Python native-serialization 'pydantic' cannot emit ${type.typeName.name}.${factory.name} factory: `
+        + `the Python method '${methodName}' is reserved by Pydantic/Typra interop. `
+        + "Rename the TypeSpec factory or use native-serialization: 'none'.",
+      );
+    }
+  }
+}
+
+function pythonFactoryMethodName(factoryName: string, fieldNames: Set<string>): string {
+  // In Python, a @classmethod with the same name as a dataclass field shadows
+  // the field's default. Prefix with create_ to avoid the collision.
+  return fieldNames.has(factoryName) ? `create_${factoryName}` : factoryName;
+}
+
 function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor, options: PythonEmitterOptions): void {
   const name = type.typeName.name;
   const usePydantic = options.nativeSerialization === "pydantic";
+  const fieldNames = new Set(type.fields.map(f => f.name));
 
   // Protocol types → emit as Protocol class with method signatures
   if (type.isProtocol) {
@@ -317,6 +342,7 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor, options
   }
   if (usePydantic) {
     assertNoPydanticReservedFieldNames(type);
+    assertNoPydanticReservedFactoryNames(type, fieldNames);
   }
 
   // Class definition
@@ -399,7 +425,6 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor, options
 
   // Factory methods
   if (type.factories.length > 0) {
-    const fieldNames = new Set(type.fields.map(f => f.name));
     lines.push("");
     for (const factory of type.factories) {
       emitFactory(name, factory, visitor, fieldNames, lines);
@@ -1388,6 +1413,18 @@ function emitPydanticInteropMethods(name: string, lines: string[]): void {
   lines.push("            return obj");
   lines.push("        return cls.load(obj)");
   lines.push("");
+  lines.push("    @classmethod");
+  lines.push(`    def model_validate_json(cls, json_data: str | bytes | bytearray, *args: Any, **kwargs: Any) -> "${name}":`);
+  lines.push("        \"\"\"Validate JSON through Typra's authoritative load contract.\"\"\"");
+  lines.push("        if args or kwargs:");
+  lines.push("            raise TypeError(\"Typra Pydantic mode delegates JSON validation to json.loads() and load(); model_validate_json arguments are unsupported.\")");
+  lines.push("        return cls.load(json.loads(json_data, strict=False))");
+  lines.push("");
+  lines.push("    @classmethod");
+  lines.push(`    def model_validate_strings(cls, obj: Any, *args: Any, **kwargs: Any) -> "${name}":`);
+  lines.push("        \"\"\"String-coercing Pydantic validation is unsupported by Typra.\"\"\"");
+  lines.push("        raise TypeError(\"Typra Pydantic mode does not support model_validate_strings(); use load() or model_validate_json() so Typra remains the authoritative loader.\")");
+  lines.push("");
   lines.push("    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:");
   lines.push("        \"\"\"Serialize through Typra's authoritative save contract.\"\"\"");
   lines.push("        if args or kwargs:");
@@ -1413,9 +1450,7 @@ function emitFactory(parentName: string, factory: FactoryDecl, visitor: ExprVisi
     .join(", ");
   const paramStr = params ? `, ${params}` : "";
 
-  // In Python, a @classmethod with the same name as a dataclass field shadows
-  // the field's default. Prefix with create_ to avoid the collision.
-  const methodName = fieldNames.has(factory.name) ? `create_${factory.name}` : factory.name;
+  const methodName = pythonFactoryMethodName(factory.name, fieldNames);
 
   lines.push("    @classmethod");
   lines.push(`    def ${methodName}(cls${paramStr}) -> "${parentName}":`);
