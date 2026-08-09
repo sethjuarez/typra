@@ -14,6 +14,7 @@ emit-targets:
     import-path: "fixtures::model"
     enum-parsing: "case-insensitive"
     protocol-scaffolds: "compile-only"
+    native-serialization: "serde"
 ```
 
 | Option | Why it matters |
@@ -23,6 +24,7 @@ emit-targets:
 | `import-path` | Import path used by generated tests. |
 | `enum-parsing` | Controls whether enum parsing is case-sensitive or case-insensitive. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+| `native-serialization` | `"serde"` emits feature-gated `Serialize`/`Deserialize` impls; `"none"` opts out. Omission preserves the legacy cfg-gated serde surface for compatibility. |
 
 Generated Rust surfaces include serde-oriented model structures, `from_json`/`to_json` and `from_yaml`/`to_yaml` helpers, provider wire mapping, and optional case-insensitive enum parsing.
 
@@ -38,3 +40,5 @@ let saved = root.to_json(&SaveContext::default())?;
 The `from_yaml` and `to_yaml` helpers provide the same round-trip against YAML. JSON and YAML helpers return `Result`, so callers propagate serde errors with `?`.
 
 Choose `enum-parsing` deliberately. Default behavior is case-sensitive unless configured otherwise.
+
+`native-serialization: "serde"` emits `#[cfg(feature = "serde")]` implementations for generated models and polymorphic kind enums. Those impls delegate through Typra's canonical `load_from_value` and `to_value` paths instead of field-by-field derives, so serde interop preserves discriminator dispatch, field names, optional omission, typed records, and open-discriminator fallback payloads.
