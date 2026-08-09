@@ -40,6 +40,13 @@ options:
         package-name: "typra.fixtures"
         format: false
         protocol-scaffolds: "compile-only"
+      - type: Java
+        output-dir: "generated/fixtures/java-jackson"
+        test-dir: "generated/fixtures/java-jackson/tests"
+        package-name: "typra.fixtures"
+        format: false
+        protocol-scaffolds: "compile-only"
+        native-serialization: "jackson"
       - type: CSharp
         output-dir: "generated/fixtures/csharp"
         test-dir: "generated/fixtures/csharp/tests"

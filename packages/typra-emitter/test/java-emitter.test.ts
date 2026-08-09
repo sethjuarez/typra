@@ -132,6 +132,55 @@ describe("Java emitter naming", () => {
     assert.match(source, /map\.containsKey\("default"\)/);
     assert.match(source, /result\.defaultValue = String\.valueOf\(map\.get\("default"\)\)/);
     assert.match(source, /result\.put\("default", serializeScalar\(obj\.defaultValue\)\)/);
+    assert.doesNotMatch(source, /com\.fasterxml\.jackson/);
+  });
+
+  it("emits opt-in Jackson bindings from Typra load/save wire names", () => {
+    const field: TypeDecl["fields"][number] = {
+      name: "default",
+      typeName: { namespace: "TypeSpec", name: "string" },
+      category: { kind: "scalar", scalarType: "string" },
+      isOptional: true,
+      defaultValue: null,
+      allowedValues: [],
+      parseAliases: {},
+      enumName: null,
+      isOpenEnum: false,
+      description: "",
+      knownAs: {},
+    };
+    const decl = typeDecl([field]);
+    decl.load.assignments.push({
+      sourceName: field.name,
+      fieldName: field.name,
+      category: field.category,
+      isOptional: field.isOptional,
+      parentTypeName: decl.typeName.name,
+      enumName: null,
+      allowedValues: [],
+      isOpenEnum: false,
+      parseAliases: {},
+      defaultValue: null,
+    });
+    decl.save.assignments.push({
+      targetName: field.name,
+      fieldName: field.name,
+      category: field.category,
+      isOptional: field.isOptional,
+      parentTypeName: decl.typeName.name,
+      enumName: null,
+      isOpenEnum: false,
+    });
+
+    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set(), [], [decl], "jackson");
+
+    assert.match(source, /import com\.fasterxml\.jackson\.annotation\.JsonProperty;/);
+    assert.match(source, /@JsonSerialize\(using = KeywordModel\.TypraJacksonSerializer\.class\)/);
+    assert.match(source, /@JsonDeserialize\(using = KeywordModel\.TypraJacksonDeserializer\.class\)/);
+    assert.match(source, /@JsonProperty\("default"\)\s+@JsonInclude\(JsonInclude\.Include\.NON_NULL\)\s+public String defaultValue = null;/);
+    assert.match(source, /generator\.writeObject\(value == null \? null : value\.save\(new SaveContext\(\)\)\);/);
+    assert.match(source, /Object data = parser\.getCodec\(\)\.readValue\(parser, Object\.class\);/);
+    assert.match(source, /return KeywordModel\.load\(data, new LoadContext\(\)\);/);
   });
 
   it("emits PascalCase public enums as standalone compilation units", () => {

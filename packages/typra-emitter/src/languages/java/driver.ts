@@ -75,7 +75,7 @@ export const generateJava = async (
     }
   }
   for (const [enumName, enumDef] of enums) {
-    await emitJavaFile(context, `${enumName}.java`, emitJavaEnum(enumDef, packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
+    await emitJavaFile(context, `${enumName}.java`, emitJavaEnum(enumDef, packageName, javaNativeSerialization(emitTarget)), emitTarget["output-dir"], emitTarget["output-dir"]);
   }
 
   const testClassNames: string[] = [];
@@ -89,9 +89,10 @@ export const generateJava = async (
       polymorphicTypeNames,
       [],
       allTypeDecls,
+      javaNativeSerialization(emitTarget),
     );
     await emitJavaFile(context, `${javaTypeName(n.typeName.name)}.java`, fileContent, emitTarget["output-dir"], emitTarget["output-dir"]);
-    const carrier = emitJavaUnknownCarrier(fileDecls[index].types[0], packageName);
+    const carrier = emitJavaUnknownCarrier(fileDecls[index].types[0], packageName, javaNativeSerialization(emitTarget));
     if (carrier) {
       await emitJavaFile(context, carrier.filename, carrier.source, emitTarget["output-dir"], emitTarget["output-dir"]);
     }
@@ -105,7 +106,7 @@ export const generateJava = async (
       const testClass = javaTestClassName(n.typeName.name);
       testClassNames.push(testClass);
       const testContext = buildBaseTestContext(n, packageName, javaTestOptions, name => registry.get(name));
-      await emitJavaFile(context, `${testClass}.java`, emitJavaTest(testContext), emitTarget["test-dir"], emitTarget["test-dir"]);
+      await emitJavaFile(context, `${testClass}.java`, emitJavaTest(testContext, javaNativeSerialization(emitTarget)), emitTarget["test-dir"], emitTarget["test-dir"]);
     }
   }
 
@@ -126,6 +127,10 @@ export const generateJava = async (
   }
 
 };
+
+function javaNativeSerialization(emitTarget: EmitTarget): "none" | "jackson" {
+  return emitTarget["native-serialization"] === "jackson" ? "jackson" : "none";
+}
 
 export function javaPackageName(namespace: string): string {
   return namespace.toLowerCase().replace(/[^a-z0-9.]+/g, ".").replace(/^\.+|\.+$/g, "") || "typra";

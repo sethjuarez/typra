@@ -347,6 +347,7 @@ export function buildGeneratedOutputReport(
         "protected-paths",
         "hydration-zones",
         "deterministic-output",
+        "native-serialization",
       ],
       versionDriftSignals: [
         "@typra/emitter",
