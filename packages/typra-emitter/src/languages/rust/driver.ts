@@ -71,25 +71,6 @@ export const generateRust = async (
   const nodes = filterNodes(allTypes, options);
   const requestedNativeSerialization = emitTarget["native-serialization"];
   const nativeSerialization = requestedNativeSerialization === "none" ? "none" : "serde";
-  if (requestedNativeSerialization === "serde") {
-    const unsupported = nodes.filter(hasUnsupportedSerdeDiscriminatorFallback);
-    if (unsupported.length > 0) {
-      for (const type of unsupported) {
-        const discriminator = type.discriminator ?? "discriminator";
-        context.program.reportDiagnostic({
-          code: "typra-emitter-rust-serde-open-discriminator",
-          message:
-            `Rust native-serialization: "serde" does not support discriminated base '${type.typeName.name}' `
-            + `with discriminator '${discriminator}' because it requires an open, wildcard, or base-instance fallback. `
-            + `Rust's base-instance representation must be settled before serde can safely mirror Typra load/save for this shape. `
-            + `Use native-serialization: "none" or close the discriminator before enabling serde.`,
-          severity: "error",
-          target: type.model,
-        });
-      }
-      return;
-    }
-  }
 
   // Build the expression IR infrastructure for this compilation
   const registry = TypeRegistry.fromTypeGraph(allTypes);
@@ -262,25 +243,6 @@ function normalizeRustFileEndings(dir: string): void {
  */
 function buildTestContext(node: TypeNode, registry: TypeRegistry): BaseTestContext {
   return buildBaseTestContext(node, undefined, rustTestOptions, name => registry.get(name));
-}
-
-function hasUnsupportedSerdeDiscriminatorFallback(node: TypeNode): boolean {
-  if (!node.discriminator || node.childTypes.length === 0) return false;
-  const discriminator = node.properties.find(prop => prop.name === node.discriminator);
-  if (!discriminator) return true;
-  const hasDeclaredWildcard = node.childTypes.some(child =>
-    child.properties.find(prop => prop.name === node.discriminator)?.defaultValue === "*"
-  );
-  if (hasDeclaredWildcard || discriminator.isOpenEnum || discriminator.typeName.name === "string") return true;
-
-  const claimedValues = new Set(
-    node.childTypes
-      .map(child => child.properties.find(prop => prop.name === node.discriminator)?.defaultValue)
-      .filter((value): value is string => typeof value === "string"),
-  );
-  return !node.isAbstract
-    && discriminator.allowedValues.length > 0
-    && discriminator.allowedValues.some(value => !claimedValues.has(value));
 }
 
 /**

@@ -1926,7 +1926,7 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
       "config": ["enabled": true],
     ]
     let wildcard = try FixtureTool.load(wildcardInput)
-    guard case .fixtureCustomTool(let custom) = wildcard else {
+    guard case .fixtureCustomTool(let custom, _) = wildcard else {
       throw TypraRuntimeError.unsupported("Expected FixtureCustomTool wildcard")
     }
     XCTAssertEqual(custom.kind, "vendor")
@@ -1935,7 +1935,7 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     XCTAssertEqual(wildcardOutput["name"] as? String, "vendor")
     XCTAssertEqual((wildcardOutput["config"] as? [String: Any])?["enabled"] as? Bool, true)
     let wildcardReloaded = try FixtureTool.load(wildcardOutput)
-    guard case .fixtureCustomTool(let reloadedCustom) = wildcardReloaded else {
+    guard case .fixtureCustomTool(let reloadedCustom, _) = wildcardReloaded else {
       throw TypraRuntimeError.unsupported("Expected reloaded FixtureCustomTool wildcard")
     }
     XCTAssertEqual(reloadedCustom.kind, "vendor")

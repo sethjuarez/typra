@@ -15,6 +15,11 @@ import { flattenInheritance } from "../../ir/inheritance.js";
 import { swiftFunctionName, swiftPropertyName, swiftStringLiteral, swiftTypeName } from "./identifiers.js";
 import { SWIFT_TYPE_MAP, swiftType } from "./types.js";
 
+interface SwiftPolymorphicDefaultCase {
+  typeName: string;
+  carriesRaw: boolean;
+}
+
 export function emitSwiftFile(
   file: FileDecl,
   visitor: ExprVisitor,
@@ -22,18 +27,23 @@ export function emitSwiftFile(
   declarationUniverse: TypeDecl[] = file.types,
 ): string {
   const augmentedUniverse = addNamedCollectionFields(declarationUniverse);
-  const polymorphicDefaultCases = new Map(
+  const polymorphicDefaultCases = new Map<string, SwiftPolymorphicDefaultCase | null>(
     augmentedUniverse
       .filter(type => type.polymorphicDispatch !== null)
       .map(type => {
         const dispatch = type.polymorphicDispatch!;
         const fallback = dispatch.defaultVariant;
-        const closedDefault = isClosedPolymorphicDispatch(dispatch)
-          ? dispatch.variants[0]?.typeName.name ?? null
+        const fallbackIsDeclaredVariant = fallback
+          ? dispatch.variants.some(variant => variant.typeName.name === fallback.typeName.name)
+          : false;
+        const closedDefault = isClosedPolymorphicDispatch(dispatch) && dispatch.variants[0]
+          ? { typeName: dispatch.variants[0].typeName.name, carriesRaw: false }
           : null;
         return [
           type.typeName.name,
-          fallback && !fallback.isSelfReference ? fallback.typeName.name : closedDefault,
+          fallback && !fallback.isSelfReference
+            ? { typeName: fallback.typeName.name, carriesRaw: !fallbackIsDeclaredVariant }
+            : closedDefault,
         ] as const;
       }),
   );
@@ -64,7 +74,7 @@ function emitType(
   visitor: ExprVisitor,
   polymorphicTypeNames: Set<string>,
   allTypes: TypeDecl[],
-  polymorphicDefaultCases: ReadonlyMap<string, string | null>,
+  polymorphicDefaultCases: ReadonlyMap<string, SwiftPolymorphicDefaultCase | null>,
 ): void {
   if (type.polymorphicDispatch) {
     emitPolymorphicEnum(type, lines, allTypes);
@@ -136,7 +146,7 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
     lines.push(`  case ${swiftPropertyName(variant.typeName.name)}(${childName})`);
   }
   if (fallback && !dispatch.variants.some(variant => variant.typeName.name === fallback.typeName.name)) {
-    lines.push(`  case ${swiftPropertyName(fallback.typeName.name)}(${swiftTypeName(fallback.typeName.name)})`);
+    lines.push(`  case ${swiftPropertyName(fallback.typeName.name)}(${swiftTypeName(fallback.typeName.name)}, [String: Any])`);
   }
   if (usesUnknownFallback) {
     lines.push("  case unknown([String: Any])");
@@ -157,7 +167,7 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
     lines.push(`    case ${swiftStringLiteral(variant.value)}: return .${swiftPropertyName(variant.typeName.name)}(try ${swiftTypeName(variant.typeName.name)}.load(normalizedData, context: context))`);
   }
   if (fallback) {
-    lines.push(`    default: return .${swiftPropertyName(fallback.typeName.name)}(try ${swiftTypeName(fallback.typeName.name)}.load(normalizedData, context: context))`);
+    lines.push(`    default: return .${swiftPropertyName(fallback.typeName.name)}(try ${swiftTypeName(fallback.typeName.name)}.load(normalizedData, context: context), object)`);
   } else if (isClosed) {
     lines.push(`    default: throw TypraRuntimeError.unknownDiscriminator(type: ${swiftStringLiteral(typeName)}, field: ${swiftStringLiteral(dispatch.discriminatorField)}, value: discriminator)`);
   } else {
@@ -172,7 +182,12 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
     lines.push(`    case .${swiftPropertyName(variant.typeName.name)}(let value): return try value.save(context)`);
   }
   if (fallback && !dispatch.variants.some(variant => variant.typeName.name === fallback.typeName.name)) {
-    lines.push(`    case .${swiftPropertyName(fallback.typeName.name)}(let value): return try value.save(context)`);
+    lines.push(`    case .${swiftPropertyName(fallback.typeName.name)}(let value, let raw):`);
+    lines.push("      var result = raw");
+    lines.push("      for (key, item) in try value.save(context) {");
+    lines.push("        result[key] = item");
+    lines.push("      }");
+    lines.push("      return result");
   }
   if (usesUnknownFallback) {
     lines.push("    case .unknown(let value): return value");
@@ -273,7 +288,7 @@ function emitStruct(
   lines: string[],
   visitor: ExprVisitor,
   polymorphicTypeNames: Set<string>,
-  polymorphicDefaultCases: ReadonlyMap<string, string | null>,
+  polymorphicDefaultCases: ReadonlyMap<string, SwiftPolymorphicDefaultCase | null>,
 ): void {
   const typeName = swiftTypeName(type.typeName.name);
   if (type.description) {
@@ -341,25 +356,9 @@ function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
       helper.propertyName === assignment.fieldName && supportsNamedCollectionHelper(helper, polymorphicTypeNames)
     );
     if (field && !field.isOptional && !field.hasExplicitDefault && field.defaultValue === null && (field.category.kind === "complex" || (type.base && (field.category.kind === "scalar" || field.category.kind === "dict")))) {
-      const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
-      if (wildcardDiscriminator) {
-        // A blank or absent discriminator is the only way the Swift enum can carry a *base*
-        // instance of an open discriminated type — the enum has no base case, so such payloads
-        // land on the wildcard variant and its variant-only required fields do not apply.
-        // Every other discriminator value (including a non-string one) genuinely selects the
-        // wildcard variant, so the required-field check must run. See issue #105 on giving
-        // Swift/Rust a base representation, which would let this become unconditional (#104).
-        const disc = swiftStringLiteral(wildcardDiscriminator);
-        lines.push(`    if !(object[${disc}] == nil || object[${disc}] is NSNull || (object[${disc}] as? String)?.isEmpty == true) {`);
-        lines.push(`      if object[${swiftStringLiteral(assignment.sourceName)}] == nil || object[${swiftStringLiteral(assignment.sourceName)}] is NSNull {`);
-        lines.push(`        throw TypraRuntimeError.unsupported(context.at(${swiftStringLiteral(assignment.sourceName)}).path + ": missing required field")`);
-        lines.push("      }");
-        lines.push("    }");
-      } else {
-        lines.push(`    if object[${swiftStringLiteral(assignment.sourceName)}] == nil || object[${swiftStringLiteral(assignment.sourceName)}] is NSNull {`);
-        lines.push(`      throw TypraRuntimeError.unsupported(context.at(${swiftStringLiteral(assignment.sourceName)}).path + ": missing required field")`);
-        lines.push("    }");
-      }
+      lines.push(`    if object[${swiftStringLiteral(assignment.sourceName)}] == nil || object[${swiftStringLiteral(assignment.sourceName)}] is NSNull {`);
+      lines.push(`      throw TypraRuntimeError.unsupported(context.at(${swiftStringLiteral(assignment.sourceName)}).path + ": missing required field")`);
+      lines.push("    }");
     }
     lines.push(`    if let value = object[${swiftStringLiteral(assignment.sourceName)}] {`);
     lines.push(`      instance.${swiftPropertyName(assignment.fieldName)} = ${swiftLoadExpression(assignment.category, assignment.enumName, assignment.fieldName, "value", polymorphicTypeNames, collectionHelper)}`);
@@ -662,7 +661,7 @@ function swiftRecordValueType(valueType: string | undefined): string {
 function swiftFieldDefaultValue(
   field: FieldDecl,
   polymorphicTypeNames: Set<string>,
-  polymorphicDefaultCases: ReadonlyMap<string, string | null>,
+  polymorphicDefaultCases: ReadonlyMap<string, SwiftPolymorphicDefaultCase | null>,
 ): string {
   const materializesCollectionDefault =
     field.hasExplicitDefault &&
@@ -675,7 +674,7 @@ function swiftFieldDefaultValue(
 function swiftDefaultValue(
   field: FieldDecl,
   polymorphicTypeNames: Set<string>,
-  polymorphicDefaultCases: ReadonlyMap<string, string | null>,
+  polymorphicDefaultCases: ReadonlyMap<string, SwiftPolymorphicDefaultCase | null>,
 ): string {
   if (
     field.hasExplicitDefault &&
@@ -694,7 +693,7 @@ function swiftDefaultValue(
       if (polymorphicTypeNames.has(field.category.typeName)) {
         const fallback = polymorphicDefaultCases.get(field.category.typeName);
         return fallback
-          ? `.${swiftPropertyName(fallback)}(${swiftTypeName(fallback)}())`
+          ? `.${swiftPropertyName(fallback.typeName)}(${swiftTypeName(fallback.typeName)}()${fallback.carriesRaw ? ", [:]" : ""})`
           : ".unknown([:])";
       }
       return `${swiftTypeName(field.category.typeName)}()`;
