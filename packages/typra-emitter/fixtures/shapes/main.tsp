@@ -590,6 +590,8 @@ model FixtureTool {
 
 model FixtureBinding {
   name?: string;
+
+  @sample(#{ source: "customer.name" })
   source: string;
 }
 
@@ -931,6 +933,7 @@ model FixtureNamedOpenVariant extends FixtureNamedOpenBase {
 
 @@coerce(McpApprovalConfig, string, #{ kind: "{value}" }, "config", "Load an approval config from its kind.", "always");
 model McpApprovalConfig {
+  @sample(#{ kind: "never" })
   kind: string;
 }
 
