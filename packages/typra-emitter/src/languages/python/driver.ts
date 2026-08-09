@@ -62,10 +62,6 @@ export const generatePython = async (
   emitTarget: EmitTarget,
   options?: GeneratorOptions
 ): Promise<void> => {
-  const nativeSerialization = emitTarget["native-serialization"] ?? "none";
-  if (nativeSerialization === "zod" || nativeSerialization === "standard-schema") {
-    throw new Error(`Python native-serialization: "${nativeSerialization}" is TypeScript-only; use "none" or "pydantic".`);
-  }
   const allTypes = Array.from(enumerateTypes(node));
   const nodes = filterNodes(allTypes, options);
 
@@ -78,6 +74,7 @@ export const generatePython = async (
 
   // Import path for test files — defaults to packageName, can be overridden via import-path config
   const importPath = emitTarget["import-path"] || packageName;
+  const nativeSerialization = pythonNativeSerialization(emitTarget);
 
   // Emit py.typed marker for PEP 561 compliance
   await emitPythonFile(context, 'py.typed', '', emitTarget["output-dir"], emitTarget["output-dir"], { allowEmpty: true });
@@ -171,6 +168,10 @@ export const generatePython = async (
     formatPythonFiles(outputDir, testDir);
   }
 };
+
+function pythonNativeSerialization(emitTarget: EmitTarget): "none" | "pydantic" {
+  return emitTarget["native-serialization"] === "pydantic" ? "pydantic" : "none";
+}
 
 /**
  * Format Python files using ruff linter and formatter.

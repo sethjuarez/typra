@@ -1,4 +1,4 @@
-import { EmitContext, resolvePath, Namespace, Model } from "@typespec/compiler";
+import { EmitContext, resolvePath, Namespace, Model, NoTarget } from "@typespec/compiler";
 import { resolveModel, TypeNode, enumerateTypes } from "./ir/ast.js";
 import { TypraEmitterOptions, EmitTarget } from "./lib.js";
 import { generateMarkdown } from "./languages/markdown/driver.js";
@@ -124,6 +124,9 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     emitterOutputDir: context.emitterOutputDir,
     ...context.options,
   }
+  if (!validateNativeSerializationOptions(context, options["emit-targets"] || [])) {
+    return;
+  }
 
 
   // resolving top level model
@@ -134,6 +137,22 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     throw new Error(
       `${rootObject} model not found or is not a model type.`
     );
+  }
+
+  function validateNativeSerializationOptions(
+    context: EmitContext<TypraEmitterOptions>,
+    targets: EmitTarget[],
+  ): boolean {
+    const errors = validateNativeSerializationTargets(targets);
+    for (const message of errors) {
+      context.program.reportDiagnostic({
+        code: "typra-emitter-native-serialization-target",
+        message,
+        severity: "error",
+        target: NoTarget,
+      });
+    }
+    return errors.length === 0;
   }
 
   const rootNamespace = options["root-namespace"] || inferRootNamespace(rootObject);
@@ -212,10 +231,6 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   }
 
   const targets = options["emit-targets"] || [];
-  const nativeSerializationErrors = validateNativeSerializationTargets(targets);
-  if (nativeSerializationErrors.length > 0) {
-    throw new Error(nativeSerializationErrors.join("\n"));
-  }
   const generatorOptions: GeneratorOptions = {
     omitModels: options["omit-models"] || [],
     additionalModels: additionalModels,

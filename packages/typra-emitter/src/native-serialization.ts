@@ -7,7 +7,7 @@ const SUPPORTED_NATIVE_SERIALIZATION = new Map<string, Set<NativeSerializationMo
   ["python", new Set(["none", "pydantic"])],
   ["csharp", new Set(["none"])],
   ["go", new Set(["none"])],
-  ["java", new Set(["none"])],
+  ["java", new Set(["none", "jackson"])],
   ["rust", new Set(["none"])],
   ["swift", new Set(["none"])],
   ["markdown", new Set(["none"])],

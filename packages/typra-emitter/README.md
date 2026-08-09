@@ -185,6 +185,23 @@ emit-targets:
 When enabled, generated Rust `from_str_opt` methods accept enum values with
 ASCII case differences while preserving the canonical serialized casing.
 
+Java targets can opt into Jackson databind support without changing the default
+generated Java surface:
+
+```yaml
+emit-targets:
+  - type: Java
+    output-dir: generated/java
+    native-serialization: jackson
+```
+
+`native-serialization` defaults to `none`. With `jackson`, generated Java models
+include Jackson annotations and serializers/deserializers that delegate to
+Typra's generated `save` and `load`, so Jackson output is derived from the same
+wire mapping as Typra JSON/YAML helpers. The emitter does not create or mutate a
+consumer build manifest; projects enabling this option must provide
+`jackson-databind` on their Java compile/runtime classpath.
+
 Consumers can declare hand-authored boundaries in verifier config:
 
 ```json

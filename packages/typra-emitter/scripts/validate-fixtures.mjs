@@ -68,6 +68,8 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "csharp.protocol-scaffold-build",
   "java.build",
   "java.generated-tests",
+  "java-jackson.build",
+  "java-jackson.generated-tests",
   "executable-conformance",
 ];
 
@@ -82,6 +84,13 @@ const EXPECTED_EXECUTABLE_CONFORMANCE_TARGET_IDS = [
   "csharp",
   "java",
   "swift",
+];
+
+const JACKSON_VERSION = "2.17.2";
+const JACKSON_ARTIFACTS = [
+  "jackson-annotations",
+  "jackson-core",
+  "jackson-databind",
 ];
 const fixtureRootSample = {
   name: "fixture-root",
@@ -1728,10 +1737,20 @@ function runCSharpProtocolScaffoldBuild() {
 }
 
 function runJavaBuild() {
-  const sourceDir = path.join(generatedRoot, "java");
+  runJavaTargetBuild("java", "Generated Java source build");
+}
+
+function runJavaJacksonBuild() {
+  const classpath = jacksonClasspath();
+  if (!classpath) return;
+  runJavaTargetBuild("java-jackson", "Generated Java Jackson source build", classpath);
+}
+
+function runJavaTargetBuild(targetDir, label, classpath = "") {
+  const sourceDir = path.join(generatedRoot, targetDir);
   const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".java"));
   if (sourceFiles.length === 0) {
-    fail("No generated Java files found to build.");
+    fail(`No generated Java files found to build for ${targetDir}.`);
     return;
   }
 
@@ -1739,18 +1758,28 @@ function runJavaBuild() {
   rmSync(classesDir, { recursive: true, force: true });
   mkdirSync(classesDir, { recursive: true });
   try {
-    runCommand("Generated Java source build", "javac", ["-d", classesDir, ...sourceFiles], { cwd: sourceDir });
+    runCommand(label, "javac", [...javaClasspathArgs(classpath), "-d", classesDir, ...sourceFiles], { cwd: sourceDir });
   } finally {
     rmSync(classesDir, { recursive: true, force: true });
   }
 }
 
 function runJavaGeneratedTests() {
-  const sourceDir = path.join(generatedRoot, "java");
+  runJavaTargetGeneratedTests("java", "Generated Java tests", "typra.fixtures.TypraGeneratedTests");
+}
+
+function runJavaJacksonGeneratedTests() {
+  const classpath = jacksonClasspath();
+  if (!classpath) return;
+  runJavaTargetGeneratedTests("java-jackson", "Generated Java Jackson tests", "typra.fixtures.TypraGeneratedTests", classpath);
+}
+
+function runJavaTargetGeneratedTests(targetDir, label, mainClass, classpath = "") {
+  const sourceDir = path.join(generatedRoot, targetDir);
   const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".java"));
   const classesDir = path.join(sourceDir, ".classes");
   if (sourceFiles.length === 0) {
-    fail("No generated Java files found to test.");
+    fail(`No generated Java files found to test for ${targetDir}.`);
     return;
   }
 
@@ -1758,15 +1787,39 @@ function runJavaGeneratedTests() {
   mkdirSync(classesDir, { recursive: true });
   try {
     const initialFailureCount = failures.length;
-    runCommand("Generated Java tests build", "javac", ["-d", classesDir, ...sourceFiles], { cwd: sourceDir });
+    runCommand(`${label} build`, "javac", [...javaClasspathArgs(classpath), "-d", classesDir, ...sourceFiles], { cwd: sourceDir });
     if (failures.length > initialFailureCount) return;
-    execFileSync("java", ["-cp", classesDir, "typra.fixtures.TypraGeneratedTests"], { cwd: sourceDir, stdio: "pipe" });
+    execFileSync("java", ["-cp", javaRuntimeClasspath(classesDir, classpath), mainClass], { cwd: sourceDir, stdio: "pipe" });
   } catch (error) {
     const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
-    fail(`Generated Java tests failed:\n${output || error.message}`);
+    fail(`${label} failed:\n${output || error.message}`);
   } finally {
     rmSync(classesDir, { recursive: true, force: true });
   }
+}
+
+function javaClasspathArgs(classpath) {
+  return classpath ? ["-cp", classpath] : [];
+}
+
+function javaRuntimeClasspath(classesDir, classpath) {
+  return classpath ? `${classesDir}${path.delimiter}${classpath}` : classesDir;
+}
+
+function jacksonClasspath() {
+  const jarDir = path.join(validationRoot, "jackson");
+  mkdirSync(jarDir, { recursive: true });
+  const jars = [];
+  for (const artifact of JACKSON_ARTIFACTS) {
+    const jarPath = path.join(jarDir, `${artifact}-${JACKSON_VERSION}.jar`);
+    jars.push(jarPath);
+    if (existsSync(jarPath)) continue;
+    const initialFailureCount = failures.length;
+    const url = `https://repo1.maven.org/maven2/com/fasterxml/jackson/core/${artifact}/${JACKSON_VERSION}/${artifact}-${JACKSON_VERSION}.jar`;
+    runCommand(`Download ${artifact}`, "curl", ["-fsSL", url, "-o", jarPath]);
+    if (failures.length > initialFailureCount) return null;
+  }
+  return jars.join(path.delimiter);
 }
 
 function buildCSharpValidationStubs(sourceDir) {
@@ -3442,7 +3495,7 @@ function runExecutableConformance() {
 }
 
 function assertGeneratedTargets() {
-  for (const target of ["typescript", "typescript-zod", "python", "python_pydantic", "go", "java", "csharp", "rust", "swift", "markdown", "json-ast"]) {
+  for (const target of ["typescript", "typescript-zod", "python", "python_pydantic", "go", "java", "java-jackson", "csharp", "rust", "swift", "markdown", "json-ast"]) {
     requirePath(path.join("generated", "fixtures", target));
   }
 }
@@ -3652,6 +3705,26 @@ function assertStaticFixtureCoverage() {
     "public String toYaml()",
     "result.status = FixtureStatus.fromValue",
     "result.put(\"status\", obj.status.value)",
+  );
+  assertExcludes(
+    path.join("generated", "fixtures", "java", "FixtureRoot.java"),
+    "com.fasterxml.jackson",
+    "@JsonSerialize",
+    "@JsonProperty",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "java-jackson", "FixtureRoot.java"),
+    "import com.fasterxml.jackson.annotation.JsonProperty;",
+    "@JsonSerialize(using = FixtureRoot.TypraJacksonSerializer.class)",
+    "@JsonDeserialize(using = FixtureRoot.TypraJacksonDeserializer.class)",
+    "@JsonProperty(\"status\")",
+    "value.save(new SaveContext())",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "java-jackson", "tests", "FixtureRootGeneratedTest.java"),
+    "assertJacksonMatches(instance1, jsonData1, FixtureRoot.class",
+    "mapper.writeValueAsString(instance)",
+    "mapper.readValue(sourceJson, type)",
   );
   assertIncludes(
     path.join("generated", "fixtures", "java", "FixtureStatus.java"),
@@ -4012,7 +4085,7 @@ function assertActualGeneratedSurface() {
 }
 
 function assertNoEmptyTargetDirs() {
-  for (const target of ["typescript", "python", "python_pydantic", "go", "java", "csharp", "rust", "swift", "markdown"]) {
+  for (const target of ["typescript", "python", "python_pydantic", "go", "java", "java-jackson", "csharp", "rust", "swift", "markdown"]) {
     const dir = path.join(generatedRoot, target);
     if (existsSync(dir) && statSync(dir).isDirectory() && walkFiles(dir).length === 0) {
       fail(`Generated target directory is empty: ${target}`);
@@ -4051,6 +4124,8 @@ function runDeclaredValidationStages() {
       ["csharp.protocol-scaffold-build", runCSharpProtocolScaffoldBuild],
       ["java.build", runJavaBuild],
       ["java.generated-tests", runJavaGeneratedTests],
+      ["java-jackson.build", runJavaJacksonBuild],
+      ["java-jackson.generated-tests", runJavaJacksonGeneratedTests],
       ["executable-conformance", runExecutableConformance],
     ]),
     allowedSkips: { "swift.generated-tests": TOOLCHAIN_UNAVAILABLE },
