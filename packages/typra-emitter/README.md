@@ -145,7 +145,10 @@ cases.
 
 `npm run validate:fixtures` regenerates the fixture slice and verifies Go with
 `gofmt -l`, `go vet ./...`, `go test ./...`, generated coercion helper tests,
-and executable conformance alongside the other runtime targets.
+and executable conformance alongside the other runtime targets. The executable
+conformance step is save-side: each backend saves the canonical fixture sample
+and the harness compares normalized output across the target set, with every
+semantic rule recorded in the rule-by-backend conformance matrix.
 
 ## Generated files
 
