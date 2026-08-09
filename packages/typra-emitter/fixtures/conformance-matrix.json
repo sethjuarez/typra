@@ -180,6 +180,22 @@
       "description": "Record<T> value types must be preserved and exercised across all targets."
     },
     {
+      "id": "property-differential-generated-ir",
+      "status": "enforced",
+      "verification": "unit-test",
+      "test": "packages/typra-emitter/scripts/validate-fixtures.mjs",
+      "backends": {
+        "typescript": "implemented",
+        "python": "implemented",
+        "csharp": "implemented",
+        "go": "implemented",
+        "java": "implemented",
+        "rust": "implemented",
+        "swift": "implemented"
+      },
+      "description": "A bounded fixed-seed corpus of valid FixtureRoot instances is generated from the TypeSpec-derived JSON IR and run through the cross-language save/load oracle with replayable seed and case identifiers."
+    },
+    {
       "id": "java-yaml-escaping",
       "status": "enforced",
       "verification": "unit-test",
