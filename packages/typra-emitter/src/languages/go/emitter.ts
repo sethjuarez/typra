@@ -567,7 +567,7 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   lines.push("\t\t}");
   lines.push("\t}");
   if (isClosed && !dispatch.defaultVariant) {
-    lines.push(`\treturn nil, fmt.Errorf("missing ${typeName} discriminator property: ${dispatch.discriminatorField}")`);
+    lines.push(`\treturn nil, fmt.Errorf("invalid ${typeName} discriminator property '${dispatch.discriminatorField}': expected non-blank string")`);
   }
 }
 
