@@ -119,7 +119,7 @@ describe("Swift polymorphic enums", () => {
     assert.match(source, /default: return \.customTool\(try CustomTool\.load/);
     assert.match(source, /case \.customTool\(let value\): return try value\.save/);
     assert.doesNotMatch(source, /case unknown\(\[String: Any\]\)|case \.unknown/);
-    assert.doesNotMatch(source, /expected: "non-blank string"/);
+    assert.match(source, /expected: "non-blank string"/);
     assert.match(source, /public var tool: Tool = \.customTool\(CustomTool\(\)\)/);
   });
 

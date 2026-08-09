@@ -149,11 +149,9 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
   }
   lines.push(`    let object = try TypraRuntime.object(normalizedData, typeName: ${swiftStringLiteral(typeName)})`);
   lines.push(`    let discriminator = try TypraRuntime.string(object[${swiftStringLiteral(dispatch.discriminatorField)}] ?? NSNull(), field: ${swiftStringLiteral(dispatch.discriminatorField)})`);
-  if (usesUnknownFallback) {
-    lines.push("    if discriminator.isEmpty {");
-    lines.push(`      throw TypraRuntimeError.invalidField(field: context.at(${swiftStringLiteral(dispatch.discriminatorField)}).path, expected: "non-blank string")`);
-    lines.push("    }");
-  }
+  lines.push("    if discriminator.isEmpty {");
+  lines.push(`      throw TypraRuntimeError.invalidField(field: context.at(${swiftStringLiteral(dispatch.discriminatorField)}).path, expected: "non-blank string")`);
+  lines.push("    }");
   lines.push("    switch discriminator {");
   for (const variant of dispatch.variants) {
     lines.push(`    case ${swiftStringLiteral(variant.value)}: return .${swiftPropertyName(variant.typeName.name)}(try ${swiftTypeName(variant.typeName.name)}.load(normalizedData, context: context))`);
@@ -342,7 +340,7 @@ function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
     const collectionHelper = type.collectionHelpers.find(helper =>
       helper.propertyName === assignment.fieldName && supportsNamedCollectionHelper(helper, polymorphicTypeNames)
     );
-    if (field?.category.kind === "complex" && !field.isOptional && !field.hasExplicitDefault) {
+    if (field && !field.isOptional && !field.hasExplicitDefault && field.defaultValue === null && (field.category.kind === "complex" || (type.base && (field.category.kind === "scalar" || field.category.kind === "dict")))) {
       const wildcardDiscriminator = type.fields.find(candidate => candidate.defaultValue === "*")?.name;
       if (wildcardDiscriminator) {
         // A blank or absent discriminator is the only way the Swift enum can carry a *base*
