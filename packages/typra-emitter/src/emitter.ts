@@ -13,6 +13,7 @@ import { emitGeneratedFile, emitGeneratedManifest, emitGeneratedOutputReport, pr
 import { buildExportSurfaceSnapshot, emitExportSurfaceSnapshot } from "./contract-surface.js";
 import { reportTypeSpecCompatibility, shouldBlockUnsupportedTypeSpecToolchain } from "./compatibility.js";
 import { buildHydrationBoundarySnapshot, emitHydrationBoundarySnapshot } from "./hydration-seams.js";
+import { validateNativeSerializationTargets } from "./native-serialization.js";
 
 // Generator options passed to each generator
 export interface GeneratorOptions {
@@ -211,6 +212,10 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   }
 
   const targets = options["emit-targets"] || [];
+  const nativeSerializationErrors = validateNativeSerializationTargets(targets);
+  if (nativeSerializationErrors.length > 0) {
+    throw new Error(nativeSerializationErrors.join("\n"));
+  }
   const generatorOptions: GeneratorOptions = {
     omitModels: options["omit-models"] || [],
     additionalModels: additionalModels,

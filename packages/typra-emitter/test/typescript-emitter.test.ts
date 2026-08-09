@@ -98,6 +98,17 @@ function fileDecl(type: TypeDecl): FileDecl {
   };
 }
 
+function fileDecls(types: TypeDecl[]): FileDecl {
+  return {
+    typeName: types[0].typeName,
+    types,
+    imports: [],
+    containsAbstract: types.some(type => type.isAbstract),
+    enums: [],
+    group: "",
+  };
+}
+
 interface GeneratedCollectionModel {
   inputModalities?: string[];
   outputModalities?: string[];
@@ -225,6 +236,43 @@ describe("TypeScript native serialization option", () => {
     assert.match(source, /ctx\.addIssue\(\{ code: z\.ZodIssueCode\.custom, message: String\(error\) \}\);/);
     assert.match(source, /\}\)\.pipe\(CollectionModel\.wireSchema\);/);
     assert.match(source, /export type CollectionModelWire = z\.infer<typeof CollectionModel\.wireSchema>;/);
+  });
+
+  it("guards open discriminator Zod fallback from accepting known discriminator claims", () => {
+    const base = typeDecl([
+      field("kind", { kind: "scalar", scalarType: "string" }, false),
+    ]);
+    base.typeName = { namespace: "Test", name: "BaseModel" };
+    base.polymorphicDispatch = {
+      discriminatorField: "kind",
+      variants: [{ value: "known", typeName: { namespace: "Test", name: "KnownModel" } }],
+      defaultVariant: { typeName: { namespace: "Test", name: "BaseModel" }, isSelfReference: true },
+      isAbstract: false,
+      isClosed: false,
+    };
+    base.load.hasPolymorphicDispatch = true;
+
+    const knownKind = field("kind", { kind: "scalar", scalarType: "string" }, false);
+    knownKind.defaultValue = "known";
+    const known = typeDecl([
+      knownKind,
+      field("required", { kind: "scalar", scalarType: "string" }, false),
+    ]);
+    known.typeName = { namespace: "Test", name: "KnownModel" };
+    known.base = { namespace: "Test", name: "BaseModel" };
+    known.save.hasBase = true;
+    known.load.assignments = known.load.assignments.map(assignment => ({
+      ...assignment,
+      parentTypeName: "KnownModel",
+    }));
+    known.save.assignments = known.save.assignments.map(assignment => ({
+      ...assignment,
+      parentTypeName: "KnownModel",
+    }));
+
+    const source = emitTypeScriptFile(fileDecls([base, known]), new TypeScriptExprVisitor(), undefined, "", { nativeSerialization: "zod" });
+
+    assert.match(source, /z\.union\(\[KnownModel\.wireObjectSchema as any, BaseModel\.wireObjectSchema\.passthrough\(\)\.refine\(data => !\["known"\]\.includes\(String\(\(data as Record<string, unknown>\)\["kind"\]\)\), \{ message: "Known kind discriminator values must match their concrete schema\." \}\)\]\)/);
   });
 });
 

@@ -7,6 +7,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 
 import { generate, SUPPORTED_TARGET_LANGUAGES } from "../src/generate.js";
+import { validateNativeSerializationTargets } from "../src/native-serialization.js";
 
 const require = createRequire(import.meta.url);
 
@@ -34,6 +35,38 @@ describe("generate", () => {
       "rust",
       "swift",
       "markdown",
+    ]);
+  });
+
+  it("rejects unsupported native serialization target pairs before creating output", async () => {
+    const output = path.join(tmpdir(), `typra-invalid-native-serialization-${Date.now()}`);
+    const result = await generate({
+      output,
+      targets: {
+        go: {
+          outputDir: path.join(output, "go"),
+          nativeSerialization: "zod",
+        },
+      } as never,
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.errors?.[0] ?? "", /Target "go" does not support native-serialization "zod"/);
+    assert.equal(existsSync(output), false);
+  });
+
+  it("validates native serialization compatibility centrally for every target", () => {
+    assert.deepEqual(validateNativeSerializationTargets([
+      { type: "TypeScript", "native-serialization": "zod" },
+      { type: "python", "native-serialization": "pydantic" },
+      { type: "java", "native-serialization": "none" },
+    ]), []);
+    assert.deepEqual(validateNativeSerializationTargets([
+      { type: "typescript", "native-serialization": "pydantic" },
+      { type: "python", "native-serialization": "standard-schema" },
+    ]), [
+      'Target "typescript" does not support native-serialization "pydantic". Supported values: "none", "zod".',
+      'Target "python" does not support native-serialization "standard-schema". Supported values: "none", "pydantic".',
     ]);
   });
 

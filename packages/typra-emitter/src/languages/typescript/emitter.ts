@@ -492,7 +492,9 @@ function zodWireSchemaExpression(type: TypeDecl): string {
   const fallback = dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference
     ? `${dispatch.defaultVariant.typeName.name}.wireObjectSchema`
     : `${type.typeName.name}.wireObjectSchema.passthrough()`;
-  return `z.union([${knownSchema}, ${fallback}])`;
+  const knownValues = `[${dispatch.variants.map(variant => JSON.stringify(variant.value)).join(", ")}]`;
+  const guardedFallback = `${fallback}.refine(data => !${knownValues}.includes(String((data as Record<string, unknown>)["${dispatch.discriminatorField}"])), { message: "Known ${dispatch.discriminatorField} discriminator values must match their concrete schema." })`;
+  return `z.union([${knownSchema}, ${guardedFallback}])`;
 }
 
 function zodObjectExpression(type: TypeDecl, allTypes: TypeDecl[], omitField?: string): string {
