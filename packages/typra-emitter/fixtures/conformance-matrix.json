@@ -37,6 +37,13 @@
       "description": "Absent, blank, and wrong-type discriminators need executable cross-target assertions."
     },
     {
+      "id": "swift-invalid-discriminator-states",
+      "status": "enforced",
+      "verification": "unit-test",
+      "test": "packages/typra-emitter/scripts/validate-fixtures.mjs",
+      "description": "Generated Swift rejects absent, blank, and null open discriminator values before using its unknown fallback carrier."
+    },
+    {
       "id": "keyed-collection-ordering",
       "status": "enforced",
       "case": "keyed-collection-ordering",
@@ -49,6 +56,13 @@
       "status": "known-gap",
       "issue": "#49",
       "description": "Duplicate or empty keyed-collection names must be preserved losslessly or rejected consistently."
+    },
+    {
+      "id": "swift-keyed-empty-name-preservation",
+      "status": "enforced",
+      "verification": "unit-test",
+      "test": "packages/typra-emitter/scripts/validate-fixtures.mjs",
+      "description": "Generated Swift falls back to list form for empty named-collection names without erasing the explicit empty name."
     },
     {
       "id": "complex-default-required-presence",

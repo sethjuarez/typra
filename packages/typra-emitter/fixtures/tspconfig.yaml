@@ -26,6 +26,14 @@ options:
         format: false
         protocol-scaffolds: "compile-only"
         cancellation-token-path: "threading.Event"
+      - type: Python
+        output-dir: "generated/fixtures/python_pydantic"
+        test-dir: "generated/fixtures/python_pydantic/tests"
+        import-path: "fixtures_pydantic"
+        format: false
+        protocol-scaffolds: "compile-only"
+        native-serialization: "pydantic"
+        cancellation-token-path: "threading.Event"
       - type: Go
         output-dir: "generated/fixtures/go"
         test-dir: "generated/fixtures/go/tests"

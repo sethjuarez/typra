@@ -62,6 +62,10 @@ export const generatePython = async (
   emitTarget: EmitTarget,
   options?: GeneratorOptions
 ): Promise<void> => {
+  const nativeSerialization = emitTarget["native-serialization"] ?? "none";
+  if (nativeSerialization === "zod" || nativeSerialization === "standard-schema") {
+    throw new Error(`Python native-serialization: "${nativeSerialization}" is TypeScript-only; use "none" or "pydantic".`);
+  }
   const allTypes = Array.from(enumerateTypes(node));
   const nodes = filterNodes(allTypes, options);
 
@@ -121,6 +125,7 @@ export const generatePython = async (
       const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
       const fileContent = emitPythonFileDecl(fileDecl, visitor, group, {
         cancellationTokenPath: emitTarget["cancellation-token-path"],
+        nativeSerialization,
       });
       const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
       await emitPythonFile(context, `_${n.typeName.name}.py`, fileContent, outDir, emitTarget["output-dir"]);
@@ -130,7 +135,9 @@ export const generatePython = async (
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const testDir = n.group ? `${emitTarget["test-dir"]}/${n.group}` : emitTarget["test-dir"];
       const testContext = buildTestContext(n, importPath, registry);
-      const testContent = emitPythonTest(testContext);
+      const testContent = emitPythonTest(testContext, {
+        nativeSerialization,
+      });
       await emitPythonFile(context, `test_${toSnakeCase(n.typeName.name)}.py`, testContent, testDir, emitTarget["test-dir"]);
     }
   }

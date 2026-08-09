@@ -148,7 +148,12 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
     emitPolymorphicCoercion(coercion, type, lines);
   }
   lines.push(`    let object = try TypraRuntime.object(normalizedData, typeName: ${swiftStringLiteral(typeName)})`);
-  lines.push(`    let discriminator = try TypraRuntime.string(object[${swiftStringLiteral(dispatch.discriminatorField)}] ?? "", field: ${swiftStringLiteral(dispatch.discriminatorField)})`);
+  lines.push(`    let discriminator = try TypraRuntime.string(object[${swiftStringLiteral(dispatch.discriminatorField)}] ?? NSNull(), field: ${swiftStringLiteral(dispatch.discriminatorField)})`);
+  if (usesUnknownFallback) {
+    lines.push("    if discriminator.isEmpty {");
+    lines.push(`      throw TypraRuntimeError.invalidField(field: context.at(${swiftStringLiteral(dispatch.discriminatorField)}).path, expected: "non-blank string")`);
+    lines.push("    }");
+  }
   lines.push("    switch discriminator {");
   for (const variant of dispatch.variants) {
     lines.push(`    case ${swiftStringLiteral(variant.value)}: return .${swiftPropertyName(variant.typeName.name)}(try ${swiftTypeName(variant.typeName.name)}.load(normalizedData, context: context))`);
@@ -411,9 +416,6 @@ function emitNamedCollectionSaveHelper(
   const elementType = swiftTypeName(helper.elementTypeName.name);
   lines.push(`  private static func ${methodName}(_ items: [${elementType}], context: SaveContext) throws -> Any {`);
   lines.push("    var serialized = try items.map { try $0.save(context) }");
-  lines.push("    for index in serialized.indices where (serialized[index][\"name\"] as? String) == \"\" {");
-  lines.push('      serialized[index].removeValue(forKey: "name")');
-  lines.push("    }");
   lines.push('    if context.collectionFormat == "array" {');
   lines.push("      return serialized");
   lines.push("    }");

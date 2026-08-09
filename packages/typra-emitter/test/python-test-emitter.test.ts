@@ -149,4 +149,30 @@ describe("Python test emitter", () => {
     assert.doesNotMatch(output, /\{id\}/);
     assert.doesNotMatch(output, /\{label\}/);
   });
+
+  it("adds Pydantic differential assertions only for native serialization mode", () => {
+    const node = {
+      typeName: { namespace: "fixtures", name: "FixtureReference" },
+      properties: [{
+        name: "id",
+        type: { name: "string", coercions: [] },
+        isScalar: true,
+        samples: [{ sample: { id: "ref-1" }, description: "" }],
+      }],
+      coercions: [],
+      factories: [],
+    } as unknown as TypeNode;
+
+    const context = buildBaseTestContext(node, "fixtures", pythonTestOptions);
+    const defaultOutput = emitPythonTest({ ...context, classCtx: emptyClassCtx(node) });
+    const pydanticOutput = emitPythonTest(
+      { ...context, classCtx: emptyClassCtx(node) },
+      { nativeSerialization: "pydantic" },
+    );
+
+    assert.doesNotMatch(defaultOutput, /model_dump/);
+    assert.match(pydanticOutput, /assert instance\.model_dump\(\) == saved_data/);
+    assert.match(pydanticOutput, /assert json\.loads\(instance\.model_dump_json\(\)\) == saved_data/);
+    assert.match(pydanticOutput, /assert FixtureReference\.model_validate\(original_data\)\.save\(\) == saved_data/);
+  });
 });

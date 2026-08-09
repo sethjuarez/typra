@@ -79,6 +79,13 @@ never becomes a model or serialized field. Set `cancellation-token-path` to the
 full runtime-native symbol path, such as `crate::engine::CancellationToken` for
 Rust or `prompty.core.cancellation.CancellationToken` for Python.
 
+Python supports opt-in Pydantic v2 model emission with
+`native-serialization: "pydantic"` on the Python target. The default remains
+`"none"` and keeps dataclass output. In Pydantic mode, generated
+`model_validate()`, `model_dump()`, and `model_dump_json()` delegate to Typra's
+generated `load()`, `save()`, and `to_json()` methods so Typra's pathful
+diagnostics and wire semantics remain the authoritative contract.
+
 Compile with TypeSpec:
 
 ```powershell

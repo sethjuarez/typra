@@ -56,7 +56,9 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "typescript.compile",
   "typescript-zod.compile",
   "python.compile",
+  "python_pydantic.compile",
   "python.generated-tests",
+  "python_pydantic.generated-tests",
   "go.generated-tests",
   "rust.generated-tests",
   "swift.generated-tests",
@@ -73,6 +75,7 @@ const EXPECTED_EXECUTABLE_CONFORMANCE_TARGET_IDS = [
   "typescript",
   "typescript-zod",
   "python",
+  "python_pydantic",
   "go",
   "rust",
   "rust-unknown",
@@ -878,16 +881,16 @@ function runGoFormatCheck(sourceDir) {
   }
 }
 
-function runPythonCompile() {
-  const sourceDir = path.join(generatedRoot, "python");
+function runPythonCompile(target = "python") {
+  const sourceDir = path.join(generatedRoot, target);
   const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".py"));
   if (sourceFiles.length === 0) {
-    fail("No generated Python files found to compile.");
+    fail(`No generated ${target} files found to compile.`);
     return;
   }
-  const python = requirePythonCommand("Generated Python source syntax validation");
+  const python = requirePythonCommand(`Generated ${target} source syntax validation`);
   if (!python) return;
-  runCommand("Generated Python source syntax validation", python, ["-m", "py_compile", ...sourceFiles]);
+  runCommand(`Generated ${target} source syntax validation`, python, ["-m", "py_compile", ...sourceFiles]);
 }
 
 /**
@@ -905,22 +908,22 @@ const PYTHON_KNOWN_TEST_FAILURES = new Map();
  * Python was the last backend whose generated suite was never executed, which is how the
  * literal and factory defects fixed in #107 reached main unnoticed. See #96.
  */
-function runPythonGeneratedTests() {
-  const sourceDir = path.join(generatedRoot, "python");
+function runPythonGeneratedTests(target = "python", packageName = "fixtures") {
+  const sourceDir = path.join(generatedRoot, target);
   const testsDir = path.join(sourceDir, "tests");
   const testFiles = existsSync(testsDir) ? walkFiles(testsDir, file => file.endsWith(".py")) : [];
   if (testFiles.length === 0) {
-    fail("No generated Python tests found to run.");
+    fail(`No generated ${target} tests found to run.`);
     return;
   }
-  const python = requirePythonCommand("Generated Python tests");
+  const python = requirePythonCommand(`Generated ${target} tests`);
   if (!python) return;
 
-  // The generated tests import the package as `fixtures`, but it is emitted into a directory
-  // named `python`, so it is only importable from a tree where that directory is named
-  // `fixtures`. Stage a copy rather than a symlink: symlinks need elevation on Windows.
-  const stageRoot = mkdtempSync(path.join(tmpdir(), "typra-python-tests-"));
-  const packageDir = path.join(stageRoot, "fixtures");
+  // The generated tests import a configured package name, but validation target directories are
+  // named for their mode. Stage a copy under the import name rather than a symlink: symlinks need
+  // elevation on Windows.
+  const stageRoot = mkdtempSync(path.join(tmpdir(), `typra-${target}-tests-`));
+  const packageDir = path.join(stageRoot, packageName);
   try {
     cpSync(sourceDir, packageDir, {
       recursive: true,
@@ -954,13 +957,13 @@ function runPythonGeneratedTests() {
     }
     // A collection error produces no per-test lines, so it must not read as "nothing failed".
     if (crashed && failed.size === 0) {
-      fail(`Generated Python tests failed to collect or run:\n${output.trim() || crashed.message}`);
+      fail(`Generated ${target} tests failed to collect or run:\n${output.trim() || crashed.message}`);
       return;
     }
 
     const unexpected = [...failed].filter(name => !PYTHON_KNOWN_TEST_FAILURES.has(name));
     if (unexpected.length > 0) {
-      fail("Generated Python tests failed:\n" + unexpected.map(name => `  ${name}`).join("\n"));
+      fail(`Generated ${target} tests failed:\n` + unexpected.map(name => `  ${name}`).join("\n"));
     }
     const fixed = [...PYTHON_KNOWN_TEST_FAILURES.keys()].filter(name => !failed.has(name));
     if (fixed.length > 0) {
@@ -1285,6 +1288,19 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     XCTAssertEqual(custom.endpoint, "https://example.test")
   }
 
+  func testInvalidConnectionDiscriminatorsAreRejected() throws {
+    for input in [
+      ["name": "missing-kind"],
+      ["kind": "", "name": "blank-kind"],
+      ["kind": NSNull(), "name": "null-kind"],
+    ] as [[String: Any]] {
+      XCTAssertThrowsError(try FixtureConnection.load(input).save()) { error in
+        let message = String(describing: error)
+        XCTAssertTrue(message.contains("kind"), message)
+      }
+    }
+  }
+
   func testNamedCollectionsUseLosslessFallbackAndRejectNestedArrays() throws {
     let unique = try FixtureNamedPayloadCollection.load([
       "items": [
@@ -1303,7 +1319,7 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     ])
     let unnamedItems = try unnamed.save()["items"] as? [[String: Any]]
     XCTAssertEqual(unnamedItems?.count, 2)
-    XCTAssertNil(unnamedItems?[1]["name"])
+    XCTAssertEqual(unnamedItems?[1]["name"] as? String, "")
 
     let duplicate = try FixtureNamedPayloadCollection.load([
       "items": [
@@ -2005,13 +2021,13 @@ function runTypeScriptZodExecutableConformance() {
   }
 }
 
-function runPythonExecutableConformance() {
-  const sourceDir = path.join(generatedRoot, "python");
+function runPythonExecutableConformance(target = "python", packageName = "python") {
+  const sourceDir = path.join(generatedRoot, target);
   const runner = [
     "import json",
     "import sys",
-    `sys.path.insert(0, ${JSON.stringify(generatedRoot)})`,
-    "from python import FixtureBag, FixtureCheckpoint, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, LoadContext, ModelInfo, SaveContext, WireOptions",
+    `sys.path.insert(0, ${JSON.stringify(path.dirname(sourceDir))})`,
+    `from ${packageName} import FixtureBag, FixtureCheckpoint, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, LoadContext, ModelInfo, SaveContext, WireOptions`,
     `root = FixtureRoot.load(json.loads(${fixtureRootSampleJsonLiteral}))`,
     "root = FixtureRoot.load(json.loads(json.dumps(root.save())))",
     'checkpoint = FixtureCheckpoint.load({"pendingToolRequests": [{"id": "call-a", "name": "echo"}, {"id": "call-b", "name": "echo"}]})',
@@ -2112,18 +2128,18 @@ function runPythonExecutableConformance() {
   ].join("\n");
 
   if (!existsSync(sourceDir)) {
-    fail("No generated Python directory found for executable conformance.");
+    fail(`No generated ${target} directory found for executable conformance.`);
     return;
   }
-  const python = requirePythonCommand("Generated Python executable conformance");
+  const python = requirePythonCommand(`Generated ${target} executable conformance`);
   if (!python) return;
 
   try {
     const output = execFileSync(python, ["-c", runner], { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-    assertConformanceResult("python", output);
+    assertConformanceResult(target, output);
   } catch (error) {
     const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
-    fail(`Generated Python executable conformance failed:\n${output || error.message}`);
+    fail(`Generated ${target} executable conformance failed:\n${output || error.message}`);
   }
 }
 
@@ -3412,7 +3428,8 @@ function runExecutableConformance() {
     implementations: new Map([
       ["typescript", runTypeScriptExecutableConformance],
       ["typescript-zod", runTypeScriptZodExecutableConformance],
-      ["python", runPythonExecutableConformance],
+      ["python", () => runPythonExecutableConformance()],
+      ["python_pydantic", () => runPythonExecutableConformance("python_pydantic", "python_pydantic")],
       ["go", runGoExecutableConformance],
       ["rust", runRustExecutableConformance],
       ["rust-unknown", runRustUnknownAbstractConformance],
@@ -3425,7 +3442,7 @@ function runExecutableConformance() {
 }
 
 function assertGeneratedTargets() {
-  for (const target of ["typescript", "typescript-zod", "python", "go", "java", "csharp", "rust", "swift", "markdown", "json-ast"]) {
+  for (const target of ["typescript", "typescript-zod", "python", "python_pydantic", "go", "java", "csharp", "rust", "swift", "markdown", "json-ast"]) {
     requirePath(path.join("generated", "fixtures", target));
   }
 }
@@ -3497,6 +3514,16 @@ function assertStaticFixtureCoverage() {
     "output_modalities: list[str] | None = field(default_factory=list)",
     "owners: list[FixtureOwner] | None = None",
     "default_owners: list[FixtureOwner] | None = field(default_factory=list)",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "python_pydantic", "_ModelInfo.py"),
+    "from pydantic import BaseModel, ConfigDict, Field",
+    "class ModelInfo(BaseModel):",
+    "model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)",
+    'input_modalities: list[str] | None = Field(default=None, alias="inputModalities")',
+    'output_modalities: list[str] | None = Field(default_factory=list, alias="outputModalities")',
+    "def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:",
+    "return self.save()",
   );
   assertIncludes(
     path.join("generated", "fixtures", "typescript", "model-info.ts"),
@@ -3985,7 +4012,7 @@ function assertActualGeneratedSurface() {
 }
 
 function assertNoEmptyTargetDirs() {
-  for (const target of ["typescript", "python", "go", "java", "csharp", "rust", "swift", "markdown"]) {
+  for (const target of ["typescript", "python", "python_pydantic", "go", "java", "csharp", "rust", "swift", "markdown"]) {
     const dir = path.join(generatedRoot, target);
     if (existsSync(dir) && statSync(dir).isDirectory() && walkFiles(dir).length === 0) {
       fail(`Generated target directory is empty: ${target}`);
@@ -4011,8 +4038,10 @@ function runDeclaredValidationStages() {
       ["consumer-smoke", runTypraConsumerSmoke],
       ["typescript.compile", runGeneratedTypeScriptCompile],
       ["typescript-zod.compile", runGeneratedTypeScriptZodCompile],
-      ["python.compile", runPythonCompile],
-      ["python.generated-tests", runPythonGeneratedTests],
+      ["python.compile", () => runPythonCompile()],
+      ["python_pydantic.compile", () => runPythonCompile("python_pydantic")],
+      ["python.generated-tests", () => runPythonGeneratedTests()],
+      ["python_pydantic.generated-tests", () => runPythonGeneratedTests("python_pydantic", "fixtures_pydantic")],
       ["go.generated-tests", runGoTests],
       ["rust.generated-tests", runRustTests],
       ["swift.generated-tests", runSwiftTests],
