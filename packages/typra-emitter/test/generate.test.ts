@@ -193,7 +193,8 @@ describe("generate", () => {
             ? `${String((error as { stdout?: unknown }).stdout ?? "")}${String((error as { stderr?: unknown }).stderr ?? "")}`
             : String(error);
           assert.match(output, /typra-emitter-native-serialization-target/);
-          assert.match(output, /native-serialization 'jackson' is not supported for target 'Python'/);
+          assert.match(output, /Target "Python" does not support native-serialization "jackson"/);
+          assert.match(output, /Supported values: "none", "pydantic"/);
           return true;
         },
       );
