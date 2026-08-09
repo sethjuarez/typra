@@ -88,8 +88,11 @@ export function emitSwiftConformanceTest(moduleName: string): string {
     "final class ConformanceTests: XCTestCase {",
     "  func testIntegerValidationRejectsUnsafeValues() throws {",
     "    XCTAssertEqual(try TypraRuntime.int64(NSNumber(value: Int64.max), field: \"value\"), Int64.max)",
+    "    XCTAssertEqual(try TypraRuntime.int64(UInt64(256), field: \"value\"), 256)",
+    "    XCTAssertEqual(try TypraRuntime.int64(UInt32(256), field: \"value\"), 256)",
     "    XCTAssertThrowsError(try TypraRuntime.int64(NSDecimalNumber(mantissa: 9223372036854775808, exponent: 0, isNegative: false), field: \"value\"))",
     "    XCTAssertThrowsError(try TypraRuntime.int64(NSDecimalNumber(mantissa: 9223372036854775809, exponent: 0, isNegative: true), field: \"value\"))",
+    "    XCTAssertThrowsError(try TypraRuntime.int64(UInt64.max, field: \"value\"))",
     "    XCTAssertThrowsError(try TypraRuntime.int64(1.5, field: \"value\"))",
     "    XCTAssertThrowsError(try TypraRuntime.int32(2147483648, field: \"value\"))",
     "  }",
@@ -155,7 +158,8 @@ function emitCodableAssertions(lines: string[]): void {
   lines.push("    let encoder = JSONEncoder()");
   lines.push("    encoder.outputFormatting = [.sortedKeys]");
   lines.push("    let codableObject = try JSONSerialization.jsonObject(with: encoder.encode(codableLoaded), options: [])");
-  lines.push("    XCTAssertEqual(try TypraRuntime.jsonString(from: codableObject), try TypraRuntime.jsonString(from: try typraLoaded.save(SaveContext())), message + \" Codable encode\")");
+  lines.push("    let codableEncodedLoaded = try T.load(codableObject, context: LoadContext())");
+  lines.push("    XCTAssertEqual(try TypraRuntime.jsonString(from: try codableEncodedLoaded.save(SaveContext())), try TypraRuntime.jsonString(from: try typraLoaded.save(SaveContext())), message + \" Codable encode\")");
   lines.push("    XCTAssertEqual(try TypraRuntime.jsonString(from: try codableLoaded.save(SaveContext())), try TypraRuntime.jsonString(from: try typraLoaded.save(SaveContext())), message + \" Codable decode\")");
   lines.push("  }");
   lines.push("");
