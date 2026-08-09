@@ -963,18 +963,22 @@ function emitLoadDict(
 ): void {
   const valueType = assign.category.kind === "dict" ? assign.category.valueType : undefined;
   lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
-  lines.push("\t\t\tif m, ok := val.(map[string]interface{}); ok {");
   if (!valueType || valueType === "unknown") {
+    lines.push("\t\t\tif m, ok := val.(map[string]interface{}); ok {");
     lines.push(`\t\t\t\tresult.${fieldName} = m`);
+    lines.push("\t\t\t}");
   } else {
+    lines.push(`\t\t\tif items, ok := val.(${getGoDictFieldType(valueType, polymorphicTypeNames)}); ok {`);
+    lines.push(`\t\t\t\tresult.${fieldName} = items`);
+    lines.push("\t\t\t} else if m, ok := val.(map[string]interface{}); ok {");
     lines.push(`\t\t\t\titems := make(${getGoDictFieldType(valueType, polymorphicTypeNames)}, len(m))`);
     lines.push("\t\t\t\tfor key, item := range m {");
     emitGoDictValueLoad(valueType, "item", "loaded", `ctx.At("${assign.sourceName}").At(key)`, polymorphicTypeNames, lines);
     lines.push("\t\t\t\t\titems[key] = loaded");
     lines.push("\t\t\t\t}");
     lines.push(`\t\t\t\tresult.${fieldName} = items`);
+    lines.push("\t\t\t}");
   }
-  lines.push("\t\t\t}");
   lines.push("\t\t}");
 }
 
