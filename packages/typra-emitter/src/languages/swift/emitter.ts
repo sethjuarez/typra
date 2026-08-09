@@ -20,11 +20,14 @@ interface SwiftPolymorphicDefaultCase {
   carriesRaw: boolean;
 }
 
+type SwiftNativeSerialization = "none" | "codable";
+
 export function emitSwiftFile(
   file: FileDecl,
   visitor: ExprVisitor,
   polymorphicTypeNames: Set<string>,
   declarationUniverse: TypeDecl[] = file.types,
+  nativeSerialization: SwiftNativeSerialization = "none",
 ): string {
   const augmentedUniverse = addNamedCollectionFields(declarationUniverse);
   const polymorphicDefaultCases = new Map<string, SwiftPolymorphicDefaultCase | null>(
@@ -62,7 +65,7 @@ export function emitSwiftFile(
   }
 
   for (const type of types) {
-    emitType(type, lines, visitor, polymorphicTypeNames, types, polymorphicDefaultCases);
+    emitType(type, lines, visitor, polymorphicTypeNames, types, polymorphicDefaultCases, nativeSerialization);
   }
 
   return trimBlankLines(lines).join("\n") + "\n";
@@ -75,16 +78,17 @@ function emitType(
   polymorphicTypeNames: Set<string>,
   allTypes: TypeDecl[],
   polymorphicDefaultCases: ReadonlyMap<string, SwiftPolymorphicDefaultCase | null>,
+  nativeSerialization: SwiftNativeSerialization,
 ): void {
   if (type.polymorphicDispatch) {
-    emitPolymorphicEnum(type, lines, allTypes);
+    emitPolymorphicEnum(type, lines, allTypes, nativeSerialization);
     return;
   }
   if (type.isProtocol) {
     emitProtocol(type, lines);
     return;
   }
-  emitStruct(type, lines, visitor, polymorphicTypeNames, polymorphicDefaultCases);
+  emitStruct(type, lines, visitor, polymorphicTypeNames, polymorphicDefaultCases, nativeSerialization);
 }
 
 function emitEnum(enumDef: EnumDef, lines: string[]): void {
@@ -131,11 +135,18 @@ function emitEnumParseMethod(enumDef: EnumDef, lines: string[], typeName: string
   lines.push("  }");
 }
 
-function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl[]): void {
+function emitPolymorphicEnum(
+  type: TypeDecl,
+  lines: string[],
+  allTypes: TypeDecl[],
+  nativeSerialization: SwiftNativeSerialization,
+): void {
   const typeName = swiftTypeName(type.typeName.name);
   const dispatch = type.polymorphicDispatch!;
   const indirect = isRecursivePolymorphicEnum(type, allTypes) ? "indirect " : "";
-  lines.push(`public ${indirect}enum ${typeName}: TypraModel {`);
+  const conformances = ["TypraModel"];
+  if (nativeSerialization === "codable") conformances.push("Codable");
+  lines.push(`public ${indirect}enum ${typeName}: ${conformances.join(", ")} {`);
   const fallback = dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference
     ? dispatch.defaultVariant
     : null;
@@ -194,6 +205,9 @@ function emitPolymorphicEnum(type: TypeDecl, lines: string[], allTypes: TypeDecl
   }
   lines.push("    }");
   lines.push("  }");
+  if (nativeSerialization === "codable") {
+    emitCodableDelegation(typeName, lines);
+  }
   emitJsonYamlMethods(typeName, lines);
   lines.push("}");
   lines.push("");
@@ -289,6 +303,7 @@ function emitStruct(
   visitor: ExprVisitor,
   polymorphicTypeNames: Set<string>,
   polymorphicDefaultCases: ReadonlyMap<string, SwiftPolymorphicDefaultCase | null>,
+  nativeSerialization: SwiftNativeSerialization,
 ): void {
   const typeName = swiftTypeName(type.typeName.name);
   if (type.description) {
@@ -296,6 +311,7 @@ function emitStruct(
   }
   const conformances = ["TypraModel"];
   if (type.isError) conformances.push("Swift.Error");
+  if (nativeSerialization === "codable") conformances.push("Codable");
   lines.push(`public struct ${typeName}: ${conformances.join(", ")} {`);
   lines.push(`  public static let shorthandProperty: String? = ${type.coercionProperty ? swiftStringLiteral(type.coercionProperty) : "nil"}`);
   for (const field of type.fields) {
@@ -323,6 +339,9 @@ function emitStruct(
   }
   lines.push("");
   emitSave(type, lines, polymorphicTypeNames);
+  if (nativeSerialization === "codable") {
+    emitCodableDelegation(typeName, lines);
+  }
   if (type.wire) {
     lines.push("");
     emitToWire(type, lines, polymorphicTypeNames);
@@ -340,6 +359,17 @@ function emitStruct(
   }
   lines.push("}");
   lines.push("");
+}
+
+function emitCodableDelegation(typeName: string, lines: string[]): void {
+  lines.push("");
+  lines.push("  public init(from decoder: Decoder) throws {");
+  lines.push("    self = try Self.load(try TypraCodableValue(from: decoder).anyValue)");
+  lines.push("  }");
+  lines.push("");
+  lines.push("  public func encode(to encoder: Encoder) throws {");
+  lines.push("    try TypraCodableValue(try save()).encode(to: encoder)");
+  lines.push("  }");
 }
 
 function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<string>): void {

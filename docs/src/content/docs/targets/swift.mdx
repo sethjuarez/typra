@@ -22,6 +22,7 @@ emit-targets:
 | `package-name` | Swift module and package name. Defaults to the root namespace when unset. |
 | `format` | Boolean toggle (default `true`). Runs `swiftformat` on emitted files when available. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+| `native-serialization` | Defaults to `none`. Set to `codable` to emit explicit Typra-backed `Codable` conformance for generated models. |
 
 Swift does not use `import-path`, `namespace`, or `enum-parsing`.
 
@@ -62,6 +63,10 @@ let saved = try root.toJSON()
 ```
 
 Load and save also accept already-parsed values through `load(_:)` and `save(_:)`, so you can bridge from other decoders without re-serializing to text.
+
+## Native Codable mode
+
+Set `native-serialization: "codable"` to make generated Swift models conform to `Codable`. The conformance is explicit and delegates through Typra `load` and `save`, so `JSONEncoder` and `JSONDecoder` follow the same wire names, discriminator dispatch, raw fallback preservation, defaults, and optional omission rules as the normal Typra path instead of relying on synthesized Swift behavior.
 
 ## Scalar coercion
 
