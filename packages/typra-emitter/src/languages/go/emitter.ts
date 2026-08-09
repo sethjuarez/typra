@@ -116,9 +116,7 @@ export function emitGoFileContent(
     type.fields.some(field => field.category.kind === "complex" && !field.isOptional && !field.hasExplicitDefault)
   );
   const needsFmt = enums.some(enumDef => hasParseAliases(enumDef) && !enumDef.isOpen) ||
-    types.some(type => type.polymorphicDispatch
-      && isClosedPolymorphicDispatch(type.polymorphicDispatch)
-      && !type.polymorphicDispatch.defaultVariant) ||
+    types.some(type => type.polymorphicDispatch) ||
     needsNamedCollections ||
     needsRequiredComplexValidation;
   // math.Trunc is only referenced when a type coerces from both a whole-number and a
@@ -559,9 +557,6 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   if (isClosed && !dispatch.defaultVariant) {
     lines.push("\t\t\tdefault:");
     lines.push(`\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: %v", discriminator)`);
-  } else if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
-    lines.push("\t\t\tdefault:");
-    lines.push(`\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
   } else {
     lines.push("\t\t\tdefault:");
     lines.push(`\t\t\t\treturn nil, fmt.Errorf("invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`);
