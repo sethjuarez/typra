@@ -200,6 +200,24 @@ wire mapping as Typra JSON/YAML helpers. The emitter does not create or mutate a
 consumer build manifest; projects enabling this option must provide
 `jackson-databind` on their Java compile/runtime classpath.
 
+Rust targets can also make the existing serde support explicit without changing
+the default generated model surface:
+
+```yaml
+emit-targets:
+  - type: Rust
+    output-dir: generated/rust
+    native-serialization: serde
+```
+
+Rust already emits `#[cfg(feature = "serde")]` `Serialize`/`Deserialize` impls
+for generated models and string unions for compatibility with current output.
+The impls delegate through Typra's canonical `to_value`/`load_from_value`
+mapping so serde output cannot silently diverge from Typra save semantics.
+Consumers should declare a crate feature named `serde` and include the `serde`
+dependency when compiling with that feature. Set `native-serialization: none`
+to opt out of these Rust impls.
+
 Consumers can declare hand-authored boundaries in verifier config:
 
 ```json

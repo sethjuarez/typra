@@ -11,7 +11,7 @@ export interface EmitTarget {
   "package-name"?: string;
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
   "protocol-scaffolds"?: "none" | "compile-only";
-  "native-serialization"?: "none" | "pydantic" | "jackson";
+  "native-serialization"?: "none" | "pydantic" | "jackson" | "serde";
   "cancellation-token-path"?: string;
 }
 export interface TypraEmitterOptions {
@@ -94,10 +94,10 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
           },
           "native-serialization": {
             type: "string",
-            enum: ["none", "pydantic", "jackson"],
+            enum: ["none", "pydantic", "jackson", "serde"],
             nullable: true,
             default: "none",
-            description: "Opt-in native serialization framework for the target. Python supports 'pydantic'; Java supports 'jackson'; defaults to 'none' for existing behavior."
+            description: "Native serialization framework for the target. Python supports opt-in 'pydantic'; Java supports opt-in 'jackson'; Rust supports 'serde' with cfg(feature = \"serde\") impls that delegate to Typra's canonical load/save mapping. Rust keeps its existing serde surface unless explicitly set to 'none'."
           },
           "cancellation-token-path": {
             type: "string",

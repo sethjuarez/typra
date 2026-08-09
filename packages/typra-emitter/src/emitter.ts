@@ -150,7 +150,8 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
       const targetName = target.type.toLowerCase().trim();
       const supported =
         (value === "pydantic" && targetName === "python")
-        || (value === "jackson" && targetName === "java");
+        || (value === "jackson" && targetName === "java")
+        || (value === "serde" && targetName === "rust");
       if (supported) continue;
 
       valid = false;
@@ -158,7 +159,7 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
         code: "typra-emitter-native-serialization-target",
         message:
           `native-serialization '${value}' is not supported for target '${target.type}'. `
-          + "Use 'pydantic' only with Python targets, 'jackson' only with Java targets, or 'none'.",
+          + "Use 'pydantic' only with Python targets, 'jackson' only with Java targets, 'serde' only with Rust targets, or 'none'.",
         severity: "error",
         target: NoTarget,
       });
