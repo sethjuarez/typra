@@ -119,6 +119,7 @@ describe("Swift polymorphic enums", () => {
     assert.match(source, /default: return \.customTool\(try CustomTool\.load/);
     assert.match(source, /case \.customTool\(let value\): return try value\.save/);
     assert.doesNotMatch(source, /case unknown\(\[String: Any\]\)|case \.unknown/);
+    assert.doesNotMatch(source, /expected: "non-blank string"/);
     assert.match(source, /public var tool: Tool = \.customTool\(CustomTool\(\)\)/);
   });
 
@@ -137,6 +138,8 @@ describe("Swift polymorphic enums", () => {
 
     const source = emitSwiftFile(fileDecl(connection), new SwiftExprVisitor(), new Set(["Connection"]));
     assert.match(source, /case unknown\(\[String: Any\]\)/);
+    assert.match(source, /let discriminator = try TypraRuntime\.string\(object\["kind"\] \?\? NSNull\(\), field: "kind"\)/);
+    assert.match(source, /if discriminator\.isEmpty \{\s+throw TypraRuntimeError\.invalidField\(field: context\.at\("kind"\)\.path, expected: "non-blank string"\)/);
     assert.match(source, /default: return \.unknown\(object\)/);
     assert.match(source, /case \.unknown\(let value\): return value/);
   });
@@ -229,6 +232,7 @@ describe("Swift polymorphic enums", () => {
     assert.match(source, /return try values\.keys\.sorted\(\)\.map \{ name in/);
     assert.match(source, /itemData\["name"\] = name\s+return try Binding\.load\(itemData, context: context\.at\(name\)\)/);
     assert.match(source, /private static func saveBindings/);
+    assert.doesNotMatch(source, /where \(serialized\[index\]\["name"\] as\? String\) == ""/);
     assert.match(source, /let value = itemData\["source"\]/);
     assert.match(source, /if let scalar = data as\? String \{\s+var instance = Binding\(\)\s+instance\.source = try TypraRuntime\.string\(scalar, field: "source"\)/);
   });

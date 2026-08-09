@@ -14,10 +14,10 @@
  *    class, so the guard inside the wildcard carrier is now unconditional, and dispatch treats
  *    a blank discriminator as absent (routing it to the base instead of the wildcard carrier).
  *
- *  - Swift and Rust model the base as an enum with no base case, so a blank or absent
- *    discriminator has nowhere to go but the wildcard carrier. There the guard fires for every
- *    discriminator value except absent/null/blank, which closes the non-string hole without
- *    rejecting the only representation those backends have for a base instance.
+ *  - Swift and Rust still model a wildcard-defaulted open base as an enum with no base case, so
+ *    a blank or absent discriminator has nowhere to go but the wildcard carrier. There the guard
+ *    fires for every discriminator value except absent/null/blank, which closes the non-string
+ *    hole without rejecting the only representation those backends have for a base instance.
  */
 
 import { describe, it } from "node:test";
@@ -201,12 +201,7 @@ describe("missing required complex fields always fail load", () => {
     assert.match(code, /discriminator != null && !String\.valueOf\(discriminator\)\.isEmpty\(\)/);
   });
 
-  // Swift and Rust model an open discriminated base as an enum with no base case, so a blank
-  // or absent discriminator has nowhere to go but the wildcard carrier. The guard therefore
-  // fires for every discriminator value *except* absent/null/blank — which still closes the
-  // reported non-string hole, without rejecting the only representation these two backends
-  // have for a base instance. Giving them a base case is tracked separately.
-  it("Swift guards every discriminator except a blank one", () => {
+  it("Swift guards every wildcard-default discriminator except a blank one", () => {
     const code = emitSwiftFile(file, new SwiftExprVisitor(registry), polymorphicNames);
 
     assert.match(code, /if object\["connection"\] == nil \|\| object\["connection"\] is NSNull \{/);

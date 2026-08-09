@@ -1275,6 +1275,19 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     XCTAssertEqual(custom.endpoint, "https://example.test")
   }
 
+  func testInvalidConnectionDiscriminatorsAreRejected() throws {
+    for input in [
+      ["name": "missing-kind"],
+      ["kind": "", "name": "blank-kind"],
+      ["kind": NSNull(), "name": "null-kind"],
+    ] as [[String: Any]] {
+      XCTAssertThrowsError(try FixtureConnection.load(input).save()) { error in
+        let message = String(describing: error)
+        XCTAssertTrue(message.contains("kind"), message)
+      }
+    }
+  }
+
   func testNamedCollectionsUseLosslessFallbackAndRejectNestedArrays() throws {
     let unique = try FixtureNamedPayloadCollection.load([
       "items": [
@@ -1293,7 +1306,7 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     ])
     let unnamedItems = try unnamed.save()["items"] as? [[String: Any]]
     XCTAssertEqual(unnamedItems?.count, 2)
-    XCTAssertNil(unnamedItems?[1]["name"])
+    XCTAssertEqual(unnamedItems?[1]["name"] as? String, "")
 
     let duplicate = try FixtureNamedPayloadCollection.load([
       "items": [
