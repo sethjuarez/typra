@@ -200,6 +200,34 @@ describe("TypeScript optional collection defaults", () => {
   });
 });
 
+describe("TypeScript native serialization option", () => {
+  it("keeps the default TypeScript output free of Zod imports and schemas", () => {
+    const source = emitTypeScriptFile(fileDecl(typeDecl([
+      field("name", { kind: "scalar", scalarType: "string" }, false),
+    ])), new TypeScriptExprVisitor());
+
+    assert.doesNotMatch(source, /from "zod"/);
+    assert.doesNotMatch(source, /wireSchema/);
+    assert.doesNotMatch(source, /z\.preprocess/);
+  });
+
+  it("emits Zod validators that delegate input canonicalization to load/save", () => {
+    const source = emitTypeScriptFile(fileDecl(typeDecl([
+      field("name", { kind: "scalar", scalarType: "string" }, false),
+    ])), new TypeScriptExprVisitor(), undefined, "", { nativeSerialization: "zod" });
+
+    assert.match(source, /import \{ z \} from "zod";/);
+    assert.match(source, /static readonly wireObjectSchema: z\.ZodObject<any> = z\.object\(\{/);
+    assert.match(source, /"name": z\.string\(\),/);
+    assert.match(source, /static readonly wireSchema: z\.ZodType<Record<string, unknown>> = z\.lazy\(\(\) => CollectionModel\.wireObjectSchema\);/);
+    assert.match(source, /static readonly schema = z\.any\(\)\.transform\(\(data, ctx\) => \{/);
+    assert.match(source, /return CollectionModel\.load\(data as Record<string, unknown>\)\.save\(\);/);
+    assert.match(source, /ctx\.addIssue\(\{ code: z\.ZodIssueCode\.custom, message: String\(error\) \}\);/);
+    assert.match(source, /\}\)\.pipe\(CollectionModel\.wireSchema\);/);
+    assert.match(source, /export type CollectionModelWire = z\.infer<typeof CollectionModel\.wireSchema>;/);
+  });
+});
+
 interface GeneratedNamedCollectionModel {
   parameters: Record<string, unknown>[];
 }

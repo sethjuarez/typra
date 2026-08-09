@@ -52,6 +52,10 @@ import {
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toKebabCase } from "../../ir/utilities.js";
 
+export interface TypeScriptEmitterOptions {
+  nativeSerialization?: "none" | "zod" | "standard-schema";
+}
+
 /**
  * Type mapping from TypeSpec scalar types to TypeScript types.
  */
@@ -125,8 +129,15 @@ function returnType(typeStr: string): string {
  * @param namespace - Optional namespace override
  * @param group - Semantic group folder this file lives in (e.g. "connection"). Empty string = root.
  */
-export function emitTypeScriptFile(decl: FileDecl, visitor: ExprVisitor, namespace?: string, group: string = ""): string {
+export function emitTypeScriptFile(
+  decl: FileDecl,
+  visitor: ExprVisitor,
+  namespace?: string,
+  group: string = "",
+  options: TypeScriptEmitterOptions = {},
+): string {
   const lines: string[] = [];
+  const emitZod = options.nativeSerialization === "zod";
 
   // 1. Header
   lines.push("// Copyright (c) Microsoft. All rights reserved.");
@@ -140,6 +151,9 @@ export function emitTypeScriptFile(decl: FileDecl, visitor: ExprVisitor, namespa
     // Context file is always at the model root — go up one level when inside a group subfolder
     const contextPath = group ? "../context" : "./context";
     lines.push(`import { LoadContext, SaveContext } from "${contextPath}";`);
+  }
+  if (emitZod && hasNonProtocol) {
+    lines.push('import { z } from "zod";');
   }
 
   for (const imp of decl.imports) {
@@ -179,7 +193,7 @@ export function emitTypeScriptFile(decl: FileDecl, visitor: ExprVisitor, namespa
 
   // 3. Emit each type
   for (const type of decl.types) {
-    emitType(type, lines, visitor);
+    emitType(type, lines, visitor, emitZod, decl.types);
     lines.push("");
   }
 
@@ -223,7 +237,7 @@ function emitEnumParser(enumDef: { name: string; values: string[]; parseAliases:
 // Type emission
 // ============================================================================
 
-function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
+function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor, emitZod: boolean, allTypes: TypeDecl[]): void {
   const name = type.typeName.name;
 
   // Protocol types → emit as interface with method signatures
@@ -240,6 +254,9 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
   // shorthandProperty static
   const shorthand = type.coercionProperty ? `"${type.coercionProperty}"` : "undefined";
   lines.push(`  static readonly shorthandProperty: string | undefined = ${shorthand};`);
+  if (emitZod) {
+    emitZodSchemas(type, lines, allTypes);
+  }
   lines.push("");
 
   // Field declarations
@@ -354,6 +371,11 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
   if (type.methods.length > 0) {
     emitMethodHelpersInterface(type, lines);
   }
+
+  if (emitZod) {
+    lines.push("");
+    lines.push(`export type ${name}Wire = z.infer<typeof ${name}.wireSchema>;`);
+  }
 }
 
 /**
@@ -433,6 +455,138 @@ function emitMethodHelpersInterface(type: TypeDecl, lines: string[]): void {
     }
   }
   lines.push("}");
+}
+
+function emitZodSchemas(type: TypeDecl, lines: string[], allTypes: TypeDecl[]): void {
+  const name = type.typeName.name;
+  lines.push(`  static readonly wireObjectSchema: z.ZodObject<any> = ${zodObjectExpression(type, allTypes)};`);
+  lines.push(`  static readonly wireObjectSchemaWithoutName: z.ZodObject<any> = ${zodObjectExpression(type, allTypes, "name")};`);
+  lines.push(`  static readonly wireSchema: z.ZodType<Record<string, unknown>> = z.lazy(() => ${zodWireSchemaExpression(type)});`);
+  lines.push(`  static readonly schema = z.any().transform((data, ctx) => {`);
+  lines.push(`    try {`);
+  lines.push(`      return ${name}.load(data as Record<string, unknown>).save();`);
+  lines.push(`    } catch (error) {`);
+  lines.push(`      ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(error) });`);
+  lines.push(`      return z.NEVER;`);
+  lines.push(`    }`);
+  lines.push(`  }).pipe(${name}.wireSchema);`);
+}
+
+function zodWireSchemaExpression(type: TypeDecl): string {
+  const dispatch = type.polymorphicDispatch;
+  if (!dispatch || dispatch.variants.length === 0) {
+    return `${type.typeName.name}.wireObjectSchema`;
+  }
+
+  const variantSchemas = dispatch.variants
+    .map(variant => `${variant.typeName.name}.wireObjectSchema as any`)
+    .join(", ");
+  const knownSchema = dispatch.variants.length === 1
+    ? variantSchemas
+    : `z.discriminatedUnion("${dispatch.discriminatorField}", [${variantSchemas}])`;
+
+  if (isClosedPolymorphicDispatch(dispatch)) {
+    return knownSchema;
+  }
+
+  const fallback = dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference
+    ? `${dispatch.defaultVariant.typeName.name}.wireObjectSchema`
+    : `${type.typeName.name}.wireObjectSchema.passthrough()`;
+  return `z.union([${knownSchema}, ${fallback}])`;
+}
+
+function zodObjectExpression(type: TypeDecl, allTypes: TypeDecl[], omitField?: string): string {
+  const entries = type.save.assignments
+    .filter(a => a.fieldName !== omitField)
+    .map(a => `    "${a.targetName}": ${zodFieldSchema(type, a, allTypes)}${a.isOptional ? ".optional()" : ""},`);
+  const objectBody = entries.length > 0
+    ? `{\n${entries.join("\n")}\n  }`
+    : "{}";
+  const object = type.base
+    ? `${type.base.name}.${omitField === "name" ? "wireObjectSchemaWithoutName" : "wireObjectSchema"}.extend(${objectBody})`
+    : `z.object(${objectBody})`;
+  return absorbsUnknownValues(type.polymorphicDispatch) ? `${object}.passthrough()` : object;
+}
+
+function zodFieldSchema(type: TypeDecl, assignment: SaveAssignment, allTypes: TypeDecl[]): string {
+  const field = type.fields.find(candidate => candidate.name === assignment.fieldName);
+  const baseType = type.base ? allTypes.find(candidate => candidate.typeName.name === type.base!.name) : undefined;
+  const discriminatorField = type.polymorphicDispatch?.discriminatorField ?? baseType?.polymorphicDispatch?.discriminatorField;
+  if (
+    field &&
+    type.base !== null &&
+    field.name === discriminatorField &&
+    field.defaultValue !== null &&
+    field.defaultValue !== undefined
+  ) {
+    if (field.defaultValue === "*") {
+      return "z.string()";
+    }
+    return `z.literal(${JSON.stringify(field.defaultValue)})`;
+  }
+
+  if (field?.enumName && field.allowedValues.length > 0) {
+    return field.isOpenEnum ? "z.string()" : zodEnumExpression(field.allowedValues);
+  }
+
+  const cat = assignment.category;
+  switch (cat.kind) {
+    case "scalar":
+      return zodScalarSchema(cat.scalarType);
+    case "dict":
+      return cat.valueType && cat.valueType !== "unknown"
+        ? `z.record(${zodRecordValueSchema(cat.valueType)})`
+        : "z.record(z.unknown())";
+    case "collection_scalar":
+      return `z.array(${zodScalarSchema(cat.scalarType)})`;
+    case "complex":
+      return `z.lazy(() => ${cat.typeName}.wireSchema)`;
+    case "collection_complex": {
+      const helper = type.collectionHelpers.find(candidate => candidate.propertyName === assignment.fieldName);
+      const arraySchema = `z.array(z.lazy(() => ${cat.typeName}.wireSchema))`;
+      if (helper?.hasNameProperty) {
+        return `z.union([${arraySchema}, z.record(z.lazy(() => ${cat.typeName}.wireObjectSchemaWithoutName))])`;
+      }
+      return arraySchema;
+    }
+  }
+}
+
+function zodScalarSchema(scalarType: string): string {
+  switch (TYPE_MAP[scalarType] ?? scalarType) {
+    case "string":
+      return "z.string()";
+    case "number":
+      return "z.number()";
+    case "boolean":
+      return "z.boolean()";
+    case "Uint8Array":
+      return "z.instanceof(Uint8Array)";
+    case "Date":
+      return "z.instanceof(Date)";
+    case "unknown":
+    case "any":
+      return "z.unknown()";
+    default:
+      return "z.unknown()";
+  }
+}
+
+function zodRecordValueSchema(valueType: string): string {
+  const scalarSchema = zodScalarSchema(valueType);
+  return scalarSchema === "z.unknown()" && !TYPE_MAP[valueType]
+    ? `z.lazy(() => ${valueType}.wireSchema)`
+    : scalarSchema;
+}
+
+function zodEnumExpression(values: string[]): string {
+  if (values.length === 0) {
+    return "z.never()";
+  }
+  if (values.length === 1) {
+    return `z.literal(${JSON.stringify(values[0])})`;
+  }
+  return `z.enum([${values.map(value => JSON.stringify(value)).join(", ")}])`;
 }
 
 /**

@@ -30,6 +30,11 @@ export const generateTypeScript = async (
   emitTarget: EmitTarget,
   options?: GeneratorOptions
 ) => {
+  const nativeSerialization = emitTarget["native-serialization"] ?? "none";
+  if (nativeSerialization === "standard-schema") {
+    throw new Error("TypeScript native-serialization: \"standard-schema\" is reserved; use \"none\" or \"zod\".");
+  }
+  const emitZod = nativeSerialization === "zod";
   const allTypes = Array.from(enumerateTypes(node));
   const nodes = filterNodes(allTypes, options);
 
@@ -72,7 +77,7 @@ export const generateTypeScript = async (
 
     const group = n.group || "";
     const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
-    const code = emitTypeScriptFileDecl(fileDecl, visitor, tsNamespace, group);
+    const code = emitTypeScriptFileDecl(fileDecl, visitor, tsNamespace, group, { nativeSerialization });
     const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
     await emitTypeScriptFile(context, `${toKebabCase(n.typeName.name)}.ts`, code, outDir, emitTarget["output-dir"]);
   }
@@ -80,7 +85,7 @@ export const generateTypeScript = async (
   // Emit group index.ts files
   for (const [group, groupNodes] of groupMap) {
     if (!group) continue;
-    const groupIndexCode = emitTypeScriptGroupIndex(group, groupNodes);
+    const groupIndexCode = emitTypeScriptGroupIndex(group, groupNodes, emitZod);
     await emitTypeScriptFile(context, "index.ts", groupIndexCode, `${emitTarget["output-dir"]}/${group}`, emitTarget["output-dir"]);
   }
 
@@ -110,7 +115,7 @@ export const generateTypeScript = async (
 
   // Emit root index.ts file — re-exports from group sub-indexes
   const indexContext = buildIndexContext(nodes);
-  const indexCode = emitTypeScriptIndex(indexContext.baseTypes, indexContext.types);
+  const indexCode = emitTypeScriptIndex(indexContext.baseTypes, indexContext.types, emitZod);
   await emitTypeScriptFile(context, "index.ts", indexCode, emitTarget["output-dir"]);
 
   // Emit eslint.config.js to project root (parent of output-dir)

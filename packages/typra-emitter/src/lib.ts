@@ -12,6 +12,7 @@ export interface EmitTarget {
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
   "protocol-scaffolds"?: "none" | "compile-only";
   "cancellation-token-path"?: string;
+  "native-serialization"?: "none" | "zod" | "standard-schema";
 }
 export interface TypraEmitterOptions {
   "root-object": string;
@@ -95,6 +96,13 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             type: "string",
             nullable: true,
             description: "Full runtime-native cancellation token symbol path. Rust uses :: separators; Python uses dotted module.symbol syntax."
+          },
+          "native-serialization": {
+            type: "string",
+            enum: ["none", "zod", "standard-schema"],
+            nullable: true,
+            default: "none",
+            description: "Target-specific native serialization/validation artifact. TypeScript supports 'zod' as an opt-in class-attached schema that validates the canonical Typra load/save wire shape; 'standard-schema' is reserved."
           }
         },
         required: ["type"]

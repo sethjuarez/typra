@@ -12,6 +12,13 @@ options:
         import-path: "../index"
         format: false
         protocol-scaffolds: "compile-only"
+      - type: TypeScript
+        output-dir: "generated/fixtures/typescript-zod"
+        test-dir: "generated/fixtures/typescript-zod/tests"
+        import-path: "../index"
+        format: false
+        native-serialization: "zod"
+        protocol-scaffolds: "compile-only"
       - type: Python
         output-dir: "generated/fixtures/python"
         test-dir: "generated/fixtures/python/tests"
