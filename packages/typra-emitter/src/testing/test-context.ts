@@ -87,14 +87,32 @@ export type TypeResolver = (name: string) => TypeNode | undefined;
  */
 const WIRE_SCALAR_DEFAULTS: Record<string, unknown> = {
   string: "sample",
+  bytes: "c2FtcGxl",
+  plainDate: "1970-01-01",
+  plainTime: "00:00:00",
+  utcDateTime: "1970-01-01T00:00:00Z",
+  offsetDateTime: "1970-01-01T00:00:00+00:00",
+  duration: "P1D",
+  url: "https://example.test",
+  uuid: "00000000-0000-0000-0000-000000000001",
   boolean: true,
+  int8: 1,
+  int16: 1,
   int32: 1,
   int64: 1,
   integer: 1,
+  safeint: 1,
+  uint8: 1,
+  uint16: 1,
+  uint32: 1,
+  uint64: 1,
   float: 1.5,
   float32: 1.5,
   float64: 1.5,
   number: 1.5,
+  numeric: 1.5,
+  decimal: 1.5,
+  decimal128: 1.5,
 };
 
 /**
@@ -120,6 +138,9 @@ function synthesizeComplexSample(
   resolveType: TypeResolver,
   seen: Set<string>,
 ): Record<string, any> | undefined {
+  if (!type.typeName?.name) {
+    return undefined;
+  }
   const key = `${type.typeName.namespace}.${type.typeName.name}`;
   if (seen.has(key)) {
     // Self-referential model. The cycle can only be broken by an optional edge, and an
@@ -133,10 +154,11 @@ function synthesizeComplexSample(
   // child that pins a real literal: a wildcard variant's discriminator is `*`, which is a
   // routing rule rather than a value, and emitting it would hand the loaders a fabricated
   // string that names nothing.
+  const children = type.childTypes ?? [];
   const concrete =
-    type.discriminator && type.childTypes.length > 0
-      ? (type.childTypes.find(child => discriminatorLiteral(child, type.discriminator!) !== "*")
-        ?? type.childTypes[0])
+    type.discriminator && children.length > 0
+      ? (children.find(child => discriminatorLiteral(child, type.discriminator!) !== "*")
+        ?? children[0])
       : type;
 
   const payload: Record<string, any> = {};
@@ -156,6 +178,45 @@ function synthesizeComplexSample(
   return payload;
 }
 
+function synthesizeCompleteComplexSample(
+  type: TypeNode,
+  resolveType: TypeResolver,
+  seen: Set<string>,
+): Record<string, any> | undefined {
+  if (!type.typeName?.name) {
+    return undefined;
+  }
+  const key = `${type.typeName.namespace}.${type.typeName.name}`;
+  if (seen.has(key)) {
+    return undefined;
+  }
+  const nested = new Set(seen).add(key);
+
+  const children = type.childTypes ?? [];
+  const concrete =
+    type.discriminator && children.length > 0
+      ? (children.find(child => discriminatorLiteral(child, type.discriminator!) !== "*")
+        ?? children[0])
+      : type;
+
+  const payload: Record<string, any> = {};
+  for (const prop of concrete.properties) {
+    const sampled = prop.samples?.[0]?.sample;
+    if (sampled) {
+      Object.assign(payload, sampled);
+      continue;
+    }
+    if (prop.isOptional || prop.hasExplicitDefault) continue;
+
+    const value = synthesizeCompleteRequiredValue(prop, resolveType, nested);
+    if (value === undefined) {
+      return undefined;
+    }
+    payload[prop.name] = value;
+  }
+  return payload;
+}
+
 /** Derive a wire value for a single required property that carries no `@sample`. */
 function synthesizeRequiredValue(
   prop: PropertyNode,
@@ -165,13 +226,28 @@ function synthesizeRequiredValue(
   // A discriminator on a concrete subtype is pinned to its literal; honour that first so the
   // synthesized payload dispatches back to the type it was built from.
   if (prop.defaultValue !== null && prop.defaultValue !== undefined) return prop.defaultValue;
-  if (prop.allowedValues.length > 0) return prop.allowedValues[0];
+  if ((prop.allowedValues ?? []).length > 0) return prop.allowedValues[0];
   if (prop.isCollection) return [];
   if (prop.isDict || prop.isAny) return {};
-  if (prop.isScalar) return WIRE_SCALAR_DEFAULTS[prop.typeName.name];
+  if (prop.isScalar) return WIRE_SCALAR_DEFAULTS[prop.typeName?.name ?? ""];
 
   const target = prop.type ?? resolveType(prop.typeName.name);
   return target ? synthesizeComplexSample(target, resolveType, seen) : undefined;
+}
+
+function synthesizeCompleteRequiredValue(
+  prop: PropertyNode,
+  resolveType: TypeResolver,
+  seen: Set<string>,
+): any {
+  if (prop.defaultValue !== null && prop.defaultValue !== undefined) return prop.defaultValue;
+  if ((prop.allowedValues ?? []).length > 0) return prop.allowedValues[0];
+  if (prop.isCollection) return [];
+  if (prop.isDict || prop.isAny) return {};
+  if (prop.isScalar) return WIRE_SCALAR_DEFAULTS[prop.typeName?.name ?? ""];
+
+  const target = prop.type ?? resolveType(prop.typeName.name);
+  return target ? synthesizeCompleteComplexSample(target, resolveType, seen) : undefined;
 }
 
 /**
@@ -224,6 +300,19 @@ export function withRequiredComplexSamples(
   return completed;
 }
 
+export function buildExampleSamples(node: TypeNode, resolveType: TypeResolver): Record<string, any>[] {
+  const samples = node.properties
+    .filter(p => p.samples && p.samples.length > 0)
+    .map(p => p.samples?.map(s => ({ ...s.sample })));
+
+  if (samples.length === 0) {
+    const synthesized = synthesizeCompleteComplexSample(node, resolveType, new Set());
+    return synthesized === undefined ? [] : [synthesized];
+  }
+
+  return getCombinations(samples).map(c => withRequiredComplexSamples(Object.assign({}, ...c), node, resolveType));
+}
+
 /**
  * Build a standardized test context from a TypeNode.
  * All language emitters should use this to ensure consistent test generation.
@@ -252,16 +341,7 @@ export function buildBaseTestContext(
  * Build test examples from @sample decorators on properties.
  */
 function buildExamples(node: TypeNode, options: TestContextOptions, resolveType: TypeResolver): TestExample[] {
-  // Get sample properties and generate combinations
-  const samples = node.properties
-    .filter(p => p.samples && p.samples.length > 0)
-    .map(p => p.samples?.map(s => ({ ...s.sample })));
-
-  const combinations = samples.length > 0 ? getCombinations(samples) : [];
-
-  return combinations.map(c => {
-    const sample = withRequiredComplexSamples(Object.assign({}, ...c), node, resolveType);
-
+  return buildExampleSamples(node, resolveType).map(sample => {
     // Create YAML document with proper string escaping
     const doc = new YAML.Document(sample);
     let requiresJsonDoubleQuotes = false;

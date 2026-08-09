@@ -12,7 +12,7 @@ export interface EmitTarget {
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
   "protocol-scaffolds"?: "none" | "compile-only";
   "cancellation-token-path"?: string;
-  "native-serialization"?: "none" | "pydantic" | "jackson" | "zod" | "standard-schema";
+  "native-serialization"?: "none" | "pydantic" | "jackson" | "serde" | "zod" | "standard-schema";
 }
 export interface TypraEmitterOptions {
   "root-object": string;
@@ -94,10 +94,10 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
           },
           "native-serialization": {
             type: "string",
-            enum: ["none", "pydantic", "jackson", "zod", "standard-schema"],
+            enum: ["none", "pydantic", "jackson", "serde", "zod", "standard-schema"],
             nullable: true,
             default: "none",
-            description: "Opt-in native serialization/validation artifact for the target. Python supports 'pydantic'; Java supports 'jackson'; TypeScript supports 'zod'; 'standard-schema' is reserved for TypeScript. Defaults to 'none'."
+            description: "Native serialization/validation artifact for the target. Python supports opt-in 'pydantic'; Java supports opt-in 'jackson'; Rust supports 'serde' with cfg(feature = \"serde\") impls that delegate to Typra's canonical load/save mapping; TypeScript supports opt-in 'zod'; 'standard-schema' is reserved for TypeScript. Defaults to 'none'."
           },
           "cancellation-token-path": {
             type: "string",

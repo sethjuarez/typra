@@ -58,16 +58,22 @@ describe("generate", () => {
   it("validates native serialization compatibility centrally for every target", () => {
     assert.deepEqual(validateNativeSerializationTargets([
       { type: "TypeScript", "native-serialization": "zod" },
+      { type: "typescript", "native-serialization": "standard-schema" },
       { type: "python", "native-serialization": "pydantic" },
       { type: "java", "native-serialization": "jackson" },
+      { type: "rust", "native-serialization": "serde" },
       { type: "java", "native-serialization": "none" },
     ]), []);
     assert.deepEqual(validateNativeSerializationTargets([
       { type: "typescript", "native-serialization": "pydantic" },
       { type: "python", "native-serialization": "standard-schema" },
+      { type: "java", "native-serialization": "zod" },
+      { type: "swift", "native-serialization": "standard-schema" },
     ]), [
-      'Target "typescript" does not support native-serialization "pydantic". Supported values: "none", "zod".',
+      'Target "typescript" does not support native-serialization "pydantic". Supported values: "none", "zod", "standard-schema".',
       'Target "python" does not support native-serialization "standard-schema". Supported values: "none", "pydantic".',
+      'Target "java" does not support native-serialization "zod". Supported values: "none", "jackson".',
+      'Target "swift" does not support native-serialization "standard-schema". Supported value: "none".',
     ]);
   });
 
@@ -195,6 +201,129 @@ describe("generate", () => {
           assert.match(output, /typra-emitter-native-serialization-target/);
           assert.match(output, /Target "Python" does not support native-serialization "jackson"/);
           assert.match(output, /Supported values: "none", "pydantic"/);
+          return true;
+        },
+      );
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects Rust serde for open discriminated bases until base-instance representation is settled", () => {
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-rust-serde-open-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      writeFileSync(source, [
+        'import "@typra/emitter";',
+        "",
+        "namespace Typra.RustSerdeProbe;",
+        "",
+        "@discriminator(\"kind\")",
+        "model Root {",
+        "  kind: string;",
+        "}",
+        "",
+        "model Known extends Root {",
+        '  kind: "known";',
+        "}",
+        "",
+      ].join("\n"));
+      writeFileSync(config, [
+        "emit:",
+        '  - "@typra/emitter"',
+        "options:",
+        '  "@typra/emitter":',
+        `    emitter-output-dir: "${path.join(output, "generated")}"`,
+        '    root-object: "Typra.RustSerdeProbe.Root"',
+        '    root-namespace: "Typra.RustSerdeProbe"',
+        "    emit-targets:",
+        "      - type: Rust",
+        `        output-dir: "${path.join(output, "generated", "rust")}"`,
+        '        native-serialization: "serde"',
+        "        format: false",
+        "",
+      ].join("\n"));
+
+      assert.throws(
+        () => execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        }),
+        (error: unknown) => {
+          const output = error && typeof error === "object" && "stdout" in error && "stderr" in error
+            ? `${String((error as { stdout?: unknown }).stdout ?? "")}${String((error as { stderr?: unknown }).stderr ?? "")}`
+            : String(error);
+          assert.match(output, /typra-emitter-rust-serde-open-discriminator/);
+          assert.match(output, /native-serialization: "serde" does not support discriminated base 'Root'/);
+          return true;
+        },
+      );
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects Rust serde for closed discriminators with unclaimed base values", () => {
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-rust-serde-unclaimed-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      writeFileSync(source, [
+        'import "@typra/emitter";',
+        "",
+        "namespace Typra.RustSerdeUnclaimedProbe;",
+        "",
+        "union RootKind {",
+        '  known: "known";',
+        '  base: "base";',
+        "}",
+        "",
+        "@discriminator(\"kind\")",
+        "model Root {",
+        "  kind: RootKind;",
+        "}",
+        "",
+        "model Known extends Root {",
+        '  kind: "known";',
+        "}",
+        "",
+      ].join("\n"));
+      writeFileSync(config, [
+        "emit:",
+        '  - "@typra/emitter"',
+        "options:",
+        '  "@typra/emitter":',
+        `    emitter-output-dir: "${path.join(output, "generated")}"`,
+        '    root-object: "Typra.RustSerdeUnclaimedProbe.Root"',
+        '    root-namespace: "Typra.RustSerdeUnclaimedProbe"',
+        "    emit-targets:",
+        "      - type: Rust",
+        `        output-dir: "${path.join(output, "generated", "rust")}"`,
+        '        native-serialization: "serde"',
+        "        format: false",
+        "",
+      ].join("\n"));
+
+      assert.throws(
+        () => execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        }),
+        (error: unknown) => {
+          const output = error && typeof error === "object" && "stdout" in error && "stderr" in error
+            ? `${String((error as { stdout?: unknown }).stdout ?? "")}${String((error as { stderr?: unknown }).stderr ?? "")}`
+            : String(error);
+          assert.match(output, /typra-emitter-rust-serde-open-discriminator/);
+          assert.match(output, /base-instance fallback/);
           return true;
         },
       );

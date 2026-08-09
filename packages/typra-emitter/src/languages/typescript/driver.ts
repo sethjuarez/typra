@@ -31,7 +31,7 @@ export const generateTypeScript = async (
   options?: GeneratorOptions
 ) => {
   const nativeSerialization = emitTarget["native-serialization"] ?? "none";
-  if (nativeSerialization === "pydantic" || nativeSerialization === "jackson") {
+  if (nativeSerialization === "pydantic" || nativeSerialization === "jackson" || nativeSerialization === "serde") {
     throw new Error(`TypeScript native-serialization: "${nativeSerialization}" is not supported; use "none" or "zod".`);
   }
   if (nativeSerialization === "standard-schema") {

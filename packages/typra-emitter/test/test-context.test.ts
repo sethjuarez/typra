@@ -57,7 +57,56 @@ function sampleFor(node: TypeNode, types: TypeNode[] = []): Record<string, any> 
   return context.examples[0].sample;
 }
 
+function exampleCountFor(node: TypeNode, types: TypeNode[] = []): number {
+  const byName = new Map(types.map(type => [type.typeName.name, type]));
+  return buildBaseTestContext(node, undefined, goTestOptions, name => byName.get(name)).examples.length;
+}
+
 describe("test context — required complex sample synthesis", () => {
+  it("synthesizes a top-level structured sample when no property declares @sample", () => {
+    const node = makeType("Unsampled", [
+      makeProp("id", "string", { isScalar: true }),
+      makeProp("count", "int32", { isScalar: true }),
+    ]);
+
+    assert.deepEqual(sampleFor(node), { id: "sample", count: 1 });
+  });
+
+  it("synthesizes defaults for every scalar family with clear JSON wire semantics", () => {
+    const node = makeType("UnsampledScalars", [
+      makeProp("url", "url", { isScalar: true }),
+      makeProp("uuid", "uuid", { isScalar: true }),
+      makeProp("decimal", "decimal", { isScalar: true }),
+      makeProp("safeint", "safeint", { isScalar: true }),
+    ]);
+
+    assert.deepEqual(sampleFor(node), {
+      url: "https://example.test",
+      uuid: "00000000-0000-0000-0000-000000000001",
+      decimal: 1.5,
+      safeint: 1,
+    });
+  });
+
+  it("uses a concrete child when synthesizing an unsampled polymorphic root", () => {
+    const text = makeType("TextContent", [
+      makeProp("kind", "string", { isScalar: true, defaultValue: "text" }),
+      makeProp("value", "string", { isScalar: true }),
+    ]);
+    const node = makeType("Content", [
+      makeProp("kind", "ContentKind", { allowedValues: ["text"] }),
+    ], { discriminator: "kind", childTypes: [text], isAbstract: true });
+
+    assert.deepEqual(sampleFor(node, [node, text]), { kind: "text", value: "sample" });
+  });
+
+  it("does not emit an incomplete top-level sample for an unsatisfied required cycle", () => {
+    const node = makeType("Tree", []);
+    node.properties.push(makeProp("child", "Tree", { type: node }));
+
+    assert.equal(exampleCountFor(node, [node]), 0);
+  });
+
   it("includes a required complex property that declares no @sample", () => {
     const detail = makeType("Detail", [
       makeProp("code", "string", { isScalar: true, sample: { code: "detail-code" } }),

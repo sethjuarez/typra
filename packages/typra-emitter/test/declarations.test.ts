@@ -1505,7 +1505,13 @@ describe("Rust emitter serde derives", () => {
     // to_value/load_from_value path, NOT a field-by-field derive, so custom
     // canonicalization (map<->list, empty-omission, etc.) is always honored.
     const file = lowerFile(namedBinding, registry, new Set());
-    const code = emitRustFile(file, new RustExprVisitor(registry), new Set());
+    const code = emitRustFile(
+      file,
+      new RustExprVisitor(registry),
+      new Set(),
+      undefined,
+      { nativeSerialization: "serde" },
+    );
 
     // No serde derive on the struct — only Debug/Clone/Default/PartialEq.
     assert.match(
@@ -1515,12 +1521,12 @@ describe("Rust emitter serde derives", () => {
     assert.doesNotMatch(code, /#\[derive\([^)]*serde::Serialize[^)]*\)\]\npub struct Binding/);
     assert.doesNotMatch(code, /#\[serde\(rename_all = "camelCase"\)\]\n#\[serde\(default\)\]\npub struct Binding/);
     // Manual delegating serde instead.
-    assert.match(code, /impl serde::Serialize for Binding \{/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for Binding \{/);
     assert.match(
       code,
       /serde::Serialize::serialize\(&self\.to_value\(&SaveContext::default\(\)\), serializer\)/,
     );
-    assert.match(code, /impl<'de> serde::Deserialize<'de> for Binding \{/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl<'de> serde::Deserialize<'de> for Binding \{/);
     assert.match(
       code,
       /Self::load_from_value\(&value, &LoadContext::default\(\)\)/,
@@ -1532,14 +1538,20 @@ describe("Rust emitter serde derives", () => {
     // into the struct. Derived `Deserialize` would reject that scalar, so the struct
     // must delegate to the canonical load_from_value (which understands the coercion).
     const file = lowerFile(modelType, registry, new Set());
-    const code = emitRustFile(file, new RustExprVisitor(registry), new Set());
+    const code = emitRustFile(
+      file,
+      new RustExprVisitor(registry),
+      new Set(),
+      undefined,
+      { nativeSerialization: "serde" },
+    );
 
     assert.match(
       code,
       /#\[derive\(Debug, Clone, Default, PartialEq\)\]\npub struct Model \{/,
     );
-    assert.match(code, /impl serde::Serialize for Model \{/);
-    assert.match(code, /impl<'de> serde::Deserialize<'de> for Model \{/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for Model \{/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl<'de> serde::Deserialize<'de> for Model \{/);
     assert.match(
       code,
       /Self::load_from_value\(&value, &LoadContext::default\(\)\)/,
@@ -1552,6 +1564,8 @@ describe("Rust emitter serde derives", () => {
       file,
       new RustExprVisitor(registry),
       new Set(["ContentPart"]),
+      undefined,
+      { nativeSerialization: "serde" },
     );
 
     // The Kind data enum keeps PartialEq but must NOT derive serde: the derived
@@ -1571,12 +1585,12 @@ describe("Rust emitter serde derives", () => {
     // ...instead it gets manual serde impls delegating to the canonical
     // to_value/load_from_value so the `kind` discriminator round-trips to its
     // exact wire value while the LoadContext/SaveContext API stays intact.
-    assert.match(code, /impl serde::Serialize for ContentPart \{/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for ContentPart \{/);
     assert.match(
       code,
       /serde::Serialize::serialize\(&self\.to_value\(&SaveContext::default\(\)\), serializer\)/,
     );
-    assert.match(code, /impl<'de> serde::Deserialize<'de> for ContentPart \{/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl<'de> serde::Deserialize<'de> for ContentPart \{/);
     assert.match(
       code,
       /Self::load_from_value\(&value, &LoadContext::default\(\)\)/,
@@ -1585,7 +1599,7 @@ describe("Rust emitter serde derives", () => {
     // The Kind enum ITSELF is also independently serde-serializable to the same
     // canonical, internally-tagged wire: it wraps the variant back into its parent
     // and delegates to to_value/load_from_value — NOT the externally-tagged derive.
-    assert.match(code, /impl serde::Serialize for ContentPartKind \{/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for ContentPartKind \{/);
     assert.match(
       code,
       /let parent = ContentPart \{ kind: self\.clone\(\), \.\.Default::default\(\) \};/,
@@ -1594,7 +1608,7 @@ describe("Rust emitter serde derives", () => {
       code,
       /serde::Serialize::serialize\(&parent\.to_value\(&SaveContext::default\(\)\), serializer\)/,
     );
-    assert.match(code, /impl<'de> serde::Deserialize<'de> for ContentPartKind \{/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl<'de> serde::Deserialize<'de> for ContentPartKind \{/);
     assert.match(
       code,
       /Ok\(ContentPart::load_from_value\(&value, &LoadContext::default\(\)\)\.kind\)/,
@@ -1611,11 +1625,17 @@ describe("Rust emitter serde derives", () => {
     const chat = makeType("ChatTurn", [role]);
     const reg = TypeRegistry.fromTypeGraph([chat]);
     const file = lowerFile(chat, reg, new Set());
-    const code = emitRustFile(file, new RustExprVisitor(reg), new Set());
+    const code = emitRustFile(
+      file,
+      new RustExprVisitor(reg),
+      new Set(),
+      undefined,
+      { nativeSerialization: "serde" },
+    );
 
     assert.match(code, /pub enum Role \{/);
-    assert.match(code, /impl serde::Serialize for Role \{/);
-    assert.match(code, /impl<'de> serde::Deserialize<'de> for Role \{/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for Role \{/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl<'de> serde::Deserialize<'de> for Role \{/);
     assert.match(code, /serializer\.serialize_str\(self\.as_str\(\)\)/);
   });
 
@@ -1709,6 +1729,7 @@ describe("Rust test generator serde_roundtrip gating", () => {
       factories: [],
       importPath: "crate::model",
       isPolymorphicBase: false,
+      nativeSerialization: "serde",
     } as RustTestContext);
 
     // Delegation-equivalence is ALWAYS emitted — the sample-agnostic invariant.
@@ -1732,6 +1753,7 @@ describe("Rust test generator serde_roundtrip gating", () => {
       factories: [],
       importPath: "crate::model",
       isPolymorphicBase: false,
+      nativeSerialization: "serde",
     } as RustTestContext);
 
     // Delegation-equivalence still present...
@@ -1757,6 +1779,7 @@ describe("Rust test generator serde_roundtrip gating", () => {
       factories: [],
       importPath: "crate::model",
       isPolymorphicBase: false,
+      nativeSerialization: "serde",
     } as RustTestContext);
 
     assert.match(code, /serde serialize must equal canonical to_value/);
@@ -1789,6 +1812,7 @@ describe("Rust test generator serde_roundtrip gating", () => {
       factories: [],
       importPath: "crate::model",
       isPolymorphicBase: false,
+      nativeSerialization: "serde",
     } as RustTestContext);
 
     assert.doesNotMatch(code, /nested discriminator must round-trip/);
@@ -1817,6 +1841,7 @@ describe("Rust test generator serde_roundtrip gating", () => {
       factories: [],
       importPath: "crate::model",
       isPolymorphicBase: false,
+      nativeSerialization: "serde",
     } as RustTestContext);
 
     assert.match(code, /serde serialize must equal canonical to_value/);

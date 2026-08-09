@@ -82,9 +82,11 @@ Rust or `prompty.core.cancellation.CancellationToken` for Python.
 Python supports opt-in Pydantic v2 model emission with
 `native-serialization: "pydantic"` on the Python target. The default remains
 `"none"` and keeps dataclass output. In Pydantic mode, generated
-`model_validate()`, `model_dump()`, and `model_dump_json()` delegate to Typra's
-generated `load()`, `save()`, and `to_json()` methods so Typra's pathful
-diagnostics and wire semantics remain the authoritative contract.
+`model_validate()`, `model_validate_json()`, `model_dump()`, and
+`model_dump_json()` delegate to Typra's generated `load()`, `save()`, and
+`to_json()` methods so Typra's pathful diagnostics and wire semantics remain
+the authoritative contract. `model_validate_strings()` hard-fails because
+Pydantic's string-coercing validation would bypass Typra's loader semantics.
 
 Compile with TypeSpec:
 
@@ -201,6 +203,24 @@ Typra's generated `save` and `load`, so Jackson output is derived from the same
 wire mapping as Typra JSON/YAML helpers. The emitter does not create or mutate a
 consumer build manifest; projects enabling this option must provide
 `jackson-databind` on their Java compile/runtime classpath.
+
+Rust targets can also make the existing serde support explicit without changing
+the default generated model surface:
+
+```yaml
+emit-targets:
+  - type: Rust
+    output-dir: generated/rust
+    native-serialization: serde
+```
+
+Rust already emits `#[cfg(feature = "serde")]` `Serialize`/`Deserialize` impls
+for generated models and string unions for compatibility with current output.
+The impls delegate through Typra's canonical `to_value`/`load_from_value`
+mapping so serde output cannot silently diverge from Typra save semantics.
+Consumers should declare a crate feature named `serde` and include the `serde`
+dependency when compiling with that feature. Set `native-serialization: none`
+to opt out of these Rust impls.
 
 Consumers can declare hand-authored boundaries in verifier config:
 

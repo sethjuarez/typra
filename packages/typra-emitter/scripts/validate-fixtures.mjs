@@ -45,6 +45,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "generated-targets",
   "empty-target-dirs",
   "output-hygiene",
+  "structured-load-coverage",
   "static-fixture-coverage",
   "static-conformance-matrix",
   "export-surface-snapshot",
@@ -666,6 +667,131 @@ function assertGeneratedOutputHygiene() {
       if (/[ \t]+$/.test(lines[index])) {
         fail(`${relativePath}:${index + 1} has trailing whitespace.`);
       }
+    }
+  }
+}
+
+function assertGeneratedStructuredLoadCoverage() {
+  const exportSurface = readJson(path.join("generated", "fixtures", ".typra-generated", "export-surfaces.json"));
+  const kebabCase = value => value
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")
+    .toLowerCase();
+  const snakeCase = value => kebabCase(value).replace(/-/g, "_");
+  const pascalCase = value => value
+    .split(/[_-]/)
+    .filter(Boolean)
+    .map(part => part[0].toUpperCase() + part.slice(1))
+    .join("");
+  const suites = [
+    {
+      target: "typescript",
+      outputRoot: "generated/fixtures/typescript",
+      dir: path.join(generatedRoot, "typescript", "tests"),
+      testFile: file => file.endsWith(".test.ts"),
+      expectedTestPath: (name, group) => path.join(generatedRoot, "typescript", "tests", group || "", `${kebabCase(name)}.test.ts`),
+      hasStructuredLoad: content => content.includes("should load from JSON - example 1"),
+    },
+    {
+      target: "python",
+      outputRoot: "generated/fixtures/python",
+      dir: path.join(generatedRoot, "python", "tests"),
+      testFile: file => file.endsWith(".py"),
+      expectedTestPath: (name, group) => path.join(generatedRoot, "python", "tests", group || "", `test_${snakeCase(name)}.py`),
+      hasStructuredLoad: content => /def test_load_json_\w+\(/.test(content),
+    },
+    {
+      target: "python_pydantic",
+      outputRoot: "generated/fixtures/python_pydantic",
+      dir: path.join(generatedRoot, "python_pydantic", "tests"),
+      testFile: file => file.endsWith(".py"),
+      expectedTestPath: (name, group) => path.join(generatedRoot, "python_pydantic", "tests", group || "", `test_${snakeCase(name)}.py`),
+      hasStructuredLoad: content => /def test_load_json_\w+\(/.test(content),
+    },
+    {
+      target: "go",
+      outputRoot: "generated/fixtures/go",
+      dir: path.join(generatedRoot, "go", "tests"),
+      testFile: file => file.endsWith("_test.go"),
+      expectedTestPath: name => path.join(generatedRoot, "go", "tests", `${snakeCase(name)}_test.go`),
+      hasStructuredLoad: content => /func Test\w+LoadJSON\(t \*testing\.T\)/.test(content),
+    },
+    {
+      target: "java",
+      outputRoot: "generated/fixtures/java",
+      dir: path.join(generatedRoot, "java", "tests"),
+      testFile: file => file.endsWith("GeneratedTest.java"),
+      expectedTestPath: name => path.join(generatedRoot, "java", "tests", `${name}GeneratedTest.java`),
+      hasStructuredLoad: content => /\.fromJson\(jsonData1\)/.test(content),
+    },
+    {
+      target: "csharp",
+      outputRoot: "generated/fixtures/csharp",
+      dir: path.join(generatedRoot, "csharp", "tests"),
+      testFile: file => file.endsWith("ConversionTests.cs"),
+      expectedTestPath: (name, group) => path.join(generatedRoot, "csharp", "tests", group || "", `${name}ConversionTests.cs`),
+      hasStructuredLoad: content => /\bLoadJsonInput1?\(/.test(content),
+    },
+    {
+      target: "rust",
+      outputRoot: "generated/fixtures/rust",
+      dir: path.join(generatedRoot, "rust", "tests"),
+      testFile: file => file.endsWith("_test.rs"),
+      expectedTestPath: (_name, group, source) => {
+        const moduleName = source.split("::").at(-1);
+        return path.join(generatedRoot, "rust", "tests", group || "", `${moduleName}_test.rs`);
+      },
+      hasStructuredLoad: content => /fn test_\w+_load_json\(\)/.test(content),
+    },
+    {
+      target: "swift",
+      outputRoot: "generated/fixtures/swift",
+      dir: path.join(generatedRoot, "swift", "Tests", "TypraFixturesTests"),
+      testFile: file => file.endsWith("Tests.swift"),
+      expectedTestPath: (_name, group, source) => {
+        const moduleName = path.basename(source, ".swift");
+        return path.join(generatedRoot, "swift", "Tests", "TypraFixturesTests", group || "", `${pascalCase(moduleName)}Tests.swift`);
+      },
+      hasStructuredLoad: content => /func testJSONRoundTrip1\(\) throws/.test(content),
+    },
+  ];
+
+  for (const suite of suites) {
+    const target = exportSurface?.targets?.find(entry => entry.outputRoot === suite.outputRoot);
+    if (target && suite.expectedTestPath) {
+      const missing = (target.exports ?? [])
+        .filter(entry => entry.kind === "value" && !entry.protocol)
+        .map(entry => suite.expectedTestPath(entry.name, entry.group, entry.source))
+        .filter((file, index, files) => files.indexOf(file) === index)
+        .filter(file => !existsSync(file));
+      if (missing.length > 0) {
+        fail(
+          `Generated ${suite.target} fixture exports without test files:\n`
+          + missing.map(file => `  ${path.relative(packageRoot, file)}`).join("\n"),
+        );
+      }
+    }
+
+    const files = walkFiles(suite.dir, file => {
+      const basename = path.basename(file);
+      const lower = basename.toLowerCase();
+      const normalized = lower.replace(/[^a-z0-9]/g, "");
+      return suite.testFile(file)
+        && !normalized.includes("protocolscaffolds")
+        && lower !== "test_context.py"
+        && lower !== "conformancetests.swift";
+    });
+    if (files.length === 0) {
+      fail(`No generated ${suite.target} fixture tests found for structured load coverage.`);
+      continue;
+    }
+
+    const missing = files.filter(file => !suite.hasStructuredLoad(readFileSync(file, "utf8")));
+    if (missing.length > 0) {
+      fail(
+        `Generated ${suite.target} fixture tests without structured JSON load coverage:\n`
+        + missing.map(file => `  ${path.relative(packageRoot, file)}`).join("\n"),
+      );
     }
   }
 }
@@ -4101,6 +4227,7 @@ function runDeclaredValidationStages() {
       ["generated-targets", assertGeneratedTargets],
       ["empty-target-dirs", assertNoEmptyTargetDirs],
       ["output-hygiene", assertGeneratedOutputHygiene],
+      ["structured-load-coverage", assertGeneratedStructuredLoadCoverage],
       ["static-fixture-coverage", assertStaticFixtureCoverage],
       ["static-conformance-matrix", assertConformanceMatrix],
       ["export-surface-snapshot", assertExportSurfaceSnapshot],
