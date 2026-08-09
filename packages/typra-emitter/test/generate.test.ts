@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 
@@ -209,7 +209,7 @@ describe("generate", () => {
     }
   });
 
-  it("rejects Rust serde for open discriminated bases until base-instance representation is settled", () => {
+  it("allows Rust serde for open discriminated bases with a fallback carrier", () => {
     const output = mkdtempSync(path.join(process.cwd(), "tmp-rust-serde-open-"));
     const source = path.join(output, "main.tsp");
     const config = path.join(output, "tspconfig.yaml");
@@ -248,27 +248,20 @@ describe("generate", () => {
         "",
       ].join("\n"));
 
-      assert.throws(
-        () => execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
-          cwd: process.cwd(),
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        }),
-        (error: unknown) => {
-          const output = error && typeof error === "object" && "stdout" in error && "stderr" in error
-            ? `${String((error as { stdout?: unknown }).stdout ?? "")}${String((error as { stderr?: unknown }).stderr ?? "")}`
-            : String(error);
-          assert.match(output, /typra-emitter-rust-serde-open-discriminator/);
-          assert.match(output, /native-serialization: "serde" does not support discriminated base 'Root'/);
-          return true;
-        },
-      );
+      execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const generated = readFileSync(path.join(output, "generated", "rust", "root.rs"), "utf8");
+      assert.match(generated, /RootKind::Custom \{/);
+      assert.match(generated, /raw: serde_json::Map<String, serde_json::Value>/);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }
   });
 
-  it("rejects Rust serde for closed discriminators with unclaimed base values", () => {
+  it("allows Rust serde for discriminators with unclaimed base values by emitting a fallback carrier", () => {
     const output = mkdtempSync(path.join(process.cwd(), "tmp-rust-serde-unclaimed-"));
     const source = path.join(output, "main.tsp");
     const config = path.join(output, "tspconfig.yaml");
@@ -312,21 +305,14 @@ describe("generate", () => {
         "",
       ].join("\n"));
 
-      assert.throws(
-        () => execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
-          cwd: process.cwd(),
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        }),
-        (error: unknown) => {
-          const output = error && typeof error === "object" && "stdout" in error && "stderr" in error
-            ? `${String((error as { stdout?: unknown }).stdout ?? "")}${String((error as { stderr?: unknown }).stderr ?? "")}`
-            : String(error);
-          assert.match(output, /typra-emitter-rust-serde-open-discriminator/);
-          assert.match(output, /base-instance fallback/);
-          return true;
-        },
-      );
+      execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const generated = readFileSync(path.join(output, "generated", "rust", "root.rs"), "utf8");
+      assert.match(generated, /RootKind::Custom \{/);
+      assert.match(generated, /raw: serde_json::Map<String, serde_json::Value>/);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }

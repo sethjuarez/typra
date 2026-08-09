@@ -101,6 +101,16 @@ describe("rust emitter — open polymorphic discriminators", () => {
     );
   });
 
+  it("emits an Unknown carrier for concrete open bases without a wildcard child", () => {
+    const code = emitOpenDiscriminatorBase();
+
+    assert.match(code, /Unknown \{/);
+    assert.match(code, /_ => ConnKind::Unknown \{/);
+    assert.match(code, /ConnKind::Unknown \{ kind_name, \.\. \} => kind_name\.as_str\(\)/);
+    assert.match(code, /ConnKind::Unknown \{ raw, \.\. \} => \{/);
+    assert.doesNotMatch(code, /_ => ConnKind::default\(\)/);
+  });
+
   it("still validates non-discriminator fields that have a named complex type", () => {
     const code = emitOpenDiscriminatorBase([makeProp("auth", "AuthMode")]);
 
@@ -114,6 +124,32 @@ describe("rust emitter — open polymorphic discriminators", () => {
       !/ConnectionType::validate_input_at/.test(code),
       "the discriminator must remain exempt even when sibling complex fields are validated",
     );
+  });
+
+  it("preserves unmodeled payload on wildcard/default fallback variants", () => {
+    const fallback = makeType(
+      "CustomConn",
+      [
+        makeProp("kind", "string", { isScalar: true, defaultValue: "*" }),
+        makeProp("endpoint", "string", { isScalar: true }),
+      ],
+      { base: { namespace: "Test", name: "Conn" } },
+    );
+    const base = makeType(
+      "Conn",
+      [makeProp("kind", "string", { isScalar: true })],
+      { discriminator: "kind", childTypes: [fallback], isAbstract: true },
+    );
+    const registry = TypeRegistry.fromTypeGraph([base, fallback]);
+    const polymorphic = new Set(["Conn"]);
+    const code = emitRustFile(lowerFile(base, registry, polymorphic), new RustExprVisitor(registry), polymorphic);
+
+    assert.match(code, /endpoint: String,/);
+    assert.match(code, /kind_name: String,/);
+    assert.match(code, /raw: serde_json::Map<String, serde_json::Value>,/);
+    assert.match(code, /raw\.remove\("kind"\);/);
+    assert.match(code, /raw\.remove\("endpoint"\);/);
+    assert.match(code, /ConnKind::Custom \{ endpoint, raw, \.\. \} => \{/);
   });
 });
 

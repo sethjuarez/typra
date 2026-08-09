@@ -115,12 +115,13 @@ describe("Swift polymorphic enums", () => {
     file.types.push(customTool, holder);
     const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set(["Tool"]));
     assert.match(source, /public enum Tool: TypraModel/);
-    assert.match(source, /case customTool\(CustomTool\)/);
-    assert.match(source, /default: return \.customTool\(try CustomTool\.load/);
-    assert.match(source, /case \.customTool\(let value\): return try value\.save/);
+    assert.match(source, /case customTool\(CustomTool, \[String: Any\]\)/);
+    assert.match(source, /default: return \.customTool\(try CustomTool\.load\(normalizedData, context: context\), object\)/);
+    assert.match(source, /case \.customTool\(let value, let raw\):/);
+    assert.match(source, /var result = raw/);
     assert.doesNotMatch(source, /case unknown\(\[String: Any\]\)|case \.unknown/);
     assert.match(source, /expected: "non-blank string"/);
-    assert.match(source, /public var tool: Tool = \.customTool\(CustomTool\(\)\)/);
+    assert.match(source, /public var tool: Tool = \.customTool\(CustomTool\(\), \[:\]\)/);
   });
 
   it("keeps self-reference fallbacks consistent through unknown", () => {
@@ -732,7 +733,7 @@ describe("Swift generated tests", () => {
       moduleName: "TestModels",
     });
 
-    assert.match(source, /if case \.fallbackConnection\(let concrete\) = instance/);
+    assert.match(source, /if case \.fallbackConnection\(let concrete, _\) = instance/);
     assert.match(source, /XCTAssertEqual\(concrete\.endpoint, "https:\/\/vendor\.example\.test"\)/);
     assert.doesNotMatch(source, /instance\.kind|\.unknown/);
   });

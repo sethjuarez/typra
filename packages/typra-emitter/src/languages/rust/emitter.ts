@@ -456,16 +456,13 @@ function emitKindEnum(
           : []);
 
     lines.push(`    /// Wildcard / catch-all variant for unrecognized \`${dispatch.discriminatorField}\` values.`);
-    // Wildcard always has kind_name field. A self-reference fallback has no
-    // concrete child model, so retain its unmodeled payload for lossless saves.
+    // Wildcard/default fallbacks retain unmodeled payload for lossless saves.
     if (variantFields.length === 0) {
       lines.push(`    ${variantName} {`);
       lines.push(`        /// The raw \`${dispatch.discriminatorField}\` string for this unknown variant.`);
       lines.push(`        ${toSnakeCase(dispatch.discriminatorField)}_name: String,`);
-      if (isSelfRef) {
-        lines.push("        /// Unmodeled fields preserved for forward-compatible round trips.");
-        lines.push("        raw: serde_json::Map<String, serde_json::Value>,");
-      }
+      lines.push("        /// Unmodeled fields preserved for forward-compatible round trips.");
+      lines.push("        raw: serde_json::Map<String, serde_json::Value>,");
       lines.push(`    },`);
     } else {
       lines.push(`    ${variantName} {`);
@@ -477,9 +474,11 @@ function emitKindEnum(
       }
       lines.push(`        /// The raw \`${dispatch.discriminatorField}\` string for this unknown variant.`);
       lines.push(`        ${toSnakeCase(dispatch.discriminatorField)}_name: String,`);
+      lines.push("        /// Unmodeled fields preserved for forward-compatible round trips.");
+      lines.push("        raw: serde_json::Map<String, serde_json::Value>,");
       lines.push(`    },`);
     }
-  } else if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+  } else if (!isClosedPolymorphicDispatch(dispatch)) {
     lines.push(`    /// Lossless fallback for unrecognized \`${dispatch.discriminatorField}\` values.`);
     lines.push("    Unknown {");
     lines.push(`        /// The raw \`${dispatch.discriminatorField}\` string for this unknown variant.`);
@@ -526,9 +525,7 @@ function emitEnumDefault(
     if (variantFields.length === 0) {
       lines.push(`        ${enumName}::${variantName} {`);
       lines.push(`            ${toSnakeCase(dispatch.discriminatorField)}_name: String::new(),`);
-      if (isSelfRef) {
-        lines.push("            raw: serde_json::Map::new(),");
-      }
+      lines.push("            raw: serde_json::Map::new(),");
       lines.push("        }");
     } else {
       lines.push(`        ${enumName}::${variantName} {`);
@@ -536,8 +533,14 @@ function emitEnumDefault(
         lines.push(`            ${rustFieldName(field.name)}: ${fieldDefault(field, polymorphicTypeNames)},`);
       }
       lines.push(`            ${toSnakeCase(dispatch.discriminatorField)}_name: String::new(),`);
+      lines.push("            raw: serde_json::Map::new(),");
       lines.push("        }");
     }
+  } else if (!isClosedPolymorphicDispatch(dispatch)) {
+    lines.push(`        ${enumName}::Unknown {`);
+    lines.push(`            ${toSnakeCase(dispatch.discriminatorField)}_name: String::new(),`);
+    lines.push("            raw: serde_json::Map::new(),");
+    lines.push("        }");
   } else if (dispatch.variants.length > 0) {
     // Default to the first named variant
     const firstVariant = dispatch.variants[0];
@@ -1108,10 +1111,9 @@ function coercionReturnStatement(
         const dvName = isSelfRef
           ? "Custom"
           : (dispatch.defaultVariant.typeName.name.replace(typeName, "") || "Custom");
-        const raw = isSelfRef ? ", raw: serde_json::Map::new()" : "";
-        return `${discSnake}: ${enumName}::${dvName} { ${discSnake}_name: "${a.literalValue}".to_string()${raw} }`;
+        return `${discSnake}: ${enumName}::${dvName} { ${discSnake}_name: "${a.literalValue}".to_string(), raw: serde_json::Map::new() }`;
       }
-      if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+      if (!isClosedPolymorphicDispatch(dispatch)) {
         return `${discSnake}: ${enumName}::Unknown { ${discSnake}_name: "${a.literalValue}".to_string(), raw: serde_json::Map::new() }`;
       }
       return `${discSnake}: ${enumName}::default()`;
@@ -1189,7 +1191,7 @@ function emitPolymorphicLoad(
           ? defaultType.fields.filter(f => f.name !== dispatch.discriminatorField && !baseFieldNames.has(f.name))
           : []);
 
-    if (isSelfRef) {
+    if (variantFields.length === 0) {
       lines.push(`            _ => ${enumName}::${variantName} {`);
       lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
       lines.push("                raw: {");
@@ -1200,10 +1202,6 @@ function emitPolymorphicLoad(
       lines.push("                    raw");
       lines.push("                },");
       lines.push("            },");
-    } else if (variantFields.length === 0) {
-      lines.push(`            _ => ${enumName}::${variantName} {`);
-      lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
-      lines.push(`            },`);
     } else {
       lines.push(`            _ => ${enumName}::${variantName} {`);
       for (const field of variantFields) {
@@ -1211,11 +1209,18 @@ function emitPolymorphicLoad(
         lines.push(`                ${rustFieldName(field.name)}: ${assignment},`);
       }
       lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
+      lines.push("                raw: {");
+      lines.push("                    let mut raw = value.as_object().cloned().unwrap_or_default();");
+      for (const fieldName of [...baseFieldNames, ...variantFields.map(field => field.name)]) {
+        lines.push(`                    raw.remove("${fieldName}");`);
+      }
+      lines.push("                    raw");
+      lines.push("                },");
       lines.push(`            },`);
     }
   } else if (isClosedPolymorphicDispatch(dispatch)) {
     lines.push(`            _ => panic!("Unknown ${name} discriminator field '${dispatch.discriminatorField}' value: {}", ${discSnake}_str),`);
-  } else if (dispatch.isAbstract) {
+  } else {
     lines.push(`            _ => ${enumName}::Unknown {`);
     lines.push(`                ${discSnake}_name: ${discSnake}_str.to_string(),`);
     lines.push("                raw: {");
@@ -1226,8 +1231,6 @@ function emitPolymorphicLoad(
     lines.push("                    raw");
     lines.push("                },");
     lines.push("            },");
-  } else {
-    lines.push(`            _ => ${enumName}::default(),`);
   }
 
   lines.push("        };");
@@ -1280,7 +1283,7 @@ function emitKindStr(
       ? "Custom"
       : (dispatch.defaultVariant.typeName.name.replace(type.typeName.name, "") || "Custom");
     lines.push(`            ${enumName}::${variantName} { ${discSnake}_name, .. } => ${discSnake}_name.as_str(),`);
-  } else if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+  } else if (!isClosedPolymorphicDispatch(dispatch)) {
     lines.push(`            ${enumName}::Unknown { ${discSnake}_name, .. } => ${discSnake}_name.as_str(),`);
   }
 
@@ -1382,29 +1385,39 @@ function emitVariantSave(
           ? defaultType.fields.filter(f => f.name !== dispatch.discriminatorField && !baseFieldNames.has(f.name))
           : []);
 
+    const rawSkipFields = Array.from(new Set([
+      ...baseFieldNames,
+      ...variantFields.map(field => field.name),
+    ]));
+    const rawFieldPattern = rawSkipFields.map(fieldName => `"${fieldName}"`).join(" | ");
     if (isSelfRef) {
       lines.push(`            ${enumName}::${variantName} { raw, .. } => {`);
       lines.push("                for (key, value) in raw {");
-      const baseFieldPattern = Array.from(baseFieldNames)
-        .map(fieldName => `"${fieldName}"`)
-        .join(" | ");
-      lines.push(`                    if matches!(key.as_str(), ${baseFieldPattern}) { continue; }`);
+      lines.push(`                    if matches!(key.as_str(), ${rawFieldPattern}) { continue; }`);
       lines.push("                    result.insert(key.clone(), value.clone());");
       lines.push("                }");
       lines.push("            }");
     } else if (variantFields.length === 0) {
-      lines.push(`            ${enumName}::${variantName} { ${discSnake}_name: _, .. } => {`);
+      lines.push(`            ${enumName}::${variantName} { raw, .. } => {`);
+      lines.push("                for (key, value) in raw {");
+      lines.push(`                    if matches!(key.as_str(), ${rawFieldPattern}) { continue; }`);
+      lines.push("                    result.insert(key.clone(), value.clone());");
+      lines.push("                }");
       lines.push("            }");
     } else {
       const destructure = variantFields.map(f => rustFieldName(f.name)).join(", ");
-      lines.push(`            ${enumName}::${variantName} { ${destructure}, ${discSnake}_name: _, .. } => {`);
+      lines.push(`            ${enumName}::${variantName} { ${destructure}, raw, .. } => {`);
       for (const field of variantFields) {
         const helper = defaultType?.collectionHelpers.find(candidate => candidate.propertyName === field.name);
         emitVariantSaveField(field, polymorphicTypeNames, type.typeName.name, lines, helper);
       }
+      lines.push("                for (key, value) in raw {");
+      lines.push(`                    if matches!(key.as_str(), ${rawFieldPattern}) { continue; }`);
+      lines.push("                    result.insert(key.clone(), value.clone());");
+      lines.push("                }");
       lines.push("            }");
     }
-  } else if (dispatch.isAbstract && !isClosedPolymorphicDispatch(dispatch)) {
+  } else if (!isClosedPolymorphicDispatch(dispatch)) {
     lines.push(`            ${enumName}::Unknown { raw, .. } => {`);
     lines.push("                for (key, value) in raw {");
     const baseFieldPattern = Array.from(baseFieldNames)

@@ -24,7 +24,8 @@ export function emitSwiftTests(ctx: BaseTestContext & { moduleName: string }): s
       ? matchingPolymorphicChild(ctx.node, expansion)
       : undefined;
     if (child) {
-      lines.push(`    if case .${swiftPropertyName(child.typeName.name)}(let concrete) = instance {`);
+      const rawPattern = isWildcardFallbackChild(ctx.node, child) ? ", _" : "";
+      lines.push(`    if case .${swiftPropertyName(child.typeName.name)}(let concrete${rawPattern}) = instance {`);
       for (const validation of coercion.validations) {
         if (validation.key === ctx.node.discriminator) continue;
         const expected = validationExpected(validation);
@@ -242,7 +243,8 @@ function emitChildPatternValidation(
   child: TypeNode,
   indent: string,
 ): void {
-  lines.push(`${indent}if case .${swiftPropertyName(child.typeName.name)}(let concrete) = ${accessor} {`);
+  const rawPattern = isWildcardFallbackChild(node, child) ? ", _" : "";
+  lines.push(`${indent}if case .${swiftPropertyName(child.typeName.name)}(let concrete${rawPattern}) = ${accessor} {`);
   for (const [key, expected] of Object.entries(sample)) {
     if (key === node.discriminator) continue;
     const literal = swiftExpectedLiteral(expected);
@@ -274,6 +276,10 @@ function defaultPolymorphicChild(node: TypeNode): TypeNode | undefined {
 
 function polymorphicChildValue(node: TypeNode, child: TypeNode): unknown {
   return child.properties.find(prop => prop.name === node.discriminator)?.defaultValue ?? "*";
+}
+
+function isWildcardFallbackChild(node: TypeNode, child: TypeNode): boolean {
+  return polymorphicChildValue(node, child) === "*";
 }
 
 function emitPropertyAssertion(

@@ -14,9 +14,9 @@
  *    class, so the guard inside the wildcard carrier is now unconditional, and dispatch rejects
  *    a missing, blank, null, or wrong-type discriminator before any fallback is considered.
  *
- *  - Swift and Rust still model a wildcard-defaulted open base as an enum with no base case, so
- *    the discriminator validation happens before enum routing and rejects invalid discriminator
- *    states rather than fabricating a base instance.
+ *  - Swift and Rust model fallback/base instances as enum carriers, so discriminator validation
+ *    happens before enum routing and rejects invalid discriminator states rather than fabricating
+ *    a value. Valid non-empty fallback values still have a representable carrier.
  */
 
 import { describe, it } from "node:test";
@@ -199,15 +199,15 @@ describe("missing required complex fields always fail load", () => {
     assert.doesNotMatch(code, /String\.valueOf\(discriminator\)/);
   });
 
-  it("Swift guards every wildcard-default discriminator except a blank one", () => {
+  it("Swift rejects invalid discriminator states and preserves wildcard fallback payload", () => {
     const code = emitSwiftFile(file, new SwiftExprVisitor(registry), polymorphicNames);
 
     assert.match(code, /if object\["connection"\] == nil \|\| object\["connection"\] is NSNull \{/);
     assert.match(code, /context\.at\("connection"\)\.path \+ ": missing required field"/);
-    // The old guard only fired for a non-empty *String*, so a numeric or boolean `kind`
-    // skipped it entirely. That form must be gone.
+    assert.match(code, /let discriminator = try TypraRuntime\.string\(object\["kind"\] \?\? NSNull\(\), field: "kind"\)/);
+    assert.match(code, /if discriminator\.isEmpty \{/);
     assert.doesNotMatch(code, /if let discriminator = object\["kind"\] as\? String, !discriminator\.isEmpty \{/);
-    assert.match(code, /\(object\["kind"\] as\? String\)\?\.isEmpty == true/);
+    assert.match(code, /case guardCustomTool\(GuardCustomTool, \[String: Any\]\)/);
   });
 
   it("Rust rejects invalid discriminator states before fallback", () => {
