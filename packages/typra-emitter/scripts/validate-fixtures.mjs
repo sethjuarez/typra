@@ -679,6 +679,7 @@ function assertGeneratedStructuredLoadCoverage() {
   const suites = [
     {
       target: "typescript",
+      outputRoot: "generated/fixtures/typescript",
       dir: path.join(generatedRoot, "typescript", "tests"),
       testFile: file => file.endsWith(".test.ts"),
       expectedTestPath: (name, group) => path.join(generatedRoot, "typescript", "tests", group || "", `${kebabCase(name)}.test.ts`),
@@ -686,6 +687,7 @@ function assertGeneratedStructuredLoadCoverage() {
     },
     {
       target: "python",
+      outputRoot: "generated/fixtures/python",
       dir: path.join(generatedRoot, "python", "tests"),
       testFile: file => file.endsWith(".py"),
       expectedTestPath: (name, group) => path.join(generatedRoot, "python", "tests", group || "", `test_${snakeCase(name)}.py`),
@@ -693,6 +695,7 @@ function assertGeneratedStructuredLoadCoverage() {
     },
     {
       target: "python_pydantic",
+      outputRoot: "generated/fixtures/python_pydantic",
       dir: path.join(generatedRoot, "python_pydantic", "tests"),
       testFile: file => file.endsWith(".py"),
       expectedTestPath: (name, group) => path.join(generatedRoot, "python_pydantic", "tests", group || "", `test_${snakeCase(name)}.py`),
@@ -700,6 +703,7 @@ function assertGeneratedStructuredLoadCoverage() {
     },
     {
       target: "go",
+      outputRoot: "generated/fixtures/go",
       dir: path.join(generatedRoot, "go", "tests"),
       testFile: file => file.endsWith("_test.go"),
       expectedTestPath: name => path.join(generatedRoot, "go", "tests", `${snakeCase(name)}_test.go`),
@@ -707,6 +711,7 @@ function assertGeneratedStructuredLoadCoverage() {
     },
     {
       target: "java",
+      outputRoot: "generated/fixtures/java",
       dir: path.join(generatedRoot, "java", "tests"),
       testFile: file => file.endsWith("GeneratedTest.java"),
       expectedTestPath: name => path.join(generatedRoot, "java", "tests", `${name}GeneratedTest.java`),
@@ -714,6 +719,7 @@ function assertGeneratedStructuredLoadCoverage() {
     },
     {
       target: "csharp",
+      outputRoot: "generated/fixtures/csharp",
       dir: path.join(generatedRoot, "csharp", "tests"),
       testFile: file => file.endsWith("ConversionTests.cs"),
       expectedTestPath: (name, group) => path.join(generatedRoot, "csharp", "tests", group || "", `${name}ConversionTests.cs`),
@@ -721,12 +727,14 @@ function assertGeneratedStructuredLoadCoverage() {
     },
     {
       target: "rust",
+      outputRoot: "generated/fixtures/rust",
       dir: path.join(generatedRoot, "rust", "tests"),
       testFile: file => file.endsWith("_test.rs"),
       hasStructuredLoad: content => /fn test_\w+_load_json\(\)/.test(content),
     },
     {
       target: "swift",
+      outputRoot: "generated/fixtures/swift",
       dir: path.join(generatedRoot, "swift", "Tests", "TypraFixturesTests"),
       testFile: file => file.endsWith("Tests.swift"),
       hasStructuredLoad: content => /func testJSONRoundTrip1\(\) throws/.test(content),
@@ -734,7 +742,7 @@ function assertGeneratedStructuredLoadCoverage() {
   ];
 
   for (const suite of suites) {
-    const target = exportSurface?.targets?.find(entry => entry.target === suite.target);
+    const target = exportSurface?.targets?.find(entry => entry.outputRoot === suite.outputRoot);
     if (target && suite.expectedTestPath) {
       const missing = (target.exports ?? [])
         .filter(entry => entry.kind === "value" && !entry.protocol)
