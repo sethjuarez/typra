@@ -143,8 +143,8 @@ const fixtureRootSample = {
       { name: "beta", first: "beta first", second: "beta second" },
     ],
     mapForm: {
-      delta: { first: "delta first", second: "delta second" },
       epsilon: { first: "epsilon first", second: "epsilon second" },
+      delta: { first: "delta first", second: "delta second" },
     },
     singleListForm: [{ name: "solo", first: "solo first", second: "solo second" }],
     singleMapForm: {
@@ -448,11 +448,14 @@ function assertConformanceMatrix() {
         if (Object.prototype.hasOwnProperty.call(rule, "case")) {
           fail(`Unit-test conformance rule ${rule.id} must not reference a fixture case.`);
         }
-        if (typeof rule.test !== "string" || !existsSync(path.join(packageRoot, "..", "..", rule.test))) {
-          fail(`Unit-test conformance rule ${rule.id} must reference an existing test file.`);
-        }
       } else {
         fail(`Enforced conformance rule ${rule.id} must declare verification as fixture-evidence or unit-test.`);
+      }
+      if (
+        (rule.verification === "unit-test" || Object.prototype.hasOwnProperty.call(rule, "test")) &&
+        (typeof rule.test !== "string" || !existsSync(path.join(packageRoot, "..", "..", rule.test)))
+      ) {
+        fail(`Enforced conformance rule ${rule.id} must reference an existing test file.`);
       }
     } else if (rule.status === "known-gap") {
       if (Object.prototype.hasOwnProperty.call(rule, "case")) {

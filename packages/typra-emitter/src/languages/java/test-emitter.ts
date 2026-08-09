@@ -341,9 +341,12 @@ function emitNamedCollectionMapValidation(
   if (!itemType) return;
 
   entries.forEach(([key, item], index) => {
-    const itemExpr = `${expr}.get(${index})`;
     const nameProperty = itemType.properties.find(itemProp => itemProp.name === "name");
+    const itemExpr = nameProperty
+      ? `${localIdentifier(expr)}${index}Entry`
+      : `${expr}.get(${index})`;
     if (nameProperty) {
+      lines.push(`    ${javaTypeName(itemType.typeName.name)} ${itemExpr} = ${expr}.stream().filter(item -> ${javaString(key)}.equals(item.${javaPropertyName(nameProperty.name)})).findFirst().orElseThrow(() -> new AssertionError("Expected ${propName}.${key} entry"));`);
       lines.push(`    assertEquals(${javaString(key)}, ${itemExpr}.${javaPropertyName(nameProperty.name)}, "Expected ${propName}.${key} name");`);
     }
     if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
