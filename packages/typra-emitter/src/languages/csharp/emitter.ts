@@ -353,6 +353,7 @@ function emitHeader(lines: string[], namespace: string): void {
   lines.push("// Copyright (c) Microsoft. All rights reserved.");
   lines.push("#nullable enable");
   lines.push("");
+  lines.push("using System.Linq;");
   lines.push("using System.Text.Json;");
   lines.push("using System.Threading;");
   lines.push("using YamlDotNet.Serialization;");
@@ -742,7 +743,7 @@ function getLoadExpression(
       return `instance.${propName} = ${varName};`;
     }
     case "dict":
-      return `instance.${propName} = ${varName}.GetDictionary()!;`;
+      return csharpDictLoadExpression(assign, propName, varName);
     case "complex":
       return `instance.${propName} = ${cat.typeName}.Load(${varName}.GetDictionary(${cat.typeName}.ShorthandProperty), context!.At("${assign.sourceName}"));`;
     case "collection_complex":
@@ -1136,7 +1137,11 @@ function getSaveExpression(assign: SaveAssignment, propName: string): string {
   const cat = assign.category;
   switch (cat.kind) {
     case "scalar":
+      return `result["${assign.targetName}"] = obj.${propName};`;
     case "dict":
+      if (cat.valueType && cat.valueType !== "unknown" && !CSHARP_TYPE_MAP[cat.valueType]) {
+        return `result["${assign.targetName}"] = obj.${propName}.ToDictionary(kvp => kvp.Key, kvp => (object?)kvp.Value.Save(context));`;
+      }
       return `result["${assign.targetName}"] = obj.${propName};`;
     case "complex":
       return `result["${assign.targetName}"] = obj.${propName}?.Save(context);`;
@@ -1145,6 +1150,25 @@ function getSaveExpression(assign: SaveAssignment, propName: string): string {
     case "collection_scalar":
       return `result["${assign.targetName}"] = obj.${propName};`;
   }
+}
+
+function csharpDictLoadExpression(assign: LoadAssignment, propName: string, varName: string): string {
+  const valueType = assign.category.kind === "dict" ? assign.category.valueType : undefined;
+  if (!valueType || valueType === "unknown") {
+    return `instance.${propName} = ${varName}.GetDictionary()!;`;
+  }
+  const valueExpr = csharpDictValueLoadExpr("kvp.Value", valueType, `context!.At("${assign.sourceName}").At(kvp.Key)`);
+  return `instance.${propName} = ${varName}.GetDictionary()!.ToDictionary(kvp => kvp.Key, kvp => ${valueExpr});`;
+}
+
+function csharpDictValueLoadExpr(valueExpr: string, valueType: string, contextExpr: string): string {
+  const csType = CSHARP_TYPE_MAP[valueType];
+  if (csType === "string") return `${valueExpr}.ToString()!`;
+  if (csType && NON_NULLABLE_VALUE_TYPES.has(csType)) {
+    return `Convert.To${CONVERT_MAP[csType]}(${valueExpr})`;
+  }
+  if (csType === "object" || !valueType || valueType === "unknown") return valueExpr;
+  return `${valueType}.Load(${valueExpr}.GetDictionary(${valueType}.ShorthandProperty), ${contextExpr})`;
 }
 
 // ============================================================================

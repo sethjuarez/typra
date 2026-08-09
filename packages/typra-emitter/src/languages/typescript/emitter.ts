@@ -508,7 +508,9 @@ function tsTypeAnnotation(f: FieldDecl): string {
   const cat = f.category;
   switch (cat.kind) {
     case "dict":
-      return f.isOptional ? "Record<string, unknown> | undefined" : "Record<string, unknown>";
+      return f.isOptional
+        ? `Record<string, ${tsRecordValueType(cat.valueType)}> | undefined`
+        : `Record<string, ${tsRecordValueType(cat.valueType)}>`;
     case "collection_scalar":
       return `${TYPE_MAP[cat.scalarType] || "unknown"}[]`;
     case "collection_complex":
@@ -520,6 +522,11 @@ function tsTypeAnnotation(f: FieldDecl): string {
     case "complex":
       return f.isOptional ? `${cat.typeName} | undefined` : cat.typeName;
   }
+}
+
+function tsRecordValueType(valueType: string | undefined): string {
+  if (!valueType || valueType === "unknown") return "unknown";
+  return TYPE_MAP[valueType] || valueType;
 }
 
 // ============================================================================
@@ -769,7 +776,31 @@ function emitLoadAssignment(a: LoadAssignment): string {
     case "collection_complex":
       return `instance.${a.fieldName} = ${a.parentTypeName}.load${capitalize(a.fieldName)}(data["${a.sourceName}"] as unknown[], context.at("${a.sourceName}"));`;
     case "dict":
-      return `instance.${a.fieldName} = data["${a.sourceName}"] as Record<string, unknown>;`;
+      return dictLoadAssignment(a.fieldName, a.sourceName, cat.valueType);
+  }
+}
+
+function dictLoadAssignment(fieldName: string, sourceName: string, valueType: string | undefined): string {
+  if (!valueType || valueType === "unknown") {
+    return `instance.${fieldName} = data["${sourceName}"] as Record<string, unknown>;`;
+  }
+  const valueExpr = dictValueLoadExpr("value", valueType, `context.at("${sourceName}").at(key)`);
+  return `instance.${fieldName} = Object.fromEntries(Object.entries(data["${sourceName}"] as Record<string, unknown>).map(([key, value]) => [key, ${valueExpr}]));`;
+}
+
+function dictValueLoadExpr(valueExpr: string, valueType: string, contextExpr: string): string {
+  const tsType = TYPE_MAP[valueType];
+  switch (tsType) {
+    case "string":
+      return `String(${valueExpr})`;
+    case "number":
+      return `Number(${valueExpr})`;
+    case "boolean":
+      return `Boolean(${valueExpr})`;
+    case "unknown":
+      return valueExpr;
+    default:
+      return `${valueType}.load(${valueExpr} as Record<string, unknown>, ${contextExpr})`;
   }
 }
 
@@ -1184,6 +1215,9 @@ function emitSaveAssignment(a: SaveAssignment): string {
     case "scalar":
     case "dict":
     case "collection_scalar":
+      if (cat.kind === "dict" && cat.valueType && cat.valueType !== "unknown" && !TYPE_MAP[cat.valueType]) {
+        return `result["${a.targetName}"] = Object.fromEntries(Object.entries(obj.${a.fieldName}).map(([key, value]) => [key, value.save(context)]));`;
+      }
       return `result["${a.targetName}"] = obj.${a.fieldName};`;
     case "collection_complex":
       return `result["${a.targetName}"] = ${a.parentTypeName}.save${capitalize(a.fieldName)}(obj.${a.fieldName}, context);`;

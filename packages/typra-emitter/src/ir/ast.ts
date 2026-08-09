@@ -626,10 +626,15 @@ export const resolveModelProperty = (program: Program, property: ModelProperty, 
     prop.isCollection = false;
 
     prop.typeName = getModelType(model, rootNamespace, rootAlias);
-    if (prop.typeName.name === "Record<unknown>") {
+    if (model.name === "Record") {
+      const recordValueType = getTemplateType(model);
       prop.isScalar = true;
       prop.isDict = true;
-      prop.dictValueType = "unknown";
+      prop.dictValueType = recordValueType?.kind === "Model"
+        ? getModelType(recordValueType, rootNamespace, rootAlias).name
+        : recordValueType
+          ? getTypeName(recordValueType, { nameOnly: true })
+          : "unknown";
       prop.typeName = {
         namespace: "",
         name: "dictionary"

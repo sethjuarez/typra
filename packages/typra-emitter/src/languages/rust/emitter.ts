@@ -727,7 +727,7 @@ function emitImpl(
 
   // Dict accessor helpers (only for dict-category fields, not scalar value types)
   for (const field of type.fields) {
-    if (field.category.kind === "dict") {
+    if (field.category.kind === "dict" && (!field.category.valueType || field.category.valueType === "unknown")) {
       emitDictAccessor(field, lines);
     }
   }
@@ -1867,7 +1867,9 @@ function fieldType(
         : `Vec<${elemType}>`;
     }
     case "dict": {
-      return "serde_json::Value";
+      if (!cat.valueType || cat.valueType === "unknown") return "serde_json::Value";
+      const mapType = `std::collections::HashMap<String, ${rustDictValueType(cat.valueType)}>`;
+      return field.isOptional ? `Option<${mapType}>` : mapType;
     }
   }
 }
@@ -1909,8 +1911,13 @@ function fieldDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): stri
     case "collection_complex":
       return field.isOptional && !field.hasExplicitDefault ? "None" : "Vec::new()";
     case "dict":
-      return "serde_json::Value::Null";
+      if (!cat.valueType || cat.valueType === "unknown") return "serde_json::Value::Null";
+      return field.isOptional ? "None" : "std::collections::HashMap::new()";
   }
+}
+
+function rustDictValueType(valueType: string): string {
+  return RUST_TYPE_MAP[valueType] || valueType;
 }
 
 // ============================================================================
@@ -1958,7 +1965,36 @@ function loadExpr(a: LoadAssignment, polymorphicTypeNames: Set<string>): string 
         : `${loaded}.unwrap_or_default()`;
     }
     case "dict":
-      return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
+      return dictLoadExpr(key, cat.valueType, a.isOptional);
+  }
+}
+
+function dictLoadExpr(key: string, valueType: string | undefined, isOptional: boolean): string {
+  if (!valueType || valueType === "unknown") {
+    return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
+  }
+  const loaded = `value.get("${key}").and_then(|v| v.as_object()).map(|items| items.iter().map(|(key, item)| (key.clone(), ${rustDictValueLoadExpr("item", valueType)})).collect())`;
+  return isOptional ? loaded : `${loaded}.unwrap_or_default()`;
+}
+
+function rustDictValueLoadExpr(valueExpr: string, valueType: string): string {
+  switch (RUST_TYPE_MAP[valueType]) {
+    case "String":
+      return `${valueExpr}.as_str().unwrap_or_default().to_string()`;
+    case "bool":
+      return `${valueExpr}.as_bool().unwrap_or_default()`;
+    case "i32":
+      return `${valueExpr}.as_i64().unwrap_or_default() as i32`;
+    case "i64":
+      return `${valueExpr}.as_i64().unwrap_or_default()`;
+    case "f32":
+      return `${valueExpr}.as_f64().unwrap_or_default() as f32`;
+    case "f64":
+      return `${valueExpr}.as_f64().unwrap_or_default()`;
+    case "serde_json::Value":
+      return `${valueExpr}.clone()`;
+    default:
+      return `${valueType}::load_from_value(${valueExpr}, ctx)`;
   }
 }
 
@@ -2076,7 +2112,7 @@ function variantLoadExpr(
         : `${loaded}.unwrap_or_default()`;
     }
     case "dict":
-      return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
+      return dictLoadExpr(key, cat.valueType, field.isOptional);
   }
 }
 
@@ -2166,16 +2202,31 @@ function emitSaveField(
       return;
     }
     case "dict": {
-      if (a.isOptional) {
-        lines.push(`${indent}if !${fieldRef}.is_null() {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+      if (!cat.valueType || cat.valueType === "unknown") {
+        if (a.isOptional) {
+          lines.push(`${indent}if !${fieldRef}.is_null() {`);
+          lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+          lines.push(`${indent}}`);
+        } else {
+          lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+        }
+      } else if (a.isOptional) {
+        lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), ${rustDictSaveExpr("items", cat.valueType)});`);
         lines.push(`${indent}}`);
       } else {
-        lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+        lines.push(`${indent}result.insert("${key}".to_string(), ${rustDictSaveExpr(`&${fieldRef}`, cat.valueType)});`);
       }
       return;
     }
   }
+}
+
+function rustDictSaveExpr(valueExpr: string, valueType: string): string {
+  if (RUST_TYPE_MAP[valueType]) {
+    return `serde_json::to_value(${valueExpr}).unwrap_or(serde_json::Value::Null)`;
+  }
+  return `serde_json::Value::Object((${valueExpr}).iter().map(|(key, item)| (key.clone(), item.to_value(ctx))).collect())`;
 }
 
 function emitScalarSave(
@@ -2347,12 +2398,20 @@ function emitVariantSaveField(
       return;
     }
     case "dict": {
-      if (field.isOptional) {
-        lines.push(`${indent}if !${fieldRef}.is_null() {`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+      if (!cat.valueType || cat.valueType === "unknown") {
+        if (field.isOptional) {
+          lines.push(`${indent}if !${fieldRef}.is_null() {`);
+          lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+          lines.push(`${indent}}`);
+        } else {
+          lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+        }
+      } else if (field.isOptional) {
+        lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
+        lines.push(`${indent}    result.insert("${key}".to_string(), ${rustDictSaveExpr("items", cat.valueType)});`);
         lines.push(`${indent}}`);
       } else {
-        lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
+        lines.push(`${indent}result.insert("${key}".to_string(), ${rustDictSaveExpr(fieldRef, cat.valueType)});`);
       }
       return;
     }

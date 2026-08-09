@@ -72,7 +72,7 @@ const checks = [
     command: "dotnet",
     args: ["--version"],
     required: true,
-    expected: ".NET SDK capable of targeting net8.0; used for generated C# builds/tests/conformance.",
+    expected: ".NET SDK capable of targeting net10.0; used for generated C# builds/tests/conformance.",
   },
   {
     name: "Swift",
