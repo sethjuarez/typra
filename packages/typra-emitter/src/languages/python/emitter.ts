@@ -1210,53 +1210,41 @@ function emitPolymorphicDispatch(
   lines.push("    @staticmethod");
   lines.push(`    def load_${discSnake}(data: dict, context: LoadContext | None) -> "${parentName}":`);
   lines.push(`        # load polymorphic ${parentName} instance`);
-  lines.push(`        if data is not None and data.get("${dispatch.discriminatorField}") is not None and str(data["${dispatch.discriminatorField}"]) != "":`);
-  lines.push(`            discriminator_value = str(data["${dispatch.discriminatorField}"])`);
+  lines.push(`        discriminator_raw = data.get("${dispatch.discriminatorField}") if data is not None else None`);
+  lines.push("        if not isinstance(discriminator_raw, str) or discriminator_raw == \"\":");
+  lines.push(`            raise ValueError("Invalid ${parentName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`);
+  lines.push("        discriminator_value = discriminator_raw");
 
   for (let i = 0; i < dispatch.variants.length; i++) {
     const v = dispatch.variants[i];
     const keyword = i === 0 ? "if" : "elif";
-    lines.push(`            ${keyword} discriminator_value == "${v.value}":`);
-    lines.push(`                return ${v.typeName.name}.load(data, context)`);
+    lines.push(`        ${keyword} discriminator_value == "${v.value}":`);
+    lines.push(`            return ${v.typeName.name}.load(data, context)`);
   }
 
   // Default handling — matches template whitespace exactly
   if (dispatch.defaultVariant) {
     lines.push("");
-    lines.push("            else:");
+    lines.push("        else:");
     if (dispatch.defaultVariant.isSelfReference) {
-      lines.push(`                # create new instance (stop recursion)`);
-      lines.push(`                return ${parentName}()`);
+      lines.push(`            # create new instance (stop recursion)`);
+      lines.push(`            return ${parentName}()`);
     } else {
       lines.push("");
-      lines.push(`                # load default instance`);
-      lines.push(`                return ${dispatch.defaultVariant.typeName.name}.load(data, context)`);
+      lines.push(`            # load default instance`);
+      lines.push(`            return ${dispatch.defaultVariant.typeName.name}.load(data, context)`);
     }
   } else if (carrier) {
     lines.push("");
-    lines.push("            else:");
-    lines.push(`                # absorb unrecognized discriminator`);
-    lines.push(`                return ${carrier}.load(data, context)`);
+    lines.push("        else:");
+    lines.push(`            # absorb unrecognized discriminator`);
+    lines.push(`            return ${carrier}.load(data, context)`);
   } else {
     lines.push("");
-    lines.push("            else:");
-    lines.push(`                raise ValueError(f"Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: {discriminator_value}")`);
+    lines.push("        else:");
+    lines.push(`            raise ValueError(f"Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: {discriminator_value}")`);
   }
 
-  lines.push("        else:");
-  if (carrier) {
-    // Matches the Go and TypeScript backends, which absorb a missing discriminator into the
-    // same carrier they use for an unrecognized one. No vector covers this case; the choice
-    // is made for cross-backend consistency, not from a stated requirement.
-    lines.push(`            # absorb missing discriminator`);
-    lines.push(`            return ${carrier}.load(data, context)`);
-  } else if (isClosed || isAbstract) {
-    lines.push("");
-    lines.push(`            raise ValueError("Missing ${parentName} discriminator property: '${dispatch.discriminatorField}'")`);
-  } else {
-    lines.push(`            # create new instance`);
-    lines.push(`            return ${parentName}()`);
-  }
   lines.push("");
 }
 

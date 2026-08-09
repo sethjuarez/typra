@@ -215,7 +215,7 @@ describe("Python abstract open polymorphic dispatch", () => {
     assert.match(source, /class Connection\(ABC\):/);
     assert.match(source, /class UnknownConnection\(Connection\):/);
     assert.doesNotMatch(source, /Unknown Connection discriminator field/);
-    assert.doesNotMatch(source, /Missing Connection discriminator property/);
+    assert.match(source, /Invalid Connection discriminator field 'kind': expected non-blank string/);
     assert.match(source, /return UnknownConnection\.load\(data, context\)/);
 
     // The retained payload must be deep-copied and stripped of the declared fields, so a
@@ -255,6 +255,6 @@ describe("Python abstract open polymorphic dispatch", () => {
     assert.doesNotMatch(source, /class UnknownConnection/);
     assert.doesNotMatch(source, /_raw: dict\[str, Any\]/);
     assert.match(source, /Unknown Connection discriminator field/);
-    assert.match(source, /Missing Connection discriminator property/);
+    assert.match(source, /Invalid Connection discriminator field 'kind': expected non-blank string/);
   });
 });

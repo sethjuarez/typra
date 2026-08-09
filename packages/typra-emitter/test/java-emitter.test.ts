@@ -769,7 +769,8 @@ describe("Java emitter runtime semantics", () => {
       };
 
       const source = emitJavaFileContent([base], "test", new JavaExprVisitor(), new Set(["Tool"]));
-      assert.match(source, /switch \(String\.valueOf\(discriminator\)\)/);
+      assert.match(source, /discriminator instanceof String discriminatorString/);
+      assert.match(source, /switch \(discriminatorString\)/);
       assert.match(source, /case "FunctionTool":/);
       assert.doesNotMatch(source, /toLowerCase\(java\.util\.Locale\.ROOT\)/);
     });

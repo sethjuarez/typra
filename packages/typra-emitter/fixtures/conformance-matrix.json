@@ -68,18 +68,20 @@
     },
     {
       "id": "invalid-discriminator-states",
-      "status": "known-gap",
-      "issue": "#133",
+      "status": "enforced",
+      "case": "invalid-discriminator-states",
+      "verification": "fixture-evidence",
+      "test": "packages/typra-emitter/scripts/validate-fixtures.mjs",
       "backends": {
-        "typescript": { "status": "waived", "issue": "#133" },
-        "python": { "status": "waived", "issue": "#133" },
-        "csharp": { "status": "waived", "issue": "#133" },
-        "go": { "status": "waived", "issue": "#133" },
-        "java": { "status": "waived", "issue": "#133" },
-        "rust": { "status": "waived", "issue": "#133" },
-        "swift": { "status": "waived", "issue": "#133" }
+        "typescript": "implemented",
+        "python": "implemented",
+        "csharp": "implemented",
+        "go": "implemented",
+        "java": "implemented",
+        "rust": "implemented",
+        "swift": "implemented"
       },
-      "description": "Absent, blank, and wrong-type discriminators need executable cross-target assertions."
+      "description": "Absent, blank, and wrong-type discriminators are rejected before open or wildcard fallback."
     },
     {
       "id": "swift-invalid-discriminator-states",
@@ -417,6 +419,75 @@
               "case \"text\": return .textContent(try TextContent.load(normalizedData, context: context))",
               "case \"image\": return .imageContent(try ImageContent.load(normalizedData, context: context))",
               "case .textContent(let value): return try value.save(context)"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "invalid-discriminator-states",
+      "description": "FixtureConnection rejects missing, blank, null, and wrong-type discriminator values before open/unknown fallback is considered.",
+      "evidence": {
+        "typescript": [
+          {
+            "path": "scripts/validate-fixtures.mjs",
+            "snippets": [
+              "FixtureConnection.load(invalidConnectionInput as any);",
+              "invalid FixtureConnection discriminator was accepted"
+            ]
+          }
+        ],
+        "python": [
+          {
+            "path": "scripts/validate-fixtures.mjs",
+            "snippets": [
+              "for invalid_connection_input in ({}, {\"kind\": \"\"}, {\"kind\": None}, {\"kind\": 42}):",
+              "invalid FixtureConnection discriminator was accepted"
+            ]
+          }
+        ],
+        "csharp": [
+          {
+            "path": "scripts/validate-fixtures.mjs",
+            "snippets": [
+              "FixtureConnection.Load(invalidConnectionInput);",
+              "invalid FixtureConnection discriminator was accepted"
+            ]
+          }
+        ],
+        "go": [
+          {
+            "path": "scripts/validate-fixtures.mjs",
+            "snippets": [
+              "invalidConnectionErr := fixtures.LoadFixtureConnection(invalidConnectionInput, loadCtx)",
+              "invalid FixtureConnection discriminator was accepted"
+            ]
+          }
+        ],
+        "java": [
+          {
+            "path": "scripts/validate-fixtures.mjs",
+            "snippets": [
+              "FixtureConnection.load(invalidConnectionInput, new LoadContext());",
+              "invalid FixtureConnection discriminator was accepted"
+            ]
+          }
+        ],
+        "rust": [
+          {
+            "path": "scripts/validate-fixtures.mjs",
+            "snippets": [
+              "FixtureConnection::from_json(&invalid_connection_input.to_string(), &load_ctx).expect_err",
+              "invalid FixtureConnection discriminator"
+            ]
+          }
+        ],
+        "swift": [
+          {
+            "path": "scripts/validate-fixtures.mjs",
+            "snippets": [
+              "testInvalidDiscriminatorStatesDoNotUseUnknownFallback",
+              "invalid FixtureConnection discriminator diagnostic lost field context"
             ]
           }
         ]

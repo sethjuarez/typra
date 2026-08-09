@@ -1126,11 +1126,13 @@ function emitPolymorphicDispatch(
   const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push(`  private static loadKind(data: Record<string, unknown>, context?: LoadContext): ${parentName} {`);
   lines.push(`    const discriminatorValue = data["${dispatch.discriminatorField}"];`);
-  // A blank discriminator is not a variant selector — it is the absence of a kind. Routing it
-  // here (rather than into the wildcard/default arm) reuses this backend's existing
-  // missing-discriminator behaviour instead of fabricating a wildcard instance.
-  lines.push('    if (discriminatorValue !== undefined && discriminatorValue !== null && String(discriminatorValue) !== "") {');
-  lines.push("      const discriminator = String(discriminatorValue);");
+  lines.push("    if (typeof discriminatorValue !== \"string\") {");
+  lines.push(`      throw new Error("Invalid ${parentName} discriminator field '${dispatch.discriminatorField}': expected non-blank string");`);
+  lines.push("    }");
+  lines.push("    if (discriminatorValue === \"\") {");
+  lines.push(`      throw new Error("Invalid ${parentName} discriminator field '${dispatch.discriminatorField}': expected non-blank string");`);
+  lines.push("    }");
+  lines.push("    const discriminator = discriminatorValue;");
   lines.push("      switch (discriminator) {");
 
   for (const v of dispatch.variants) {
@@ -1155,19 +1157,6 @@ function emitPolymorphicDispatch(
   }
 
   lines.push("      }");
-  lines.push("    }");
-
-  // Missing discriminator
-  if (carrier) {
-    // Matches the Go backend, which absorbs a missing discriminator into the same
-    // carrier it uses for an unrecognized one. No vector covers this case; the
-    // choice is made for cross-backend consistency, not from a stated requirement.
-    lines.push(`    return ${carrier}.load(data, context);`);
-  } else if (isClosed || dispatch.isAbstract) {
-    lines.push(`    throw new Error("Missing ${parentName} discriminator property: '${dispatch.discriminatorField}'");`);
-  } else {
-    lines.push(`    return new ${parentName}();`);
-  }
 
   lines.push("  }");
   lines.push("");

@@ -116,9 +116,7 @@ export function emitGoFileContent(
     type.fields.some(field => field.category.kind === "complex" && !field.isOptional && !field.hasExplicitDefault)
   );
   const needsFmt = enums.some(enumDef => hasParseAliases(enumDef) && !enumDef.isOpen) ||
-    types.some(type => type.polymorphicDispatch
-      && isClosedPolymorphicDispatch(type.polymorphicDispatch)
-      && !type.polymorphicDispatch.defaultVariant) ||
+    types.some(type => type.polymorphicDispatch) ||
     needsNamedCollections ||
     needsRequiredComplexValidation;
   // math.Trunc is only referenced when a type coerces from both a whole-number and a
@@ -534,19 +532,14 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   lines.push(`\t\tif discriminator, ok := m["${dispatch.discriminatorField}"]; ok {`);
   lines.push("\t\t\tswitch discriminator := discriminator.(type) {");
   lines.push("\t\t\tcase string:");
+  lines.push('\t\t\t\tif discriminator == "" {');
+  lines.push(`\t\t\t\t\treturn nil, fmt.Errorf("invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`);
+  lines.push("\t\t\t\t}");
   lines.push("\t\t\t\tswitch discriminator {");
 
   for (const variant of dispatch.variants) {
     lines.push(`\t\t\t\tcase "${variant.value}":`);
     lines.push(`\t\t\t\t\treturn Load${variant.typeName.name}(data, ctx)`);
-  }
-
-  // A blank discriminator is not a variant selector — it is the absence of a kind. Breaking out
-  // of the switch lets it fall through to this backend's existing missing-discriminator
-  // behaviour instead of being absorbed by the wildcard/default arm as a fabricated instance.
-  if (!dispatch.variants.some(variant => variant.value === "")) {
-    lines.push('\t\t\t\tcase "":');
-    lines.push("\t\t\t\t\t// blank discriminator: not a variant selector");
   }
 
   // Default variant
@@ -564,11 +557,13 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   if (isClosed && !dispatch.defaultVariant) {
     lines.push("\t\t\tdefault:");
     lines.push(`\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: %v", discriminator)`);
-  } else if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
+  } else {
     lines.push("\t\t\tdefault:");
-    lines.push(`\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
+    lines.push(`\t\t\t\treturn nil, fmt.Errorf("invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`);
   }
   lines.push("\t\t\t}");
+  lines.push("\t\t} else {");
+  lines.push(`\t\t\treturn nil, fmt.Errorf("missing ${typeName} discriminator property: ${dispatch.discriminatorField}")`);
   lines.push("\t\t}");
   lines.push("\t}");
   if (isClosed && !dispatch.defaultVariant) {

@@ -934,48 +934,34 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
   lines.push("    /// </summary>");
   lines.push(`    private static ${typeName} LoadKind(Dictionary<string, object?> data, LoadContext? context)`);
   lines.push("    {");
-  lines.push(`        if (data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) && discriminatorValue is not null && discriminatorValue.ToString() != "")`);
+  lines.push(`        if (!data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) || discriminatorValue is not string discriminator || discriminator == "")`);
   lines.push("        {");
-  lines.push("            var discriminator = discriminatorValue.ToString();");
-  lines.push("            return discriminator switch");
-  lines.push("            {");
+  lines.push(`            throw new ArgumentException("Invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string");`);
+  lines.push("        }");
+  lines.push("");
+  lines.push("        return discriminator switch");
+  lines.push("        {");
 
   for (const variant of dispatch.variants) {
-    lines.push(`                "${variant.value}" => ${variant.typeName.name}.Load(data, context),`);
+    lines.push(`            "${variant.value}" => ${variant.typeName.name}.Load(data, context),`);
   }
 
   // Default handling
   if (dispatch.defaultVariant) {
     if (dispatch.defaultVariant.isSelfReference) {
-      lines.push(`                _ => new ${typeName}(),`);
+      lines.push(`            _ => new ${typeName}(),`);
     } else {
-      lines.push(`                _ => ${dispatch.defaultVariant.typeName.name}.Load(data, context),`);
+      lines.push(`            _ => ${dispatch.defaultVariant.typeName.name}.Load(data, context),`);
     }
   } else if (carrier) {
-    lines.push(`                _ => ${carrier}.Load(data, context),`);
+    lines.push(`            _ => ${carrier}.Load(data, context),`);
   } else if (isClosed || dispatch.isAbstract) {
-    lines.push(`                _ => throw new ArgumentException($"Unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: {discriminator}"),`);
+    lines.push(`            _ => throw new ArgumentException($"Unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: {discriminator}"),`);
   } else {
-    lines.push(`                _ => new ${typeName}(),`);
+    lines.push(`            _ => new ${typeName}(),`);
   }
 
-  lines.push("            };");
-  lines.push("        }");
-  lines.push("");
-
-  // Fallback when discriminator property is missing
-  if (carrier) {
-    // Matches the Go, TypeScript and Python backends, which absorb a missing discriminator
-    // into the same carrier they use for an unrecognized one. No vector covers this case;
-    // the choice is made for cross-backend consistency, not from a stated requirement.
-    lines.push(`        return ${carrier}.Load(data, context);`);
-  } else if ((isClosed || dispatch.isAbstract) && !dispatch.defaultVariant) {
-    lines.push(`        throw new ArgumentException("Missing ${typeName} discriminator property: '${dispatch.discriminatorField}'");`);
-  } else if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
-    lines.push(`        throw new ArgumentException("Missing ${typeName} discriminator property: '${dispatch.discriminatorField}'");`);
-  } else {
-    lines.push(`        return new ${typeName}();`);
-  }
+  lines.push("        };");
 
   lines.push("");
   lines.push("    }");

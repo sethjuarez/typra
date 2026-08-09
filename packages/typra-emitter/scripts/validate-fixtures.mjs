@@ -2850,6 +2850,17 @@ function runTypeScriptExecutableConformance() {
       'if (caseCollision.constructor !== FixtureConnection || caseCollisionSaved.kind !== "Custom" || caseCollisionSaved.name !== "case-sensitive-unknown" || (caseCollisionSaved.payload as { mode: string }).mode !== "future" || Object.keys(caseCollisionSaved).length !== 3) throw new Error("wrong-case connection discriminator did not remain unknown");',
       'const knownConnection = FixtureConnection.load({ kind: "custom", name: "known", endpoint: "https://example.test" });',
       'if (knownConnection.constructor === FixtureConnection || knownConnection.save().endpoint !== "https://example.test") throw new Error("known connection dispatch regressed");',
+      'for (const invalidConnectionInput of [{}, { kind: "" }, { kind: null }, { kind: 42 }]) {',
+      "  let rejected = false;",
+      "  try {",
+      "    FixtureConnection.load(invalidConnectionInput as any);",
+      "  } catch (error) {",
+      "    rejected = true;",
+      "    const message = String(error);",
+      '    if (!message.includes("kind") && !message.includes("discriminator")) throw error;',
+      "  }",
+      '  if (!rejected) throw new Error("invalid FixtureConnection discriminator was accepted");',
+      "}",
       'const wildcardTool = FixtureTool.load({ kind: "vendor", name: "vendor", description: "vendor description", connection: { kind: "future-auth", name: "future" }, config: { enabled: true } });',
       'if (!(wildcardTool instanceof FixtureCustomTool)) throw new Error("declared wildcard subtype did not own unknown tool kind");',
       "const wildcardToolSaved = wildcardTool.save();",
@@ -3094,6 +3105,14 @@ function runPythonExecutableConformance(
     "assert type(case_collision) is FixtureConnection and case_collision.save() == case_collision_input",
     'known_connection = FixtureConnection.load({"kind": "custom", "name": "known", "endpoint": "https://example.test"})',
     'assert type(known_connection) is not FixtureConnection and known_connection.save()["endpoint"] == "https://example.test"',
+    'for invalid_connection_input in ({}, {"kind": ""}, {"kind": None}, {"kind": 42}):',
+    "    try:",
+    "        FixtureConnection.load(invalid_connection_input)",
+    "    except ValueError as error:",
+    "        message = str(error)",
+    '        assert "kind" in message or "discriminator" in message',
+    "    else:",
+    '        raise AssertionError("invalid FixtureConnection discriminator was accepted")',
     'wildcard_tool = FixtureTool.load({"kind": "vendor", "name": "vendor", "description": "vendor description", "connection": {"kind": "future-auth", "name": "future"}, "config": {"enabled": True}})',
     'assert type(wildcard_tool) is FixtureCustomTool, "declared wildcard subtype did not own unknown tool kind"',
     "wildcard_tool_saved = wildcard_tool.save()",
@@ -3368,6 +3387,12 @@ function runGoExecutableConformance() {
       '\tknownConnection, err := fixtures.LoadFixtureConnection(map[string]interface{}{"kind": "custom", "name": "known", "endpoint": "https://example.test"}, loadCtx)',
       "\tif err != nil { panic(err) }",
       '\tif _, ok := knownConnection.(fixtures.FixtureCustomConnection); !ok { panic("known connection dispatch regressed") }',
+      '\tfor _, invalidConnectionInput := range []map[string]interface{}{{}, {"kind": ""}, {"kind": nil}, {"kind": 42.0}} {',
+      "\t\t_, invalidConnectionErr := fixtures.LoadFixtureConnection(invalidConnectionInput, loadCtx)",
+      '\t\tif invalidConnectionErr == nil { panic("invalid FixtureConnection discriminator was accepted") }',
+      "\t\tinvalidConnectionMessage := invalidConnectionErr.Error()",
+      '\t\tif !strings.Contains(invalidConnectionMessage, "kind") && !strings.Contains(invalidConnectionMessage, "discriminator") { panic("invalid FixtureConnection discriminator diagnostic lost field context: " + invalidConnectionMessage) }',
+      "\t}",
       // Issue #46 asks for round-trip coverage of all four named-collection wire shapes:
       // array form, name-keyed object form, duplicate names, and unnamed entries.
       "\tnamedBindings := map[string]interface{}{",
@@ -3695,6 +3720,11 @@ function runRustExecutableConformance() {
       "    let known_connection = FixtureConnection::load_from_value(&known_connection_input, &load_ctx);",
       "    assert!(matches!(known_connection.kind, FixtureConnectionKind::FixtureCustomConnection { .. }));",
       "    assert_eq!(known_connection.to_value(&save_ctx), known_connection_input);",
+      "    for invalid_connection_input in [json!({}), json!({\"kind\": \"\"}), json!({\"kind\": null}), json!({\"kind\": 42})] {",
+      "        let invalid_connection_error = FixtureConnection::from_json(&invalid_connection_input.to_string(), &load_ctx).expect_err(\"invalid FixtureConnection discriminator\");",
+      "        let invalid_connection_message = invalid_connection_error.to_string();",
+      "        assert!(invalid_connection_message.contains(\"kind\") || invalid_connection_message.contains(\"discriminator\"), \"{invalid_connection_message}\");",
+      "    }",
       // A named open-enum discriminator must round-trip an unrecognized kind losslessly.
       // (This is adjacent to issue #38 but does not reproduce it — see the fixture doc.)
       '    let named_open_input = json!({"kind": "vendor-specific", "label": "future", "extra": {"nested": [1, null]}});',
@@ -4043,6 +4073,24 @@ function runCSharpExecutableConformance() {
       'if (FixtureTool.Load(wildcardToolSaved).GetType() != typeof(FixtureCustomTool)) throw new InvalidOperationException("wildcard tool did not survive reload");',
       'var knownConnection = FixtureConnection.Load(new Dictionary<string, object?> { ["kind"] = "custom", ["name"] = "known", ["endpoint"] = "https://example.test" });',
       'if (knownConnection.GetType() == typeof(FixtureConnection) || !Equals(knownConnection.Save()["endpoint"], "https://example.test")) throw new InvalidOperationException("known connection dispatch regressed");',
+      "foreach (var invalidConnectionInput in new Dictionary<string, object?>[]",
+      "{",
+      "    new(),",
+      '    new() { ["kind"] = "" },',
+      '    new() { ["kind"] = null },',
+      '    new() { ["kind"] = 42 },',
+      "})",
+      "{",
+      "    try",
+      "    {",
+      "        FixtureConnection.Load(invalidConnectionInput);",
+      '        throw new InvalidOperationException("invalid FixtureConnection discriminator was accepted");',
+      "    }",
+      "    catch (ArgumentException error)",
+      "    {",
+      '        if (!error.Message.Contains("kind") && !error.Message.Contains("discriminator")) throw;',
+      "    }",
+      "}",
       'try { FixtureToolbox.FromJson("""{"tools":{"custom":{"kind":"vendor"}},"inheritedMapBindingTool":{"kind":"function","name":"map","command":"run"},"inheritedListBindingTool":{"kind":"function","name":"list","command":"run"}}"""); throw new InvalidOperationException("missing required CustomTool.connection was accepted"); } catch (ArgumentException error) { if (!error.Message.Contains("tools.custom.connection") || !error.Message.Contains("missing required field")) throw; }',
       'var reference = FixtureReference.FromJson("\\"ref-coerced\\"");',
       'var uniqueNamed = FixtureNamedPayloadCollection.FromJson("""{"items":[{"name":"alpha","payload":{"nested":[1,null]}},{"name":"beta","payload":"second"}]}""");',
@@ -4212,6 +4260,21 @@ function runJavaExecutableConformance() {
       '    require(FixtureTool.load(wildcardToolSaved, new LoadContext()).getClass() == FixtureCustomTool.class, "wildcard tool did not survive reload");',
       '    FixtureConnection knownConnection = FixtureConnection.load(Map.of("kind", "custom", "name", "known", "endpoint", "https://example.test"), new LoadContext());',
       '    require(knownConnection instanceof FixtureCustomConnection && "https://example.test".equals(knownConnection.save(new SaveContext()).get("endpoint")), "known connection dispatch regressed");',
+      "    List<Map<String, Object>> invalidConnectionInputs = new java.util.ArrayList<>();",
+      "    invalidConnectionInputs.add(new LinkedHashMap<>());",
+      '    invalidConnectionInputs.add(new LinkedHashMap<>(Map.of("kind", "")));',
+      "    Map<String, Object> nullDiscriminatorConnection = new LinkedHashMap<>();",
+      '    nullDiscriminatorConnection.put("kind", null);',
+      "    invalidConnectionInputs.add(nullDiscriminatorConnection);",
+      '    invalidConnectionInputs.add(new LinkedHashMap<>(Map.of("kind", 42)));',
+      "    for (Map<String, Object> invalidConnectionInput : invalidConnectionInputs) {",
+      "      try {",
+      "        FixtureConnection.load(invalidConnectionInput, new LoadContext());",
+      '        throw new AssertionError("invalid FixtureConnection discriminator was accepted");',
+      "      } catch (IllegalArgumentException error) {",
+      '        require(error.getMessage().contains("kind") || error.getMessage().contains("discriminator"), "invalid FixtureConnection discriminator diagnostic lost field context");',
+      "      }",
+      "    }",
       "    try {",
       '      FixtureToolbox.fromJson("{\\"tools\\":{\\"custom\\":{\\"kind\\":\\"vendor\\"}},\\"inheritedMapBindingTool\\":{\\"kind\\":\\"function\\",\\"name\\":\\"map\\",\\"command\\":\\"run\\"},\\"inheritedListBindingTool\\":{\\"kind\\":\\"function\\",\\"name\\":\\"list\\",\\"command\\":\\"run\\"}}");',
       '      throw new AssertionError("missing required CustomTool.connection was accepted");',
@@ -4476,6 +4539,25 @@ final class ConformanceValidateTests: XCTestCase {
     let first = try JSONSerialization.data(withJSONObject: saved, options: [.sortedKeys])
     let second = try JSONSerialization.data(withJSONObject: reloaded, options: [.sortedKeys])
     XCTAssertEqual(first, second, "unknown carrier payload did not survive a reload")
+  }
+
+  func testInvalidDiscriminatorStatesDoNotUseUnknownFallback() throws {
+    let invalidInputs: [[String: Any]] = [
+      [:],
+      ["kind": ""],
+      ["kind": NSNull()],
+      ["kind": 42],
+    ]
+
+    for input in invalidInputs {
+      XCTAssertThrowsError(try FixtureConnection.load(input), "invalid FixtureConnection discriminator was accepted") { error in
+        let message = String(describing: error)
+        XCTAssertTrue(
+          message.contains("kind") || message.contains("discriminator"),
+          "invalid FixtureConnection discriminator diagnostic lost field context: \\(message)"
+        )
+      }
+    }
   }
 
   // Both declared named-collection forms load equivalently, while an array-valued

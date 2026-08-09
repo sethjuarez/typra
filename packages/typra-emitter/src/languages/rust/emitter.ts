@@ -816,6 +816,11 @@ function emitClosedDiscriminatorValidation(type: TypeDecl, lines: string[]): voi
 function emitInputValidation(type: TypeDecl, childTypes: TypeDecl[], lines: string[]): void {
   const closed = type.polymorphicDispatch && isClosedPolymorphicDispatch(type.polymorphicDispatch);
   lines.push("    pub(crate) fn validate_input_at(value: &serde_json::Value, path: &str) -> Result<(), String> {");
+  if (type.load.coercions.length > 0) {
+    lines.push("        if !value.is_object() {");
+    lines.push("            return Ok(());");
+    lines.push("        }");
+  }
   if (closed) {
     lines.push("        Self::validate_discriminator(value)?;");
   }
@@ -831,7 +836,13 @@ function emitInputValidation(type: TypeDecl, childTypes: TypeDecl[], lines: stri
   emitFieldInputValidation(type, baseAssignments, lines, "        ");
   if (type.polymorphicDispatch) {
     const dispatch = type.polymorphicDispatch;
-    lines.push(`        match value.get("${dispatch.discriminatorField}").and_then(|candidate| candidate.as_str()).unwrap_or("") {`);
+    lines.push(`        let discriminator = value.get("${dispatch.discriminatorField}")`);
+    lines.push(`            .ok_or_else(|| "Missing ${type.typeName.name} discriminator property: '${dispatch.discriminatorField}'".to_string())?;`);
+    lines.push("        let discriminator = match discriminator {");
+    lines.push("            serde_json::Value::String(value) if !value.is_empty() => value.as_str(),");
+    lines.push(`            _ => return Err("Invalid ${type.typeName.name} discriminator field '${dispatch.discriminatorField}': expected non-blank string".to_string()),`);
+    lines.push("        };");
+    lines.push("        match discriminator {");
     for (const variant of dispatch.variants) {
       const childType = childTypes.find(candidate => candidate.typeName.name === variant.typeName.name);
       lines.push(`            "${variant.value}" => {`);
@@ -841,16 +852,7 @@ function emitInputValidation(type: TypeDecl, childTypes: TypeDecl[], lines: stri
     if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
       const defaultType = childTypes.find(candidate => candidate.typeName.name === dispatch.defaultVariant!.typeName.name);
       lines.push("            _ => {");
-      // A blank or absent discriminator is the only way the Rust enum can carry a *base*
-      // instance of an open discriminated type — the enum has no base case, so such payloads
-      // land on the wildcard variant and its variant-only required fields do not apply.
-      // Every other discriminator value (including a non-string one, which would previously
-      // slip through `as_str()`) genuinely selects the wildcard variant, so the required-field
-      // check must run. See issue #105 on giving Swift/Rust a base representation, which
-      // would let this become unconditional (#104).
-      lines.push(`                if value.get("${dispatch.discriminatorField}").is_some_and(|candidate| !candidate.is_null() && candidate.as_str() != Some("")) {`);
       if (defaultType) emitFieldInputValidation(defaultType, defaultType.load.assignments, lines, "                    ");
-      lines.push("                }");
       lines.push("            }");
     } else {
       lines.push("            _ => {}");

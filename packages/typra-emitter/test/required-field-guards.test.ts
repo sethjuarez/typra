@@ -11,13 +11,12 @@
  * The fix has two halves:
  *
  *  - TypeScript, Python, C#, Go and Java model an open discriminated base as a real base
- *    class, so the guard inside the wildcard carrier is now unconditional, and dispatch treats
- *    a blank discriminator as absent (routing it to the base instead of the wildcard carrier).
+ *    class, so the guard inside the wildcard carrier is now unconditional, and dispatch rejects
+ *    a missing, blank, null, or wrong-type discriminator before any fallback is considered.
  *
  *  - Swift and Rust still model a wildcard-defaulted open base as an enum with no base case, so
- *    a blank or absent discriminator has nowhere to go but the wildcard carrier. There the guard
- *    fires for every discriminator value except absent/null/blank, which closes the non-string
- *    hole without rejecting the only representation those backends have for a base instance.
+ *    the discriminator validation happens before enum routing and rejects invalid discriminator
+ *    states rather than fabricating a base instance.
  */
 
 import { describe, it } from "node:test";
@@ -130,8 +129,7 @@ describe("missing required complex fields always fail load", () => {
     assert.match(code, /if \(data\["connection"\] === undefined \|\| data\["connection"\] === null\) \{/);
     assert.match(code, /context\.at\("connection"\)\.path\}: missing required field/);
     assert.doesNotMatch(code, /typeof data\["kind"\] === "string" && data\["kind"\] !== ""/);
-    // A blank discriminator must not select the wildcard carrier.
-    assert.match(code, /String\(discriminatorValue\) !== ""/);
+    assert.match(code, /Invalid GuardTool discriminator field 'kind': expected non-blank string/);
   });
 
   it("Python guards unconditionally", () => {
@@ -140,7 +138,7 @@ describe("missing required complex fields always fail load", () => {
     assert.match(code, /if "connection" not in data or data\["connection"\] is None:/);
     assert.match(code, /context\.at\('connection'\)\.path\}: missing required field/);
     assert.doesNotMatch(code, /isinstance\(data\.get\("kind"\), str\)/);
-    assert.match(code, /str\(data\["kind"\]\) != ""/);
+    assert.match(code, /Invalid GuardTool discriminator field 'kind': expected non-blank string/);
   });
 
   it("C# guards unconditionally", () => {
@@ -158,7 +156,7 @@ describe("missing required complex fields always fail load", () => {
     assert.doesNotMatch(code, /IsNullOrEmpty\(data\.GetValueOrDefault\("kind"\)/);
   });
 
-  it("C# dispatch ignores a blank discriminator", () => {
+  it("C# dispatch rejects invalid discriminator states", () => {
     const code = emitCSharpClass(
       file.types.find(candidate => candidate.typeName.name === "GuardTool")!,
       "Test",
@@ -167,7 +165,7 @@ describe("missing required complex fields always fail load", () => {
       name => file.types.find(candidate => candidate.typeName.name === name),
     );
 
-    assert.match(code, /discriminatorValue\.ToString\(\) != ""/);
+    assert.match(code, /Invalid GuardTool discriminator field 'kind': expected non-blank string/);
   });
 
   it("Go guards unconditionally", () => {
@@ -183,7 +181,7 @@ describe("missing required complex fields always fail load", () => {
     assert.match(code, /if requiredValue, exists := m\["connection"\]; !exists \|\| requiredValue == nil \{/);
     assert.match(code, /ctx\.At\("connection"\)\.Path\)/);
     assert.doesNotMatch(code, /hasDiscriminator := m\["kind"\]/);
-    assert.match(code, /case "":\n\t+\/\/ blank discriminator: not a variant selector/);
+    assert.match(code, /invalid GuardTool discriminator field 'kind': expected non-blank string/);
   });
 
   it("Java guards unconditionally", () => {
@@ -197,8 +195,8 @@ describe("missing required complex fields always fail load", () => {
 
     assert.match(code, /if \(!map\.containsKey\("connection"\) \|\| map\.get\("connection"\) == null\) \{/);
     assert.match(code, /ctx\.at\("connection"\)\.path \+ ": missing required field"/);
-    assert.doesNotMatch(code, /instanceof String discriminator && !discriminator\.isEmpty\(\)/);
-    assert.match(code, /discriminator != null && !String\.valueOf\(discriminator\)\.isEmpty\(\)/);
+    assert.match(code, /discriminator instanceof String discriminatorString/);
+    assert.doesNotMatch(code, /String\.valueOf\(discriminator\)/);
   });
 
   it("Swift guards every wildcard-default discriminator except a blank one", () => {
@@ -212,12 +210,12 @@ describe("missing required complex fields always fail load", () => {
     assert.match(code, /\(object\["kind"\] as\? String\)\?\.isEmpty == true/);
   });
 
-  it("Rust guards every discriminator except a blank one", () => {
+  it("Rust rejects invalid discriminator states before fallback", () => {
     const code = emitRustFile(file, new RustExprVisitor(registry), polymorphicNames);
 
     assert.match(code, /value\.get\("connection"\)\.filter\(\|candidate\| !candidate\.is_null\(\)\)/);
     assert.match(code, /missing required field", child_path/);
     assert.doesNotMatch(code, /as_str\(\)\)\.is_some_and\(\|discriminator\| !discriminator\.is_empty\(\)\)/);
-    assert.match(code, /!candidate\.is_null\(\) && candidate\.as_str\(\) != Some\(""\)/);
+    assert.match(code, /Invalid GuardTool discriminator field 'kind': expected non-blank string/);
   });
 });
