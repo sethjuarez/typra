@@ -80,9 +80,11 @@ Rust or `prompty.core.cancellation.CancellationToken` for Python.
 Python supports opt-in Pydantic v2 model emission with
 `native-serialization: "pydantic"` on the Python target. The default remains
 `"none"` and keeps dataclass output. In Pydantic mode, generated
-`model_validate()`, `model_dump()`, and `model_dump_json()` delegate to Typra's
-generated `load()`, `save()`, and `to_json()` methods so Typra's pathful
-diagnostics and wire semantics remain the authoritative contract.
+`model_validate()`, `model_validate_json()`, `model_dump()`, and
+`model_dump_json()` delegate to Typra's generated `load()`, `save()`, and
+`to_json()` methods so Typra's pathful diagnostics and wire semantics remain
+the authoritative contract. `model_validate_strings()` hard-fails because
+Pydantic's string-coercing validation would bypass Typra's loader semantics.
 
 Compile with TypeSpec:
 

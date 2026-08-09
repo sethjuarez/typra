@@ -130,6 +130,7 @@ describe("Python optional collection defaults", () => {
       nativeSerialization: "pydantic",
     });
 
+    assert.match(source, /^import json$/m);
     assert.match(source, /^from pydantic import BaseModel, ConfigDict, Field$/m);
     assert.doesNotMatch(source, /^from dataclasses import/m);
     assert.match(source, /class ModelInfo\(BaseModel\):/);
@@ -141,6 +142,10 @@ describe("Python optional collection defaults", () => {
     assert.match(source, /required_tags: list\[str\] = Field\(default_factory=list, alias="requiredTags"\)/);
     assert.match(source, /def model_validate\(cls, obj: Any, \*args: Any, \*\*kwargs: Any\) -> "ModelInfo":/);
     assert.match(source, /return cls\.load\(obj\)/);
+    assert.match(source, /def model_validate_json\(cls, json_data: str \| bytes \| bytearray, \*args: Any, \*\*kwargs: Any\) -> "ModelInfo":/);
+    assert.match(source, /return cls\.load\(json\.loads\(json_data, strict=False\)\)/);
+    assert.match(source, /def model_validate_strings\(cls, obj: Any, \*args: Any, \*\*kwargs: Any\) -> "ModelInfo":/);
+    assert.match(source, /does not support model_validate_strings\(\)/);
     assert.match(source, /def model_dump\(self, \*args: Any, \*\*kwargs: Any\) -> dict\[str, Any\]:/);
     assert.match(source, /return self\.save\(\)/);
     assert.match(source, /def model_dump_json\(self, \*args: Any, \*\*kwargs: Any\) -> str:/);
@@ -149,14 +154,14 @@ describe("Python optional collection defaults", () => {
 
   it("fails loudly when a field would collide with Pydantic interop names", () => {
     const type = typeDecl([
-      field("modelDump", { kind: "scalar", scalarType: "string" }, false),
+      field("modelValidateJson", { kind: "scalar", scalarType: "string" }, false),
     ]);
 
     assert.throws(
       () => emitPythonFile(fileDecl(type), new PythonExprVisitor(), "", {
         nativeSerialization: "pydantic",
       }),
-      /ModelInfo\.modelDump.*model_dump.*reserved by Pydantic\/Typra interop/,
+      /ModelInfo\.modelValidateJson.*model_validate_json.*reserved by Pydantic\/Typra interop/,
     );
   });
 });

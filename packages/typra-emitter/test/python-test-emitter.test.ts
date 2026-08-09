@@ -174,5 +174,8 @@ describe("Python test emitter", () => {
     assert.match(pydanticOutput, /assert instance\.model_dump\(\) == saved_data/);
     assert.match(pydanticOutput, /assert json\.loads\(instance\.model_dump_json\(\)\) == saved_data/);
     assert.match(pydanticOutput, /assert FixtureReference\.model_validate\(original_data\)\.save\(\) == saved_data/);
+    assert.match(pydanticOutput, /assert FixtureReference\.model_validate_json\(json_data\)\.save\(\) == saved_data/);
+    assert.match(pydanticOutput, /FixtureReference\.model_validate_strings\(original_data\)/);
+    assert.match(pydanticOutput, /raise AssertionError\("model_validate_strings bypassed Typra load"\)/);
   });
 });

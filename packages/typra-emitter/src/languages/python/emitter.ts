@@ -131,6 +131,9 @@ export function emitPythonFile(
   if (preservesRawPayload) {
     stdlibImports.push("import copy");
   }
+  if (usePydantic && hasNonProtocol) {
+    stdlibImports.push("import json");
+  }
   if (decl.containsAbstract) {
     stdlibImports.push("from abc import ABC");
   }
@@ -291,6 +294,8 @@ const PYDANTIC_RESERVED_FIELD_NAMES = new Set([
   "model_dump",
   "model_dump_json",
   "model_validate",
+  "model_validate_json",
+  "model_validate_strings",
 ]);
 
 function assertNoPydanticReservedFieldNames(type: TypeDecl): void {
@@ -1387,6 +1392,18 @@ function emitPydanticInteropMethods(name: string, lines: string[]): void {
   lines.push("        if isinstance(obj, cls):");
   lines.push("            return obj");
   lines.push("        return cls.load(obj)");
+  lines.push("");
+  lines.push("    @classmethod");
+  lines.push(`    def model_validate_json(cls, json_data: str | bytes | bytearray, *args: Any, **kwargs: Any) -> "${name}":`);
+  lines.push("        \"\"\"Validate JSON through Typra's authoritative load contract.\"\"\"");
+  lines.push("        if args or kwargs:");
+  lines.push("            raise TypeError(\"Typra Pydantic mode delegates JSON validation to json.loads() and load(); model_validate_json arguments are unsupported.\")");
+  lines.push("        return cls.load(json.loads(json_data, strict=False))");
+  lines.push("");
+  lines.push("    @classmethod");
+  lines.push(`    def model_validate_strings(cls, obj: Any, *args: Any, **kwargs: Any) -> "${name}":`);
+  lines.push("        \"\"\"String-coercing Pydantic validation is unsupported by Typra.\"\"\"");
+  lines.push("        raise TypeError(\"Typra Pydantic mode does not support model_validate_strings(); use load() or model_validate_json() so Typra remains the authoritative loader.\")");
   lines.push("");
   lines.push("    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:");
   lines.push("        \"\"\"Serialize through Typra's authoritative save contract.\"\"\"");
