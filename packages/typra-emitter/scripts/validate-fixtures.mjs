@@ -16,6 +16,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  compareConformanceMatrixTargets,
+  REQUIRED_CONFORMANCE_MATRIX_TARGETS,
+} from "./conformance-matrix-policy.mjs";
+import {
   compareExpectedExecution,
   TOOLCHAIN_UNAVAILABLE,
 } from "./validation-execution.mjs";
@@ -388,15 +392,6 @@ const executableConformanceTargets = [
   "rust",
   "swift",
 ];
-const requiredConformanceMatrixTargets = [
-  "typescript",
-  "python",
-  "csharp",
-  "go",
-  "java",
-  "rust",
-  "swift",
-];
 const conformanceObservedOutputs = new Map();
 const conformanceSkippedTargets = new Map();
 
@@ -656,20 +651,6 @@ function assertArrayIncludes(label, actual, ...expected) {
   }
 }
 
-function assertExactStringList(label, actual, expected) {
-  if (!Array.isArray(actual)) {
-    fail(`${label} must be an array.`);
-    return false;
-  }
-  const actualJson = JSON.stringify(actual);
-  const expectedJson = JSON.stringify(expected);
-  if (actualJson !== expectedJson) {
-    fail(`${label} must exactly match ${expectedJson}. Actual: ${actualJson}`);
-    return false;
-  }
-  return true;
-}
-
 function normalizeBackendCell(cell) {
   if (cell === "implemented") {
     return { status: "implemented" };
@@ -738,13 +719,11 @@ function assertConformanceMatrix() {
   if (matrix.version !== 1) {
     fail("Conformance matrix has an unexpected version.");
   }
-  if (
-    !assertExactStringList(
-      "Conformance matrix targets",
-      matrix.targets,
-      requiredConformanceMatrixTargets,
-    )
-  ) {
+  const targetComparison = compareConformanceMatrixTargets(matrix.targets);
+  for (const message of targetComparison.failures) {
+    fail(message);
+  }
+  if (!targetComparison.ok) {
     return;
   }
   if (!Array.isArray(matrix.cases) || matrix.cases.length === 0) {
@@ -781,7 +760,7 @@ function assertConformanceMatrix() {
       fail(`Conformance matrix contains duplicate rule id: ${rule.id}`);
     }
     ruleIds.add(rule.id);
-    assertRuleBackendMatrix(rule, requiredConformanceMatrixTargets);
+    assertRuleBackendMatrix(rule, REQUIRED_CONFORMANCE_MATRIX_TARGETS);
 
     if (rule.status === "enforced") {
       if (rule.verification === "fixture-evidence") {
@@ -851,7 +830,7 @@ function assertConformanceMatrix() {
   for (const conformanceCase of matrix.cases) {
     const evidenceTargets = [
       ...new Set([
-        ...requiredConformanceMatrixTargets,
+        ...REQUIRED_CONFORMANCE_MATRIX_TARGETS,
         ...Object.keys(conformanceCase.evidence ?? {}),
       ]),
     ];
@@ -961,125 +940,194 @@ function assertGeneratedOutputHygiene() {
 }
 
 function assertGeneratedStructuredLoadCoverage() {
-  const exportSurface = readJson(path.join("generated", "fixtures", ".typra-generated", "export-surfaces.json"));
-  const kebabCase = value => value
-    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
-    .replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")
-    .toLowerCase();
-  const snakeCase = value => kebabCase(value).replace(/-/g, "_");
-  const pascalCase = value => value
-    .split(/[_-]/)
-    .filter(Boolean)
-    .map(part => part[0].toUpperCase() + part.slice(1))
-    .join("");
+  const exportSurface = readJson(
+    path.join(
+      "generated",
+      "fixtures",
+      ".typra-generated",
+      "export-surfaces.json",
+    ),
+  );
+  const kebabCase = (value) =>
+    value
+      .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+      .replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")
+      .toLowerCase();
+  const snakeCase = (value) => kebabCase(value).replace(/-/g, "_");
+  const pascalCase = (value) =>
+    value
+      .split(/[_-]/)
+      .filter(Boolean)
+      .map((part) => part[0].toUpperCase() + part.slice(1))
+      .join("");
   const suites = [
     {
       target: "typescript",
       outputRoot: "generated/fixtures/typescript",
       dir: path.join(generatedRoot, "typescript", "tests"),
-      testFile: file => file.endsWith(".test.ts"),
-      expectedTestPath: (name, group) => path.join(generatedRoot, "typescript", "tests", group || "", `${kebabCase(name)}.test.ts`),
-      hasStructuredLoad: content => content.includes("should load from JSON - example 1"),
+      testFile: (file) => file.endsWith(".test.ts"),
+      expectedTestPath: (name, group) =>
+        path.join(
+          generatedRoot,
+          "typescript",
+          "tests",
+          group || "",
+          `${kebabCase(name)}.test.ts`,
+        ),
+      hasStructuredLoad: (content) =>
+        content.includes("should load from JSON - example 1"),
     },
     {
       target: "python",
       outputRoot: "generated/fixtures/python",
       dir: path.join(generatedRoot, "python", "tests"),
-      testFile: file => file.endsWith(".py"),
-      expectedTestPath: (name, group) => path.join(generatedRoot, "python", "tests", group || "", `test_${snakeCase(name)}.py`),
-      hasStructuredLoad: content => /def test_load_json_\w+\(/.test(content),
+      testFile: (file) => file.endsWith(".py"),
+      expectedTestPath: (name, group) =>
+        path.join(
+          generatedRoot,
+          "python",
+          "tests",
+          group || "",
+          `test_${snakeCase(name)}.py`,
+        ),
+      hasStructuredLoad: (content) => /def test_load_json_\w+\(/.test(content),
     },
     {
       target: "python_pydantic",
       outputRoot: "generated/fixtures/python_pydantic",
       dir: path.join(generatedRoot, "python_pydantic", "tests"),
-      testFile: file => file.endsWith(".py"),
-      expectedTestPath: (name, group) => path.join(generatedRoot, "python_pydantic", "tests", group || "", `test_${snakeCase(name)}.py`),
-      hasStructuredLoad: content => /def test_load_json_\w+\(/.test(content),
+      testFile: (file) => file.endsWith(".py"),
+      expectedTestPath: (name, group) =>
+        path.join(
+          generatedRoot,
+          "python_pydantic",
+          "tests",
+          group || "",
+          `test_${snakeCase(name)}.py`,
+        ),
+      hasStructuredLoad: (content) => /def test_load_json_\w+\(/.test(content),
     },
     {
       target: "go",
       outputRoot: "generated/fixtures/go",
       dir: path.join(generatedRoot, "go", "tests"),
-      testFile: file => file.endsWith("_test.go"),
-      expectedTestPath: name => path.join(generatedRoot, "go", "tests", `${snakeCase(name)}_test.go`),
-      hasStructuredLoad: content => /func Test\w+LoadJSON\(t \*testing\.T\)/.test(content),
+      testFile: (file) => file.endsWith("_test.go"),
+      expectedTestPath: (name) =>
+        path.join(generatedRoot, "go", "tests", `${snakeCase(name)}_test.go`),
+      hasStructuredLoad: (content) =>
+        /func Test\w+LoadJSON\(t \*testing\.T\)/.test(content),
     },
     {
       target: "java",
       outputRoot: "generated/fixtures/java",
       dir: path.join(generatedRoot, "java", "tests"),
-      testFile: file => file.endsWith("GeneratedTest.java"),
-      expectedTestPath: name => path.join(generatedRoot, "java", "tests", `${name}GeneratedTest.java`),
-      hasStructuredLoad: content => /\.fromJson\(jsonData1\)/.test(content),
+      testFile: (file) => file.endsWith("GeneratedTest.java"),
+      expectedTestPath: (name) =>
+        path.join(generatedRoot, "java", "tests", `${name}GeneratedTest.java`),
+      hasStructuredLoad: (content) => /\.fromJson\(jsonData1\)/.test(content),
     },
     {
       target: "csharp",
       outputRoot: "generated/fixtures/csharp",
       dir: path.join(generatedRoot, "csharp", "tests"),
-      testFile: file => file.endsWith("ConversionTests.cs"),
-      expectedTestPath: (name, group) => path.join(generatedRoot, "csharp", "tests", group || "", `${name}ConversionTests.cs`),
-      hasStructuredLoad: content => /\bLoadJsonInput1?\(/.test(content),
+      testFile: (file) => file.endsWith("ConversionTests.cs"),
+      expectedTestPath: (name, group) =>
+        path.join(
+          generatedRoot,
+          "csharp",
+          "tests",
+          group || "",
+          `${name}ConversionTests.cs`,
+        ),
+      hasStructuredLoad: (content) => /\bLoadJsonInput1?\(/.test(content),
     },
     {
       target: "rust",
       outputRoot: "generated/fixtures/rust",
       dir: path.join(generatedRoot, "rust", "tests"),
-      testFile: file => file.endsWith("_test.rs"),
+      testFile: (file) => file.endsWith("_test.rs"),
       expectedTestPath: (_name, group, source) => {
         const moduleName = source.split("::").at(-1);
-        return path.join(generatedRoot, "rust", "tests", group || "", `${moduleName}_test.rs`);
+        return path.join(
+          generatedRoot,
+          "rust",
+          "tests",
+          group || "",
+          `${moduleName}_test.rs`,
+        );
       },
-      hasStructuredLoad: content => /fn test_\w+_load_json\(\)/.test(content),
+      hasStructuredLoad: (content) => /fn test_\w+_load_json\(\)/.test(content),
     },
     {
       target: "swift",
       outputRoot: "generated/fixtures/swift",
       dir: path.join(generatedRoot, "swift", "Tests", "TypraFixturesTests"),
-      testFile: file => file.endsWith("Tests.swift"),
+      testFile: (file) => file.endsWith("Tests.swift"),
       expectedTestPath: (_name, group, source) => {
         const moduleName = path.basename(source, ".swift");
-        return path.join(generatedRoot, "swift", "Tests", "TypraFixturesTests", group || "", `${pascalCase(moduleName)}Tests.swift`);
+        return path.join(
+          generatedRoot,
+          "swift",
+          "Tests",
+          "TypraFixturesTests",
+          group || "",
+          `${pascalCase(moduleName)}Tests.swift`,
+        );
       },
-      hasStructuredLoad: content => /func testJSONRoundTrip1\(\) throws/.test(content),
+      hasStructuredLoad: (content) =>
+        /func testJSONRoundTrip1\(\) throws/.test(content),
     },
   ];
 
   for (const suite of suites) {
-    const target = exportSurface?.targets?.find(entry => entry.outputRoot === suite.outputRoot);
+    const target = exportSurface?.targets?.find(
+      (entry) => entry.outputRoot === suite.outputRoot,
+    );
     if (target && suite.expectedTestPath) {
       const missing = (target.exports ?? [])
-        .filter(entry => entry.kind === "value" && !entry.protocol)
-        .map(entry => suite.expectedTestPath(entry.name, entry.group, entry.source))
+        .filter((entry) => entry.kind === "value" && !entry.protocol)
+        .map((entry) =>
+          suite.expectedTestPath(entry.name, entry.group, entry.source),
+        )
         .filter((file, index, files) => files.indexOf(file) === index)
-        .filter(file => !existsSync(file));
+        .filter((file) => !existsSync(file));
       if (missing.length > 0) {
         fail(
-          `Generated ${suite.target} fixture exports without test files:\n`
-          + missing.map(file => `  ${path.relative(packageRoot, file)}`).join("\n"),
+          `Generated ${suite.target} fixture exports without test files:\n` +
+            missing
+              .map((file) => `  ${path.relative(packageRoot, file)}`)
+              .join("\n"),
         );
       }
     }
 
-    const files = walkFiles(suite.dir, file => {
+    const files = walkFiles(suite.dir, (file) => {
       const basename = path.basename(file);
       const lower = basename.toLowerCase();
       const normalized = lower.replace(/[^a-z0-9]/g, "");
-      return suite.testFile(file)
-        && !normalized.includes("protocolscaffolds")
-        && lower !== "test_context.py"
-        && lower !== "conformancetests.swift";
+      return (
+        suite.testFile(file) &&
+        !normalized.includes("protocolscaffolds") &&
+        lower !== "test_context.py" &&
+        lower !== "conformancetests.swift"
+      );
     });
     if (files.length === 0) {
-      fail(`No generated ${suite.target} fixture tests found for structured load coverage.`);
+      fail(
+        `No generated ${suite.target} fixture tests found for structured load coverage.`,
+      );
       continue;
     }
 
-    const missing = files.filter(file => !suite.hasStructuredLoad(readFileSync(file, "utf8")));
+    const missing = files.filter(
+      (file) => !suite.hasStructuredLoad(readFileSync(file, "utf8")),
+    );
     if (missing.length > 0) {
       fail(
-        `Generated ${suite.target} fixture tests without structured JSON load coverage:\n`
-        + missing.map(file => `  ${path.relative(packageRoot, file)}`).join("\n"),
+        `Generated ${suite.target} fixture tests without structured JSON load coverage:\n` +
+          missing
+            .map((file) => `  ${path.relative(packageRoot, file)}`)
+            .join("\n"),
       );
     }
   }
