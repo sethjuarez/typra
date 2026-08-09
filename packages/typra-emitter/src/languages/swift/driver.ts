@@ -18,6 +18,8 @@ import { SWIFT_TYPE_MAP } from "./types.js";
 
 export const swiftTypeMapper: Record<string, string> = SWIFT_TYPE_MAP;
 
+type SwiftNativeSerialization = "none" | "codable";
+
 export const generateSwift = async (
   context: EmitContext<TypraEmitterOptions>,
   node: TypeNode,
@@ -29,6 +31,7 @@ export const generateSwift = async (
   const registry = TypeRegistry.fromTypeGraph(allTypes);
   const visitor = new SwiftExprVisitor(registry);
   const moduleName = swiftModuleName(emitTarget["package-name"] || node.typeName.namespace);
+  const nativeSerialization = swiftNativeSerialization(emitTarget);
 
   const polymorphicTypeNames = new Set<string>();
   for (const n of nodes) {
@@ -50,13 +53,13 @@ export const generateSwift = async (
   );
   const declarationUniverse = Array.from(fileDecls.values()).flatMap(file => file.types);
   await emitSwiftGeneratedFile(context, "Package.swift", emitSwiftPackage(moduleName, packageTestPath), outputDir, outputDir, { marker: false });
-  await emitSwiftGeneratedFile(context, "TypraRuntime.swift", emitSwiftRuntime(moduleName), sourceRoot, outputDir);
+  await emitSwiftGeneratedFile(context, "TypraRuntime.swift", emitSwiftRuntime(moduleName, nativeSerialization), sourceRoot, outputDir);
 
   for (const n of nodes) {
     if (!n.base) {
       const group = n.group || "";
       const fileDecl = fileDecls.get(`${n.typeName.namespace}.${n.typeName.name}`)!;
-      const content = emitSwiftFile(fileDecl, visitor, polymorphicTypeNames, declarationUniverse);
+      const content = emitSwiftFile(fileDecl, visitor, polymorphicTypeNames, declarationUniverse, nativeSerialization);
       const outDir = group ? `${sourceRoot}/${group}` : sourceRoot;
       await emitSwiftGeneratedFile(context, swiftFileName(n.typeName.name), content, outDir, outputDir);
     }
@@ -65,7 +68,10 @@ export const generateSwift = async (
       const testContext = { ...buildTestContext(n, registry), moduleName };
       const group = n.group || "";
       const outDir = group ? `${testRoot}/${group}` : testRoot;
-      await emitSwiftGeneratedFile(context, `${n.typeName.name}Tests.swift`, emitSwiftTests(testContext), outDir, outputDir);
+      await emitSwiftGeneratedFile(context, `${n.typeName.name}Tests.swift`, emitSwiftTests({
+        ...testContext,
+        nativeSerialization,
+      }), outDir, outputDir);
     }
   }
 
@@ -85,6 +91,10 @@ export const generateSwift = async (
     formatSwiftFiles(resolvedOutput);
   }
 };
+
+function swiftNativeSerialization(emitTarget: EmitTarget): SwiftNativeSerialization {
+  return emitTarget["native-serialization"] === "codable" ? "codable" : "none";
+}
 
 function buildTestContext(node: TypeNode, registry: TypeRegistry): BaseTestContext {
   return buildBaseTestContext(node, undefined, swiftTestOptions, name => registry.get(name));

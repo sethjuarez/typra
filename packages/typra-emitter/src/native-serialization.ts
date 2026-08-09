@@ -9,7 +9,7 @@ const SUPPORTED_NATIVE_SERIALIZATION = new Map<string, Set<NativeSerializationMo
   ["go", new Set(["none"])],
   ["java", new Set(["none", "jackson"])],
   ["rust", new Set(["none", "serde"])],
-  ["swift", new Set(["none"])],
+  ["swift", new Set(["none", "codable"])],
   ["markdown", new Set(["none"])],
 ]);
 

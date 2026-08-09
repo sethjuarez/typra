@@ -7,7 +7,7 @@ import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { flattenInheritance } from "../src/ir/inheritance.js";
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
-import { emitSwiftProtocolScaffolds } from "../src/languages/swift/scaffolding.js";
+import { emitSwiftProtocolScaffolds, emitSwiftRuntime } from "../src/languages/swift/scaffolding.js";
 import { emitSwiftConformanceTest, emitSwiftTests } from "../src/languages/swift/test-emitter.js";
 import { buildBaseTestContext, swiftTestOptions } from "../src/testing/test-context.js";
 import { swiftType } from "../src/languages/swift/types.js";
@@ -324,6 +324,56 @@ describe("Swift inherited model fields", () => {
     assert.match(source, /if let value = self\.description \{\s+result\["description"\] = value/);
   });
 
+  describe("Swift Codable native serialization", () => {
+    it("preserves default output unless codable is explicitly enabled", () => {
+      const model = typeDecl("Model");
+      addStringField(model, "wireName");
+
+      const source = emitSwiftFile(fileDecl(model), new SwiftExprVisitor(), new Set());
+
+      assert.match(source, /public struct Model: TypraModel \{/);
+      assert.doesNotMatch(source, /public struct Model: TypraModel, Codable/);
+      assert.doesNotMatch(source, /init\(from decoder: Decoder\)/);
+    });
+
+    it("emits explicit Typra-backed Codable for structs and polymorphic enums", () => {
+      const content = typeDecl("Content");
+      content.polymorphicDispatch = {
+        discriminatorField: "kind",
+        variants: [{ value: "text", typeName: { namespace: "Test", name: "TextContent" } }],
+        defaultVariant: { typeName: content.typeName, isSelfReference: true },
+        isAbstract: false,
+        isClosed: false,
+      };
+      const text = typeDecl("TextContent");
+      addStringField(text, "kind", false, "text");
+      addStringField(text, "value");
+
+      const file = fileDecl(content);
+      file.types.push(text);
+      const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set(["Content"]), file.types, "codable");
+
+      assert.match(source, /public enum Content: TypraModel, Codable \{/);
+      assert.match(source, /public struct TextContent: TypraModel, Codable \{/);
+      assert.match(source, /public init\(from decoder: Decoder\) throws \{\s+self = try Self\.load\(try TypraCodableValue\(from: decoder\)\.anyValue\)\s+\}/);
+      assert.match(source, /public func encode\(to encoder: Encoder\) throws \{\s+try TypraCodableValue\(try save\(\)\)\.encode\(to: encoder\)\s+\}/);
+    });
+
+    it("normalizes NSNumber before Swift Bool bridging can corrupt raw numeric payloads", () => {
+      const defaultRuntime = emitSwiftRuntime("TestModels");
+      const runtime = emitSwiftRuntime("TestModels", "codable");
+
+      assert.doesNotMatch(defaultRuntime, /TypraCodableValue|TypraCodingKey/);
+      assert.match(runtime, /case let value as NSNumber:\s+try encodeNumber\(value, to: &container\)\s+case let value as Bool:/);
+      assert.match(runtime, /if TypraRuntime\.isBoolNumber\(value\) \{\s+try container\.encode\(value\.boolValue\)/);
+      assert.match(runtime, /if let decimal = value as\? NSDecimalNumber \{\s+try container\.encode\(decimal\.decimalValue\)/);
+      assert.match(runtime, /case "s", "i", "l", "q":\s+try container\.encode\(value\.int64Value\)/);
+      assert.match(runtime, /default:\s+try container\.encode\(value\.doubleValue\)/);
+      assert.match(runtime, /public static func double\(_ data: Any, field: String\) throws -> Double \{\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/);
+      assert.match(runtime, /public static func int64\(_ data: Any, field: String\) throws -> Int64 \{\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/);
+    });
+  });
+
   it("inherits named collection helpers into derived value structs", () => {
     const tool = typeDecl("Tool");
     tool.fields = [{
@@ -547,6 +597,33 @@ describe("Swift generated tests", () => {
       coercions: [],
       factories: [],
       moduleName: "TestModels",
+    });
+
+    it("emits Codable differential assertions only when requested", () => {
+      const model = new TypeNode({} as Model, "");
+      model.typeName = { namespace: "Test", name: "Model" };
+      const name = new PropertyNode({} as ModelProperty, "");
+      name.name = "name";
+      name.typeName = { namespace: "", name: "string" };
+      name.isScalar = true;
+      model.properties = [name];
+      const context = buildBaseTestContext(model, undefined, swiftTestOptions);
+
+      const defaultOutput = emitSwiftTests({
+        ...context,
+        moduleName: "TestModels",
+        nativeSerialization: "none",
+      });
+      const codableOutput = emitSwiftTests({
+        ...context,
+        moduleName: "TestModels",
+        nativeSerialization: "codable",
+      });
+
+      assert.doesNotMatch(defaultOutput, /assertCodableMatches/);
+      assert.match(codableOutput, /private func assertCodableMatches<T: TypraModel & Codable>/);
+      assert.match(codableOutput, /JSONDecoder\(\)\.decode\(T\.self, from: sourceData\)/);
+      assert.match(codableOutput, /Codable encode/);
     });
 
     assert.match(source, /XCTAssertEqual\(\(try XCTUnwrap\(instance\.inputModalities\)\)\.count, 1\)/);

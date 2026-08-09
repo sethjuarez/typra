@@ -207,7 +207,7 @@
         "go": "implemented",
         "java": "implemented",
         "rust": "implemented",
-        "swift": { "status": "waived", "issue": "#98" }
+        "swift": "implemented"
       },
       "description": "Opt-in native serialization/validation surfaces that exist for a target must delegate to or differentially match Typra canonical load/save instead of introducing a second wire contract."
     },

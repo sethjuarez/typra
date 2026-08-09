@@ -83,6 +83,13 @@ options:
         package-name: "TypraFixtures"
         format: false
         protocol-scaffolds: "compile-only"
+      - type: Swift
+        output-dir: "generated/fixtures/swift-codable"
+        test-dir: "generated/fixtures/swift-codable/Tests/TypraFixturesTests"
+        package-name: "TypraFixtures"
+        format: false
+        protocol-scaffolds: "compile-only"
+        native-serialization: "codable"
       - type: Markdown
         output-dir: "generated/fixtures/markdown"
         format: false

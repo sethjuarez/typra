@@ -103,6 +103,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "rust.generated-tests",
   "rust-serde.generated-tests",
   "swift.generated-tests",
+  "swift-codable.generated-tests",
   "csharp.build",
   "csharp.consumer-nullability-build",
   "csharp.generated-tests",
@@ -126,6 +127,7 @@ const EXPECTED_EXECUTABLE_CONFORMANCE_TARGET_IDS = [
   "csharp",
   "java",
   "swift",
+  "swift-codable",
 ];
 
 const JACKSON_VERSION = "2.17.2";
@@ -415,6 +417,7 @@ const executableConformanceTargets = [
   "rust",
   "rust-serde",
   "swift",
+  "swift-codable",
 ];
 const conformanceObservedOutputs = new Map();
 const conformanceSkippedTargets = new Map();
@@ -430,6 +433,7 @@ const KNOWN_TEST_FAILURES = {
   rust: new Map(),
   "rust-serde": new Map(),
   swift: new Map(),
+  "swift-codable": new Map(),
 };
 
 function fail(message) {
@@ -1056,6 +1060,24 @@ function assertGeneratedStructuredLoadCoverage() {
           `test_${snakeCase(name)}.py`,
         ),
       hasStructuredLoad: (content) => /def test_load_json_\w+\(/.test(content),
+    },
+    {
+      target: "swift-codable",
+      outputRoot: "generated/fixtures/swift-codable",
+      dir: path.join(generatedRoot, "swift-codable", "Tests", "TypraFixturesTests"),
+      testFile: (file) => file.endsWith("Tests.swift"),
+      expectedTestPath: (_name, group, source) => {
+        const moduleName = path.basename(source, ".swift");
+        return path.join(
+          generatedRoot,
+          "swift-codable",
+          "Tests",
+          "TypraFixturesTests",
+          group || "",
+          `${pascalCase(moduleName)}Tests.swift`,
+        );
+      },
+      hasStructuredLoad: (content) => /func testJSONRoundTrip\d+\(\) throws/.test(content),
     },
     {
       target: "go",
@@ -1853,22 +1875,22 @@ function runRustTests(target = "rust", packageName = "fixtures") {
   }
 }
 
-function runSwiftTests(context = {}) {
-  const sourceDir = path.join(generatedRoot, "swift");
+function runSwiftTests(context = {}, targetDir = "swift", label = "Swift") {
+  const sourceDir = path.join(generatedRoot, targetDir);
   const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".swift"));
   if (sourceFiles.length === 0) {
-    fail("No generated Swift files found to test.");
+    fail(`No generated ${label} files found to test.`);
     return;
   }
 
   if (!commandExists("swift")) {
     if (process.env.CI_SWIFT_REQUIRED === "1") {
       fail(
-        "Generated Swift validation cannot run because swift is not available.",
+        `Generated ${label} validation cannot run because swift is not available.`,
       );
     } else {
       console.warn(
-        "Warning: swift is not available. Skipping generated Swift compile/test validation.",
+        `Warning: swift is not available. Skipping generated ${label} compile/test validation.`,
       );
       context.skip?.(TOOLCHAIN_UNAVAILABLE);
     }
@@ -2196,10 +2218,10 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
         (match) => match[1],
       ),
     ]);
-    assertKnownTestFailures("swift", failed, KNOWN_TEST_FAILURES.swift, {
+    assertKnownTestFailures(targetDir, failed, KNOWN_TEST_FAILURES[targetDir], {
       crashed,
       output,
-      crashMessage: "Generated Swift package tests failed to build or run",
+      crashMessage: `Generated ${label} package tests failed to build or run`,
     });
   } finally {
     if (existsSync(inheritedPropertyTest)) {
@@ -2209,6 +2231,10 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
       rmSync(buildDir, { recursive: true, force: true });
     }
   }
+}
+
+function runSwiftCodableTests(context = {}) {
+  runSwiftTests(context, "swift-codable", "Swift Codable");
 }
 
 function findSwiftWindowsSdk() {
@@ -4675,26 +4701,26 @@ function swiftToolchainEnv() {
  * `runSwiftTests`. `swift test` interleaves its own progress output, so the payload is tagged with
  * a sentinel and extracted rather than read off the last line.
  */
-function runSwiftExecutableConformance(context = {}) {
-  const sourceDir = path.join(generatedRoot, "swift");
+function runSwiftExecutableConformance(context = {}, targetDir = "swift", useCodable = false) {
+  const sourceDir = path.join(generatedRoot, targetDir);
   const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".swift"));
   if (sourceFiles.length === 0) {
-    fail("No generated Swift files found for executable conformance.");
+    fail(`No generated ${targetDir} files found for executable conformance.`);
     return;
   }
 
   if (!commandExists("swift")) {
     if (process.env.CI_SWIFT_REQUIRED === "1") {
       fail(
-        "Generated Swift executable conformance cannot run because swift is not available.",
+        `Generated ${targetDir} executable conformance cannot run because swift is not available.`,
       );
     } else {
       console.warn(
-        "Warning: swift is not available. Skipping generated Swift executable conformance.",
+        `Warning: swift is not available. Skipping generated ${targetDir} executable conformance.`,
       );
       context.skip?.(TOOLCHAIN_UNAVAILABLE);
       recordConformanceSkip(
-        "swift",
+        targetDir,
         "swift toolchain is not available locally",
       );
     }
@@ -4716,11 +4742,31 @@ import Foundation
 @testable import TypraFixtures
 
 final class ConformanceValidateTests: XCTestCase {
+  private func loadFixtureRootFromJson(_ json: String) throws -> FixtureRoot {
+    ${useCodable ? "return try JSONDecoder().decode(FixtureRoot.self, from: Data(json.utf8))" : ""}
+    ${useCodable ? "" : "let data = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]"}
+    ${useCodable ? "" : "return try FixtureRoot.load(data)"}
+  }
+
+  ${useCodable ? `private func assertCodableMatchesTypra<T: TypraModel & Codable>(_ value: T, _ message: String) throws {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let codableObject = try JSONSerialization.jsonObject(with: encoder.encode(value))
+    let typraObject = try value.save(SaveContext())
+    let codableJson = try TypraRuntime.jsonString(from: codableObject)
+    let typraJson = try TypraRuntime.jsonString(from: typraObject)
+    XCTAssertEqual(codableJson, typraJson, message)
+  }` : `private func assertCodableMatchesTypra(_ value: Any, _ message: String) throws {
+    _ = value
+    _ = message
+  }`}
+
   func testEmitsCanonicalConformancePayload() throws {
-    let rootData = try JSONSerialization.jsonObject(with: Data(${fixtureRootSampleJsonLiteral}.utf8)) as! [String: Any]
     let propertyCases = try JSONSerialization.jsonObject(with: Data(${propertyCorpusJsonLiteral}.utf8)) as! [[String: Any]]
     let propertyOutputs = try propertyCases.map { entry -> [String: Any] in
-      let propertyRoot = try FixtureRoot.load(entry["input"] as! [String: Any])
+      let inputData = try JSONSerialization.data(withJSONObject: entry["input"] as! [String: Any])
+      let propertyRoot = try loadFixtureRootFromJson(String(data: inputData, encoding: .utf8)!)
+      try assertCodableMatchesTypra(propertyRoot, "property corpus Codable encode must match Typra save")
       return [
         "id": entry["id"]!,
         "seed": entry["seed"]!,
@@ -4728,8 +4774,25 @@ final class ConformanceValidateTests: XCTestCase {
         "root": try propertyRoot.save(),
       ]
     }
-    let root = try FixtureRoot.load(rootData)
+    let root = try loadFixtureRootFromJson(${fixtureRootSampleJsonLiteral})
+    try assertCodableMatchesTypra(root, "root Codable encode must match Typra save")
+    var unknownRecordData = try JSONSerialization.jsonObject(with: Data(${fixtureRootSampleJsonLiteral}.utf8)) as! [String: Any]
+    unknownRecordData["metadata"] = [
+      "zero": 0,
+      "one": 1,
+      "decimal": 0.125,
+      "highPrecision": 1234567890.1234567,
+      "flag": true,
+    ]
+    let unknownRecordRoot = try FixtureRoot.load(unknownRecordData)
+    try assertCodableMatchesTypra(unknownRecordRoot, "Record<unknown> NSNumber payloads must not bridge 0/1 into booleans")
     let imageContent = try FixtureContent.load(["kind": "image", "url": "https://example.com/fixture.png"])
+    try assertCodableMatchesTypra(imageContent, "polymorphic Codable encode must match Typra save")
+    let rawConnectionData = try JSONSerialization.jsonObject(with: Data("""
+    {"kind":"future-auth","name":"future","zero":0,"one":1,"decimal":0.125,"highPrecision":1234567890.1234567,"flag":true}
+    """.utf8)) as! [String: Any]
+    let rawConnection = try FixtureConnection.load(rawConnectionData)
+    try assertCodableMatchesTypra(rawConnection, "raw unknown discriminator NSNumber payloads must not bridge 0/1 into booleans")
     let wire = try WireOptions.load(["maxOutputTokens": 256, "temperature": 0.7])
     let reference = try FixtureReference.fromYAML("\\"ref-coerced\\"")
 
@@ -4850,12 +4913,12 @@ final class ConformanceValidateTests: XCTestCase {
         env: { ...swiftToolchainEnv(), TYPRA_CONFORMANCE_OUTPUT: payloadPath },
       },
     );
-    assertConformanceResult("swift", readFileSync(payloadPath, "utf8"));
+    assertConformanceResult(targetDir, readFileSync(payloadPath, "utf8"));
   } catch (error) {
     const output =
       `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
     fail(
-      `Generated Swift executable conformance failed:\n${output || error.message}`,
+      `Generated ${targetDir} executable conformance failed:\n${output || error.message}`,
     );
   } finally {
     if (existsSync(runnerPath)) {
@@ -4863,6 +4926,10 @@ final class ConformanceValidateTests: XCTestCase {
     }
     rmSync(buildDir, { recursive: true, force: true });
   }
+}
+
+function runSwiftCodableExecutableConformance(context = {}) {
+  runSwiftExecutableConformance(context, "swift-codable", true);
 }
 
 /** Pulls the sentinel-tagged payload out of a test runner's interleaved output. */
@@ -4895,8 +4962,9 @@ function runExecutableConformance() {
       ["csharp", runCSharpExecutableConformance],
       ["java", runJavaExecutableConformance],
       ["swift", runSwiftExecutableConformance],
+      ["swift-codable", runSwiftCodableExecutableConformance],
     ]),
-    allowedSkips: { swift: TOOLCHAIN_UNAVAILABLE },
+    allowedSkips: { swift: TOOLCHAIN_UNAVAILABLE, "swift-codable": TOOLCHAIN_UNAVAILABLE },
   });
   assertExecutableConformanceCoverage();
   assertExecutableConformanceAgreement();
@@ -4915,6 +4983,7 @@ function assertGeneratedTargets() {
     "rust",
     "rust-serde",
     "swift",
+    "swift-codable",
     "markdown",
     "json-ast",
   ]) {
@@ -5451,6 +5520,9 @@ function assertExportSurfaceSnapshot() {
   if (!snapshot.targets?.some(target => target.target === "rust" && target.outputRoot?.endsWith("generated/fixtures/rust-serde"))) {
     fail("Export surface snapshot is missing the Rust serde output root.");
   }
+  if (!snapshot.targets?.some(target => target.target === "swift" && target.outputRoot?.endsWith("generated/fixtures/swift-codable"))) {
+    fail("Export surface snapshot is missing the Swift Codable output root.");
+  }
 
   assertArrayIncludes(
     "TypeScript root exports",
@@ -5799,6 +5871,7 @@ function runDeclaredValidationStages() {
         () => runRustTests("rust-serde", "fixtures_serde"),
       ],
       ["swift.generated-tests", runSwiftTests],
+      ["swift-codable.generated-tests", runSwiftCodableTests],
       ["csharp.build", runCSharpBuild],
       ["csharp.consumer-nullability-build", runCSharpConsumerNullabilityBuild],
       ["csharp.generated-tests", runCSharpGeneratedTests],
@@ -5809,7 +5882,7 @@ function runDeclaredValidationStages() {
       ["java-jackson.generated-tests", runJavaJacksonGeneratedTests],
       ["executable-conformance", runExecutableConformance],
     ]),
-    allowedSkips: { "swift.generated-tests": TOOLCHAIN_UNAVAILABLE },
+    allowedSkips: { "swift.generated-tests": TOOLCHAIN_UNAVAILABLE, "swift-codable.generated-tests": TOOLCHAIN_UNAVAILABLE },
   });
 }
 

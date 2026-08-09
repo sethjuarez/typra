@@ -62,6 +62,7 @@ describe("generate", () => {
       { type: "python", "native-serialization": "pydantic" },
       { type: "java", "native-serialization": "jackson" },
       { type: "rust", "native-serialization": "serde" },
+      { type: "swift", "native-serialization": "codable" },
       { type: "java", "native-serialization": "none" },
     ]), []);
     assert.deepEqual(validateNativeSerializationTargets([
@@ -73,7 +74,7 @@ describe("generate", () => {
       'Target "typescript" does not support native-serialization "pydantic". Supported values: "none", "zod", "standard-schema".',
       'Target "python" does not support native-serialization "standard-schema". Supported values: "none", "pydantic".',
       'Target "java" does not support native-serialization "zod". Supported values: "none", "jackson".',
-      'Target "swift" does not support native-serialization "standard-schema". Supported value: "none".',
+      'Target "swift" does not support native-serialization "standard-schema". Supported values: "none", "codable".',
     ]);
   });
 
