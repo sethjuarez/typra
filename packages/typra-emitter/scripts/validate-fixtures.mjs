@@ -101,6 +101,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "python_pydantic.generated-tests",
   "go.generated-tests",
   "rust.generated-tests",
+  "rust-serde.generated-tests",
   "swift.generated-tests",
   "csharp.build",
   "csharp.consumer-nullability-build",
@@ -120,6 +121,7 @@ const EXPECTED_EXECUTABLE_CONFORMANCE_TARGET_IDS = [
   "python_pydantic",
   "go",
   "rust",
+  "rust-serde",
   "rust-unknown",
   "csharp",
   "java",
@@ -411,6 +413,7 @@ const executableConformanceTargets = [
   "go",
   "java",
   "rust",
+  "rust-serde",
   "swift",
 ];
 const conformanceObservedOutputs = new Map();
@@ -425,6 +428,7 @@ const KNOWN_TEST_FAILURES = {
   java: new Map(),
   "java-jackson": new Map(),
   rust: new Map(),
+  "rust-serde": new Map(),
   swift: new Map(),
 };
 
@@ -1105,6 +1109,23 @@ function assertGeneratedStructuredLoadCoverage() {
       hasStructuredLoad: (content) => /fn test_\w+_load_json\(\)/.test(content),
     },
     {
+      target: "rust-serde",
+      outputRoot: "generated/fixtures/rust-serde",
+      dir: path.join(generatedRoot, "rust-serde", "tests"),
+      testFile: (file) => file.endsWith("_test.rs"),
+      expectedTestPath: (_name, group, source) => {
+        const moduleName = source.split("::").at(-1);
+        return path.join(
+          generatedRoot,
+          "rust-serde",
+          "tests",
+          group || "",
+          `${moduleName}_test.rs`,
+        );
+      },
+      hasStructuredLoad: (content) => /fn test_\w+_load_json\(\)/.test(content),
+    },
+    {
       target: "swift",
       outputRoot: "generated/fixtures/swift",
       dir: path.join(generatedRoot, "swift", "Tests", "TypraFixturesTests"),
@@ -1757,11 +1778,12 @@ function runGoTests() {
   }
 }
 
-function runRustTests() {
-  const sourceDir = path.join(generatedRoot, "rust");
+function runRustTests(target = "rust", packageName = "fixtures") {
+  const sourceDir = path.join(generatedRoot, target);
+  const useSerdeFeature = target === "rust-serde";
   const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".rs"));
   if (sourceFiles.length === 0) {
-    fail("No generated Rust files found to test.");
+    fail(`No generated ${target} Rust files found to test.`);
     return;
   }
 
@@ -1773,7 +1795,7 @@ function runRustTests() {
     cargoPath,
     [
       "[package]",
-      'name = "fixtures"',
+      `name = "${packageName}"`,
       'version = "0.0.0"',
       'edition = "2021"',
       "",
@@ -1782,6 +1804,9 @@ function runRustTests() {
       'serde = { version = "1", features = ["derive"] }',
       'serde_json = "1"',
       'serde_yaml = "0.9"',
+      "",
+      "[features]",
+      "serde = []",
       "",
       "[lib]",
       'path = "lib.rs"',
@@ -1793,7 +1818,7 @@ function runRustTests() {
     let output = "";
     let crashed = null;
     try {
-      output = execFileSync("cargo", ["test"], {
+      output = execFileSync("cargo", useSerdeFeature ? ["test", "--features", "serde"] : ["test"], {
         cwd: sourceDir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
@@ -1811,10 +1836,10 @@ function runRustTests() {
         (match) => match[1],
       ),
     ]);
-    assertKnownTestFailures("rust", failed, KNOWN_TEST_FAILURES.rust, {
+    assertKnownTestFailures(target, failed, KNOWN_TEST_FAILURES[target], {
       crashed,
       output,
-      crashMessage: "Generated Rust tests failed to build or run",
+      crashMessage: `Generated ${target} Rust tests failed to build or run`,
     });
   } finally {
     for (const tempPath of [cargoPath, lockPath, libPath]) {
@@ -3700,15 +3725,16 @@ function runGoExecutableConformance() {
   }
 }
 
-function runRustExecutableConformance() {
-  const sourceDir = path.join(generatedRoot, "rust");
+function runRustExecutableConformance(target = "rust", packageName = "fixtures") {
+  const sourceDir = path.join(generatedRoot, target);
+  const useSerdeFeature = target === "rust-serde";
   const cargoPath = path.join(sourceDir, "Cargo.toml");
   const lockPath = path.join(sourceDir, "Cargo.lock");
   const libPath = path.join(sourceDir, "lib.rs");
   const runnerPath = path.join(sourceDir, "conformance_validate.rs");
   const targetDir = mkdtempSync(path.join(tmpdir(), "typra-rust-conformance-"));
   if (!existsSync(sourceDir)) {
-    fail("No generated Rust directory found for executable conformance.");
+    fail(`No generated ${target} Rust directory found for executable conformance.`);
     return;
   }
 
@@ -3716,7 +3742,7 @@ function runRustExecutableConformance() {
     cargoPath,
     [
       "[package]",
-      'name = "fixtures"',
+      `name = "${packageName}"`,
       'version = "0.0.0"',
       'edition = "2021"',
       "",
@@ -3725,6 +3751,9 @@ function runRustExecutableConformance() {
       'serde = { version = "1", features = ["derive"] }',
       'serde_json = "1"',
       'serde_yaml = "0.9"',
+      "",
+      "[features]",
+      "serde = []",
       "",
       "[lib]",
       'path = "lib.rs"',
@@ -3739,7 +3768,7 @@ function runRustExecutableConformance() {
   writeFileSync(
     runnerPath,
     [
-      "use fixtures::model::*;",
+      `use ${packageName}::model::*;`,
       "use serde_json::json;",
       "",
       "fn main() {",
@@ -3748,21 +3777,35 @@ function runRustExecutableConformance() {
       `    let root_value: serde_json::Value = serde_json::from_str(${fixtureRootSampleJsonLiteral}).unwrap();`,
       `    let property_cases: Vec<serde_json::Value> = serde_json::from_str(${propertyCorpusJsonLiteral}).unwrap();`,
       "    let property_outputs: Vec<serde_json::Value> = property_cases.iter().map(|entry| {",
-      "        let root = FixtureRoot::load_from_value(&entry[\"input\"], &load_ctx);",
+      useSerdeFeature
+        ? "        let root: FixtureRoot = serde_json::from_value(entry[\"input\"].clone()).unwrap();"
+        : "        let root = FixtureRoot::load_from_value(&entry[\"input\"], &load_ctx);",
       "        json!({",
       "            \"id\": entry[\"id\"].clone(),",
       "            \"seed\": entry[\"seed\"].clone(),",
       "            \"caseId\": entry[\"caseId\"].clone(),",
-      "            \"root\": root.to_value(&save_ctx)",
+      useSerdeFeature
+        ? "            \"root\": serde_json::to_value(&root).unwrap()"
+        : "            \"root\": root.to_value(&save_ctx)",
       "        })",
       "    }).collect();",
-      "    let root = FixtureRoot::load_from_value(&root_value, &load_ctx);",
-      '    let image_content = FixtureContent::load_from_value(&json!({"kind": "image", "url": "https://example.com/fixture.png"}), &load_ctx);',
-      '    let known_content = FixtureContent::from_json(r#"{"kind":"text","value":"hello"}"#, &load_ctx).expect("known closed discriminator");',
-      '    assert_eq!(known_content.to_value(&save_ctx), json!({"kind": "text", "value": "hello"}));',
+      useSerdeFeature
+        ? "    let root: FixtureRoot = serde_json::from_value(root_value.clone()).unwrap();"
+        : "    let root = FixtureRoot::load_from_value(&root_value, &load_ctx);",
+      useSerdeFeature
+        ? '    let image_content: FixtureContent = serde_json::from_value(json!({"kind": "image", "url": "https://example.com/fixture.png"})).unwrap();'
+        : '    let image_content = FixtureContent::load_from_value(&json!({"kind": "image", "url": "https://example.com/fixture.png"}), &load_ctx);',
+      useSerdeFeature
+        ? '    let known_content: FixtureContent = serde_json::from_str(r#"{"kind":"text","value":"hello"}"#).expect("serde known closed discriminator");'
+        : '    let known_content = FixtureContent::from_json(r#"{"kind":"text","value":"hello"}"#, &load_ctx).expect("known closed discriminator");',
+      useSerdeFeature
+        ? '    assert_eq!(serde_json::to_value(&known_content).unwrap(), json!({"kind": "text", "value": "hello"}));'
+        : '    assert_eq!(known_content.to_value(&save_ctx), json!({"kind": "text", "value": "hello"}));',
       '    for invalid_kind in ["video", "Text"] {',
       '        let input = format!(r#"{{"kind":"{}","value":"hello"}}"#, invalid_kind);',
-      '        let error = FixtureContent::from_json(&input, &load_ctx).expect_err("invalid closed discriminator");',
+      useSerdeFeature
+        ? '        let error = serde_json::from_str::<FixtureContent>(&input).expect_err("serde invalid closed discriminator");'
+        : '        let error = FixtureContent::from_json(&input, &load_ctx).expect_err("invalid closed discriminator");',
       "        let message = error.to_string();",
       '        assert!(message.contains("kind") && message.contains(invalid_kind), "{message}");',
       "    }",
@@ -3780,55 +3823,121 @@ function runRustExecutableConformance() {
       '            "nullable": null',
       "        }",
       "    });",
-      "    let mut unknown_connection = FixtureConnection::load_from_value(&unknown_connection_input, &load_ctx);",
+      useSerdeFeature
+        ? "    let mut unknown_connection = serde_json::from_value::<FixtureConnection>(unknown_connection_input.clone()).unwrap();"
+        : "    let mut unknown_connection = FixtureConnection::load_from_value(&unknown_connection_input, &load_ctx);",
+      "    let canonical_unknown_connection = FixtureConnection::load_from_value(&unknown_connection_input, &load_ctx);",
       '    assert_eq!(unknown_connection.kind_str(), "future-auth");',
       '    assert!(matches!(&unknown_connection.kind, FixtureConnectionKind::Custom { raw, .. } if raw.get("endpoint") == Some(&json!("https://future.test")) && raw.get("providerOptions") == unknown_connection_input.get("providerOptions")));',
-      "    assert_eq!(unknown_connection.to_value(&save_ctx), unknown_connection_input);",
-      "    let reloaded_unknown_connection = FixtureConnection::load_from_value(&unknown_connection.to_value(&save_ctx), &load_ctx);",
-      "    assert_eq!(reloaded_unknown_connection.to_value(&save_ctx), unknown_connection_input);",
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&unknown_connection).unwrap(), canonical_unknown_connection.to_value(&save_ctx));"
+        : "    assert_eq!(unknown_connection.to_value(&save_ctx), unknown_connection_input);",
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&unknown_connection).unwrap(), unknown_connection_input);"
+        : "",
+      useSerdeFeature
+        ? "    let reloaded_unknown_connection = serde_json::from_value::<FixtureConnection>(serde_json::to_value(&unknown_connection).unwrap()).unwrap();"
+        : "    let reloaded_unknown_connection = FixtureConnection::load_from_value(&unknown_connection.to_value(&save_ctx), &load_ctx);",
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&reloaded_unknown_connection).unwrap(), unknown_connection_input);"
+        : "    assert_eq!(reloaded_unknown_connection.to_value(&save_ctx), unknown_connection_input);",
       '    unknown_connection.name = Some("updated".to_string());',
       "    let mut updated_unknown_connection = unknown_connection_input.clone();",
       '    updated_unknown_connection["name"] = json!("updated");',
-      "    assert_eq!(unknown_connection.to_value(&save_ctx), updated_unknown_connection);",
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&unknown_connection).unwrap(), updated_unknown_connection);"
+        : "    assert_eq!(unknown_connection.to_value(&save_ctx), updated_unknown_connection);",
       '    let known_connection_input = json!({"kind": "custom", "name": "known", "endpoint": "https://known.test"});',
-      "    let known_connection = FixtureConnection::load_from_value(&known_connection_input, &load_ctx);",
-      "    assert!(matches!(known_connection.kind, FixtureConnectionKind::FixtureCustomConnection { .. }));",
-      "    assert_eq!(known_connection.to_value(&save_ctx), known_connection_input);",
+      useSerdeFeature
+        ? "    let known_connection = serde_json::from_value::<FixtureConnection>(known_connection_input.clone()).unwrap();"
+        : "    let known_connection = FixtureConnection::load_from_value(&known_connection_input, &load_ctx);",
+      "    let canonical_known_connection = FixtureConnection::load_from_value(&known_connection_input, &load_ctx);",
+      "    assert!(matches!(&known_connection.kind, FixtureConnectionKind::FixtureCustomConnection { .. }));",
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&known_connection).unwrap(), canonical_known_connection.to_value(&save_ctx));"
+        : "    assert_eq!(known_connection.to_value(&save_ctx), known_connection_input);",
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&known_connection).unwrap(), known_connection_input);"
+        : "",
       "    for invalid_connection_input in [json!({}), json!({\"kind\": \"\"}), json!({\"kind\": null}), json!({\"kind\": 42})] {",
-      "        let invalid_connection_error = FixtureConnection::from_json(&invalid_connection_input.to_string(), &load_ctx).expect_err(\"invalid FixtureConnection discriminator\");",
+      useSerdeFeature
+        ? "        let invalid_connection_error = serde_json::from_value::<FixtureConnection>(invalid_connection_input.clone()).expect_err(\"serde invalid FixtureConnection discriminator\");"
+        : "        let invalid_connection_error = FixtureConnection::from_json(&invalid_connection_input.to_string(), &load_ctx).expect_err(\"invalid FixtureConnection discriminator\");",
       "        let invalid_connection_message = invalid_connection_error.to_string();",
       "        assert!(invalid_connection_message.contains(\"kind\") || invalid_connection_message.contains(\"discriminator\"), \"{invalid_connection_message}\");",
       "    }",
       // A named open-enum discriminator must round-trip an unrecognized kind losslessly.
       // (This is adjacent to issue #38 but does not reproduce it — see the fixture doc.)
       '    let named_open_input = json!({"kind": "vendor-specific", "label": "future", "extra": {"nested": [1, null]}});',
-      "    let named_open = FixtureNamedOpenBase::load_from_value(&named_open_input, &load_ctx);",
+      useSerdeFeature
+        ? "    let named_open = serde_json::from_value::<FixtureNamedOpenBase>(named_open_input.clone()).unwrap();"
+        : "    let named_open = FixtureNamedOpenBase::load_from_value(&named_open_input, &load_ctx);",
+      "    let canonical_named_open = FixtureNamedOpenBase::load_from_value(&named_open_input, &load_ctx);",
       '    assert_eq!(named_open.kind_str(), "vendor-specific");',
-      "    assert_eq!(named_open.to_value(&save_ctx), named_open_input);",
-      '    let named_open_known = FixtureNamedOpenBase::load_from_value(&json!({"kind": "managed", "label": "known", "resourceId": "res-1"}), &load_ctx);',
-      "    assert!(matches!(named_open_known.kind, FixtureNamedOpenBaseKind::FixtureNamedOpenVariant { .. }));",
-      '    let missing_connection_error = FixtureToolbox::from_json(r#"{"tools":{"custom":{"kind":"vendor"}},"inheritedMapBindingTool":{"kind":"function","name":"map","command":"run"},"inheritedListBindingTool":{"kind":"function","name":"list","command":"run"}}"#, &load_ctx).expect_err("missing required CustomTool.connection");',
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&named_open).unwrap(), canonical_named_open.to_value(&save_ctx));"
+        : "    assert_eq!(named_open.to_value(&save_ctx), named_open_input);",
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&named_open).unwrap(), named_open_input);"
+        : "",
+      useSerdeFeature
+        ? '    let named_open_known = serde_json::from_value::<FixtureNamedOpenBase>(json!({"kind": "managed", "label": "known", "resourceId": "res-1"})).unwrap();'
+        : '    let named_open_known = FixtureNamedOpenBase::load_from_value(&json!({"kind": "managed", "label": "known", "resourceId": "res-1"}), &load_ctx);',
+      "    assert!(matches!(&named_open_known.kind, FixtureNamedOpenBaseKind::FixtureNamedOpenVariant { .. }));",
+      useSerdeFeature
+        ? '    let missing_connection_error = serde_json::from_str::<FixtureToolbox>(r#"{"tools":{"custom":{"kind":"vendor"}},"inheritedMapBindingTool":{"kind":"function","name":"map","command":"run"},"inheritedListBindingTool":{"kind":"function","name":"list","command":"run"}}"#).expect_err("serde missing required CustomTool.connection");'
+        : '    let missing_connection_error = FixtureToolbox::from_json(r#"{"tools":{"custom":{"kind":"vendor"}},"inheritedMapBindingTool":{"kind":"function","name":"map","command":"run"},"inheritedListBindingTool":{"kind":"function","name":"list","command":"run"}}"#, &load_ctx).expect_err("missing required CustomTool.connection");',
       "    let missing_connection_diagnostic = missing_connection_error.to_string();",
       '    assert!(missing_connection_diagnostic.contains("tools.custom.connection") && missing_connection_diagnostic.contains("missing required field"), "{missing_connection_diagnostic}");',
       '    let function_tool_input = json!({"kind": "function", "name": "search", "command": "run", "parameters": [{"name": "query", "kind": "string", "required": true}]});',
-      "    let function_tool = FixtureTool::load_from_value(&function_tool_input, &load_ctx);",
-      "    let function_tool_saved = function_tool.to_value(&save_ctx);",
+      useSerdeFeature
+        ? "    let function_tool = serde_json::from_value::<FixtureTool>(function_tool_input.clone()).unwrap();"
+        : "    let function_tool = FixtureTool::load_from_value(&function_tool_input, &load_ctx);",
+      "    let canonical_function_tool = FixtureTool::load_from_value(&function_tool_input, &load_ctx);",
+      useSerdeFeature
+        ? "    let function_tool_saved = serde_json::to_value(&function_tool).unwrap();"
+        : "    let function_tool_saved = function_tool.to_value(&save_ctx);",
+      "    assert_eq!(function_tool_saved, canonical_function_tool.to_value(&save_ctx));",
       '    assert_eq!(function_tool_saved["parameters"]["query"]["kind"], json!("string"));',
       '    assert_eq!(function_tool_saved["parameters"]["query"]["required"], json!(true));',
-      "    let function_tool_reloaded = FixtureTool::load_from_value(&function_tool_saved, &load_ctx);",
-      "    assert_eq!(function_tool_reloaded.to_value(&save_ctx), function_tool_saved);",
-      '    let unnamed_function_tool = FixtureTool::load_from_value(&json!({"kind": "function", "name": "unnamed", "command": "run", "parameters": [{"kind": "string"}]}), &load_ctx);',
-      '    assert_eq!(unnamed_function_tool.to_value(&save_ctx)["parameters"], json!([{"kind": "string"}]));',
-      '    let duplicate_function_tool = FixtureTool::load_from_value(&json!({"kind": "function", "name": "duplicate", "command": "run", "parameters": [{"name": "query", "kind": "string"}, {"name": "query", "kind": "number"}]}), &load_ctx);',
-      '    assert_eq!(duplicate_function_tool.to_value(&save_ctx)["parameters"], json!([{"name": "query", "kind": "string"}, {"name": "query", "kind": "number"}]));',
+      useSerdeFeature
+        ? "    let function_tool_reloaded = serde_json::from_value::<FixtureTool>(function_tool_saved.clone()).unwrap();"
+        : "    let function_tool_reloaded = FixtureTool::load_from_value(&function_tool_saved, &load_ctx);",
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&function_tool_reloaded).unwrap(), function_tool_saved);"
+        : "    assert_eq!(function_tool_reloaded.to_value(&save_ctx), function_tool_saved);",
+      useSerdeFeature
+        ? '    let unnamed_function_tool = serde_json::from_value::<FixtureTool>(json!({"kind": "function", "name": "unnamed", "command": "run", "parameters": [{"kind": "string"}]})).unwrap();'
+        : '    let unnamed_function_tool = FixtureTool::load_from_value(&json!({"kind": "function", "name": "unnamed", "command": "run", "parameters": [{"kind": "string"}]}), &load_ctx);',
+      useSerdeFeature
+        ? '    assert_eq!(serde_json::to_value(&unnamed_function_tool).unwrap()["parameters"], json!([{"kind": "string"}]));'
+        : '    assert_eq!(unnamed_function_tool.to_value(&save_ctx)["parameters"], json!([{"kind": "string"}]));',
+      useSerdeFeature
+        ? '    let duplicate_function_tool = serde_json::from_value::<FixtureTool>(json!({"kind": "function", "name": "duplicate", "command": "run", "parameters": [{"name": "query", "kind": "string"}, {"name": "query", "kind": "number"}]})).unwrap();'
+        : '    let duplicate_function_tool = FixtureTool::load_from_value(&json!({"kind": "function", "name": "duplicate", "command": "run", "parameters": [{"name": "query", "kind": "string"}, {"name": "query", "kind": "number"}]}), &load_ctx);',
+      useSerdeFeature
+        ? '    assert_eq!(serde_json::to_value(&duplicate_function_tool).unwrap()["parameters"], json!([{"name": "query", "kind": "string"}, {"name": "query", "kind": "number"}]));'
+        : '    assert_eq!(duplicate_function_tool.to_value(&save_ctx)["parameters"], json!([{"name": "query", "kind": "string"}, {"name": "query", "kind": "number"}]));',
       '    let wildcard_tool_input = json!({"kind": "vendor", "name": "vendor", "description": "vendor description", "connection": {"kind": "future-auth", "name": "future"}, "config": {"enabled": true}});',
-      "    let wildcard_tool = FixtureTool::load_from_value(&wildcard_tool_input, &load_ctx);",
+      useSerdeFeature
+        ? "    let wildcard_tool = serde_json::from_value::<FixtureTool>(wildcard_tool_input.clone()).unwrap();"
+        : "    let wildcard_tool = FixtureTool::load_from_value(&wildcard_tool_input, &load_ctx);",
+      "    let canonical_wildcard_tool = FixtureTool::load_from_value(&wildcard_tool_input, &load_ctx);",
       '    assert!(matches!(&wildcard_tool.kind, FixtureToolKind::FixtureCustomTool { .. }), "declared wildcard subtype did not own unknown tool kind");',
-      "    assert_eq!(wildcard_tool.to_value(&save_ctx), wildcard_tool_input);",
-      "    let wildcard_tool_reloaded = FixtureTool::load_from_value(&wildcard_tool.to_value(&save_ctx), &load_ctx);",
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&wildcard_tool).unwrap(), canonical_wildcard_tool.to_value(&save_ctx));"
+        : "    assert_eq!(wildcard_tool.to_value(&save_ctx), wildcard_tool_input);",
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&wildcard_tool).unwrap(), wildcard_tool_input);"
+        : "",
+      useSerdeFeature
+        ? "    let wildcard_tool_reloaded = serde_json::from_value::<FixtureTool>(serde_json::to_value(&wildcard_tool).unwrap()).unwrap();"
+        : "    let wildcard_tool_reloaded = FixtureTool::load_from_value(&wildcard_tool.to_value(&save_ctx), &load_ctx);",
       '    assert!(matches!(&wildcard_tool_reloaded.kind, FixtureToolKind::FixtureCustomTool { .. }), "wildcard tool did not survive reload");',
       '    let wire = WireOptions::load_from_value(&json!({"maxOutputTokens": 256, "temperature": 0.7}), &load_ctx);',
-      '    let reference = FixtureReference::load_from_value(&json!("ref-coerced"), &load_ctx);',
+      useSerdeFeature
+        ? '    let reference: FixtureReference = serde_json::from_value(json!("ref-coerced")).unwrap();'
+        : '    let reference = FixtureReference::load_from_value(&json!("ref-coerced"), &load_ctx);',
       "    let number_property = FixtureProperty::load_from_value(&json!(3.5), &load_ctx);",
       '    assert_eq!(number_property.to_value(&save_ctx), json!({"kind": "number", "default": 3.5}));',
       "    let omitted_model_info = ModelInfo::load_from_value(&json!({}), &load_ctx);",
@@ -3869,14 +3978,20 @@ function runRustExecutableConformance() {
       "    let indexed_message = indexed_error.to_string();",
       '    assert!(indexed_message.contains("entries[1].detail"), "array element diagnostic lost the element index: {indexed_message}");',
       '    println!("{}", json!({',
-      '        "root": root.to_value(&save_ctx),',
+      useSerdeFeature
+        ? '        "root": serde_json::to_value(&root).unwrap(),'
+        : '        "root": root.to_value(&save_ctx),',
       '        "propertyCases": property_outputs,',
-      '        "imageContent": image_content.to_value(&save_ctx),',
+      useSerdeFeature
+        ? '        "imageContent": serde_json::to_value(&image_content).unwrap(),'
+        : '        "imageContent": image_content.to_value(&save_ctx),',
       '        "openai": wire.to_wire("openai"),',
       '        "anthropic": wire.to_wire("anthropic"),',
       '        "unmapped": wire.to_wire("unmapped-provider"),',
       '        "emptyProvider": wire.to_wire(""),',
-      '        "reference": reference.to_value(&save_ctx)',
+      useSerdeFeature
+        ? '        "reference": serde_json::to_value(&reference).unwrap()'
+        : '        "reference": reference.to_value(&save_ctx)',
       "    }));",
       "}",
       "",
@@ -3886,7 +4001,9 @@ function runRustExecutableConformance() {
   try {
     const output = execFileSync(
       "cargo",
-      ["run", "--quiet", "--bin", "conformance_validate"],
+      useSerdeFeature
+        ? ["run", "--quiet", "--features", "serde", "--bin", "conformance_validate"]
+        : ["run", "--quiet", "--bin", "conformance_validate"],
       {
         cwd: sourceDir,
         encoding: "utf8",
@@ -3894,12 +4011,12 @@ function runRustExecutableConformance() {
         env: { ...process.env, CARGO_TARGET_DIR: targetDir },
       },
     ).trim();
-    assertConformanceResult("rust", output);
+    assertConformanceResult(target, output);
   } catch (error) {
     const output =
       `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
     fail(
-      `Generated Rust executable conformance failed:\n${output || error.message}`,
+      `Generated ${target} Rust executable conformance failed:\n${output || error.message}`,
     );
   } finally {
     for (const tempPath of [cargoPath, lockPath, libPath, runnerPath]) {
@@ -4769,7 +4886,11 @@ function runExecutableConformance() {
           runPythonExecutableConformance("python_pydantic", "python_pydantic"),
       ],
       ["go", runGoExecutableConformance],
-      ["rust", runRustExecutableConformance],
+      ["rust", () => runRustExecutableConformance()],
+      [
+        "rust-serde",
+        () => runRustExecutableConformance("rust-serde", "fixtures_serde"),
+      ],
       ["rust-unknown", runRustUnknownAbstractConformance],
       ["csharp", runCSharpExecutableConformance],
       ["java", runJavaExecutableConformance],
@@ -4792,6 +4913,7 @@ function assertGeneratedTargets() {
     "java-jackson",
     "csharp",
     "rust",
+    "rust-serde",
     "swift",
     "markdown",
     "json-ast",
@@ -5160,6 +5282,27 @@ function assertStaticFixtureCoverage() {
     "fn display(&self, prefix: &String) -> String;",
   );
   assertIncludes(
+    path.join("generated", "fixtures", "rust-serde", "fixture_root.rs"),
+    "#[cfg(feature = \"serde\")]",
+    "impl serde::Serialize for FixtureRoot",
+    "self.to_value(&SaveContext::default())",
+    "impl<'de> serde::Deserialize<'de> for FixtureRoot",
+    "Self::load_from_value(&value, &LoadContext::default())",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust-serde", "fixture_connection.rs"),
+    "raw: serde_json::Map<String, serde_json::Value>",
+    "impl serde::Serialize for FixtureConnectionKind",
+    "FixtureConnection::load_from_value(&value, &LoadContext::default()).kind",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust-serde", "tests", "fixture_discriminator_edges_test.rs"),
+    '#[cfg(feature = "serde")]',
+    "serde_json::from_str(json)",
+    "serde_json::to_value(&instance)",
+    "serde serialize must equal canonical to_value",
+  );
+  assertIncludes(
     path.join("generated", "fixtures", "rust", "fixture_property.rs"),
     "if let Some(value) = value.as_i64() {",
     "kind: FixturePropertyKind::FixtureIntegerProperty, default: Some(value.into())",
@@ -5304,6 +5447,9 @@ function assertExportSurfaceSnapshot() {
   }
   if (!snapshot.targets?.some(target => target.target === "typescript" && target.outputRoot?.endsWith("generated/fixtures/typescript-zod"))) {
     fail("Export surface snapshot is missing the TypeScript Zod output root.");
+  }
+  if (!snapshot.targets?.some(target => target.target === "rust" && target.outputRoot?.endsWith("generated/fixtures/rust-serde"))) {
+    fail("Export surface snapshot is missing the Rust serde output root.");
   }
 
   assertArrayIncludes(
@@ -5647,7 +5793,11 @@ function runDeclaredValidationStages() {
         () => runPythonGeneratedTests("python_pydantic", "fixtures_pydantic"),
       ],
       ["go.generated-tests", runGoTests],
-      ["rust.generated-tests", runRustTests],
+      ["rust.generated-tests", () => runRustTests()],
+      [
+        "rust-serde.generated-tests",
+        () => runRustTests("rust-serde", "fixtures_serde"),
+      ],
       ["swift.generated-tests", runSwiftTests],
       ["csharp.build", runCSharpBuild],
       ["csharp.consumer-nullability-build", runCSharpConsumerNullabilityBuild],

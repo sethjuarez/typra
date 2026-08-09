@@ -196,6 +196,22 @@
       "description": "A bounded fixed-seed corpus of valid FixtureRoot instances is generated from the TypeSpec-derived JSON IR and run through the cross-language save/load oracle with replayable seed and case identifiers."
     },
     {
+      "id": "native-serialization-canonical-equivalence",
+      "status": "enforced",
+      "verification": "unit-test",
+      "test": "packages/typra-emitter/scripts/validate-fixtures.mjs",
+      "backends": {
+        "typescript": "implemented",
+        "python": "implemented",
+        "csharp": "implemented",
+        "go": "implemented",
+        "java": "implemented",
+        "rust": "implemented",
+        "swift": { "status": "waived", "issue": "#98" }
+      },
+      "description": "Opt-in native serialization/validation surfaces that exist for a target must delegate to or differentially match Typra canonical load/save instead of introducing a second wire contract."
+    },
+    {
       "id": "java-yaml-escaping",
       "status": "enforced",
       "verification": "unit-test",

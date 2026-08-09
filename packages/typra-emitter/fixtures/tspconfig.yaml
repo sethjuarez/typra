@@ -68,6 +68,15 @@ options:
         format: false
         protocol-scaffolds: "compile-only"
         cancellation-token-path: "std::sync::atomic::AtomicBool"
+      - type: Rust
+        output-dir: "generated/fixtures/rust-serde"
+        test-dir: "generated/fixtures/rust-serde/tests"
+        import-path: "fixtures_serde::model"
+        enum-parsing: "case-insensitive"
+        format: false
+        protocol-scaffolds: "compile-only"
+        native-serialization: "serde"
+        cancellation-token-path: "std::sync::atomic::AtomicBool"
       - type: Swift
         output-dir: "generated/fixtures/swift"
         test-dir: "generated/fixtures/swift/Tests/TypraFixturesTests"

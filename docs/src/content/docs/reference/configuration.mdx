@@ -53,7 +53,7 @@ Each `emit-targets` entry has a required `type` and can set target-specific opti
 | `alias` | Target aliasing when supported by the emitter. |
 | `enum-parsing` | Rust enum parsing mode. |
 | `protocol-scaffolds` | Compile-only protocol scaffold generation. |
-| `native-serialization` | Opt-in native interop surface. Python supports `"none"` or `"pydantic"` and defaults to `"none"`. |
+| `native-serialization` | Opt-in native interop surface. Python supports `"none"` or `"pydantic"`, Java supports `"none"` or `"jackson"`, Rust supports `"none"` or `"serde"`, and TypeScript supports `"none"` or `"zod"`. Rust preserves its legacy cfg-gated serde surface when omitted; set `"none"` to opt out. |
 
 `protocol-scaffolds: "compile-only"` emits test-only implementations that prove generated protocols compile. They intentionally throw or reject when called and are not runtime fakes.
 
