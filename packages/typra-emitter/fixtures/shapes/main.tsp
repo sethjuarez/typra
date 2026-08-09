@@ -291,11 +291,10 @@ open discriminators, which the base must carry. unclaimedClosed is the closed-un
 issue #37: the value is permitted by the union yet claimed by no subtype, and a closed union is
 not the same thing as an exhaustive dispatch.
 
-These are all well-formed documents that must load. Discriminators that are absent, blank or of
-the wrong type are a separate axis and are not covered here: whether they fail the load or are
-treated as merely unrecognized depends on the dispatch, and the targets are not known to agree.
-Preservation of undeclared extra fields alongside an unrecognized discriminator is likewise a
-separate axis and is not covered here.
+These are all well-formed documents that must load. Discriminators that are absent, blank, null,
+or the wrong type are a separate negative-conformance axis: they must fail before wildcard or
+open-fallback dispatch can run. Preservation of undeclared extra fields alongside an unrecognized
+discriminator is likewise a separate axis and is not covered here.
 """)
 model FixtureDiscriminatorEdges {
   @sample(#{ wildcardSelected: #{ kind: "vendor-extension", name: "wildcard-selected tool", connection: #{ kind: "custom", endpoint: "https://example.test" }, config: #{ enabled: true } } })
@@ -544,7 +543,7 @@ model FixturePolymorphicDefaults {
   @doc("Optional field of the same abstract closed union")
   optionalAbstractContent?: FixtureAbstractContent;
 
-  @sample(#{ requiredConnection: #{ kind: "custom", name: "defaults-connection" } })
+  @sample(#{ requiredConnection: #{ kind: "custom", name: "defaults-connection", endpoint: "https://example.test/defaults" } })
   @doc("Required field of an open union that does declare an unknown case")
   requiredConnection: FixtureConnection;
 }
@@ -662,7 +661,7 @@ model FixtureCustomTool extends FixtureTool {
 }
 
 model FixtureToolbox {
-  @sample(#{ tools: #[#{ kind: "function", name: "search", command: "search --query" }] })
+  @sample(#{ tools: #[#{ kind: "function", name: "search", command: "search --query", parameters: #[#{ name: "query", kind: "string", required: true }] }] })
   tools: Record<FixtureTool> | Named<FixtureTool>[];
 
   @sample(#{ bindingTools: #[#{ name: "binding-tool", kind: "function", command: "run", bindings: #[#{ name: "input", source: "customer.name" }] }] })
@@ -673,6 +672,7 @@ model FixtureToolbox {
       name: "map-binding-tool",
       kind: "function",
       command: "run",
+      parameters: #[#{ name: "query", kind: "string", required: true }],
       bindings: #{ zebra: "customer.id", alpha: "customer.name" }
     }
   })
@@ -683,6 +683,7 @@ model FixtureToolbox {
       name: "list-binding-tool",
       kind: "function",
       command: "run",
+      parameters: #[#{ name: "query", kind: "string", required: true }],
       bindings: #[
         #{ name: "alpha", source: "customer.name" },
         #{ name: "zebra", source: "customer.id" }
@@ -872,7 +873,7 @@ model FixtureCustomConnection extends FixtureConnection {
 @abstract
 @discriminator("kind")
 model FixtureAbstractOpenConnection {
-  @sample(#{ kind: "managed" })
+  @sample(#{ kind: "managed", resourceId: "managed-resource-1" })
   kind: string;
 
   @sample(#{ label: "abstract open connection" })

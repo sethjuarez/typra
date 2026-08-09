@@ -58,12 +58,15 @@ be explicit in diagnostics, the conformance matrix, or a tracked known failure.
 ## Polymorphic dispatch
 
 - Discriminated load requires a present, non-blank string discriminator.
-  Missing, blank, or wrong-type discriminator values are load errors. Current
-  open-base behavior that absorbs these invalid discriminator states is a known
-  regularization gap, not the target contract.
+  Missing, blank, `null`, or any non-string discriminator value is a load error.
+  These invalid states are not "unknown" discriminator values and must not route
+  to wildcard, open, or unknown fallback carriers.
 - A discriminator value claimed by a subtype loads that subtype.
 - A discriminator value claimed by a wildcard subtype loads the wildcard subtype
   and must still enforce that subtype's required fields.
+- If a payload claims a known discriminator value but fails that concrete
+  subtype's schema, loading fails. It must not be retried against an open or
+  unknown fallback.
 - A well-formed but unclaimed discriminator value on an open base loads an
   unknown carrier that preserves the raw payload.
 - An unclaimed value on a closed base is a load error.
