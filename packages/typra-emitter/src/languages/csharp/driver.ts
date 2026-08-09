@@ -2,7 +2,7 @@ import { EmitContext, resolvePath } from "@typespec/compiler";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import { enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
-import { getCombinations, scalarValue } from "../../ir/utilities.js";
+import { scalarValue } from "../../ir/utilities.js";
 import * as YAML from "yaml";
 import { resolve, dirname } from "path";
 import { execFileSync } from "child_process";
@@ -16,7 +16,7 @@ import { emitCSharpTest } from "./test-emitter.js";
 import { toPascalCase } from "../../ir/visitor.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import { collectProtocolNodes, emitCSharpProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
-import { withRequiredComplexSamples, TypeResolver } from "../../testing/test-context.js";
+import { buildExampleSamples, TypeResolver } from "../../testing/test-context.js";
 
 /**
  * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the
@@ -127,23 +127,7 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
  * driver diverges from the shared `buildBaseTestContext` path the other backends use.
  */
 export const renderTests = (node: TypeNode, namespace: string, resolveType: TypeResolver): string => {
-  const samples = node.properties.filter(p => p.samples && p.samples.length > 0).map(p => {
-    return p.samples?.map(s => ({
-      ...s.sample,
-    }));
-  });
-
-  const combinations =
-    samples.length > 0 ?
-      getCombinations(samples) :
-      [];
-
-  const examples = combinations.map(c => {
-    // Complete the payload with required complex fields the `@sample` combinations left out,
-    // exactly as `buildBaseTestContext` does for every other backend. Without this the
-    // generated fixture omits fields the generated loader requires, so the emitted test is
-    // rejected by the emitted validation.
-    const sample = withRequiredComplexSamples(Object.assign({}, ...c), node, resolveType);
+  const examples = buildExampleSamples(node, resolveType).map(sample => {
     // Create YAML document and customize string scalar style for values with special chars
     const doc = new YAML.Document(sample);
     YAML.visit(doc, {
