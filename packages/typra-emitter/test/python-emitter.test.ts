@@ -109,6 +109,55 @@ describe("Python optional collection defaults", () => {
     assert.match(source, /required_tags: list\[str\] = field\(default_factory=list\)/);
     assert.match(source, /if data is not None and "inputModalities" in data:\s+instance\.input_modalities = data\["inputModalities"\]/);
     assert.match(source, /if obj\.input_modalities is not None:\s+result\["inputModalities"\] = obj\.input_modalities/);
+    assert.doesNotMatch(source, /from pydantic import/);
+    assert.doesNotMatch(source, /BaseModel/);
+  });
+
+  it("emits Pydantic v2 models only when native serialization is enabled", () => {
+    const type = typeDecl([
+      field("inputModalities", { kind: "collection_scalar", scalarType: "string" }, true),
+      field("owners", { kind: "collection_complex", typeName: "Owner" }, true),
+      field("outputModalities", { kind: "collection_scalar", scalarType: "string" }, true, true),
+      field("defaultOwners", { kind: "collection_complex", typeName: "Owner" }, true, true),
+      field("requiredTags", { kind: "collection_scalar", scalarType: "string" }, false),
+    ]);
+    type.save.assignments = type.save.assignments.map(assignment => ({
+      ...assignment,
+      targetName: assignment.fieldName === "inputModalities" ? "inputModalitiesWire" : assignment.targetName,
+    }));
+
+    const source = emitPythonFile(fileDecl(type), new PythonExprVisitor(), "", {
+      nativeSerialization: "pydantic",
+    });
+
+    assert.match(source, /^from pydantic import BaseModel, ConfigDict, Field$/m);
+    assert.doesNotMatch(source, /^from dataclasses import/m);
+    assert.match(source, /class ModelInfo\(BaseModel\):/);
+    assert.match(source, /model_config = ConfigDict\(populate_by_name=True, arbitrary_types_allowed=True\)/);
+    assert.match(source, /input_modalities: list\[str\] \| None = Field\(default=None, alias="inputModalitiesWire"\)/);
+    assert.match(source, /owners: list\[Owner\] \| None = Field\(default=None, alias="owners"\)/);
+    assert.match(source, /output_modalities: list\[str\] \| None = Field\(default_factory=list, alias="outputModalities"\)/);
+    assert.match(source, /default_owners: list\[Owner\] \| None = Field\(default_factory=list, alias="defaultOwners"\)/);
+    assert.match(source, /required_tags: list\[str\] = Field\(default_factory=list, alias="requiredTags"\)/);
+    assert.match(source, /def model_validate\(cls, obj: Any, \*args: Any, \*\*kwargs: Any\) -> "ModelInfo":/);
+    assert.match(source, /return cls\.load\(obj\)/);
+    assert.match(source, /def model_dump\(self, \*args: Any, \*\*kwargs: Any\) -> dict\[str, Any\]:/);
+    assert.match(source, /return self\.save\(\)/);
+    assert.match(source, /def model_dump_json\(self, \*args: Any, \*\*kwargs: Any\) -> str:/);
+    assert.match(source, /return self\.to_json\(indent=indent\)/);
+  });
+
+  it("fails loudly when a field would collide with Pydantic interop names", () => {
+    const type = typeDecl([
+      field("modelDump", { kind: "scalar", scalarType: "string" }, false),
+    ]);
+
+    assert.throws(
+      () => emitPythonFile(fileDecl(type), new PythonExprVisitor(), "", {
+        nativeSerialization: "pydantic",
+      }),
+      /ModelInfo\.modelDump.*model_dump.*reserved by Pydantic\/Typra interop/,
+    );
   });
 });
 
@@ -151,6 +200,23 @@ describe("Python abstract open polymorphic dispatch", () => {
     assert.match(source, /instance\._raw\.pop\("label", None\)/);
     assert.match(source, /result: dict\[str, Any\] = copy\.deepcopy\(obj\._raw\)/);
     assert.match(source, /^import copy$/m);
+  });
+
+  it("uses Pydantic private attributes for open discriminator raw payloads", () => {
+    const type = abstractOpenConnection();
+    const decl = fileDecl(type);
+    decl.containsAbstract = true;
+    const source = emitPythonFile(decl, new PythonExprVisitor(), "", {
+      nativeSerialization: "pydantic",
+    });
+
+    assert.match(source, /^from pydantic import BaseModel, ConfigDict, Field, PrivateAttr$/m);
+    assert.match(source, /class Connection\(BaseModel, ABC\):/);
+    assert.match(source, /_raw: dict\[str, Any\] = PrivateAttr\(default_factory=dict\)/);
+    assert.match(source, /class UnknownConnection\(Connection\):/);
+    assert.doesNotMatch(source, /@dataclass/);
+    assert.match(source, /instance\._raw = copy\.deepcopy\(data\)/);
+    assert.match(source, /result: dict\[str, Any\] = copy\.deepcopy\(obj\._raw\)/);
   });
 
   it("does not emit a carrier for a closed abstract dispatch", () => {

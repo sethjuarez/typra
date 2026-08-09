@@ -11,6 +11,7 @@ export interface EmitTarget {
   "package-name"?: string;
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
   "protocol-scaffolds"?: "none" | "compile-only";
+  "native-serialization"?: "none" | "pydantic";
   "cancellation-token-path"?: string;
 }
 export interface TypraEmitterOptions {
@@ -90,6 +91,13 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             nullable: true,
             default: "none",
             description: "Opt-in generated test scaffolds for protocol conformance. 'compile-only' emits test-dir-only implementations that compile but do not provide runtime fake behavior."
+          },
+          "native-serialization": {
+            type: "string",
+            enum: ["none", "pydantic"],
+            nullable: true,
+            default: "none",
+            description: "Opt-in native serialization framework for the target. Python supports 'pydantic'; defaults to 'none' for existing dataclass behavior."
           },
           "cancellation-token-path": {
             type: "string",

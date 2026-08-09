@@ -280,7 +280,14 @@ class TestSaveContext:
  * Emit a pytest test file for a type.
  * Replaces test.py.njk template.
  */
-export function emitPythonTest(ctx: BaseTestContext & { classCtx: PythonClassContext }): string {
+export interface PythonTestEmitterOptions {
+  nativeSerialization?: "none" | "pydantic";
+}
+
+export function emitPythonTest(
+  ctx: BaseTestContext & { classCtx: PythonClassContext },
+  options: PythonTestEmitterOptions = {},
+): string {
   const { node, examples, coercions, factories, classCtx } = ctx;
   if (examples.length === 0 && coercions.length === 0 && factories.length === 0) {
     return "";
@@ -342,6 +349,11 @@ export function emitPythonTest(ctx: BaseTestContext & { classCtx: PythonClassCon
     lines.push(`    original_data = json.loads(json_data, strict=False)`);
     lines.push(`    instance = ${typeName}.load(original_data)`);
     lines.push(`    saved_data = instance.save()`);
+    if (options.nativeSerialization === "pydantic") {
+      lines.push(`    assert instance.model_dump() == saved_data`);
+      lines.push(`    assert json.loads(instance.model_dump_json()) == saved_data`);
+      lines.push(`    assert ${typeName}.model_validate(original_data).save() == saved_data`);
+    }
     lines.push(`    reloaded = ${typeName}.load(saved_data)`);
     lines.push(`    assert reloaded is not None`);
     for (const v of sample.validations) {

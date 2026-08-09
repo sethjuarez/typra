@@ -10,9 +10,9 @@
  *
  * Structural blocks emitted (in order):
  *   1. Header comment (auto-generated warning)
- *   2. Imports (abc, dataclasses, typing, context, local types)
+ *   2. Imports (abc, dataclasses/pydantic, typing, context, local types)
  *   3. For each type in the file:
- *      a. @dataclass class definition with docstring
+ *      a. @dataclass or BaseModel class definition with docstring
  *      b. _shorthand_property ClassVar
  *      c. Field declarations with type annotations + defaults
  *      d. load() static method
@@ -94,6 +94,7 @@ function returnType(typeStr: string): string {
  */
 export interface PythonEmitterOptions {
   cancellationTokenPath?: string;
+  nativeSerialization?: "none" | "pydantic";
 }
 
 export function emitPythonFile(
@@ -125,6 +126,7 @@ export function emitPythonFile(
   const preservesRawPayload = decl.types.some(type =>
     absorbsUnknownValues(type.polymorphicDispatch),
   );
+  const usePydantic = options.nativeSerialization === "pydantic";
 
   if (preservesRawPayload) {
     stdlibImports.push("import copy");
@@ -132,8 +134,15 @@ export function emitPythonFile(
   if (decl.containsAbstract) {
     stdlibImports.push("from abc import ABC");
   }
-  if (hasNonProtocol) {
+  if (hasNonProtocol && !usePydantic) {
     stdlibImports.push("from dataclasses import dataclass, field");
+  }
+  const pydanticImports = ["BaseModel", "ConfigDict", "Field"];
+  if (preservesRawPayload) {
+    pydanticImports.push("PrivateAttr");
+  }
+  if (hasNonProtocol && usePydantic) {
+    localImports.push(`from pydantic import ${pydanticImports.sort().join(", ")}`);
   }
   const typingImports = ["Any"];
   if (hasNonProtocol) typingImports.push("ClassVar");
@@ -210,7 +219,7 @@ export function emitPythonFile(
   for (const type of decl.types) {
     lines.push("");
     lines.push("");
-    emitType(type, lines, visitor);
+    emitType(type, lines, visitor, options);
   }
 
   return pruneUnusedTypingImports(emitCleanPythonLines(lines, "\n"));
@@ -277,21 +286,48 @@ function escapeRegExp(value: string): string {
 // Type emission
 // ============================================================================
 
-function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
+const PYDANTIC_RESERVED_FIELD_NAMES = new Set([
+  "model_config",
+  "model_dump",
+  "model_dump_json",
+  "model_validate",
+]);
+
+function assertNoPydanticReservedFieldNames(type: TypeDecl): void {
+  for (const field of type.fields) {
+    const attributeName = toSnakeCase(field.name);
+    if (PYDANTIC_RESERVED_FIELD_NAMES.has(attributeName)) {
+      throw new Error(
+        `Python native-serialization 'pydantic' cannot emit ${type.typeName.name}.${field.name}: `
+        + `the Python attribute '${attributeName}' is reserved by Pydantic/Typra interop. `
+        + "Rename the TypeSpec property or use native-serialization: 'none'.",
+      );
+    }
+  }
+}
+
+function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor, options: PythonEmitterOptions): void {
   const name = type.typeName.name;
+  const usePydantic = options.nativeSerialization === "pydantic";
 
   // Protocol types → emit as Protocol class with method signatures
   if (type.isProtocol) {
     emitProtocolClass(type, lines);
     return;
   }
+  if (usePydantic) {
+    assertNoPydanticReservedFieldNames(type);
+  }
 
   // Class definition
-  lines.push("@dataclass");
   const bases: string[] = [];
   if (type.base) bases.push(type.base.name);
+  if (usePydantic && !type.base) bases.push("BaseModel");
   if (type.isAbstract) bases.push("ABC");
   const baseSuffix = bases.length > 0 ? `(${bases.join(", ")})` : "";
+  if (!usePydantic) {
+    lines.push("@dataclass");
+  }
   lines.push(`class ${name}${baseSuffix}:`);
 
   // Docstring
@@ -301,14 +337,21 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
   lines.push("");
   const shorthand = type.coercionProperty ? `"${type.coercionProperty}"` : "None";
   lines.push(`    _shorthand_property: ClassVar[str | None] = ${shorthand}`);
+  if (usePydantic) {
+    lines.push("    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)");
+  }
 
   // Field declarations (blank line between _shorthand and first field)
   lines.push("");
+  const saveTargets = new Map(type.save.assignments.map(a => [a.fieldName, a.targetName]));
   for (const field of type.fields) {
-    lines.push(`    ${toSnakeCase(field.name)}: ${pythonTypeAnnotation(field)}${pythonDefaultValue(field)}`);
+    const wireName = saveTargets.get(field.name) ?? field.name;
+    lines.push(`    ${toSnakeCase(field.name)}: ${pythonTypeAnnotation(field)}${pythonDefaultValue(field, options, wireName)}`);
   }
   if (absorbsUnknownValues(type.polymorphicDispatch)) {
-    lines.push("    _raw: dict[str, Any] = field(default_factory=dict, init=False, repr=False)");
+    lines.push(usePydantic
+      ? "    _raw: dict[str, Any] = PrivateAttr(default_factory=dict)"
+      : "    _raw: dict[str, Any] = field(default_factory=dict, init=False, repr=False)");
   }
 
   // load() method
@@ -350,6 +393,10 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
   // to_json() method
   emitToJson(name, lines);
 
+  if (usePydantic) {
+    emitPydanticInteropMethods(name, lines);
+  }
+
   // Factory methods
   if (type.factories.length > 0) {
     const fieldNames = new Set(type.fields.map(f => f.name));
@@ -363,7 +410,7 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
   lines.push("");
 
   if (needsUnknownCarrier(type)) {
-    emitUnknownCarrier(type, lines);
+    emitUnknownCarrier(type, lines, options);
   }
 
   // Method stubs — emit as a sibling Protocol class outside the dataclass
@@ -385,11 +432,13 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor): void {
  * exact unrecognized value is already preserved by the time this instance is returned.
  * It needs no `save` either: the base's `save` seeds its result from `_raw`.
  */
-function emitUnknownCarrier(type: TypeDecl, lines: string[]): void {
+function emitUnknownCarrier(type: TypeDecl, lines: string[], options: PythonEmitterOptions): void {
   const parentName = type.typeName.name;
   const carrier = unknownCarrierName(parentName);
 
-  lines.push("@dataclass");
+  if (options.nativeSerialization !== "pydantic") {
+    lines.push("@dataclass");
+  }
   lines.push(`class ${carrier}(${parentName}):`);
   lines.push(`    """Carries a ${parentName} whose discriminator matches no known subtype.`);
   lines.push("");
@@ -679,7 +728,11 @@ function pythonDocstringType(f: FieldDecl): string {
 // Default values
 // ============================================================================
 
-function pythonDefaultValue(f: FieldDecl): string {
+function pythonDefaultValue(f: FieldDecl, options: PythonEmitterOptions = {}, wireName?: string): string {
+  if (options.nativeSerialization === "pydantic") {
+    return pydanticDefaultValue(f, wireName ?? f.name);
+  }
+
   const cat = f.category;
 
   if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
@@ -688,6 +741,50 @@ function pythonDefaultValue(f: FieldDecl): string {
 
   if (f.isOptional) {
     return " = None";
+  }
+
+  function pydanticDefaultValue(f: FieldDecl, wireName: string): string {
+    const cat = f.category;
+    const args: string[] = [];
+
+    if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
+      if (f.isOptional && !f.hasExplicitDefault) {
+        args.push("default=None");
+      } else {
+        args.push("default_factory=list");
+      }
+    } else if (f.isOptional) {
+      args.push("default=None");
+    } else if (f.enumName && f.allowedValues.length > 0) {
+      const dv = typeof f.defaultValue === "string" && f.allowedValues.includes(f.defaultValue)
+        ? f.defaultValue
+        : f.allowedValues[0];
+      args.push(`default=${JSON.stringify(dv)}`);
+    } else if (cat.kind === "scalar") {
+      const t = cat.scalarType;
+      if (t === "boolean") {
+        args.push(`default=${f.defaultValue ? "True" : "False"}`);
+      } else if (t === "string") {
+        args.push(`default=${JSON.stringify(f.defaultValue ?? "")}`);
+      } else if (t === "number" || t === "numeric" || t === "float64" || t === "float32" || t === "float") {
+        args.push(`default=${f.defaultValue ?? "0.0"}`);
+      } else if (t === "int64" || t === "int32" || t === "integer") {
+        args.push(`default=${f.defaultValue ?? "0"}`);
+      } else if (t === "dictionary") {
+        args.push("default_factory=dict");
+      } else {
+        args.push(`default=${f.defaultValue ?? "None"}`);
+      }
+    } else if (cat.kind === "dict") {
+      args.push("default_factory=dict");
+    } else if (cat.kind === "complex") {
+      args.push(`default_factory=${f.typeName.name}`);
+    } else {
+      args.push("default=None");
+    }
+
+    args.push(`alias=${JSON.stringify(wireName)}`);
+    return ` = Field(${args.join(", ")})`;
   }
 
   // Enum fields — use the field's default value or the first allowed value
@@ -1277,6 +1374,32 @@ function emitToJson(name: string, lines: string[]): void {
   lines.push("        if context is None:");
   lines.push("            context = SaveContext()");
   lines.push("        return context.to_json(self.save(context), indent)");
+  lines.push("");
+}
+
+function emitPydanticInteropMethods(name: string, lines: string[]): void {
+  lines.push("");
+  lines.push("    @classmethod");
+  lines.push(`    def model_validate(cls, obj: Any, *args: Any, **kwargs: Any) -> "${name}":`);
+  lines.push("        \"\"\"Validate through Typra's authoritative load contract.\"\"\"");
+  lines.push("        if args or kwargs:");
+  lines.push("            raise TypeError(\"Typra Pydantic mode delegates validation to load(); model_validate arguments are unsupported.\")");
+  lines.push("        if isinstance(obj, cls):");
+  lines.push("            return obj");
+  lines.push("        return cls.load(obj)");
+  lines.push("");
+  lines.push("    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:");
+  lines.push("        \"\"\"Serialize through Typra's authoritative save contract.\"\"\"");
+  lines.push("        if args or kwargs:");
+  lines.push("            raise TypeError(\"Typra Pydantic mode delegates serialization to save(); model_dump arguments are unsupported.\")");
+  lines.push("        return self.save()");
+  lines.push("");
+  lines.push("    def model_dump_json(self, *args: Any, **kwargs: Any) -> str:");
+  lines.push("        \"\"\"Serialize JSON through Typra's authoritative to_json contract.\"\"\"");
+  lines.push("        indent = kwargs.pop(\"indent\", 2)");
+  lines.push("        if args or kwargs:");
+  lines.push("            raise TypeError(\"Typra Pydantic mode delegates JSON serialization to to_json(); unsupported model_dump_json arguments were provided.\")");
+  lines.push("        return self.to_json(indent=indent)");
   lines.push("");
 }
 

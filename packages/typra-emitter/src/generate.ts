@@ -39,6 +39,8 @@ export interface TargetOptions {
   format?: boolean;
   /** Enum/string-union parsing policy for targets that support it */
   enumParsing?: "case-sensitive" | "case-insensitive";
+  /** Opt-in native serialization framework for targets that support it */
+  nativeSerialization?: "none" | "pydantic";
 }
 
 /**
@@ -248,6 +250,7 @@ function buildEmitTargets(
   format?: boolean;
   namespace?: string;
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
+  "native-serialization"?: "none" | "pydantic";
 }> {
   if (Array.isArray(targets)) {
     // Simple array of target names - use default directories
@@ -266,6 +269,7 @@ function buildEmitTargets(
       format: opts.format ?? format,
       namespace: opts.namespace,
       "enum-parsing": opts.enumParsing,
+      "native-serialization": opts.nativeSerialization,
     }));
   }
 }

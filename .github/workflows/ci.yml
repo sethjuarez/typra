@@ -50,7 +50,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python test dependency
-        run: python -m pip install --upgrade pip pytest PyYAML
+        run: python -m pip install --upgrade pip pytest PyYAML pydantic
 
       - name: Install dependencies
         run: npm ci
@@ -112,7 +112,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python test dependency
-        run: python -m pip install --upgrade pip pytest PyYAML
+        run: python -m pip install --upgrade pip pytest PyYAML pydantic
 
       - name: Configure matrix toolchain
         env:
