@@ -656,6 +656,20 @@ function assertArrayIncludes(label, actual, ...expected) {
   }
 }
 
+function assertExactStringList(label, actual, expected) {
+  if (!Array.isArray(actual)) {
+    fail(`${label} must be an array.`);
+    return false;
+  }
+  const actualJson = JSON.stringify(actual);
+  const expectedJson = JSON.stringify(expected);
+  if (actualJson !== expectedJson) {
+    fail(`${label} must exactly match ${expectedJson}. Actual: ${actualJson}`);
+    return false;
+  }
+  return true;
+}
+
 function normalizeBackendCell(cell) {
   if (cell === "implemented") {
     return { status: "implemented" };
@@ -724,8 +738,13 @@ function assertConformanceMatrix() {
   if (matrix.version !== 1) {
     fail("Conformance matrix has an unexpected version.");
   }
-  if (!Array.isArray(matrix.targets) || matrix.targets.length === 0) {
-    fail("Conformance matrix must declare at least one target.");
+  if (
+    !assertExactStringList(
+      "Conformance matrix targets",
+      matrix.targets,
+      requiredConformanceMatrixTargets,
+    )
+  ) {
     return;
   }
   if (!Array.isArray(matrix.cases) || matrix.cases.length === 0) {
@@ -762,7 +781,7 @@ function assertConformanceMatrix() {
       fail(`Conformance matrix contains duplicate rule id: ${rule.id}`);
     }
     ruleIds.add(rule.id);
-    assertRuleBackendMatrix(rule, matrix.targets);
+    assertRuleBackendMatrix(rule, requiredConformanceMatrixTargets);
 
     if (rule.status === "enforced") {
       if (rule.verification === "fixture-evidence") {
@@ -832,7 +851,7 @@ function assertConformanceMatrix() {
   for (const conformanceCase of matrix.cases) {
     const evidenceTargets = [
       ...new Set([
-        ...matrix.targets,
+        ...requiredConformanceMatrixTargets,
         ...Object.keys(conformanceCase.evidence ?? {}),
       ]),
     ];

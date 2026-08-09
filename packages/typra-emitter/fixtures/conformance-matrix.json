@@ -86,6 +86,15 @@
       "status": "enforced",
       "verification": "unit-test",
       "test": "packages/typra-emitter/scripts/validate-fixtures.mjs",
+      "backends": {
+        "typescript": "implemented",
+        "python": "implemented",
+        "csharp": "implemented",
+        "go": "implemented",
+        "java": "implemented",
+        "rust": "implemented",
+        "swift": "implemented"
+      },
       "description": "Generated Swift rejects absent, blank, and null open discriminator values before using its unknown fallback carrier."
     },
     {
@@ -125,6 +134,15 @@
       "status": "enforced",
       "verification": "unit-test",
       "test": "packages/typra-emitter/scripts/validate-fixtures.mjs",
+      "backends": {
+        "typescript": "implemented",
+        "python": "implemented",
+        "csharp": "implemented",
+        "go": "implemented",
+        "java": "implemented",
+        "rust": "implemented",
+        "swift": "implemented"
+      },
       "description": "Generated Swift falls back to list form for empty named-collection names without erasing the explicit empty name."
     },
     {
