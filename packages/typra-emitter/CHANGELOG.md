@@ -6,6 +6,25 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.4.31](https://github.com/sethjuarez/typra/compare/v0.4.30...v0.4.31) (2026-08-09)
+
+
+### Bug Fixes
+
+* **csharp:** stop folding multiline YAML fixtures and run every generated C# test ([625098b](https://github.com/sethjuarez/typra/commit/625098b1e3c832c6a263eebcf3846a478a0e47bf))
+* **csharp:** stop folding multiline YAML fixtures and run every generated C# test ([de356d8](https://github.com/sethjuarez/typra/commit/de356d8428cb73c4cb765bb78a1bd45169cbb79d)), closes [#93](https://github.com/sethjuarez/typra/issues/93) [#94](https://github.com/sethjuarez/typra/issues/94)
+* **emitter:** always fail load on a missing required complex field ([2572b95](https://github.com/sethjuarez/typra/commit/2572b9581223ebc729cb9fa8893604a7fe8ddc1a))
+* **emitter:** always fail load on a missing required complex field ([a27615c](https://github.com/sethjuarez/typra/commit/a27615ce4fc2bff2c128fc74db0c4af54f256b66)), closes [#104](https://github.com/sethjuarez/typra/issues/104) [#105](https://github.com/sethjuarez/typra/issues/105)
+* **emitter:** preserve typed record values ([4763f75](https://github.com/sethjuarez/typra/commit/4763f7555e2c2e657466b63224fbb1aa7d55fc0d))
+* **go:** guard math import to named collection shorthand ([#137](https://github.com/sethjuarez/typra/issues/137)) ([2ade20d](https://github.com/sethjuarez/typra/commit/2ade20d1fc1c8991ff1c21dd6673c099c26fa060))
+* **java:** absorb unrecognized discriminators on abstract open bases ([#131](https://github.com/sethjuarez/typra/issues/131)) ([fa6cc6a](https://github.com/sethjuarez/typra/commit/fa6cc6a431dbe23b0ee6e77692d405a8f6a90416))
+* **java:** escape control characters in generated JSON output ([#128](https://github.com/sethjuarez/typra/issues/128)) ([754b072](https://github.com/sethjuarez/typra/commit/754b072e032620632a3bbcf793dfc47400338481)), closes [#113](https://github.com/sethjuarez/typra/issues/113)
+* **python:** emit valid Python literals and substituted factory assertions in generated tests ([b842515](https://github.com/sethjuarez/typra/commit/b8425156cf316484af42f13eed40e14e422ecea6))
+* **python:** emit valid Python literals and substituted factory assertions in generated tests ([0f29dca](https://github.com/sethjuarez/typra/commit/0f29dca3cf4284cc18929701f1fd179d2f81438e)), closes [#107](https://github.com/sethjuarez/typra/issues/107)
+* **rust:** emit required zero values ([#124](https://github.com/sethjuarez/typra/issues/124)) ([838cb89](https://github.com/sethjuarez/typra/commit/838cb89194df42ef0f861a5278ee72f30360e50f)), closes [#97](https://github.com/sethjuarez/typra/issues/97)
+* **testing:** name a concrete variant when the fixture root is a discriminated base ([75a1007](https://github.com/sethjuarez/typra/commit/75a1007aa43cb286cd21d640089a1894f3dfc38f))
+* **testing:** name a concrete variant when the fixture root is a discriminated base ([b5a15fc](https://github.com/sethjuarez/typra/commit/b5a15fcf0445b243e4978eaf0bf8f81ad1dbb7a6)), closes [#92](https://github.com/sethjuarez/typra/issues/92)
+
 ## 0.4.30
 
 ### Fixed
