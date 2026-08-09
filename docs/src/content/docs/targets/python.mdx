@@ -13,6 +13,7 @@ emit-targets:
     test-dir: "generated/python/tests"
     import-path: "fixtures"
     protocol-scaffolds: "compile-only"
+    native-serialization: "none"
 ```
 
 | Option | Why it matters |
@@ -21,8 +22,11 @@ emit-targets:
 | `test-dir` | Where generated Python tests are written. |
 | `import-path` | Module path used by generated tests. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+| `native-serialization` | `"none"` keeps dataclass output. `"pydantic"` emits Pydantic v2 `BaseModel` types. |
 
 Generated Python surfaces include model surfaces, loader/saver helpers, JSON/YAML helpers, import-pruned output, and tests.
+
+`native-serialization: "pydantic"` is opt-in and requires Pydantic v2 in the consuming Python environment. Typra still treats generated `load()` and `save()` as the authoritative contract surface: the Pydantic `model_validate()`, `model_dump()`, and `model_dump_json()` helpers delegate to those methods rather than introducing a second loader or serializer with different semantics.
 
 ## Typical usage shape
 

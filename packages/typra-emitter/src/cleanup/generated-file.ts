@@ -295,6 +295,7 @@ export function buildGeneratedOutputReport(
         ...(target.format !== undefined && { format: target.format }),
         ...(target["enum-parsing"] && { enumParsing: target["enum-parsing"] }),
         ...(target["protocol-scaffolds"] && { protocolScaffolds: target["protocol-scaffolds"] }),
+        ...(target["native-serialization"] && { nativeSerialization: target["native-serialization"] }),
       })).sort((left, right) => `${left.type}:${left.outputDir ?? ""}`.localeCompare(`${right.type}:${right.outputDir ?? ""}`)),
       protectedPaths: protectedPathPatterns,
       hydrationZones: [...(context.options["hydration-zones"] ?? [])].sort((left, right) => left.localeCompare(right)),
