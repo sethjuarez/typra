@@ -150,17 +150,17 @@ model WireOptions {
 
 Common decorators:
 
-| Decorator | Purpose |
-| --- | --- |
-| `@sample` | Supplies generated test/example data for a property. |
-| `@abstract` | Marks a model as not directly instantiated. |
-| `@@coerce` | Expands scalar input into an object during load. |
-| `@@factory` | Generates factory constructors for a model. |
-| `@@method` | Generates method signatures or protocol methods. |
-| `@@knownAs` | Maps a property to provider-specific wire names. |
-| `@@defaultFor` | Records provider-specific required defaults. |
-| `@parseAlias` | Accepts alternate input strings for a canonical union value. |
-| `@@protocol` | Marks a model as an emitted protocol/interface contract. |
+| Decorator      | Purpose                                                      |
+| -------------- | ------------------------------------------------------------ |
+| `@sample`      | Supplies generated test/example data for a property.         |
+| `@abstract`    | Marks a model as not directly instantiated.                  |
+| `@@coerce`     | Expands scalar input into an object during load.             |
+| `@@factory`    | Generates factory constructors for a model.                  |
+| `@@method`     | Generates method signatures or protocol methods.             |
+| `@@knownAs`    | Maps a property to provider-specific wire names.             |
+| `@@defaultFor` | Records provider-specific required defaults.                 |
+| `@parseAlias`  | Accepts alternate input strings for a canonical union value. |
+| `@@protocol`   | Marks a model as an emitted protocol/interface contract.     |
 
 `@parseAlias` is parse-only: loading accepts aliases, but saving emits the
 canonical TypeSpec value.
@@ -169,19 +169,19 @@ canonical TypeSpec value.
 
 The root emitter options are:
 
-| Option | Purpose |
-| --- | --- |
-| `root-object` | Required fully qualified model to generate from. |
-| `root-namespace` | Namespace used to resolve and emit the model graph. |
-| `root-alias` | Alias for the generated root surface. |
-| `additional-roots` | Extra fully qualified roots to generate. |
-| `omit-models` | Model names to leave out of generation. |
-| `schema-output-dir` | Reserved schema directory for future cleanup flows. |
-| `deterministic-output` | Stable metadata and text hygiene for CI diffs. |
-| `protected-paths` | Hand-authored paths recorded for verifier boundaries. |
-| `hydration-zones` | Extension zones recorded for verifier checks. |
-| `allow-unsupported-typespec-version` | Warn on unvalidated TypeSpec versions. |
-| `emit-targets` | Language-specific output configuration. |
+| Option                               | Purpose                                               |
+| ------------------------------------ | ----------------------------------------------------- |
+| `root-object`                        | Required fully qualified model to generate from.      |
+| `root-namespace`                     | Namespace used to resolve and emit the model graph.   |
+| `root-alias`                         | Alias for the generated root surface.                 |
+| `additional-roots`                   | Extra fully qualified roots to generate.              |
+| `omit-models`                        | Model names to leave out of generation.               |
+| `schema-output-dir`                  | Reserved schema directory for future cleanup flows.   |
+| `deterministic-output`               | Stable metadata and text hygiene for CI diffs.        |
+| `protected-paths`                    | Hand-authored paths recorded for verifier boundaries. |
+| `hydration-zones`                    | Extension zones recorded for verifier checks.         |
+| `allow-unsupported-typespec-version` | Warn on unvalidated TypeSpec versions.                |
+| `emit-targets`                       | Language-specific output configuration.               |
 
 Each `emit-targets` entry has a required `type` and can set `output-dir`,
 `test-dir`, `format`, `import-path`, `package-name`, `namespace`, `alias`,
@@ -303,6 +303,14 @@ Java/javac, .NET, Swift, and Cargo. It intentionally gates fixture validation,
 not the TypeScript build or unit suite. Run it before interpreting
 fixture-validation failures so missing or outdated local toolchains do not look
 like emitter regressions.
+
+`validate:fixtures` also runs the save-side conformance oracle: each available
+runtime loads the canonical fixture sample, saves it back to a normalized
+payload, and compares that output across the seven target backends. The
+conformance matrix in `packages/typra-emitter/fixtures/conformance-matrix.json`
+must list every semantic rule against every backend as implemented or as an
+issue-cited waiver, and generated-test failures flow through bidirectional
+known-failure maps so stale waivers fail once fixed.
 
 After building, check the local CLI with:
 
