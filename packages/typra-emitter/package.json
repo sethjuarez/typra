@@ -70,7 +70,7 @@
     "pretest": "npm run build",
     "prevalidate:fixtures": "npm run build && npm run generate:fixtures",
     "validate:fixtures": "node ./scripts/validate-fixtures.mjs",
-    "test": "node --test \"dist/test/*.test.js\"",
+    "test": "node --test \"dist/test/*.test.js\" \"scripts/*.test.mjs\"",
     "lint": "eslint src/ test/ --report-unused-disable-directives --max-warnings=0",
     "lint:fix": "eslint . --report-unused-disable-directives --fix",
     "format": "prettier .  --write",

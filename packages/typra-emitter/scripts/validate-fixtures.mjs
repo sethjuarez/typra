@@ -3,6 +3,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, readd
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { compareExpectedExecution, TOOLCHAIN_UNAVAILABLE } from "./validation-execution.mjs";
+
 const packageRoot = process.cwd();
 
 /**
@@ -38,6 +40,44 @@ if (existsSync(packageNodeModules)) {
 process.on("exit", () => rmSync(validationRoot, { recursive: true, force: true }));
 const failures = [];
 const CSHARP_TARGET_FRAMEWORK = "net10.0";
+
+const EXPECTED_VALIDATION_STAGE_IDS = [
+  "generated-targets",
+  "empty-target-dirs",
+  "output-hygiene",
+  "static-fixture-coverage",
+  "static-conformance-matrix",
+  "export-surface-snapshot",
+  "hydration-boundary-snapshot",
+  "generated-output-report",
+  "actual-generated-surface",
+  "typra-verify",
+  "consumer-smoke",
+  "typescript.compile",
+  "python.compile",
+  "python.generated-tests",
+  "go.generated-tests",
+  "rust.generated-tests",
+  "swift.generated-tests",
+  "csharp.build",
+  "csharp.consumer-nullability-build",
+  "csharp.generated-tests",
+  "csharp.protocol-scaffold-build",
+  "java.build",
+  "java.generated-tests",
+  "executable-conformance",
+];
+
+const EXPECTED_EXECUTABLE_CONFORMANCE_TARGET_IDS = [
+  "typescript",
+  "python",
+  "go",
+  "rust",
+  "rust-unknown",
+  "csharp",
+  "java",
+  "swift",
+];
 const fixtureRootSample = {
   name: "fixture-root",
   description: "A generated fixture with broad emitter coverage.",
@@ -274,6 +314,43 @@ const conformanceKnownDivergences = {};
 
 function fail(message) {
   failures.push(message);
+}
+
+function runExpectedExecutionPlan({ label, expectedIds, implementations, allowedSkips = {} }) {
+  const executed = [];
+  const skipped = [];
+
+  for (const id of expectedIds) {
+    const run = implementations.get(id);
+    if (!run) continue;
+
+    const beforeSkipCount = skipped.length;
+    // A stage that intentionally does no work must call context.skip(); every other no-op path
+    // should call fail(), otherwise invocation would be misreported as real execution.
+    run({
+      skip(reason) {
+        skipped.push({ id, reason });
+      },
+    });
+    if (!skipped.slice(beforeSkipCount).some(entry => entry.id === id)) {
+      executed.push(id);
+    }
+  }
+
+  const result = compareExpectedExecution({
+    label,
+    expected: expectedIds,
+    implemented: [...implementations.keys()],
+    executed,
+    skipped,
+    allowedSkips,
+  });
+  for (const warning of result.warnings) {
+    console.warn(`Warning: ${warning}`);
+  }
+  for (const message of result.failures) {
+    fail(message);
+  }
 }
 
 function normalizeConformanceValue(value) {
@@ -968,7 +1045,7 @@ function runRustTests() {
   }
 }
 
-function runSwiftTests() {
+function runSwiftTests(context = {}) {
   const sourceDir = path.join(generatedRoot, "swift");
   const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".swift"));
   if (sourceFiles.length === 0) {
@@ -981,6 +1058,7 @@ function runSwiftTests() {
       fail("Generated Swift validation cannot run because swift is not available.");
     } else {
       console.warn("Warning: swift is not available. Skipping generated Swift compile/test validation.");
+      context.skip?.(TOOLCHAIN_UNAVAILABLE);
     }
     return;
   }
@@ -3091,7 +3169,7 @@ function swiftToolchainEnv() {
  * `runSwiftTests`. `swift test` interleaves its own progress output, so the payload is tagged with
  * a sentinel and extracted rather than read off the last line.
  */
-function runSwiftExecutableConformance() {
+function runSwiftExecutableConformance(context = {}) {
   const sourceDir = path.join(generatedRoot, "swift");
   const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".swift"));
   if (sourceFiles.length === 0) {
@@ -3104,6 +3182,7 @@ function runSwiftExecutableConformance() {
       fail("Generated Swift executable conformance cannot run because swift is not available.");
     } else {
       console.warn("Warning: swift is not available. Skipping generated Swift executable conformance.");
+      context.skip?.(TOOLCHAIN_UNAVAILABLE);
     }
     return;
   }
@@ -3233,14 +3312,21 @@ function mkdirp(dir) {
 }
 
 function runExecutableConformance() {
-  runTypeScriptExecutableConformance();
-  runPythonExecutableConformance();
-  runGoExecutableConformance();
-  runRustExecutableConformance();
-  runRustUnknownAbstractConformance();
-  runCSharpExecutableConformance();
-  runJavaExecutableConformance();
-  runSwiftExecutableConformance();
+  runExpectedExecutionPlan({
+    label: "Executable conformance validation",
+    expectedIds: EXPECTED_EXECUTABLE_CONFORMANCE_TARGET_IDS,
+    implementations: new Map([
+      ["typescript", runTypeScriptExecutableConformance],
+      ["python", runPythonExecutableConformance],
+      ["go", runGoExecutableConformance],
+      ["rust", runRustExecutableConformance],
+      ["rust-unknown", runRustUnknownAbstractConformance],
+      ["csharp", runCSharpExecutableConformance],
+      ["java", runJavaExecutableConformance],
+      ["swift", runSwiftExecutableConformance],
+    ]),
+    allowedSkips: { swift: TOOLCHAIN_UNAVAILABLE },
+  });
 }
 
 function assertGeneratedTargets() {
@@ -3794,30 +3880,41 @@ function assertNoEmptyTargetDirs() {
   }
 }
 
-assertGeneratedTargets();
-assertNoEmptyTargetDirs();
-assertGeneratedOutputHygiene();
-assertStaticFixtureCoverage();
-assertConformanceMatrix();
-assertExportSurfaceSnapshot();
-assertHydrationBoundarySnapshot();
-assertGeneratedOutputReport();
-assertActualGeneratedSurface();
-runTypraVerify();
-runTypraConsumerSmoke();
-runGeneratedTypeScriptCompile();
-runPythonCompile();
-runPythonGeneratedTests();
-runGoTests();
-runRustTests();
-runSwiftTests();
-runCSharpBuild();
-runCSharpConsumerNullabilityBuild();
-runCSharpGeneratedTests();
-runCSharpProtocolScaffoldBuild();
-runJavaBuild();
-runJavaGeneratedTests();
-runExecutableConformance();
+function runDeclaredValidationStages() {
+  runExpectedExecutionPlan({
+    label: "Fixture validation",
+    expectedIds: EXPECTED_VALIDATION_STAGE_IDS,
+    implementations: new Map([
+      ["generated-targets", assertGeneratedTargets],
+      ["empty-target-dirs", assertNoEmptyTargetDirs],
+      ["output-hygiene", assertGeneratedOutputHygiene],
+      ["static-fixture-coverage", assertStaticFixtureCoverage],
+      ["static-conformance-matrix", assertConformanceMatrix],
+      ["export-surface-snapshot", assertExportSurfaceSnapshot],
+      ["hydration-boundary-snapshot", assertHydrationBoundarySnapshot],
+      ["generated-output-report", assertGeneratedOutputReport],
+      ["actual-generated-surface", assertActualGeneratedSurface],
+      ["typra-verify", runTypraVerify],
+      ["consumer-smoke", runTypraConsumerSmoke],
+      ["typescript.compile", runGeneratedTypeScriptCompile],
+      ["python.compile", runPythonCompile],
+      ["python.generated-tests", runPythonGeneratedTests],
+      ["go.generated-tests", runGoTests],
+      ["rust.generated-tests", runRustTests],
+      ["swift.generated-tests", runSwiftTests],
+      ["csharp.build", runCSharpBuild],
+      ["csharp.consumer-nullability-build", runCSharpConsumerNullabilityBuild],
+      ["csharp.generated-tests", runCSharpGeneratedTests],
+      ["csharp.protocol-scaffold-build", runCSharpProtocolScaffoldBuild],
+      ["java.build", runJavaBuild],
+      ["java.generated-tests", runJavaGeneratedTests],
+      ["executable-conformance", runExecutableConformance],
+    ]),
+    allowedSkips: { "swift.generated-tests": TOOLCHAIN_UNAVAILABLE },
+  });
+}
+
+runDeclaredValidationStages();
 
 if (failures.length > 0) {
   console.error("Fixture validation failed:");
