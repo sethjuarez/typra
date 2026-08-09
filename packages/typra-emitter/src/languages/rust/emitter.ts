@@ -63,6 +63,7 @@ import { toSnakeCase } from "../../ir/utilities.js";
 export interface RustEmitterOptions {
   enumParsing?: "case-sensitive" | "case-insensitive";
   cancellationTokenPath?: string;
+  nativeSerialization?: "none" | "serde";
 }
 
 /**
@@ -209,23 +210,27 @@ function emitStringEnum(enumDef: EnumDef, lines: string[], options: RustEmitterO
   lines.push("}");
   lines.push("");
 
-  // First-class serde support: round-trip as the plain string value (matching `as_str`
-  // / `Display`). Implemented manually so open enums correctly capture unknown strings
-  // into `Other(..)` — a plain derive cannot express that catch-all.
-  lines.push(`impl serde::Serialize for ${enumDef.name} {`);
-  lines.push("    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {");
-  lines.push("        serializer.serialize_str(self.as_str())");
-  lines.push("    }");
-  lines.push("}");
-  lines.push("");
-  lines.push(`impl<'de> serde::Deserialize<'de> for ${enumDef.name} {`);
-  lines.push("    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {");
-  lines.push("        let s = <String as serde::Deserialize>::deserialize(deserializer)?;");
-  lines.push("        Self::from_str_opt(&s)");
-  lines.push(`            .ok_or_else(|| serde::de::Error::custom(format!("invalid ${enumDef.name} value: {}", s)))`);
-  lines.push("    }");
-  lines.push("}");
-  lines.push("");
+  if (options.nativeSerialization !== "none") {
+    // First-class serde support: round-trip as the plain string value (matching `as_str`
+    // / `Display`). Implemented manually so open enums correctly capture unknown strings
+    // into `Other(..)` — a plain derive cannot express that catch-all.
+    lines.push("#[cfg(feature = \"serde\")]");
+    lines.push(`impl serde::Serialize for ${enumDef.name} {`);
+    lines.push("    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {");
+    lines.push("        serializer.serialize_str(self.as_str())");
+    lines.push("    }");
+    lines.push("}");
+    lines.push("");
+    lines.push("#[cfg(feature = \"serde\")]");
+    lines.push(`impl<'de> serde::Deserialize<'de> for ${enumDef.name} {`);
+    lines.push("    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {");
+    lines.push("        let s = <String as serde::Deserialize>::deserialize(deserializer)?;");
+    lines.push("        Self::from_str_opt(&s)");
+    lines.push(`            .ok_or_else(|| serde::de::Error::custom(format!("invalid ${enumDef.name} value: {}", s)))`);
+    lines.push("    }");
+    lines.push("}");
+    lines.push("");
+  }
 }
 
 /**
@@ -366,12 +371,14 @@ export function emitRustFile(
   emitStruct(baseType, polymorphicTypeNames, lines);
   emitImpl(baseType, childTypes, baseFieldNames, visitor, polymorphicTypeNames, lines);
 
-  // Manual serde impls for EVERY data struct: serde delegates to the canonical
-  // to_value/load_from_value so its output/input always equals the canonical wire
-  // form — polymorphic discriminators, scalar-coercion shorthand, map<->list
-  // normalization, empty-omission, etc. This is the single robust invariant
-  // (serde == canonical), replacing the earlier flat-vs-polymorphic classification.
-  emitDelegatingSerde(baseType, lines);
+  if (options.nativeSerialization !== "none") {
+    // Manual serde impls for EVERY data struct: serde delegates to the canonical
+    // to_value/load_from_value so its output/input always equals the canonical wire
+    // form — polymorphic discriminators, scalar-coercion shorthand, map<->list
+    // normalization, empty-omission, etc. This is the single robust invariant
+    // (serde == canonical), replacing the earlier flat-vs-polymorphic classification.
+    emitDelegatingSerde(baseType, lines);
+  }
 
   // Method stubs as trait
   if (baseType.methods.length > 0) {
@@ -631,12 +638,14 @@ function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
   lines.push(`// Serde for \`${name}\` delegates to the canonical to_value/load_from_value`);
   lines.push(`// logic so ${reason}. Uses a default (no-op) context — no \${env:}/\${file:}`);
   lines.push(`// resolution here — leaving the context-aware LoadContext/SaveContext API intact.`);
+  lines.push("#[cfg(feature = \"serde\")]");
   lines.push(`impl serde::Serialize for ${name} {`);
   lines.push(`    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {`);
   lines.push(`        serde::Serialize::serialize(&self.to_value(&SaveContext::default()), serializer)`);
   lines.push(`    }`);
   lines.push(`}`);
   lines.push("");
+  lines.push("#[cfg(feature = \"serde\")]");
   lines.push(`impl<'de> serde::Deserialize<'de> for ${name} {`);
   lines.push(`    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {`);
   lines.push(`        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;`);
@@ -659,6 +668,7 @@ function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
     lines.push(`// to the canonical to_value/load_from_value logic, so a bare \`${kindName}\``);
     lines.push(`// serializes to internally-tagged \`{"${discWire}": "<value>", ...}\` — the same wire`);
     lines.push(`// form as its parent — instead of serde's externally-tagged \`{"<Variant>": {...}}\`.`);
+    lines.push("#[cfg(feature = \"serde\")]");
     lines.push(`impl serde::Serialize for ${kindName} {`);
     lines.push(`    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {`);
     lines.push(`        let parent = ${name} { ${discField}: self.clone(), ..Default::default() };`);
@@ -666,6 +676,7 @@ function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
     lines.push(`    }`);
     lines.push(`}`);
     lines.push("");
+    lines.push("#[cfg(feature = \"serde\")]");
     lines.push(`impl<'de> serde::Deserialize<'de> for ${kindName} {`);
     lines.push(`    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {`);
     lines.push(`        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;`);
@@ -1431,7 +1442,7 @@ function emitToYaml(name: string, lines: string[]): void {
 
 /**
  * Emit a `to_wire(&self, provider: &str) -> serde_json::Value` method that
- * serializes the struct via `serde_json::to_value`, then remaps field names
+ * serializes the struct via Typra's canonical `to_value`, then remaps field names
  * according to provider-specific wire mappings.
  *
  * Only emitted when `type.wire` is non-null.
@@ -1443,7 +1454,7 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
   lines.push("");
   lines.push(`    /// Convert to provider-specific wire format.`);
   lines.push(`    pub fn to_wire(&self, provider: &str) -> serde_json::Value {`);
-  lines.push(`        let data = serde_json::to_value(self).unwrap_or_default();`);
+  lines.push(`        let data = self.to_value(&SaveContext::default());`);
   lines.push(`        let mut result = serde_json::Map::new();`);
 
   // Build the wire_map HashMap literal

@@ -117,6 +117,66 @@ describe("rust emitter — open polymorphic discriminators", () => {
   });
 });
 
+describe("rust emitter — native serialization option", () => {
+  it("preserves default serde Serialize/Deserialize impls for compatibility", () => {
+    const code = emitOpenDiscriminatorBase();
+
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for Conn/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl<'de> serde::Deserialize<'de> for Conn/);
+  });
+
+  it("omits serde Serialize/Deserialize impls when explicitly disabled", () => {
+    const reference = makeType(
+      "ReferenceConnection",
+      [makeProp("kind", "string", { isScalar: true, defaultValue: "reference" })],
+      { base: { namespace: "Test", name: "Conn" } },
+    );
+    const base = makeType(
+      "Conn",
+      [makeProp("kind", "ConnectionType", { allowedValues: ["reference"], isOpenEnum: true })],
+      { discriminator: "kind", childTypes: [reference], isAbstract: true },
+    );
+    const registry = TypeRegistry.fromTypeGraph([base, reference]);
+    const code = emitRustFile(
+      lowerFile(base, registry, new Set(["Conn"])),
+      new RustExprVisitor(registry),
+      new Set(["Conn"]),
+      undefined,
+      { nativeSerialization: "none" },
+    );
+
+    assert.doesNotMatch(code, /impl serde::Serialize for Conn/);
+    assert.doesNotMatch(code, /impl<'de> serde::Deserialize<'de> for Conn/);
+  });
+
+  it("emits feature-gated serde impls that delegate through canonical load/save when opted in", () => {
+    const reference = makeType(
+      "ReferenceConnection",
+      [makeProp("kind", "string", { isScalar: true, defaultValue: "reference" })],
+      { base: { namespace: "Test", name: "Conn" } },
+    );
+    const base = makeType(
+      "Conn",
+      [makeProp("kind", "ConnectionType", { allowedValues: ["reference"], isOpenEnum: true })],
+      { discriminator: "kind", childTypes: [reference], isAbstract: true },
+    );
+    const registry = TypeRegistry.fromTypeGraph([base, reference]);
+    const code = emitRustFile(
+      lowerFile(base, registry, new Set(["Conn"])),
+      new RustExprVisitor(registry),
+      new Set(["Conn"]),
+      undefined,
+      { nativeSerialization: "serde" },
+    );
+
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for Conn/);
+    assert.match(code, /self\.to_value\(&SaveContext::default\(\)\)/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl<'de> serde::Deserialize<'de> for Conn/);
+    assert.match(code, /Conn::load_from_value\(&value, &LoadContext::default\(\)\)/);
+    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for ConnKind/);
+  });
+});
+
 // ============================================================================
 // Optional fields carried as serde_json::Value
 // ============================================================================
@@ -319,6 +379,41 @@ describe("rust emitter — numeric coercion bridging", () => {
     assert.ok(/if let Some\(s\) = value\.as_str\(\)/.test(code), "expected the declared string coercion");
     assert.ok(!/as_f64\(\)/.test(code), "string-only coercions must gain no numeric bridge");
     assert.ok(!/as_i64\(\)/.test(code), "string-only coercions must gain no numeric bridge");
+  });
+});
+
+describe("rust emitter — provider wire mapping", () => {
+  it("uses canonical to_value instead of requiring model serde", () => {
+    const type = {
+      typeName: { namespace: "Test", name: "WireOptions" },
+      base: null,
+      isAbstract: false,
+      isProtocol: false,
+      description: "",
+      fields: [scalarField("temperature", "float32")],
+      coercionProperty: null,
+      load: { coercions: [], assignments: [], hasPolymorphicDispatch: false, hasContextHooks: false },
+      save: { assignments: [], hasBase: false, hasContextHooks: false },
+      factories: [],
+      collectionHelpers: [],
+      polymorphicDispatch: null,
+      methods: [],
+      wire: {
+        mappings: [
+          {
+            fieldName: "temperature",
+            parentTypeName: "WireOptions",
+            wireNames: { openai: "temperature" },
+          },
+        ],
+      },
+    } as unknown as TypeDecl;
+
+    const file = { group: "", imports: [], enums: [], types: [type] } as unknown as FileDecl;
+    const code = emitRustFile(file, new RustExprVisitor(TypeRegistry.fromTypeGraph([])), new Set<string>());
+
+    assert.match(code, /let data = self\.to_value\(&SaveContext::default\(\)\);/);
+    assert.doesNotMatch(code, /serde_json::to_value\(self\)/);
   });
 });
 

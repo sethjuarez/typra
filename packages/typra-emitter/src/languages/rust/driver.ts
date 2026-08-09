@@ -69,6 +69,27 @@ export const generateRust = async (
 ): Promise<void> => {
   const allTypes = Array.from(enumerateTypes(node));
   const nodes = filterNodes(allTypes, options);
+  const requestedNativeSerialization = emitTarget["native-serialization"];
+  const nativeSerialization = requestedNativeSerialization === "none" ? "none" : "serde";
+  if (requestedNativeSerialization === "serde") {
+    const unsupported = nodes.filter(hasUnsupportedSerdeDiscriminatorFallback);
+    if (unsupported.length > 0) {
+      for (const type of unsupported) {
+        const discriminator = type.discriminator ?? "discriminator";
+        context.program.reportDiagnostic({
+          code: "typra-emitter-rust-serde-open-discriminator",
+          message:
+            `Rust native-serialization: "serde" does not support discriminated base '${type.typeName.name}' `
+            + `with discriminator '${discriminator}' because it requires an open, wildcard, or base-instance fallback. `
+            + `Rust's base-instance representation must be settled before serde can safely mirror Typra load/save for this shape. `
+            + `Use native-serialization: "none" or close the discriminator before enabling serde.`,
+          severity: "error",
+          target: type.model,
+        });
+      }
+      return;
+    }
+  }
 
   // Build the expression IR infrastructure for this compilation
   const registry = TypeRegistry.fromTypeGraph(allTypes);
@@ -117,6 +138,7 @@ export const generateRust = async (
       const fileContent = emitRustFileDecl(fileDecl, visitor, polymorphicTypeNames, childToParent, {
         enumParsing: emitTarget["enum-parsing"] ?? "case-sensitive",
         cancellationTokenPath: emitTarget["cancellation-token-path"],
+        nativeSerialization,
       });
       const fileName = toSnakeCase(n.typeName.name) + '.rs';
       const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
@@ -135,6 +157,7 @@ export const generateRust = async (
         ...testContext,
         importPath,
         isPolymorphicBase,
+        nativeSerialization,
       });
       const testFileName = toSnakeCase(n.typeName.name) + '_test.rs';
       const testGroup = n.group || "";
@@ -239,6 +262,25 @@ function normalizeRustFileEndings(dir: string): void {
  */
 function buildTestContext(node: TypeNode, registry: TypeRegistry): BaseTestContext {
   return buildBaseTestContext(node, undefined, rustTestOptions, name => registry.get(name));
+}
+
+function hasUnsupportedSerdeDiscriminatorFallback(node: TypeNode): boolean {
+  if (!node.discriminator || node.childTypes.length === 0) return false;
+  const discriminator = node.properties.find(prop => prop.name === node.discriminator);
+  if (!discriminator) return true;
+  const hasDeclaredWildcard = node.childTypes.some(child =>
+    child.properties.find(prop => prop.name === node.discriminator)?.defaultValue === "*"
+  );
+  if (hasDeclaredWildcard || discriminator.isOpenEnum || discriminator.typeName.name === "string") return true;
+
+  const claimedValues = new Set(
+    node.childTypes
+      .map(child => child.properties.find(prop => prop.name === node.discriminator)?.defaultValue)
+      .filter((value): value is string => typeof value === "string"),
+  );
+  return !node.isAbstract
+    && discriminator.allowedValues.length > 0
+    && discriminator.allowedValues.some(value => !claimedValues.has(value));
 }
 
 /**
@@ -497,6 +539,7 @@ function rustAssertionValue(node: TypeNode, key: string, value: unknown, delimit
 export interface RustTestContext extends BaseTestContext {
   importPath: string;
   isPolymorphicBase: boolean;
+  nativeSerialization?: "none" | "serde";
 }
 
 /**
@@ -518,7 +561,7 @@ function hasNonIntegerNumber(v: unknown): boolean {
  * Emit an integration test file for a TypeSpec model type.
  */
 export function emitRustTest(ctx: RustTestContext): string {
-  const { node, isAbstract, examples, coercions, factories, importPath, isPolymorphicBase } = ctx;
+  const { node, isAbstract, examples, coercions, factories, importPath, isPolymorphicBase, nativeSerialization } = ctx;
   const typeName = node.typeName.name;
   const snakeName = toSnakeCase(typeName);
   let out = '';
@@ -636,7 +679,8 @@ export function emitRustTest(ctx: RustTestContext): string {
     // survives the serde path with its exact canonical wire value. With the old
     // externally-tagged derive this would fail to even deserialize nested
     // discriminated values (e.g. `{"kind":"text",...}`).
-    if (!isAbstract) {
+    if (!isAbstract && nativeSerialization !== "none") {
+      out += '#[cfg(feature = "serde")]\n';
       out += '#[test]\n';
       out += `fn test_${snakeName}_serde_roundtrip${suffix}() {\n`;
       out += '    let json = r####"\n';
