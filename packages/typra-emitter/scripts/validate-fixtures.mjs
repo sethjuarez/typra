@@ -676,6 +676,11 @@ function assertGeneratedStructuredLoadCoverage() {
     .replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")
     .toLowerCase();
   const snakeCase = value => kebabCase(value).replace(/-/g, "_");
+  const pascalCase = value => value
+    .split(/[_-]/)
+    .filter(Boolean)
+    .map(part => part[0].toUpperCase() + part.slice(1))
+    .join("");
   const suites = [
     {
       target: "typescript",
@@ -730,6 +735,10 @@ function assertGeneratedStructuredLoadCoverage() {
       outputRoot: "generated/fixtures/rust",
       dir: path.join(generatedRoot, "rust", "tests"),
       testFile: file => file.endsWith("_test.rs"),
+      expectedTestPath: (_name, group, source) => {
+        const moduleName = source.split("::").at(-1);
+        return path.join(generatedRoot, "rust", "tests", group || "", `${moduleName}_test.rs`);
+      },
       hasStructuredLoad: content => /fn test_\w+_load_json\(\)/.test(content),
     },
     {
@@ -737,6 +746,10 @@ function assertGeneratedStructuredLoadCoverage() {
       outputRoot: "generated/fixtures/swift",
       dir: path.join(generatedRoot, "swift", "Tests", "TypraFixturesTests"),
       testFile: file => file.endsWith("Tests.swift"),
+      expectedTestPath: (_name, group, source) => {
+        const moduleName = path.basename(source, ".swift");
+        return path.join(generatedRoot, "swift", "Tests", "TypraFixturesTests", group || "", `${pascalCase(moduleName)}Tests.swift`);
+      },
       hasStructuredLoad: content => /func testJSONRoundTrip1\(\) throws/.test(content),
     },
   ];
@@ -746,7 +759,8 @@ function assertGeneratedStructuredLoadCoverage() {
     if (target && suite.expectedTestPath) {
       const missing = (target.exports ?? [])
         .filter(entry => entry.kind === "value" && !entry.protocol)
-        .map(entry => suite.expectedTestPath(entry.name, entry.group))
+        .map(entry => suite.expectedTestPath(entry.name, entry.group, entry.source))
+        .filter((file, index, files) => files.indexOf(file) === index)
         .filter(file => !existsSync(file));
       if (missing.length > 0) {
         fail(
