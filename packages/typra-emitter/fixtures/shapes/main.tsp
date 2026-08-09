@@ -368,13 +368,12 @@ behaviours are worth testing, but not here: bundling them into this class would 
 could be cardinality, key promotion or shorthand collapse, and the point of a class is that a
 failure names one thing. Two non-key fields make the shorthand path unreachable.
 
-Order within a keyed collection is deliberately not asserted, and the sample names are already
-in sorted order so that this class does not depend on the answer. A keyed collection is written
-through a name-keyed map, and the targets do not agree on whether a map preserves insertion
-order: it round-trips list order in some and sorts or randomises it in others. That is a real
-contract gap rather than a property of cardinality, and it is tracked in issue #134. Array
-order, which the targets do agree on, is asserted by repeatedTags and mixedContent. Duplicate
-names within a keyed collection are a further separate axis and are not covered here.
+Order within a keyed collection's object form is deliberately not asserted: a keyed collection
+is written through a name-keyed map, and object key order is not part of the runtime contract.
+The map-form sample is intentionally written out of sorted order so generated tests and the
+executable conformance payload exercise object-form loading without relying on key order.
+Array order remains part of the contract and is asserted by repeatedTags and mixedContent.
+Duplicate names within a keyed collection are a further separate axis and are not covered here.
 """)
 model FixtureCollectionCardinality {
   @sample(#{ repeatedTags: #["alpha", "beta", "alpha"] })
@@ -393,7 +392,7 @@ model FixtureCollectionCardinality {
   @doc("Keyed dual-form collection supplied in list form at many")
   listForm: Record<FixtureCardinalityItem> | Named<FixtureCardinalityItem>[];
 
-  @sample(#{ mapForm: #{ delta: #{ first: "delta first", second: "delta second" }, epsilon: #{ first: "epsilon first", second: "epsilon second" } } })
+  @sample(#{ mapForm: #{ epsilon: #{ first: "epsilon first", second: "epsilon second" }, delta: #{ first: "delta first", second: "delta second" } } })
   @doc("The same keyed collection supplied in map form at many, with the key promoted to name")
   mapForm: Record<FixtureCardinalityItem> | Named<FixtureCardinalityItem>[];
 

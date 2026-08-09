@@ -38,9 +38,11 @@
     },
     {
       "id": "keyed-collection-ordering",
-      "status": "known-gap",
-      "issue": "#134",
-      "description": "Keyed collection object-form ordering needs a documented and enforced cross-target contract."
+      "status": "enforced",
+      "case": "keyed-collection-ordering",
+      "verification": "fixture-evidence",
+      "test": "packages/typra-emitter/test/java-emitter.test.ts",
+      "description": "Keyed collection object-form key order is not part of the runtime contract; array order remains ordered, with generated Java map-form assertions guarded by key-based unit coverage."
     },
     {
       "id": "keyed-collection-ambiguous-names",
@@ -479,6 +481,104 @@
               "if let scalar = data as? String {",
               "instance.id = try TypraRuntime.string(scalar, field: \"id\")",
               "instance.label = \"coerced reference\""
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "keyed-collection-ordering",
+      "description": "FixtureCollectionCardinality keeps array order executable while exercising an intentionally unsorted object-form keyed collection whose key order is not contractual.",
+      "evidence": {
+        "typescript": [
+          {
+            "path": "generated/fixtures/typescript/tests/fixture-collection-cardinality.test.ts",
+            "snippets": [
+              "\"listForm\": [",
+              "\"name\": \"alpha\"",
+              "\"name\": \"beta\"",
+              "\"mapForm\": {",
+              "\"epsilon\": {",
+              "\"delta\": {"
+            ]
+          }
+        ],
+        "python": [
+          {
+            "path": "generated/fixtures/python/tests/test_fixture_collection_cardinality.py",
+            "snippets": [
+              "\"listForm\": [",
+              "\"name\": \"alpha\"",
+              "\"name\": \"beta\"",
+              "\"mapForm\": {",
+              "\"epsilon\": {",
+              "\"delta\": {"
+            ]
+          }
+        ],
+        "csharp": [
+          {
+            "path": "generated/fixtures/csharp/tests/FixtureCollectionCardinalityConversionTests.cs",
+            "snippets": [
+              "\"listForm\": [",
+              "\"name\": \"alpha\"",
+              "\"name\": \"beta\"",
+              "\"mapForm\": {",
+              "\"epsilon\": {",
+              "\"delta\": {"
+            ]
+          }
+        ],
+        "go": [
+          {
+            "path": "generated/fixtures/go/tests/fixture_collection_cardinality_test.go",
+            "snippets": [
+              "\"listForm\": [",
+              "\"name\": \"alpha\"",
+              "\"name\": \"beta\"",
+              "\"mapForm\": {",
+              "\"epsilon\": {",
+              "\"delta\": {"
+            ]
+          }
+        ],
+        "java": [
+          {
+            "path": "generated/fixtures/java/tests/FixtureCollectionCardinalityGeneratedTest.java",
+            "snippets": [
+              "\"listForm\": [",
+              "\"name\": \"alpha\"",
+              "\"name\": \"beta\"",
+              "\"mapForm\": {",
+              "\"epsilon\": {",
+              "\"delta\": {",
+              ".stream().filter(item -> \"epsilon\".equals(item.name))"
+            ]
+          }
+        ],
+        "rust": [
+          {
+            "path": "generated/fixtures/rust/tests/fixture_collection_cardinality_test.rs",
+            "snippets": [
+              "\"listForm\": [",
+              "\"name\": \"alpha\"",
+              "\"name\": \"beta\"",
+              "\"mapForm\": {",
+              "\"epsilon\": {",
+              "\"delta\": {"
+            ]
+          }
+        ],
+        "swift": [
+          {
+            "path": "generated/fixtures/swift/Tests/TypraFixturesTests/FixtureCollectionCardinalityTests.swift",
+            "snippets": [
+              "\"listForm\": [",
+              "\"name\": \"alpha\"",
+              "\"name\": \"beta\"",
+              "\"mapForm\": {",
+              "\"epsilon\": {",
+              "\"delta\": {"
             ]
           }
         ]

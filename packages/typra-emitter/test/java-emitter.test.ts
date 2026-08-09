@@ -373,11 +373,14 @@ describe("Java emitter runtime semantics", () => {
       });
 
       assert.match(source, /assertEquals\(3, instance1\.bindings\.size\(\), "Expected bindings size"\);/);
-      assert.match(source, /assertEquals\("alpha", instance1\.bindings\.get\(0\)\.name, "Expected bindings\.alpha name"\);/);
-      assert.match(source, /assertEquals\("text", instance1\.bindings\.get\(0\)\.value, "Expected bindings\.alpha\.value"\);/);
-      assert.match(source, /assertEquals\(2\.5, instance1\.bindings\.get\(1\)\.weight, "Expected bindings\.beta\.weight"\);/);
-      assert.match(source, /assertEquals\("expanded", instance1\.bindings\.get\(2\)\.value, "Expected instance1\.bindings\.get\(2\)\.value"\);/);
-      assert.match(source, /assertEquals\(3, instance1\.bindings\.get\(2\)\.weight, "Expected instance1\.bindings\.get\(2\)\.weight"\);/);
+      assert.match(source, /Binding instance1Bindings0Entry = instance1\.bindings\.stream\(\)\.filter\(item -> "alpha"\.equals\(item\.name\)\)/);
+      assert.match(source, /assertEquals\("alpha", instance1Bindings0Entry\.name, "Expected bindings\.alpha name"\);/);
+      assert.match(source, /assertEquals\("text", instance1Bindings0Entry\.value, "Expected bindings\.alpha\.value"\);/);
+      assert.match(source, /Binding instance1Bindings1Entry = instance1\.bindings\.stream\(\)\.filter\(item -> "beta"\.equals\(item\.name\)\)/);
+      assert.match(source, /assertEquals\(2\.5, instance1Bindings1Entry\.weight, "Expected bindings\.beta\.weight"\);/);
+      assert.match(source, /Binding instance1Bindings2Entry = instance1\.bindings\.stream\(\)\.filter\(item -> "gamma"\.equals\(item\.name\)\)/);
+      assert.match(source, /assertEquals\("expanded", instance1Bindings2Entry\.value, "Expected instance1Bindings2Entry\.value"\);/);
+      assert.match(source, /assertEquals\(3, instance1Bindings2Entry\.weight, "Expected instance1Bindings2Entry\.weight"\);/);
     });
 
     it("emits YAML control-character roundtrip assertions", () => {
