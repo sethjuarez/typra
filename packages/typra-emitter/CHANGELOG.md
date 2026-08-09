@@ -6,6 +6,28 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.5.0](https://github.com/sethjuarez/typra/compare/v0.4.31...v0.5.0) (2026-08-09)
+
+
+### Features
+
+* **emitter:** gate Rust serde serialization option ([512c67d](https://github.com/sethjuarez/typra/commit/512c67d7ba266ae8ed48cf7b18488564b4213a93))
+* **java:** add opt-in Jackson serialization ([#152](https://github.com/sethjuarez/typra/issues/152)) ([d7c4155](https://github.com/sethjuarez/typra/commit/d7c4155f89ed719a3df592741328d95de351dba2))
+* **python:** add pydantic native serialization option ([655440b](https://github.com/sethjuarez/typra/commit/655440be95b5438379d3a65256b41d72ffa77eda))
+* **rust:** complete serde native serialization validation ([1221448](https://github.com/sethjuarez/typra/commit/122144896b541019f474b7281b91cc568a948f0d))
+* **swift:** add codable native serialization option ([#162](https://github.com/sethjuarez/typra/issues/162)) ([51f9f40](https://github.com/sethjuarez/typra/commit/51f9f40803f1be9134110f949064f5dedab0140e))
+* **typescript:** add zod native serialization option ([#155](https://github.com/sethjuarez/typra/issues/155)) ([d796512](https://github.com/sethjuarez/typra/commit/d796512e7021e6c000c17c7b3226e98692982deb))
+
+
+### Bug Fixes
+
+* **emitter:** carry open discriminator fallbacks ([5a6ecdb](https://github.com/sethjuarez/typra/commit/5a6ecdb95847225bcb4eae6106e33559156e4c0a))
+* **emitter:** enforce discriminator runtime contract ([#158](https://github.com/sethjuarez/typra/issues/158)) ([e38b97f](https://github.com/sethjuarez/typra/commit/e38b97f77194d9ea4851292db0e9350caa71d762))
+* **emitter:** harden Swift unknown fallbacks ([#149](https://github.com/sethjuarez/typra/issues/149)) ([090edcc](https://github.com/sethjuarez/typra/commit/090edcc2e4c25ad2f5b89edc5f5c856219a2721a))
+* **emitter:** reject invalid discriminator states ([#157](https://github.com/sethjuarez/typra/issues/157)) ([8476b95](https://github.com/sethjuarez/typra/commit/8476b9525f9f5235bcfffcc8a1ef1921d3f52b40))
+* **harness:** detect fixture validation under-execution ([266e33c](https://github.com/sethjuarez/typra/commit/266e33cb0ef0d2557febddac3611d794ce543af1))
+* **python:** route pydantic validation entry points through typra ([5e9eab6](https://github.com/sethjuarez/typra/commit/5e9eab6e9ba6f972d33927cd9f4506e2f938eb07))
+
 ## [0.4.31](https://github.com/sethjuarez/typra/compare/v0.4.30...v0.4.31) (2026-08-09)
 
 
