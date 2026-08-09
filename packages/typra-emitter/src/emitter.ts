@@ -1,4 +1,4 @@
-import { EmitContext, resolvePath, Namespace, Model } from "@typespec/compiler";
+import { EmitContext, resolvePath, Namespace, Model, NoTarget } from "@typespec/compiler";
 import { resolveModel, TypeNode, enumerateTypes } from "./ir/ast.js";
 import { TypraEmitterOptions, EmitTarget } from "./lib.js";
 import { generateMarkdown } from "./languages/markdown/driver.js";
@@ -123,6 +123,9 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     emitterOutputDir: context.emitterOutputDir,
     ...context.options,
   }
+  if (!validateNativeSerializationOptions(context, options["emit-targets"] || [])) {
+    return;
+  }
 
 
   // resolving top level model
@@ -133,6 +136,34 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     throw new Error(
       `${rootObject} model not found or is not a model type.`
     );
+  }
+
+  function validateNativeSerializationOptions(
+    context: EmitContext<TypraEmitterOptions>,
+    targets: EmitTarget[],
+  ): boolean {
+    let valid = true;
+    for (const target of targets) {
+      const value = target["native-serialization"] ?? "none";
+      if (value === "none") continue;
+
+      const targetName = target.type.toLowerCase().trim();
+      const supported =
+        (value === "pydantic" && targetName === "python")
+        || (value === "jackson" && targetName === "java");
+      if (supported) continue;
+
+      valid = false;
+      context.program.reportDiagnostic({
+        code: "typra-emitter-native-serialization-target",
+        message:
+          `native-serialization '${value}' is not supported for target '${target.type}'. `
+          + "Use 'pydantic' only with Python targets, 'jackson' only with Java targets, or 'none'.",
+        severity: "error",
+        target: NoTarget,
+      });
+    }
+    return valid;
   }
 
   const rootNamespace = options["root-namespace"] || inferRootNamespace(rootObject);

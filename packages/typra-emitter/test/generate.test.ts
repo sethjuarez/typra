@@ -114,4 +114,57 @@ describe("generate", () => {
       rmSync(output, { recursive: true, force: true });
     }
   });
+
+  it("rejects native serialization values on unsupported targets", () => {
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-native-serialization-target-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      writeFileSync(source, [
+        'import "@typra/emitter";',
+        "",
+        "namespace Typra.NativeProbe;",
+        "",
+        "model Root {",
+        "  name: string;",
+        "}",
+        "",
+      ].join("\n"));
+      writeFileSync(config, [
+        "emit:",
+        '  - "@typra/emitter"',
+        "options:",
+        '  "@typra/emitter":',
+        `    emitter-output-dir: "${path.join(output, "generated")}"`,
+        '    root-object: "Typra.NativeProbe.Root"',
+        "    emit-targets:",
+        "      - type: Python",
+        `        output-dir: "${path.join(output, "generated", "python")}"`,
+        '        native-serialization: "jackson"',
+        "        format: false",
+        "",
+      ].join("\n"));
+
+      assert.throws(
+        () => execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        }),
+        (error: unknown) => {
+          const output = error && typeof error === "object" && "stdout" in error && "stderr" in error
+            ? `${String((error as { stdout?: unknown }).stdout ?? "")}${String((error as { stderr?: unknown }).stderr ?? "")}`
+            : String(error);
+          assert.match(output, /typra-emitter-native-serialization-target/);
+          assert.match(output, /native-serialization 'jackson' is not supported for target 'Python'/);
+          return true;
+        },
+      );
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
 });

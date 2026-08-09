@@ -11,7 +11,7 @@ export interface EmitTarget {
   "package-name"?: string;
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
   "protocol-scaffolds"?: "none" | "compile-only";
-  "native-serialization"?: "none" | "pydantic";
+  "native-serialization"?: "none" | "pydantic" | "jackson";
   "cancellation-token-path"?: string;
 }
 export interface TypraEmitterOptions {
@@ -94,10 +94,10 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
           },
           "native-serialization": {
             type: "string",
-            enum: ["none", "pydantic"],
+            enum: ["none", "pydantic", "jackson"],
             nullable: true,
             default: "none",
-            description: "Opt-in native serialization framework for the target. Python supports 'pydantic'; defaults to 'none' for existing dataclass behavior."
+            description: "Opt-in native serialization framework for the target. Python supports 'pydantic'; Java supports 'jackson'; defaults to 'none' for existing behavior."
           },
           "cancellation-token-path": {
             type: "string",
