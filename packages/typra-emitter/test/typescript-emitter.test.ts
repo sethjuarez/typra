@@ -458,7 +458,7 @@ describe("TypeScript abstract open polymorphic dispatch", () => {
     assert.match(source, /export class UnknownConnection extends Connection \{/);
     assert.doesNotMatch(source, /Unknown Connection discriminator field/);
     assert.match(source, /default:\s+return UnknownConnection\.load\(data, context\);/);
-    assert.doesNotMatch(source, /Missing Connection discriminator property/);
+    assert.match(source, /Invalid Connection discriminator field 'kind': expected non-blank string/);
 
     const { Connection } = evaluateOpenConnection(source);
 
@@ -509,7 +509,7 @@ describe("TypeScript abstract open polymorphic dispatch", () => {
     assert.doesNotMatch(source, /class UnknownConnection/);
     assert.doesNotMatch(source, /protected raw: Record<string, unknown>/);
     assert.match(source, /Unknown Connection discriminator field/);
-    assert.match(source, /Missing Connection discriminator property/);
+    assert.match(source, /Invalid Connection discriminator field 'kind': expected non-blank string/);
   });
 });
 
@@ -539,7 +539,7 @@ describe("TypeScript open polymorphic preservation", () => {
 
     assert.match(source, /protected raw: Record<string, unknown> = \{\};/);
     assert.match(source, /protected static cloneRawValue\(value: unknown\): unknown/);
-    assert.match(source, /const discriminator = String\(discriminatorValue\);/);
+    assert.match(source, /const discriminator = discriminatorValue;/);
     assert.doesNotMatch(source, /discriminatorValue\)\.toLowerCase\(\)/);
     assert.match(source, /if \(instance\.constructor === Connection\) \{/);
     assert.match(source, /instance\.raw = Connection\.cloneRawValue\(data\) as Record<string, unknown>;/);

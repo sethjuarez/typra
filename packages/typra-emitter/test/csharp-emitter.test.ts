@@ -291,9 +291,8 @@ describe("C# abstract open polymorphic dispatch", () => {
     assert.match(source, /public abstract partial class Connection/);
     assert.match(source, /public sealed partial class UnknownConnection : Connection/);
     assert.doesNotMatch(source, /Unknown Connection discriminator field/);
-    assert.doesNotMatch(source, /Missing Connection discriminator property/);
+    assert.match(source, /Invalid Connection discriminator field 'kind': expected non-blank string/);
     assert.match(source, /_ => UnknownConnection\.Load\(data, context\),/);
-    assert.match(source, /return UnknownConnection\.Load\(data, context\);/);
 
     // The retained payload is deep-cloned and stripped of the declared fields, so save
     // re-emits the unknown keys without duplicating the modelled ones.
@@ -317,7 +316,7 @@ describe("C# abstract open polymorphic dispatch", () => {
     assert.doesNotMatch(source, /class UnknownConnection/);
     assert.doesNotMatch(source, /_raw/);
     assert.match(source, /Unknown Connection discriminator field/);
-    assert.match(source, /Missing Connection discriminator property/);
+    assert.match(source, /Invalid Connection discriminator field 'kind': expected non-blank string/);
   });
 });
 

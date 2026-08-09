@@ -533,25 +533,23 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push("    if (data instanceof Map<?, ?> dispatchMap) {");
   lines.push(`      Object discriminator = dispatchMap.get("${escapeJava(dispatch.discriminatorField)}");`);
-  lines.push('      if (discriminator != null && !String.valueOf(discriminator).isEmpty()) {');
-  lines.push("        switch (String.valueOf(discriminator)) {");
-  for (const variant of dispatch.variants) {
-    lines.push(`          case "${escapeJava(variant.value)}":`);
-    lines.push(`            return ${javaTypeName(variant.typeName.name)}.load(data, ctx);`);
-  }
-  lines.push("          default:");
-  if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
-    lines.push(`            return ${javaTypeName(dispatch.defaultVariant.typeName.name)}.load(data, ctx);`);
-  } else if (isClosed) {
-    lines.push(`            throw new IllegalArgumentException("Unknown ${typeName} discriminator field '${escapeJava(dispatch.discriminatorField)}' value: " + discriminator);`);
-  } else {
-    lines.push("            break;");
-  }
-  lines.push("        }");
+  lines.push("      if (!(discriminator instanceof String discriminatorString) || discriminatorString.isEmpty()) {");
+  lines.push(`        throw new IllegalArgumentException("Invalid ${typeName} discriminator field '${escapeJava(dispatch.discriminatorField)}': expected non-blank string");`);
   lines.push("      }");
-  if (isClosed) {
-    lines.push(`      throw new IllegalArgumentException("Missing ${typeName} discriminator property: '${escapeJava(dispatch.discriminatorField)}'");`);
+  lines.push("      switch (discriminatorString) {");
+  for (const variant of dispatch.variants) {
+    lines.push(`        case "${escapeJava(variant.value)}":`);
+    lines.push(`          return ${javaTypeName(variant.typeName.name)}.load(data, ctx);`);
   }
+  lines.push("        default:");
+  if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
+    lines.push(`          return ${javaTypeName(dispatch.defaultVariant.typeName.name)}.load(data, ctx);`);
+  } else if (isClosed) {
+    lines.push(`          throw new IllegalArgumentException("Unknown ${typeName} discriminator field '${escapeJava(dispatch.discriminatorField)}' value: " + discriminatorString);`);
+  } else {
+    lines.push("          break;");
+  }
+  lines.push("      }");
   lines.push("    }");
   void typeName;
 }

@@ -534,19 +534,14 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   lines.push(`\t\tif discriminator, ok := m["${dispatch.discriminatorField}"]; ok {`);
   lines.push("\t\t\tswitch discriminator := discriminator.(type) {");
   lines.push("\t\t\tcase string:");
+  lines.push('\t\t\t\tif discriminator == "" {');
+  lines.push(`\t\t\t\t\treturn nil, fmt.Errorf("invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`);
+  lines.push("\t\t\t\t}");
   lines.push("\t\t\t\tswitch discriminator {");
 
   for (const variant of dispatch.variants) {
     lines.push(`\t\t\t\tcase "${variant.value}":`);
     lines.push(`\t\t\t\t\treturn Load${variant.typeName.name}(data, ctx)`);
-  }
-
-  // A blank discriminator is not a variant selector — it is the absence of a kind. Breaking out
-  // of the switch lets it fall through to this backend's existing missing-discriminator
-  // behaviour instead of being absorbed by the wildcard/default arm as a fabricated instance.
-  if (!dispatch.variants.some(variant => variant.value === "")) {
-    lines.push('\t\t\t\tcase "":');
-    lines.push("\t\t\t\t\t// blank discriminator: not a variant selector");
   }
 
   // Default variant
@@ -567,8 +562,13 @@ function emitPolymorphicDispatch(typeName: string, dispatch: PolymorphicDispatch
   } else if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
     lines.push("\t\t\tdefault:");
     lines.push(`\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`);
+  } else {
+    lines.push("\t\t\tdefault:");
+    lines.push(`\t\t\t\treturn nil, fmt.Errorf("invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`);
   }
   lines.push("\t\t\t}");
+  lines.push("\t\t} else {");
+  lines.push(`\t\t\treturn nil, fmt.Errorf("missing ${typeName} discriminator property: ${dispatch.discriminatorField}")`);
   lines.push("\t\t}");
   lines.push("\t}");
   if (isClosed && !dispatch.defaultVariant) {

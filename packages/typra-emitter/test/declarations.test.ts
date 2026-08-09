@@ -695,7 +695,7 @@ describe("lowerFile", () => {
   // ============================================================================
 
   describe("Go emitter dispatch hardening", () => {
-    it("keeps abstract scalar coercions reachable before missing-discriminator errors", () => {
+    it("keeps abstract scalar coercions reachable before discriminator validation", () => {
       const tokenConnection = makeType("TokenConnection", [
         makeProp("kind", "string", { isScalar: true, defaultValue: "token" }),
         makeProp("endpoint", "string", { isScalar: true }),
@@ -733,7 +733,7 @@ describe("lowerFile", () => {
       const loadStart = code.indexOf("func LoadConnectionWithCoercion(");
       const loadBody = code.slice(loadStart, code.indexOf("\nfunc ", loadStart + 1));
       assert.doesNotMatch(loadBody, /unknown ConnectionWithCoercion discriminator/);
-      assert.doesNotMatch(loadBody, /missing ConnectionWithCoercion discriminator/);
+      assert.match(loadBody, /missing ConnectionWithCoercion discriminator/);
       assert.match(loadBody, /\/\/ Load from map/);
       assert.match(loadBody, /return result, nil/);
       assert.match(loadBody, /result\.raw\[key\] = cloneConnectionWithCoercionRawValue\(value\)/);
@@ -1350,7 +1350,7 @@ describe("open self-reference payload preservation", () => {
 
     assert.match(code, /protected Dictionary<string, object\?> _raw = new\(\);/);
     assert.match(code, /protected static object\? CloneRawValue\(object\? value\)/);
-    assert.match(code, /var discriminator = discriminatorValue\.ToString\(\);/);
+    assert.match(code, /discriminatorValue is not string discriminator \|\| discriminator == ""/);
     assert.doesNotMatch(code, /ToLowerInvariant/);
     assert.match(code, /if \(instance\.GetType\(\) == typeof\(ContentPart\)\)/);
     assert.match(code, /instance\._raw = \(Dictionary<string, object\?>\)CloneRawValue\(data\)!;/);
@@ -1362,7 +1362,7 @@ describe("open self-reference payload preservation", () => {
 
     assert.match(code, /import copy/);
     assert.match(code, /_raw: dict\[str, Any\] = field\(default_factory=dict, init=False, repr=False\)/);
-    assert.match(code, /discriminator_value = str\(data\["kind"\]\)/);
+    assert.match(code, /discriminator_value = discriminator_raw/);
     assert.doesNotMatch(code, /discriminator_value = .*\.lower\(\)/);
     assert.match(code, /if type\(instance\) is ContentPart:\s+instance\._raw = copy\.deepcopy\(data\)/);
     assert.match(code, /result: dict\[str, Any\] = copy\.deepcopy\(obj\._raw\)/);
