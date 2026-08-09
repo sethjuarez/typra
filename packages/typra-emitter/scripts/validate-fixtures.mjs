@@ -88,6 +88,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "typra-verify",
   "consumer-smoke",
   "typescript.compile",
+  "typescript-zod.compile",
   "typescript.generated-tests",
   "python.compile",
   "python_pydantic.compile",
@@ -109,6 +110,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
 
 const EXPECTED_EXECUTABLE_CONFORMANCE_TARGET_IDS = [
   "typescript",
+  "typescript-zod",
   "python",
   "python_pydantic",
   "go",
@@ -1167,12 +1169,12 @@ function typeScriptTypeRoots(tscCli) {
   return [path.resolve(path.dirname(tscCli), "..", "..", "@types")];
 }
 
-function runGeneratedTypeScriptCompile() {
-  const sourceDir = path.join(generatedRoot, "typescript");
-  const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".ts"));
+function runGeneratedTypeScriptCompileFor(targetDir, label) {
+  const sourceDir = path.join(generatedRoot, targetDir);
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".ts"));
 
   if (sourceFiles.length === 0) {
-    fail("No generated TypeScript files found to compile.");
+    fail(`No generated ${label} files found to compile.`);
     return;
   }
   const tscCli = findTypeScriptCli(packageRoot);
@@ -1222,11 +1224,8 @@ function runGeneratedTypeScriptCompile() {
       stdio: "pipe",
     });
   } catch (error) {
-    const output =
-      `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
-    fail(
-      `Generated TypeScript source and tests do not compile:\n${output || error.message}`,
-    );
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated ${label} source and tests do not compile:\n${output || error.message}`);
   } finally {
     for (const tempPath of [configPath, ambientPath]) {
       if (existsSync(tempPath)) {
@@ -1234,6 +1233,14 @@ function runGeneratedTypeScriptCompile() {
       }
     }
   }
+}
+
+function runGeneratedTypeScriptCompile() {
+  runGeneratedTypeScriptCompileFor("typescript", "TypeScript");
+}
+
+function runGeneratedTypeScriptZodCompile() {
+  runGeneratedTypeScriptCompileFor("typescript-zod", "TypeScript Zod");
 }
 
 function runTypeScriptGeneratedTests() {
@@ -2949,6 +2956,91 @@ function runTypeScriptExecutableConformance() {
   }
 }
 
+function runTypeScriptZodExecutableConformance() {
+  const sourceDir = path.join(generatedRoot, "typescript-zod");
+  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".ts") && !file.includes(`${path.sep}.typra-conformance${path.sep}`) && !file.includes(`${path.sep}tests${path.sep}`));
+  if (sourceFiles.length === 0) {
+    fail("No generated TypeScript Zod files found for executable conformance.");
+    return;
+  }
+  const tscCli = findTypeScriptCli(packageRoot);
+  if (!tscCli) return;
+
+  const runnerPath = path.join(sourceDir, "conformance.validate.ts");
+  const configPath = path.join(sourceDir, "tsconfig.conformance.json");
+  const outDir = path.join(sourceDir, ".typra-conformance");
+  writeFileSync(runnerPath, [
+    'import { FixtureConnection, FixtureContent, FixtureRoot, FixtureToolbox, WireOptions } from "./index";',
+    "",
+    "function stable(value: unknown): string {",
+    "  if (Array.isArray(value)) return JSON.stringify(value.map(item => JSON.parse(stable(item))));",
+    "  if (value && typeof value === \"object\") {",
+    "    const result: Record<string, unknown> = {};",
+    "    for (const key of Object.keys(value as Record<string, unknown>).sort()) result[key] = (value as Record<string, unknown>)[key];",
+    "    for (const key of Object.keys(result)) result[key] = JSON.parse(stable(result[key]));",
+    "    return JSON.stringify(result);",
+    "  }",
+    "  return JSON.stringify(value);",
+    "}",
+    "function assertSame(label: string, actual: unknown, expected: unknown): void {",
+    "  const actualJson = stable(actual);",
+    "  const expectedJson = stable(expected);",
+    "  if (actualJson !== expectedJson) throw new Error(`${label} diverged\\nactual=${actualJson}\\nexpected=${expectedJson}`);",
+    "}",
+    "function assertSchemaAgrees<T extends { save(): Record<string, unknown> }>(label: string, model: { load(data: Record<string, unknown>): T; schema: { parse(data: unknown): Record<string, unknown> } }, input: Record<string, unknown>): void {",
+    "  const expected = model.load(input).save();",
+    "  const actual = model.schema.parse(input);",
+    "  assertSame(label, actual, expected);",
+    "}",
+    `assertSchemaAgrees("FixtureRoot", FixtureRoot, JSON.parse(${fixtureRootSampleJsonLiteral}));`,
+    `assertSchemaAgrees("FixtureContent", FixtureContent, ${JSON.stringify(imageContentSample)});`,
+    'assertSchemaAgrees("WireOptions", WireOptions, { maxOutputTokens: 256, temperature: 0.7 });',
+    'assertSchemaAgrees("FixtureConnection open unknown", FixtureConnection, { kind: "future-auth", name: "future", config: { nested: [1, null, { enabled: true }] }, nullable: null });',
+    'try { FixtureConnection.schema.parse({ kind: "custom", name: "claimed-known" }); throw new Error("open fallback accepted known custom connection without endpoint"); } catch (error) { const message = String(error); if (!message.includes("endpoint") && !message.includes("concrete schema")) throw error; }',
+    'try { FixtureContent.schema.parse({ kind: "video", value: "hello" }); throw new Error("closed discriminator Zod schema accepted an unknown content kind"); } catch (error) { const message = String(error); if (!message.includes("video") && !message.includes("discriminator")) throw error; }',
+    'try { FixtureToolbox.schema.parse({ tools: { custom: { kind: "vendor" } }, inheritedMapBindingTool: { kind: "function", name: "map", command: "run" }, inheritedListBindingTool: { kind: "function", name: "list", command: "run" } } as any); throw new Error("Zod schema accepted missing required CustomTool.connection"); } catch (error) { const message = String(error); if (!message.includes("tools.custom.connection") || !message.includes("missing required field")) throw error; }',
+    "console.log(JSON.stringify({ ok: true }));",
+    "",
+  ].join("\n"));
+  writeFileSync(configPath, JSON.stringify({
+    compilerOptions: {
+      target: "ES2022",
+      module: "commonjs",
+      moduleResolution: "node",
+      esModuleInterop: true,
+      skipLibCheck: true,
+      types: ["node"],
+      typeRoots: typeScriptTypeRoots(tscCli),
+      lib: ["ES2022"],
+      outDir,
+      rootDir: sourceDir,
+    },
+    files: [...sourceFiles, runnerPath],
+  }, null, 2));
+
+  try {
+    execFileSync(process.execPath, [tscCli, "-p", configPath], { cwd: packageRoot, stdio: "pipe" });
+    writeFileSync(path.join(outDir, "package.json"), JSON.stringify({ type: "commonjs" }, null, 2));
+    const output = execFileSync(process.execPath, [path.join(outDir, "conformance.validate.js")], { cwd: outDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    const result = JSON.parse(output);
+    if (result.ok !== true) {
+      fail(`Generated TypeScript Zod executable conformance emitted an unexpected result: ${output}`);
+    }
+  } catch (error) {
+    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(`Generated TypeScript Zod executable conformance failed:\n${output || error.message}`);
+  } finally {
+    for (const tempPath of [runnerPath, configPath]) {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    }
+    if (existsSync(outDir)) {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  }
+}
+
 function runPythonExecutableConformance(
   target = "python",
   packageName = "python",
@@ -4481,6 +4573,7 @@ function runExecutableConformance() {
     expectedIds: EXPECTED_EXECUTABLE_CONFORMANCE_TARGET_IDS,
     implementations: new Map([
       ["typescript", runTypeScriptExecutableConformance],
+      ["typescript-zod", runTypeScriptZodExecutableConformance],
       ["python", () => runPythonExecutableConformance()],
       [
         "python_pydantic",
@@ -4503,6 +4596,7 @@ function runExecutableConformance() {
 function assertGeneratedTargets() {
   for (const target of [
     "typescript",
+    "typescript-zod",
     "python",
     "python_pydantic",
     "go",
@@ -4540,6 +4634,21 @@ function assertStaticFixtureCoverage() {
     "toWire(provider: string)",
     "max_completion_tokens",
     "max_tokens",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "typescript-zod", "fixture-content.ts"),
+    'import { z } from "zod";',
+    'static readonly wireSchema',
+    'z.discriminatedUnion("kind"',
+    'static readonly schema',
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "typescript-zod", "fixture-connection.ts"),
+    "wireObjectSchemaWithoutName",
+    ".passthrough()",
+    "return FixtureConnection.load(data as Record<string, unknown>).save();",
+    "ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(error) });",
+    "}).pipe(FixtureConnection.wireSchema)",
   );
   assertIncludes(
     path.join(
@@ -5005,6 +5114,9 @@ function assertExportSurfaceSnapshot() {
       fail(`Export surface snapshot is missing target: ${target}`);
     }
   }
+  if (!snapshot.targets?.some(target => target.target === "typescript" && target.outputRoot?.endsWith("generated/fixtures/typescript-zod"))) {
+    fail("Export surface snapshot is missing the TypeScript Zod output root.");
+  }
 
   assertArrayIncludes(
     "TypeScript root exports",
@@ -5337,6 +5449,7 @@ function runDeclaredValidationStages() {
       ["typra-verify", runTypraVerify],
       ["consumer-smoke", runTypraConsumerSmoke],
       ["typescript.compile", runGeneratedTypeScriptCompile],
+      ["typescript-zod.compile", runGeneratedTypeScriptZodCompile],
       ["python.compile", () => runPythonCompile()],
       ["python_pydantic.compile", () => runPythonCompile("python_pydantic")],
       ["typescript.generated-tests", runTypeScriptGeneratedTests],

@@ -4,6 +4,7 @@ import { execFileSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "fs";
 import { createRequire } from "module";
 import * as YAML from "yaml";
+import { validateNativeSerializationTargets } from "./native-serialization.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,7 +41,7 @@ export interface TargetOptions {
   /** Enum/string-union parsing policy for targets that support it */
   enumParsing?: "case-sensitive" | "case-insensitive";
   /** Opt-in native serialization framework for targets that support it */
-  nativeSerialization?: "none" | "pydantic" | "jackson" | "serde";
+  nativeSerialization?: "none" | "pydantic" | "jackson" | "serde" | "zod" | "standard-schema";
 }
 
 /**
@@ -173,14 +174,23 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     };
   }
 
-  // Ensure output directory exists
+  // Build emit targets configuration
   const outputDir = path.resolve(output);
+  const emitTargets = buildEmitTargets(targets, outputDir, generateTests, format);
+  const nativeSerializationErrors = validateNativeSerializationTargets(emitTargets);
+  if (nativeSerializationErrors.length > 0) {
+    return {
+      success: false,
+      outputDir,
+      targets: targetNames,
+      errors: nativeSerializationErrors,
+    };
+  }
+
+  // Ensure output directory exists
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
   }
-
-  // Build emit targets configuration
-  const emitTargets = buildEmitTargets(targets, outputDir, generateTests, format);
 
   // Create temporary tspconfig.yaml
   const tspConfig = {
@@ -250,7 +260,7 @@ function buildEmitTargets(
   format?: boolean;
   namespace?: string;
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
-  "native-serialization"?: "none" | "pydantic" | "jackson" | "serde";
+  "native-serialization"?: "none" | "pydantic" | "jackson" | "serde" | "zod" | "standard-schema";
 }> {
   if (Array.isArray(targets)) {
     // Simple array of target names - use default directories

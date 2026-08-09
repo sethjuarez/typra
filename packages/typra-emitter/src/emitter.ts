@@ -13,6 +13,7 @@ import { emitGeneratedFile, emitGeneratedManifest, emitGeneratedOutputReport, pr
 import { buildExportSurfaceSnapshot, emitExportSurfaceSnapshot } from "./contract-surface.js";
 import { reportTypeSpecCompatibility, shouldBlockUnsupportedTypeSpecToolchain } from "./compatibility.js";
 import { buildHydrationBoundarySnapshot, emitHydrationBoundarySnapshot } from "./hydration-seams.js";
+import { validateNativeSerializationTargets } from "./native-serialization.js";
 
 // Generator options passed to each generator
 export interface GeneratorOptions {
@@ -142,29 +143,16 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     context: EmitContext<TypraEmitterOptions>,
     targets: EmitTarget[],
   ): boolean {
-    let valid = true;
-    for (const target of targets) {
-      const value = target["native-serialization"] ?? "none";
-      if (value === "none") continue;
-
-      const targetName = target.type.toLowerCase().trim();
-      const supported =
-        (value === "pydantic" && targetName === "python")
-        || (value === "jackson" && targetName === "java")
-        || (value === "serde" && targetName === "rust");
-      if (supported) continue;
-
-      valid = false;
+    const errors = validateNativeSerializationTargets(targets);
+    for (const message of errors) {
       context.program.reportDiagnostic({
         code: "typra-emitter-native-serialization-target",
-        message:
-          `native-serialization '${value}' is not supported for target '${target.type}'. `
-          + "Use 'pydantic' only with Python targets, 'jackson' only with Java targets, 'serde' only with Rust targets, or 'none'.",
+        message,
         severity: "error",
         target: NoTarget,
       });
     }
-    return valid;
+    return errors.length === 0;
   }
 
   const rootNamespace = options["root-namespace"] || inferRootNamespace(rootObject);

@@ -185,7 +185,8 @@ The root emitter options are:
 
 Each `emit-targets` entry has a required `type` and can set `output-dir`,
 `test-dir`, `format`, `import-path`, `package-name`, `namespace`, `alias`,
-`enum-parsing`, `protocol-scaffolds`, and `cancellation-token-path`.
+`enum-parsing`, `protocol-scaffolds`, `cancellation-token-path`, and
+`native-serialization`.
 
 `protocol-scaffolds: "compile-only"` emits test-dir-only implementations that
 prove generated `@@protocol`/`@@method` contracts compile. They intentionally
@@ -199,6 +200,26 @@ emit-targets:
     output-dir: "generated/rust"
     enum-parsing: "case-insensitive"
 ```
+
+TypeScript targets can opt into native runtime validation artifacts with
+`native-serialization: "zod"`. The default is `"none"`, so existing TypeScript
+output does not import Zod. Zod mode emits class-attached `schema`,
+`wireSchema`, and `wireObjectSchemaWithoutName` validators alongside the
+generated classes. `schema.parse(input)` first canonicalizes through Typra's
+authoritative `load(input).save()` path, then validates the saved wire shape, so
+validation cannot silently drift from Typra load/save semantics. Consumers using
+this opt-in mode must provide `zod` in the generated TypeScript project.
+
+```yaml
+emit-targets:
+  - type: TypeScript
+    output-dir: "generated/typescript"
+    native-serialization: "zod"
+```
+
+`native-serialization: "standard-schema"` is reserved for a future
+Standard Schema-compatible TypeScript path and currently fails fast rather than
+approximating behavior.
 
 Methods can attach runtime effect metadata through the backward-compatible
 eighth `@method` argument:

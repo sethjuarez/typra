@@ -52,6 +52,8 @@ options:
         output-dir: "generated/typescript"
         test-dir: "generated/typescript/tests"
         import-path: "../index"
+        # Optional: emit Zod validators that validate Typra's canonical load/save wire shape.
+        native-serialization: "zod"
       - type: Swift
         output-dir: "generated/swift"
         test-dir: "generated/swift/Tests/MyProjectTests"

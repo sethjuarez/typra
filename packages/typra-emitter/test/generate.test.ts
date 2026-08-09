@@ -7,6 +7,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 
 import { generate, SUPPORTED_TARGET_LANGUAGES } from "../src/generate.js";
+import { validateNativeSerializationTargets } from "../src/native-serialization.js";
 
 const require = createRequire(import.meta.url);
 
@@ -34,6 +35,45 @@ describe("generate", () => {
       "rust",
       "swift",
       "markdown",
+    ]);
+  });
+
+  it("rejects unsupported native serialization target pairs before creating output", async () => {
+    const output = path.join(tmpdir(), `typra-invalid-native-serialization-${Date.now()}`);
+    const result = await generate({
+      output,
+      targets: {
+        go: {
+          outputDir: path.join(output, "go"),
+          nativeSerialization: "zod",
+        },
+      } as never,
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.errors?.[0] ?? "", /Target "go" does not support native-serialization "zod"/);
+    assert.equal(existsSync(output), false);
+  });
+
+  it("validates native serialization compatibility centrally for every target", () => {
+    assert.deepEqual(validateNativeSerializationTargets([
+      { type: "TypeScript", "native-serialization": "zod" },
+      { type: "typescript", "native-serialization": "standard-schema" },
+      { type: "python", "native-serialization": "pydantic" },
+      { type: "java", "native-serialization": "jackson" },
+      { type: "rust", "native-serialization": "serde" },
+      { type: "java", "native-serialization": "none" },
+    ]), []);
+    assert.deepEqual(validateNativeSerializationTargets([
+      { type: "typescript", "native-serialization": "pydantic" },
+      { type: "python", "native-serialization": "standard-schema" },
+      { type: "java", "native-serialization": "zod" },
+      { type: "swift", "native-serialization": "standard-schema" },
+    ]), [
+      'Target "typescript" does not support native-serialization "pydantic". Supported values: "none", "zod", "standard-schema".',
+      'Target "python" does not support native-serialization "standard-schema". Supported values: "none", "pydantic".',
+      'Target "java" does not support native-serialization "zod". Supported values: "none", "jackson".',
+      'Target "swift" does not support native-serialization "standard-schema". Supported value: "none".',
     ]);
   });
 
@@ -159,7 +199,8 @@ describe("generate", () => {
             ? `${String((error as { stdout?: unknown }).stdout ?? "")}${String((error as { stderr?: unknown }).stderr ?? "")}`
             : String(error);
           assert.match(output, /typra-emitter-native-serialization-target/);
-          assert.match(output, /native-serialization 'jackson' is not supported for target 'Python'/);
+          assert.match(output, /Target "Python" does not support native-serialization "jackson"/);
+          assert.match(output, /Supported values: "none", "pydantic"/);
           return true;
         },
       );
