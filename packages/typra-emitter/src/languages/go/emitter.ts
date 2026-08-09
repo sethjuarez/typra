@@ -676,7 +676,7 @@ function emitLoadAssignment(
       emitLoadCollectionComplex(assign, helper, fieldName, cat.typeName, polymorphicTypeNames, lines);
       break;
     case "dict":
-      emitLoadDict(assign, fieldName, lines);
+      emitLoadDict(assign, fieldName, polymorphicTypeNames, lines);
       break;
   }
 }
@@ -958,13 +958,72 @@ function emitLoadCollectionComplex(
 function emitLoadDict(
   assign: LoadAssignment,
   fieldName: string,
+  polymorphicTypeNames: Set<string>,
   lines: string[],
 ): void {
+  const valueType = assign.category.kind === "dict" ? assign.category.valueType : undefined;
   lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
-  lines.push("\t\t\tif m, ok := val.(map[string]interface{}); ok {");
-  lines.push(`\t\t\t\tresult.${fieldName} = m`);
-  lines.push("\t\t\t}");
+  if (!valueType || valueType === "unknown") {
+    lines.push("\t\t\tif m, ok := val.(map[string]interface{}); ok {");
+    lines.push(`\t\t\t\tresult.${fieldName} = m`);
+    lines.push("\t\t\t}");
+  } else {
+    lines.push(`\t\t\tif items, ok := val.(${getGoDictFieldType(valueType, polymorphicTypeNames)}); ok {`);
+    lines.push(`\t\t\t\tresult.${fieldName} = items`);
+    lines.push("\t\t\t} else if m, ok := val.(map[string]interface{}); ok {");
+    lines.push(`\t\t\t\titems := make(${getGoDictFieldType(valueType, polymorphicTypeNames)}, len(m))`);
+    lines.push("\t\t\t\tfor key, item := range m {");
+    emitGoDictValueLoad(valueType, "item", "loaded", `ctx.At("${assign.sourceName}").At(key)`, polymorphicTypeNames, lines);
+    lines.push("\t\t\t\t\titems[key] = loaded");
+    lines.push("\t\t\t\t}");
+    lines.push(`\t\t\t\tresult.${fieldName} = items`);
+    lines.push("\t\t\t}");
+  }
   lines.push("\t\t}");
+}
+
+function emitGoDictValueLoad(
+  valueType: string,
+  valueExpr: string,
+  targetName: string,
+  contextExpr: string,
+  polymorphicTypeNames: Set<string>,
+  lines: string[],
+): void {
+  const goType = GO_TYPE_MAP[valueType];
+  if (goType === "string") {
+    lines.push(`\t\t\t\t\t${targetName} := ${valueExpr}.(string)`);
+    return;
+  }
+  if (goType === "bool") {
+    lines.push(`\t\t\t\t\t${targetName} := ${valueExpr}.(bool)`);
+    return;
+  }
+  if (goType && NUMERIC_GO_TYPES.has(goType)) {
+    lines.push(`\t\t\t\t\tvar ${targetName} ${goType}`);
+    lines.push(`\t\t\t\t\tswitch n := ${valueExpr}.(type) {`);
+    lines.push("\t\t\t\t\tcase int:");
+    lines.push(`\t\t\t\t\t\t${targetName} = ${goType}(n)`);
+    lines.push("\t\t\t\t\tcase int32:");
+    lines.push(`\t\t\t\t\t\t${targetName} = ${goType}(n)`);
+    lines.push("\t\t\t\t\tcase int64:");
+    lines.push(`\t\t\t\t\t\t${targetName} = ${goType}(n)`);
+    lines.push("\t\t\t\t\tcase float32:");
+    lines.push(`\t\t\t\t\t\t${targetName} = ${goType}(n)`);
+    lines.push("\t\t\t\t\tcase float64:");
+    lines.push(`\t\t\t\t\t\t${targetName} = ${goType}(n)`);
+    lines.push("\t\t\t\t\t}");
+    return;
+  }
+  if (goType === "interface{}") {
+    lines.push(`\t\t\t\t\t${targetName} := ${valueExpr}`);
+    return;
+  }
+  lines.push(`\t\t\t\t\t${targetName}, err := Load${valueType}(${valueExpr}, ${contextExpr})`);
+  lines.push("\t\t\t\t\tif err != nil {");
+  lines.push("\t\t\t\t\t\treturn result, err");
+  lines.push("\t\t\t\t\t}");
+  void polymorphicTypeNames;
 }
 
 // ============================================================================
@@ -1142,7 +1201,7 @@ function emitSaveAssignment(
       emitSaveCollectionComplex(assign, helper, fieldName, cat.typeName, polymorphicTypeNames, lines);
       break;
     case "dict":
-      emitSaveDict(assign, fieldName, lines);
+      emitSaveDict(assign, fieldName, polymorphicTypeNames, lines);
       break;
   }
 }
@@ -1319,15 +1378,45 @@ function emitSaveCollectionComplex(
 function emitSaveDict(
   assign: SaveAssignment,
   fieldName: string,
+  polymorphicTypeNames: Set<string>,
   lines: string[],
 ): void {
+  const valueType = assign.category.kind === "dict" ? assign.category.valueType : undefined;
+  const serializesComplexValues = Boolean(valueType && valueType !== "unknown" && !GO_TYPE_MAP[valueType]);
   if (assign.isOptional) {
     lines.push(`\tif obj.${fieldName} != nil {`);
-    lines.push(`\t\tresult["${assign.targetName}"] = obj.${fieldName}`);
+    emitGoDictSaveResult(assign.targetName, `obj.${fieldName}`, serializesComplexValues, polymorphicTypeNames.has(valueType ?? ""), lines, "\t\t");
     lines.push("\t}");
   } else {
-    lines.push(`\tresult["${assign.targetName}"] = obj.${fieldName}`);
+    emitGoDictSaveResult(assign.targetName, `obj.${fieldName}`, serializesComplexValues, polymorphicTypeNames.has(valueType ?? ""), lines, "\t");
   }
+}
+
+function emitGoDictSaveResult(
+  targetName: string,
+  sourceExpr: string,
+  serializesComplexValues: boolean | undefined,
+  valuesArePolymorphic: boolean,
+  lines: string[],
+  indent: string,
+): void {
+  if (!serializesComplexValues) {
+    lines.push(`${indent}result["${targetName}"] = ${sourceExpr}`);
+    return;
+  }
+  lines.push(`${indent}items := make(map[string]interface{}, len(${sourceExpr}))`);
+  lines.push(`${indent}for key, item := range ${sourceExpr} {`);
+  if (valuesArePolymorphic) {
+    lines.push(`${indent}\tif savable, ok := item.(interface{ Save(*SaveContext) map[string]interface{} }); ok {`);
+    lines.push(`${indent}\t\titems[key] = savable.Save(ctx)`);
+    lines.push(`${indent}\t} else {`);
+    lines.push(`${indent}\t\titems[key] = item`);
+    lines.push(`${indent}\t}`);
+  } else {
+    lines.push(`${indent}\titems[key] = item.Save(ctx)`);
+  }
+  lines.push(`${indent}}`);
+  lines.push(`${indent}result["${targetName}"] = items`);
 }
 
 // ============================================================================
@@ -1478,8 +1567,15 @@ function getGoFieldType(
       return `[]${category.typeName}`;
     }
     case "dict":
-      return "map[string]interface{}";
+      return getGoDictFieldType(category.valueType, polymorphicTypeNames);
   }
+}
+
+function getGoDictFieldType(valueType: string | undefined, polymorphicTypeNames: Set<string>): string {
+  if (!valueType || valueType === "unknown") return "map[string]interface{}";
+  const mapped = GO_TYPE_MAP[valueType];
+  if (mapped) return `map[string]${mapped}`;
+  return polymorphicTypeNames.has(valueType) ? "map[string]interface{}" : `map[string]${valueType}`;
 }
 
 function getStructTag(fieldName: string, isOptional: boolean, hasExplicitDefault = false): string {

@@ -628,6 +628,12 @@ function resolveImports(
       // Only import non-scalar, non-dict types
       if (field.category.kind === "complex" || field.category.kind === "collection_complex") {
         addImport(field.typeName.name);
+      } else if (
+        field.category.kind === "dict" &&
+        field.category.valueType &&
+        registry.get(field.category.valueType)
+      ) {
+        addImport(field.category.valueType);
       }
     }
 

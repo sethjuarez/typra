@@ -13,7 +13,7 @@ import {
 import { ExprVisitor } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
 import { swiftFunctionName, swiftPropertyName, swiftStringLiteral, swiftTypeName } from "./identifiers.js";
-import { swiftType } from "./types.js";
+import { SWIFT_TYPE_MAP, swiftType } from "./types.js";
 
 export function emitSwiftFile(
   file: FileDecl,
@@ -649,8 +649,14 @@ function swiftCategoryType(category: PropertyCategory, enumName: string | null, 
     case "collection_complex":
       return `[${swiftTypeName(category.typeName)}]`;
     case "dict":
-      return "[String: Any]";
+      return `[String: ${swiftRecordValueType(category.valueType)}]`;
   }
+}
+
+function swiftRecordValueType(valueType: string | undefined): string {
+  if (!valueType || valueType === "unknown") return "Any";
+  const mapped = swiftType(valueType);
+  return mapped === "Any" && valueType !== "any" && valueType !== "unknown" ? swiftTypeName(valueType) : mapped;
 }
 
 function swiftFieldDefaultValue(
@@ -755,8 +761,22 @@ function swiftLoadExpression(
       }
       return `try TypraRuntime.array(${valueExpr}, field: ${swiftStringLiteral(fieldName)}).enumerated().map { try ${swiftTypeName(category.typeName)}.load($1, context: context.at(${swiftStringLiteral(fieldName)}).atIndex($0)) }`;
     case "dict":
-      return `try TypraRuntime.dictionary(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
+      if (!category.valueType || category.valueType === "unknown") {
+        return `try TypraRuntime.dictionary(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
+      }
+      return `Dictionary(uniqueKeysWithValues: try TypraRuntime.dictionary(${valueExpr}, field: ${swiftStringLiteral(fieldName)}).map { (key, item) in (key, ${swiftRecordValueLoadExpression(category.valueType, "item", fieldName)}) })`;
   }
+}
+
+function swiftRecordValueLoadExpression(valueType: string, valueExpr: string, fieldName: string): string {
+  if (isSwiftScalarRecordValue(valueType)) {
+    return scalarLoadExpression(valueType, valueExpr, fieldName);
+  }
+  return `try ${swiftTypeName(valueType)}.load(${valueExpr}, context: context.at(${swiftStringLiteral(fieldName)}).at(key))`;
+}
+
+function isSwiftScalarRecordValue(valueType: string): boolean {
+  return valueType.toLowerCase() in SWIFT_TYPE_MAP;
 }
 
 function scalarLoadExpression(scalarType: string, valueExpr: string, fieldName: string): string {
@@ -798,6 +818,9 @@ function swiftSaveExpression(
       }
       return `try ${valueExpr}.map { try $0.save(context) }`;
     case "dict":
+      if (category.valueType && category.valueType !== "unknown" && !isSwiftScalarRecordValue(category.valueType)) {
+        return `Dictionary(uniqueKeysWithValues: try ${valueExpr}.map { (key, item) in (key, try item.save(context)) })`;
+      }
       return valueExpr;
   }
 }

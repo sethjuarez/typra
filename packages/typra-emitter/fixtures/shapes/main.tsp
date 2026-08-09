@@ -22,6 +22,10 @@ model FixtureRoot {
   @doc("Dictionary-shaped metadata")
   metadata?: Record<unknown>;
 
+  @sample(#{ typedRecords: #{ counts: #{ alpha: 1, beta: 2 }, owners: #{ primary: #{ id: "owner-typed-1", displayName: "Typed Owner" } } } })
+  @doc("Records with scalar and model value types")
+  typedRecords: FixtureTypedRecords;
+
   @sample(#{ owner: #{ id: "owner-1", displayName: "Fixture Owner" } })
   @doc("Nested object field")
   owner: FixtureOwner;
@@ -72,6 +76,17 @@ model FixtureRoot {
 
   @doc("Ordered complex collection with non-unique names")
   checkpoint?: FixtureCheckpoint;
+}
+
+@doc("Typed record values must preserve their declared value type.")
+model FixtureTypedRecords {
+  @sample(#{ counts: #{ alpha: 1, beta: 2 } })
+  @doc("A record whose values are declared scalar integers")
+  counts: Record<int32>;
+
+  @sample(#{ owners: #{ primary: #{ id: "owner-typed-1", displayName: "Typed Owner" } } })
+  @doc("A record whose values are declared model instances")
+  owners: Record<FixtureOwner>;
 }
 
 @doc("""

@@ -57,8 +57,9 @@
     },
     {
       "id": "typed-record-values",
-      "status": "known-gap",
-      "issue": "#123",
+      "status": "enforced",
+      "case": "typed-record-values",
+      "verification": "fixture-evidence",
       "description": "Record<T> value types must be preserved and exercised across all targets."
     },
     {
@@ -478,6 +479,98 @@
               "if let scalar = data as? String {",
               "instance.id = try TypraRuntime.string(scalar, field: \"id\")",
               "instance.label = \"coerced reference\""
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "typed-record-values",
+      "description": "FixtureTypedRecords preserves scalar and model-valued Record<T> fields across target type annotations, load, and save paths.",
+      "evidence": {
+        "json-ast": [
+          {
+            "path": "generated/fixtures/json-ast/model.json",
+            "snippets": [
+              "\"dictValueType\": \"int32\"",
+              "\"dictValueType\": \"FixtureOwner\""
+            ]
+          }
+        ],
+        "typescript": [
+          {
+            "path": "generated/fixtures/typescript/fixture-typed-records.ts",
+            "snippets": [
+              "counts: Record<string, number>",
+              "owners: Record<string, FixtureOwner>",
+              "FixtureOwner.load(value as Record<string, unknown>",
+              "value.save(context)"
+            ]
+          }
+        ],
+        "python": [
+          {
+            "path": "generated/fixtures/python/_FixtureTypedRecords.py",
+            "snippets": [
+              "counts: dict[str, int]",
+              "owners: dict[str, FixtureOwner]",
+              "FixtureOwner.load(value, context.at(\"owners\").at(key))",
+              "value.save(context)"
+            ]
+          }
+        ],
+        "csharp": [
+          {
+            "path": "generated/fixtures/csharp/FixtureTypedRecords.cs",
+            "snippets": [
+              "public IDictionary<string, int> Counts",
+              "public IDictionary<string, FixtureOwner> Owners",
+              "Convert.ToInt32(kvp.Value)",
+              "FixtureOwner.Load(kvp.Value.GetDictionary"
+            ]
+          }
+        ],
+        "go": [
+          {
+            "path": "generated/fixtures/go/fixture_typed_records.go",
+            "snippets": [
+              "Counts map[string]int32",
+              "Owners map[string]FixtureOwner",
+              "LoadFixtureOwner(item, ctx.At(\"owners\").At(key))",
+              "items[key] = item.Save(ctx)"
+            ]
+          }
+        ],
+        "java": [
+          {
+            "path": "generated/fixtures/java/FixtureTypedRecords.java",
+            "snippets": [
+              "public Map<String, Integer> counts",
+              "public Map<String, FixtureOwner> owners",
+              "FixtureOwner.load(entry.getValue(), ctx.at(\"owners\").at(String.valueOf(entry.getKey())))",
+              "entry.getValue().save(ctx)"
+            ]
+          }
+        ],
+        "rust": [
+          {
+            "path": "generated/fixtures/rust/fixture_typed_records.rs",
+            "snippets": [
+              "pub counts: std::collections::HashMap<String, i32>",
+              "pub owners: std::collections::HashMap<String, FixtureOwner>",
+              "FixtureOwner::load_from_value(item, ctx)",
+              "item.to_value(ctx)"
+            ]
+          }
+        ],
+        "swift": [
+          {
+            "path": "generated/fixtures/swift/Sources/TypraFixtures/fixture_typed_records.swift",
+            "snippets": [
+              "public var counts: [String: Int32]",
+              "public var owners: [String: FixtureOwner]",
+              "TypraRuntime.int32(item, field: \"counts\")",
+              "FixtureOwner.load(item, context: context.at(\"owners\").at(key))"
             ]
           }
         ]

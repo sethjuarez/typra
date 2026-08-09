@@ -545,7 +545,14 @@ function emitLoadField(
       break;
     case "dict":
       lines.push(`      if (map.get("${wireName}") instanceof Map<?, ?> dict) {`);
-      lines.push(`        result.${name} = copyMap(dict);`);
+      if (!field.category.valueType || field.category.valueType === "unknown") {
+        lines.push(`        result.${name} = copyMap(dict);`);
+      } else {
+        lines.push(`        result.${name} = new LinkedHashMap<>();`);
+        lines.push("        for (Map.Entry<?, ?> entry : dict.entrySet()) {");
+        lines.push(`          result.${name}.put(String.valueOf(entry.getKey()), ${javaDictValueLoad("entry.getValue()", field.category.valueType, `ctx.at("${wireName}").at(String.valueOf(entry.getKey()))`)});`);
+        lines.push("        }");
+      }
       lines.push("      }");
       break;
   }
@@ -664,8 +671,18 @@ function emitSaveField(
   const propertyName = javaPropertyName(name);
   switch (category.kind) {
     case "scalar":
-    case "dict":
       lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", ${enumName ? `obj.${propertyName}.value` : `serializeScalar(obj.${propertyName})`});`);
+      break;
+    case "dict":
+      if (category.valueType && category.valueType !== "unknown" && !JAVA_TYPE_MAP[category.valueType]) {
+        lines.push(`    if (obj.${propertyName} != null) {`);
+        lines.push("      Map<String, Object> items = new LinkedHashMap<>();");
+        lines.push(`      for (Map.Entry<String, ${javaDictValueType(category.valueType)}> entry : obj.${propertyName}.entrySet()) items.put(entry.getKey(), entry.getValue().save(ctx));`);
+        lines.push(`      result.put("${wireName}", items);`);
+        lines.push("    }");
+      } else {
+        lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", serializeScalar(obj.${propertyName}));`);
+      }
       break;
     case "complex":
       lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", obj.${propertyName}.save(ctx));`);
@@ -898,7 +915,7 @@ function javaFieldType(field: FieldDecl, polymorphicTypeNames: Set<string>): str
     case "collection_complex":
       return `List<${javaTypeName(field.category.typeName)}>`;
     case "dict":
-      return "Map<String, Object>";
+      return `Map<String, ${javaDictValueType(field.category.valueType)}>`;
   }
   void polymorphicTypeNames;
 }
@@ -957,6 +974,18 @@ function openEnumAliasParser(field: FieldDecl): string | null {
     return javaAliasParserName(field.enumName);
   }
   return null;
+}
+
+function javaDictValueType(valueType: string | undefined): string {
+  if (!valueType || valueType === "unknown") return "Object";
+  return JAVA_TYPE_MAP[valueType] ?? javaTypeName(valueType);
+}
+
+function javaDictValueLoad(valueExpr: string, valueType: string, contextExpr: string): string {
+  if (JAVA_TYPE_MAP[valueType]) {
+    return loadScalar(valueExpr, valueType, null);
+  }
+  return `${javaTypeName(valueType)}.load(${valueExpr}, ${contextExpr})`;
 }
 
 function loadScalar(valueExpr: string, scalarType: string, enumName: string | null, parseAliasFunction: string | null = null): string {

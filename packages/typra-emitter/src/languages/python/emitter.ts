@@ -626,7 +626,9 @@ function pythonTypeAnnotation(f: FieldDecl): string {
   const cat = f.category;
   switch (cat.kind) {
     case "dict":
-      return f.isOptional ? "dict[str, Any] | None" : "dict[str, Any]";
+      return f.isOptional
+        ? `dict[str, ${pythonRecordValueType(cat.valueType)}] | None`
+        : `dict[str, ${pythonRecordValueType(cat.valueType)}]`;
     case "collection_scalar": {
       const pyType = `list[${TYPE_MAP[cat.scalarType] || "Any"}]`;
       return f.isOptional ? `${pyType} | None` : pyType;
@@ -644,12 +646,17 @@ function pythonTypeAnnotation(f: FieldDecl): string {
   }
 }
 
+function pythonRecordValueType(valueType: string | undefined): string {
+  if (!valueType || valueType === "unknown") return "Any";
+  return TYPE_MAP[valueType] || valueType;
+}
+
 function pythonDocstringType(f: FieldDecl): string {
   const cat = f.category;
   let baseType: string;
   switch (cat.kind) {
     case "dict":
-      baseType = "dict[str, Any]";
+      baseType = `dict[str, ${pythonRecordValueType(cat.valueType)}]`;
       break;
     case "collection_scalar":
       baseType = `list[${TYPE_MAP[cat.scalarType] || "Any"}]`;
@@ -809,13 +816,39 @@ function emitLoadAssignment(a: LoadAssignment): string {
   }
   switch (cat.kind) {
     case "scalar":
-    case "dict":
     case "collection_scalar":
       return `instance.${snake} = data["${a.sourceName}"]`;
+    case "dict":
+      return dictLoadAssignment(snake, a.sourceName, cat.valueType);
     case "collection_complex":
       return `instance.${snake} = ${a.parentTypeName}.load_${snake}(data["${a.sourceName}"], context.at("${a.sourceName}"))`;
     case "complex":
       return `instance.${snake} = ${cat.typeName}.load(data["${a.sourceName}"], context.at("${a.sourceName}"))`;
+  }
+
+  function dictLoadAssignment(fieldName: string, sourceName: string, valueType: string | undefined): string {
+    if (!valueType || valueType === "unknown") {
+      return `instance.${fieldName} = data["${sourceName}"]`;
+    }
+    const valueExpr = dictValueLoadExpr("value", valueType, `context.at("${sourceName}").at(key)`);
+    return `instance.${fieldName} = {key: ${valueExpr} for key, value in data["${sourceName}"].items()}`;
+  }
+
+  function dictValueLoadExpr(valueExpr: string, valueType: string, contextExpr: string): string {
+    switch (TYPE_MAP[valueType]) {
+      case "str":
+        return `str(${valueExpr})`;
+      case "int":
+        return `int(${valueExpr})`;
+      case "float":
+        return `float(${valueExpr})`;
+      case "bool":
+        return `bool(${valueExpr})`;
+      case "Any":
+        return valueExpr;
+      default:
+        return `${valueType}.load(${valueExpr}, ${contextExpr})`;
+    }
   }
 }
 
@@ -1161,8 +1194,12 @@ function emitSaveAssignment(a: SaveAssignment): string {
   const cat = a.category;
   switch (cat.kind) {
     case "scalar":
-    case "dict":
     case "collection_scalar":
+      return `result["${a.targetName}"] = obj.${snake}`;
+    case "dict":
+      if (cat.valueType && cat.valueType !== "unknown" && !TYPE_MAP[cat.valueType]) {
+        return `result["${a.targetName}"] = {key: value.save(context) for key, value in obj.${snake}.items()}`;
+      }
       return `result["${a.targetName}"] = obj.${snake}`;
     case "collection_complex":
       return `result["${a.targetName}"] = ${a.parentTypeName}.save_${snake}(obj.${snake}, context)`;

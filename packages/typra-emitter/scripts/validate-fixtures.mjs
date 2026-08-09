@@ -37,6 +37,7 @@ if (existsSync(packageNodeModules)) {
 }
 process.on("exit", () => rmSync(validationRoot, { recursive: true, force: true }));
 const failures = [];
+const CSHARP_TARGET_FRAMEWORK = "net10.0";
 const fixtureRootSample = {
   name: "fixture-root",
   description: "A generated fixture with broad emitter coverage.",
@@ -44,6 +45,18 @@ const fixtureRootSample = {
   metadata: {
     source: "fixture",
     version: 1,
+  },
+  typedRecords: {
+    counts: {
+      alpha: 1,
+      beta: 2,
+    },
+    owners: {
+      primary: {
+        id: "owner-typed-1",
+        displayName: "Typed Owner",
+      },
+    },
   },
   owner: {
     id: "owner-1",
@@ -1325,7 +1338,7 @@ function runCSharpBuild() {
   writeFileSync(projectPath, [
     '<Project Sdk="Microsoft.NET.Sdk">',
     "  <PropertyGroup>",
-    "    <TargetFramework>net8.0</TargetFramework>",
+    `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
     "    <Nullable>enable</Nullable>",
     "    <WarningsAsErrors>nullable</WarningsAsErrors>",
     "    <ImplicitUsings>enable</ImplicitUsings>",
@@ -1372,7 +1385,7 @@ function runCSharpConsumerNullabilityBuild() {
   writeFileSync(libraryProjectPath, [
     '<Project Sdk="Microsoft.NET.Sdk">',
     "  <PropertyGroup>",
-    "    <TargetFramework>net8.0</TargetFramework>",
+    `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
     "    <Nullable>enable</Nullable>",
     "    <WarningsAsErrors>nullable</WarningsAsErrors>",
     "    <ImplicitUsings>enable</ImplicitUsings>",
@@ -1394,7 +1407,7 @@ function runCSharpConsumerNullabilityBuild() {
       ["build", libraryProjectPath, "--nologo", "--verbosity", "quiet", "-p:BaseOutputPath=" + `${libraryBinDir}${path.sep}`, "-p:BaseIntermediateOutputPath=" + `${libraryObjDir}${path.sep}`],
       { cwd: sourceDir },
     );
-    const libraryPath = path.join(libraryBinDir, "Debug", "net8.0", "TypraFixtureConsumerLibrary.dll");
+    const libraryPath = path.join(libraryBinDir, "Debug", CSHARP_TARGET_FRAMEWORK, "TypraFixtureConsumerLibrary.dll");
     if (!existsSync(libraryPath)) {
       fail(`Generated C# consumer library was not found at ${libraryPath}.`);
       return;
@@ -1403,7 +1416,7 @@ function runCSharpConsumerNullabilityBuild() {
       '<Project Sdk="Microsoft.NET.Sdk">',
       "  <PropertyGroup>",
       "    <OutputType>Exe</OutputType>",
-      "    <TargetFramework>net8.0</TargetFramework>",
+      `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
       "    <Nullable>enable</Nullable>",
       "    <WarningsAsErrors>nullable</WarningsAsErrors>",
       "    <ImplicitUsings>enable</ImplicitUsings>",
@@ -1481,7 +1494,7 @@ function runCSharpGeneratedTests() {
   writeFileSync(projectPath, [
     '<Project Sdk="Microsoft.NET.Sdk">',
     "  <PropertyGroup>",
-    "    <TargetFramework>net8.0</TargetFramework>",
+    `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
     "    <Nullable>enable</Nullable>",
     "    <WarningsAsErrors>nullable</WarningsAsErrors>",
     "    <ImplicitUsings>enable</ImplicitUsings>",
@@ -1521,8 +1534,9 @@ function runCSharpGeneratedTests() {
     }
 
     const failed = new Set();
-    for (const match of output.matchAll(/^\s*(?:X|Failed)\s+(\S+?)(?:\s|\[|$)/gm)) {
-      failed.add(match[1]);
+    for (const match of output.matchAll(/^\s*(?:X\s+(\S+?)|Failed\s+([A-Za-z_][\w.]*))(?:\s|\[|$)/gm)) {
+      const testName = match[1] ?? match[2];
+      if (testName && testName !== "to") failed.add(testName);
     }
     // A build break produces no per-test lines at all, so it must not read as "nothing failed".
     if (crashed && failed.size === 0) {
@@ -1573,7 +1587,7 @@ function runCSharpProtocolScaffoldBuild() {
   writeFileSync(projectPath, [
     '<Project Sdk="Microsoft.NET.Sdk">',
     "  <PropertyGroup>",
-    "    <TargetFramework>net8.0</TargetFramework>",
+    `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
     "    <Nullable>enable</Nullable>",
     "    <WarningsAsErrors>nullable</WarningsAsErrors>",
     "    <ImplicitUsings>enable</ImplicitUsings>",
@@ -2663,7 +2677,7 @@ function runCSharpExecutableConformance() {
     '<Project Sdk="Microsoft.NET.Sdk">',
     "  <PropertyGroup>",
     "    <OutputType>Exe</OutputType>",
-    "    <TargetFramework>net8.0</TargetFramework>",
+    `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
     "    <Nullable>enable</Nullable>",
     "    <WarningsAsErrors>nullable</WarningsAsErrors>",
     "    <ImplicitUsings>enable</ImplicitUsings>",
