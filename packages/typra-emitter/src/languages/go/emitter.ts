@@ -38,6 +38,7 @@ import {
 } from "../../ir/declarations.js";
 import {
   shouldGuardMissingRequiredField,
+  shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
   shouldPreserveOptionalAbsence,
 } from "../../ir/field-emission-policy.js";
@@ -464,8 +465,7 @@ function emitLoadFunction(
   lines.push("\t}");
   if (!hasTerminalDispatch) {
     const explicitCollectionDefaults = type.fields.filter(field =>
-      field.hasExplicitDefault &&
-      (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex")
+      shouldMaterializeCollectionDefault(field, "explicit-only")
     );
     if (explicitCollectionDefaults.length === 0) {
       lines.push(`\tresult := ${typeName}{}`);
@@ -1387,7 +1387,7 @@ function emitSaveDict(
 ): void {
   const valueType = assign.category.kind === "dict" ? assign.category.valueType : undefined;
   const serializesComplexValues = Boolean(valueType && valueType !== "unknown" && !GO_TYPE_MAP[valueType]);
-  if (assign.isOptional) {
+  if (shouldOmitAbsentOnSave(assign, "go")) {
     lines.push(`\tif obj.${fieldName} != nil {`);
     emitGoDictSaveResult(assign.targetName, `obj.${fieldName}`, serializesComplexValues, polymorphicTypeNames.has(valueType ?? ""), lines, "\t\t");
     lines.push("\t}");

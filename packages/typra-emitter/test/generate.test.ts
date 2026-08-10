@@ -11,6 +11,10 @@ import { validateNativeSerializationTargets } from "../src/native-serialization.
 
 const require = createRequire(import.meta.url);
 
+function yamlString(value: string): string {
+  return JSON.stringify(value);
+}
+
 describe("generate", () => {
   it("rejects unsupported target languages before creating output", async () => {
     const output = path.join(tmpdir(), `typra-invalid-target-${Date.now()}`);
@@ -124,12 +128,12 @@ describe("generate", () => {
         '  - "@typra/emitter"',
         "options:",
         '  "@typra/emitter":',
-        `    emitter-output-dir: "${path.join(output, "generated")}"`,
+        `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
         '    root-object: "Typra.DefaultProbe.Root"',
         '    root-namespace: "Typra.DefaultProbe"',
         "    emit-targets:",
         "      - type: TypeScript",
-        `        output-dir: "${path.join(output, "generated", "typescript")}"`,
+        `        output-dir: ${yamlString(path.join(output, "generated", "typescript"))}`,
         "        format: false",
         "",
       ].join("\n"));
@@ -179,11 +183,11 @@ describe("generate", () => {
         '  - "@typra/emitter"',
         "options:",
         '  "@typra/emitter":',
-        `    emitter-output-dir: "${path.join(output, "generated")}"`,
+        `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
         '    root-object: "Typra.NativeProbe.Root"',
         "    emit-targets:",
         "      - type: Python",
-        `        output-dir: "${path.join(output, "generated", "python")}"`,
+        `        output-dir: ${yamlString(path.join(output, "generated", "python"))}`,
         '        native-serialization: "jackson"',
         "        format: false",
         "",
@@ -238,12 +242,12 @@ describe("generate", () => {
         '  - "@typra/emitter"',
         "options:",
         '  "@typra/emitter":',
-        `    emitter-output-dir: "${path.join(output, "generated")}"`,
+        `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
         '    root-object: "Typra.RustSerdeProbe.Root"',
         '    root-namespace: "Typra.RustSerdeProbe"',
         "    emit-targets:",
         "      - type: Rust",
-        `        output-dir: "${path.join(output, "generated", "rust")}"`,
+        `        output-dir: ${yamlString(path.join(output, "generated", "rust"))}`,
         '        native-serialization: "serde"',
         "        format: false",
         "",
@@ -295,12 +299,12 @@ describe("generate", () => {
         '  - "@typra/emitter"',
         "options:",
         '  "@typra/emitter":',
-        `    emitter-output-dir: "${path.join(output, "generated")}"`,
+        `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
         '    root-object: "Typra.RustSerdeUnclaimedProbe.Root"',
         '    root-namespace: "Typra.RustSerdeUnclaimedProbe"',
         "    emit-targets:",
         "      - type: Rust",
-        `        output-dir: "${path.join(output, "generated", "rust")}"`,
+        `        output-dir: ${yamlString(path.join(output, "generated", "rust"))}`,
         '        native-serialization: "serde"',
         "        format: false",
         "",

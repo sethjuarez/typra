@@ -13,6 +13,7 @@ export interface RequiredFieldGuardOptions {
 export type LoadFieldPresencePolicy = "guard-then-fail" | "load-when-present";
 export type SaveFieldEmissionPolicy = "emit-always" | "omit-when-absent";
 export type OptionalFieldAbsencePolicy = "preserve-absence" | "materialize-default";
+export type CollectionDefaultProfile = "required-or-explicit" | "explicit-only";
 
 export type SaveFieldEmissionProfile =
   | "optional-only"
@@ -37,6 +38,10 @@ function isGuardedCategory(
   return options.includeInheritedScalarAndDict === true
     && options.hasBase === true
     && (category.kind === "scalar" || category.kind === "dict");
+}
+
+function isCollectionCategory(category: PropertyCategory): boolean {
+  return category.kind === "collection_scalar" || category.kind === "collection_complex";
 }
 
 /**
@@ -108,4 +113,17 @@ export function shouldPreserveOptionalAbsence(field: {
   hasExplicitDefault?: boolean;
 } | undefined): boolean {
   return optionalFieldAbsencePolicy(field) === "preserve-absence";
+}
+
+export function shouldMaterializeCollectionDefault(
+  field: { category: PropertyCategory; isOptional: boolean; hasExplicitDefault?: boolean } | undefined,
+  profile: CollectionDefaultProfile = "required-or-explicit",
+): boolean {
+  if (!field || !isCollectionCategory(field.category)) return false;
+  switch (profile) {
+    case "explicit-only":
+      return field.hasExplicitDefault === true;
+    case "required-or-explicit":
+      return !shouldPreserveOptionalAbsence(field);
+  }
 }

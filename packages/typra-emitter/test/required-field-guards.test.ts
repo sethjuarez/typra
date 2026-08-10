@@ -30,6 +30,7 @@ import {
   optionalFieldAbsencePolicy,
   saveFieldEmissionPolicy,
   shouldGuardMissingRequiredField,
+  shouldMaterializeCollectionDefault,
   shouldPreserveOptionalAbsence,
 } from "../src/ir/field-emission-policy.js";
 import { emitTypeScriptFile } from "../src/languages/typescript/emitter.js";
@@ -209,6 +210,31 @@ describe("shared optional absence/default policy", () => {
     assert.equal(optionalFieldAbsencePolicy(defaultedOptionalCollection), "materialize-default");
     assert.equal(shouldPreserveOptionalAbsence(defaultedOptionalCollection), false);
     assert.equal(optionalFieldAbsencePolicy(connection), "materialize-default");
+  });
+
+  it("preserves backend-specific collection default materialization profiles", () => {
+    const custom = file.types.find(candidate => candidate.typeName.name === "GuardCustomTool")!;
+    const connection = custom.fields.find(field => field.name === "connection")!;
+    const requiredCollection = {
+      ...connection,
+      category: { kind: "collection_complex" as const, typeName: "GuardConnection" },
+    };
+    const optionalCollection = {
+      ...requiredCollection,
+      isOptional: true,
+      hasExplicitDefault: false,
+    };
+    const defaultedOptionalCollection = {
+      ...optionalCollection,
+      hasExplicitDefault: true,
+    };
+
+    assert.equal(shouldMaterializeCollectionDefault(requiredCollection), true);
+    assert.equal(shouldMaterializeCollectionDefault(optionalCollection), false);
+    assert.equal(shouldMaterializeCollectionDefault(defaultedOptionalCollection), true);
+    assert.equal(shouldMaterializeCollectionDefault(requiredCollection, "explicit-only"), false);
+    assert.equal(shouldMaterializeCollectionDefault(defaultedOptionalCollection, "explicit-only"), true);
+    assert.equal(shouldMaterializeCollectionDefault(connection), false);
   });
 });
 

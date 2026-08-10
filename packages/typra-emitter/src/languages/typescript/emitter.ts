@@ -46,8 +46,8 @@ import {
 } from "../../ir/declarations.js";
 import {
   shouldGuardMissingRequiredField,
+  shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
-  shouldPreserveOptionalAbsence,
 } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
@@ -698,10 +698,7 @@ function tsDefaultValue(f: FieldDecl): string {
   const cat = f.category;
 
   if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
-    if (shouldPreserveOptionalAbsence(f)) {
-      return "";
-    }
-    return " = []";
+    return shouldMaterializeCollectionDefault(f) ? " = []" : "";
   }
 
   if (f.isOptional) {
@@ -771,8 +768,7 @@ function emitConstructor(type: TypeDecl, lines: string[]): void {
   for (const field of type.fields) {
     const cat = field.category;
     if (
-      field.isOptional &&
-      !shouldPreserveOptionalAbsence(field) &&
+      shouldMaterializeCollectionDefault(field) &&
       (cat.kind === "collection_scalar" || cat.kind === "collection_complex")
     ) {
       lines.push(`    this.${field.name} = init?.${field.name} ?? [];`);

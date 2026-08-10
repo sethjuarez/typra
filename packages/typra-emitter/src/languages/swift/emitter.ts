@@ -10,7 +10,11 @@ import {
   WireFieldMapping,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
+import {
+  shouldGuardMissingRequiredField,
+  shouldMaterializeCollectionDefault,
+  shouldOmitAbsentOnSave,
+} from "../../ir/field-emission-policy.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
 import { swiftFunctionName, swiftPropertyName, swiftStringLiteral, swiftTypeName } from "./identifiers.js";
@@ -694,10 +698,7 @@ function swiftFieldDefaultValue(
   polymorphicTypeNames: Set<string>,
   polymorphicDefaultCases: ReadonlyMap<string, SwiftPolymorphicDefaultCase | null>,
 ): string {
-  const materializesCollectionDefault =
-    field.hasExplicitDefault &&
-    (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex");
-  return field.isOptional && !materializesCollectionDefault
+  return field.isOptional && !shouldMaterializeCollectionDefault(field, "explicit-only")
     ? "nil"
     : swiftDefaultValue(field, polymorphicTypeNames, polymorphicDefaultCases);
 }
@@ -707,10 +708,7 @@ function swiftDefaultValue(
   polymorphicTypeNames: Set<string>,
   polymorphicDefaultCases: ReadonlyMap<string, SwiftPolymorphicDefaultCase | null>,
 ): string {
-  if (
-    field.hasExplicitDefault &&
-    (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex")
-  ) {
+  if (shouldMaterializeCollectionDefault(field, "explicit-only")) {
     return "[]";
   }
   if (field.defaultValue !== null && field.defaultValue !== undefined) {
