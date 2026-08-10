@@ -36,6 +36,7 @@ import {
   EntryShorthandAssignment,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import {
   INTEGRAL_SCALAR_TYPES,
   FRACTIONAL_SCALAR_TYPES,
@@ -113,7 +114,7 @@ export function emitGoFileContent(
   const needsContext = types.some(type => type.methods.some(method => method.runtimeCancellable));
   const needsNamedCollections = types.some(type => type.collectionHelpers.some(helper => helper.hasNameProperty));
   const needsRequiredComplexValidation = types.some(type =>
-    type.fields.some(field => field.category.kind === "complex" && !field.isOptional && !field.hasExplicitDefault)
+    type.fields.some(field => shouldGuardMissingRequiredField(field))
   );
   const needsFmt = enums.some(enumDef => hasParseAliases(enumDef) && !enumDef.isOpen) ||
     types.some(type => type.polymorphicDispatch) ||
@@ -495,7 +496,7 @@ function emitLoadFunction(
 
   for (const assign of type.load.assignments) {
     const field = type.fields.find(candidate => candidate.name === assign.fieldName);
-    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(`\t\tif requiredValue, exists := m["${assign.sourceName}"]; !exists || requiredValue == nil {`);
     lines.push(`\t\t\treturn result, fmt.Errorf("%s: missing required field", ctx.At("${assign.sourceName}").Path)`);
     lines.push("\t\t}");
@@ -1213,7 +1214,7 @@ function emitSaveScalar(
   const saveExpr = assign.enumName ? `string(obj.${fieldName})` : `obj.${fieldName}`;
   const saveExprDeref = assign.enumName ? `string(*obj.${fieldName})` : `*obj.${fieldName}`;
 
-  if (assign.isOptional) {
+  if (shouldOmitAbsentOnSave(assign, "go")) {
     lines.push(`\tif obj.${fieldName} != nil {`);
     lines.push(`\t\tresult["${assign.targetName}"] = ${saveExprDeref}`);
     lines.push("\t}");
@@ -1232,7 +1233,7 @@ function emitSaveComplex(
   const isPolymorphic = polymorphicTypeNames.has(typeName);
 
   if (isPolymorphic) {
-    if (assign.isOptional) {
+    if (shouldOmitAbsentOnSave(assign, "go")) {
       // Optional polymorphic complex — double nil check pattern
       lines.push(`\tif obj.${fieldName} != nil {`);
       lines.push(`\t\t// Handle polymorphic type (stored as interface{} without pointer)`);
@@ -1261,7 +1262,7 @@ function emitSaveComplex(
       lines.push("\t}");
     }
   } else {
-    if (assign.isOptional) {
+    if (shouldOmitAbsentOnSave(assign, "go")) {
       lines.push(`\tif obj.${fieldName} != nil {`);
       lines.push(`\t\tresult["${assign.targetName}"] = obj.${fieldName}.Save(ctx)`);
       lines.push("\t}");
@@ -1278,7 +1279,7 @@ function emitSaveCollectionScalar(
   fieldName: string,
   lines: string[],
 ): void {
-  if (assign.isOptional) {
+  if (shouldOmitAbsentOnSave(assign, "go")) {
     lines.push(`\tif obj.${fieldName} != nil {`);
     lines.push(`\t\tresult["${assign.targetName}"] = obj.${fieldName}`);
     lines.push("\t}");
@@ -1297,7 +1298,9 @@ function emitSaveCollectionComplex(
 ): void {
   const isPolymorphic = polymorphicTypeNames.has(typeName);
 
-  lines.push(`\tif obj.${fieldName} != nil {`);
+  if (shouldOmitAbsentOnSave(assign, "go")) {
+    lines.push(`\tif obj.${fieldName} != nil {`);
+  }
 
   lines.push(`\t\tarr := make([]interface{}, len(obj.${fieldName}))`);
   if (isPolymorphic) {
@@ -1367,7 +1370,9 @@ function emitSaveCollectionComplex(
     lines.push(`\t\tresult["${assign.targetName}"] = arr`);
   }
 
-  lines.push("\t}");
+  if (shouldOmitAbsentOnSave(assign, "go")) {
+    lines.push("\t}");
+  }
 }
 
 function emitSaveDict(

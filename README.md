@@ -319,7 +319,7 @@ CI also runs a TypeSpec compatibility matrix for each explicitly supported
 before widening the package peer range.
 
 `npm run check:toolchain` reports the local tools needed by
-`validate:fixtures`: Node.js, npm, Python plus `pytest`/PyYAML, Go/gofmt,
+`validate:fixtures`: Node.js, npm, Python plus `pydantic`/`pytest`/PyYAML, Go/gofmt,
 Java/javac, .NET, Swift, and Cargo. It intentionally gates fixture validation,
 not the TypeScript build or unit suite. Run it before interpreting
 fixture-validation failures so missing or outdated local toolchains do not look

@@ -36,6 +36,7 @@ import {
   MethodStubDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   isIntegralScalar,
@@ -656,7 +657,7 @@ function emitLoadMethod(
 
   for (const assign of type.load.assignments) {
     const field = type.fields.find(candidate => candidate.name === assign.fieldName);
-    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(`        if (!data.TryGetValue("${assign.sourceName}", out var required${toPascalCase(assign.fieldName)}Value) || required${toPascalCase(assign.fieldName)}Value is null)`);
     lines.push("        {");
     lines.push(`            throw new ArgumentException($"{context!.At("${assign.sourceName}").Path}: missing required field");`);
@@ -1102,7 +1103,7 @@ function emitSaveAssignment(assign: SaveAssignment, lines: string[]): void {
 
   lines.push("");
 
-  if (assign.isOptional) {
+  if (shouldOmitAbsentOnSave(assign)) {
     lines.push(`        if (obj.${propName} is not null)`);
     lines.push("        {");
     lines.push(`            ${getSaveExpression(assign, propName)}`);

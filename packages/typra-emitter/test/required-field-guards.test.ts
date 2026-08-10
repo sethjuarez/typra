@@ -26,6 +26,10 @@ import { Model, ModelProperty } from "@typespec/compiler";
 import { TypeNode, PropertyNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { lowerFile } from "../src/ir/lower.js";
+import {
+  saveFieldEmissionPolicy,
+  shouldGuardMissingRequiredField,
+} from "../src/ir/field-emission-policy.js";
 import { emitTypeScriptFile } from "../src/languages/typescript/emitter.js";
 import { TypeScriptExprVisitor } from "../src/languages/typescript/visitor.js";
 import { emitPythonFile } from "../src/languages/python/emitter.js";
@@ -119,6 +123,67 @@ describe("wildcard discriminator carrier fixture", () => {
     assert.equal(connection?.category.kind, "complex");
     assert.equal(connection?.isOptional, false);
     assert.equal(connection?.hasExplicitDefault, false);
+  });
+});
+
+describe("shared missing-required-field policy", () => {
+  it("guards required complex fields and not optional or defaulted fields", () => {
+    const custom = file.types.find(candidate => candidate.typeName.name === "GuardCustomTool")!;
+    const connection = custom.fields.find(field => field.name === "connection");
+    const kind = custom.fields.find(field => field.name === "kind");
+
+    assert.equal(shouldGuardMissingRequiredField(connection), true);
+    assert.equal(shouldGuardMissingRequiredField({ ...connection!, isOptional: true }), false);
+    assert.equal(shouldGuardMissingRequiredField({ ...connection!, hasExplicitDefault: true }), false);
+    assert.equal(shouldGuardMissingRequiredField(kind), false);
+  });
+
+  it("keeps Swift's inherited scalar/dict guard decision explicit", () => {
+    const base = file.types.find(candidate => candidate.typeName.name === "GuardTool")!;
+    const kind = base.fields.find(field => field.name === "kind");
+
+    assert.equal(shouldGuardMissingRequiredField(kind), false);
+    assert.equal(
+      shouldGuardMissingRequiredField(kind, { includeInheritedScalarAndDict: true, hasBase: true }),
+      true,
+    );
+  });
+});
+
+describe("shared save-side field emission policy", () => {
+  it("names the default optional-only emit/omit decision", () => {
+    const custom = file.types.find(candidate => candidate.typeName.name === "GuardCustomTool")!;
+    const connection = custom.fields.find(field => field.name === "connection")!;
+
+    assert.equal(saveFieldEmissionPolicy(connection), "emit-always");
+    assert.equal(saveFieldEmissionPolicy({ ...connection, isOptional: true }), "omit-when-absent");
+  });
+
+  it("preserves backend-specific current save profiles explicitly", () => {
+    const custom = file.types.find(candidate => candidate.typeName.name === "GuardCustomTool")!;
+    const connection = custom.fields.find(field => field.name === "connection")!;
+    const requiredCollection = {
+      ...connection,
+      category: { kind: "collection_complex" as const, typeName: "GuardConnection" },
+    };
+
+    assert.equal(saveFieldEmissionPolicy(connection, "always-check"), "omit-when-absent");
+    assert.equal(saveFieldEmissionPolicy(requiredCollection, "go"), "omit-when-absent");
+    assert.equal(
+      saveFieldEmissionPolicy({ ...requiredCollection, isOptional: true }, "rust-collection-default"),
+      "omit-when-absent",
+    );
+    assert.equal(
+      saveFieldEmissionPolicy(
+        { ...requiredCollection, isOptional: true, hasExplicitDefault: true },
+        "rust-collection-default",
+      ),
+      "emit-always",
+    );
+    assert.equal(
+      saveFieldEmissionPolicy({ ...connection, hasExplicitDefault: true }, "rust-value-sentinel"),
+      "omit-when-absent",
+    );
   });
 });
 

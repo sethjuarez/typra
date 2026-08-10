@@ -44,6 +44,7 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
@@ -852,7 +853,7 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
 
   for (const a of type.load.assignments) {
     const field = type.fields.find(candidate => candidate.name === a.fieldName);
-    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(`    if (data["${a.sourceName}"] === undefined || data["${a.sourceName}"] === null) {`);
     lines.push(`      throw new Error(\`\${context.at("${a.sourceName}").path}: missing required field\`);`);
     lines.push("    }");
@@ -1330,14 +1331,12 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
 
   // Per-property save assignments
   for (const a of type.save.assignments) {
-    if (a.isOptional) {
+    if (shouldOmitAbsentOnSave(a, "always-check")) {
       lines.push(`    if (obj.${a.fieldName} !== undefined && obj.${a.fieldName} !== null) {`);
       lines.push(`      ${emitSaveAssignment(a)}`);
       lines.push("    }");
     } else {
-      lines.push(`    if (obj.${a.fieldName} !== undefined && obj.${a.fieldName} !== null) {`);
-      lines.push(`      ${emitSaveAssignment(a)}`);
-      lines.push("    }");
+      lines.push(`    ${emitSaveAssignment(a)}`);
     }
   }
 

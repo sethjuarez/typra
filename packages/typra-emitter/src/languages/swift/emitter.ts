@@ -10,6 +10,7 @@ import {
   WireFieldMapping,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
 import { swiftFunctionName, swiftPropertyName, swiftStringLiteral, swiftTypeName } from "./identifiers.js";
@@ -385,7 +386,7 @@ function emitLoad(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
     const collectionHelper = type.collectionHelpers.find(helper =>
       helper.propertyName === assignment.fieldName && supportsNamedCollectionHelper(helper, polymorphicTypeNames)
     );
-    if (field && !field.isOptional && !field.hasExplicitDefault && field.defaultValue === null && (field.category.kind === "complex" || (type.base && (field.category.kind === "scalar" || field.category.kind === "dict")))) {
+    if (shouldGuardMissingRequiredField(field, { includeInheritedScalarAndDict: true, hasBase: type.base !== null })) {
       lines.push(`    if object[${swiftStringLiteral(assignment.sourceName)}] == nil || object[${swiftStringLiteral(assignment.sourceName)}] is NSNull {`);
       lines.push(`      throw TypraRuntimeError.unsupported(context.at(${swiftStringLiteral(assignment.sourceName)}).path + ": missing required field")`);
       lines.push("    }");
@@ -580,7 +581,7 @@ function emitSave(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
       polymorphicTypeNames,
       collectionHelper,
     );
-    if (assignment.isOptional) {
+    if (shouldOmitAbsentOnSave(assignment)) {
       lines.push(`    if let value = ${prop} {`);
       lines.push(`      result[${swiftStringLiteral(assignment.targetName)}] = ${swiftSaveExpression(assignment.category, assignment.enumName, "value", polymorphicTypeNames, collectionHelper)}`);
       lines.push("    }");

@@ -38,6 +38,7 @@ import {
   WireFieldMapping,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
@@ -888,7 +889,7 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
 
   for (const a of type.load.assignments) {
     const field = type.fields.find(candidate => candidate.name === a.fieldName);
-    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(`        if "${a.sourceName}" not in data or data["${a.sourceName}"] is None:`);
     lines.push(`            raise ValueError(f"{context.at('${a.sourceName}').path}: missing required field")`);
   }
@@ -1285,8 +1286,12 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
   lines.push("");
   for (const a of type.save.assignments) {
     const snake = toSnakeCase(a.fieldName);
-    lines.push(`        if obj.${snake} is not None:`);
-    lines.push(`            ${emitSaveAssignment(a)}`);
+    if (shouldOmitAbsentOnSave(a, "always-check")) {
+      lines.push(`        if obj.${snake} is not None:`);
+      lines.push(`            ${emitSaveAssignment(a)}`);
+    } else {
+      lines.push(`        ${emitSaveAssignment(a)}`);
+    }
   }
 
   // Context post-processing (only for root types without base)

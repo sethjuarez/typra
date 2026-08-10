@@ -32,9 +32,9 @@ const checks = [
   {
     name: "Python test dependencies",
     command: ["python3", "python"],
-    args: ["-c", "import pytest, yaml"],
+    args: ["-c", "import pydantic, pytest, yaml"],
     required: true,
-    expected: "pytest and PyYAML; install with `python -m pip install pytest PyYAML` for the interpreter reported above.",
+    expected: "pydantic, pytest, and PyYAML; install with `python -m pip install pydantic pytest PyYAML` for the interpreter reported above.",
   },
   {
     name: "Go",
