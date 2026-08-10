@@ -44,6 +44,7 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import { shouldGuardMissingRequiredField } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
@@ -852,7 +853,7 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
 
   for (const a of type.load.assignments) {
     const field = type.fields.find(candidate => candidate.name === a.fieldName);
-    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(`    if (data["${a.sourceName}"] === undefined || data["${a.sourceName}"] === null) {`);
     lines.push(`      throw new Error(\`\${context.at("${a.sourceName}").path}: missing required field\`);`);
     lines.push("    }");

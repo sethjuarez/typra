@@ -36,6 +36,7 @@ import {
   EntryShorthandAssignment,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import { shouldGuardMissingRequiredField } from "../../ir/field-emission-policy.js";
 import {
   INTEGRAL_SCALAR_TYPES,
   FRACTIONAL_SCALAR_TYPES,
@@ -113,7 +114,7 @@ export function emitGoFileContent(
   const needsContext = types.some(type => type.methods.some(method => method.runtimeCancellable));
   const needsNamedCollections = types.some(type => type.collectionHelpers.some(helper => helper.hasNameProperty));
   const needsRequiredComplexValidation = types.some(type =>
-    type.fields.some(field => field.category.kind === "complex" && !field.isOptional && !field.hasExplicitDefault)
+    type.fields.some(field => shouldGuardMissingRequiredField(field))
   );
   const needsFmt = enums.some(enumDef => hasParseAliases(enumDef) && !enumDef.isOpen) ||
     types.some(type => type.polymorphicDispatch) ||
@@ -495,7 +496,7 @@ function emitLoadFunction(
 
   for (const assign of type.load.assignments) {
     const field = type.fields.find(candidate => candidate.name === assign.fieldName);
-    if (field?.category.kind !== "complex" || field.isOptional || field.hasExplicitDefault) continue;
+    if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(`\t\tif requiredValue, exists := m["${assign.sourceName}"]; !exists || requiredValue == nil {`);
     lines.push(`\t\t\treturn result, fmt.Errorf("%s: missing required field", ctx.At("${assign.sourceName}").Path)`);
     lines.push("\t\t}");

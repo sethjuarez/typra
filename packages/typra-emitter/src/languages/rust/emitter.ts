@@ -50,6 +50,7 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import { shouldGuardMissingRequiredField } from "../../ir/field-emission-policy.js";
 import {
   INTEGRAL_SCALAR_TYPES,
   FRACTIONAL_SCALAR_TYPES,
@@ -880,7 +881,7 @@ function emitFieldInputValidation(
     if (category.kind === "complex") {
       const fieldDecl = type.fields.find(candidate => candidate.name === assignment.fieldName);
       lines.push(`${indent}let child_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`);
-      if (fieldDecl && !fieldDecl.isOptional && !fieldDecl.hasExplicitDefault) {
+      if (shouldGuardMissingRequiredField(fieldDecl)) {
         lines.push(`${indent}let child = value.get("${field}").filter(|candidate| !candidate.is_null())`);
         lines.push(`${indent}    .ok_or_else(|| format!("{}: missing required field", child_path))?;`);
         lines.push(`${indent}${category.typeName}::validate_input_at(child, &child_path)?;`);

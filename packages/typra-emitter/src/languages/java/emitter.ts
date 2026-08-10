@@ -12,6 +12,7 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
+import { shouldGuardMissingRequiredField } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
@@ -446,7 +447,7 @@ function emitLoadBaseInto(
     const collectionHelper = type.collectionHelpers.find(helper =>
       helper.propertyName === assignment.fieldName && helper.hasNameProperty
     );
-    if (field?.category.kind === "complex" && !field.isOptional && !field.hasExplicitDefault) {
+    if (shouldGuardMissingRequiredField(field)) {
       const wireName = escapeJava(assignment.sourceName);
       lines.push(`    if (!map.containsKey("${wireName}") || map.get("${wireName}") == null) {`);
       lines.push(`      throw new IllegalArgumentException(ctx.at("${wireName}").path + ": missing required field");`);
