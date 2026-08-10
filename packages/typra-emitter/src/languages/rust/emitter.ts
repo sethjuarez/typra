@@ -50,7 +50,11 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
+import {
+  shouldGuardMissingRequiredField,
+  shouldOmitAbsentOnSave,
+  shouldPreserveOptionalAbsence,
+} from "../../ir/field-emission-policy.js";
 import {
   INTEGRAL_SCALAR_TYPES,
   FRACTIONAL_SCALAR_TYPES,
@@ -1881,7 +1885,7 @@ function fieldType(
     }
     case "collection_scalar": {
       const elemType = RUST_TYPE_MAP[cat.scalarType] || cat.scalarType;
-      const isOptional = field.isOptional && !field.hasExplicitDefault;
+      const isOptional = shouldPreserveOptionalAbsence(field);
       if (isValueType(cat.scalarType)) {
         return isOptional ? "Option<Vec<serde_json::Value>>" : "Vec<serde_json::Value>";
       }
@@ -1889,7 +1893,7 @@ function fieldType(
     }
     case "collection_complex": {
       const elemType = cat.typeName === "unknown" ? "serde_json::Value" : cat.typeName;
-      return field.isOptional && !field.hasExplicitDefault
+      return shouldPreserveOptionalAbsence(field)
         ? `Option<Vec<${elemType}>>`
         : `Vec<${elemType}>`;
     }
@@ -1936,7 +1940,7 @@ function fieldDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): stri
     }
     case "collection_scalar":
     case "collection_complex":
-      return field.isOptional && !field.hasExplicitDefault ? "None" : "Vec::new()";
+      return shouldPreserveOptionalAbsence(field) ? "None" : "Vec::new()";
     case "dict":
       if (!cat.valueType || cat.valueType === "unknown") return "serde_json::Value::Null";
       return field.isOptional ? "None" : "std::collections::HashMap::new()";
@@ -1982,12 +1986,12 @@ function loadExpr(a: LoadAssignment, polymorphicTypeNames: Set<string>): string 
       return collectionScalarLoadExpr(
         key,
         cat.scalarType,
-        a.isOptional && !a.hasExplicitDefault,
+        shouldPreserveOptionalAbsence(a),
       );
     }
     case "collection_complex": {
       const loaded = `value.get("${key}").map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx))`;
-      return a.isOptional && !a.hasExplicitDefault
+      return shouldPreserveOptionalAbsence(a)
         ? loaded
         : `${loaded}.unwrap_or_default()`;
     }
@@ -2128,13 +2132,13 @@ function variantLoadExpr(
       return collectionScalarLoadExpr(
         key,
         cat.scalarType,
-        field.isOptional && !field.hasExplicitDefault,
+        shouldPreserveOptionalAbsence(field),
       );
     }
     case "collection_complex": {
       // Collection in a variant — use the parent type's helper
       const loaded = `value.get("${key}").map(|v| Self::load_${toSnakeCase(field.name)}(v, ctx))`;
-      return field.isOptional && !field.hasExplicitDefault
+      return shouldPreserveOptionalAbsence(field)
         ? loaded
         : `${loaded}.unwrap_or_default()`;
     }

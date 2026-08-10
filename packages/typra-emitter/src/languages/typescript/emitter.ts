@@ -44,7 +44,11 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
+import {
+  shouldGuardMissingRequiredField,
+  shouldOmitAbsentOnSave,
+  shouldPreserveOptionalAbsence,
+} from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
@@ -694,7 +698,7 @@ function tsDefaultValue(f: FieldDecl): string {
   const cat = f.category;
 
   if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
-    if (f.isOptional && !f.hasExplicitDefault) {
+    if (shouldPreserveOptionalAbsence(f)) {
       return "";
     }
     return " = []";
@@ -768,7 +772,7 @@ function emitConstructor(type: TypeDecl, lines: string[]): void {
     const cat = field.category;
     if (
       field.isOptional &&
-      field.hasExplicitDefault &&
+      !shouldPreserveOptionalAbsence(field) &&
       (cat.kind === "collection_scalar" || cat.kind === "collection_complex")
     ) {
       lines.push(`    this.${field.name} = init?.${field.name} ?? [];`);

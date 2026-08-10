@@ -27,8 +27,10 @@ import { TypeNode, PropertyNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { lowerFile } from "../src/ir/lower.js";
 import {
+  optionalFieldAbsencePolicy,
   saveFieldEmissionPolicy,
   shouldGuardMissingRequiredField,
+  shouldPreserveOptionalAbsence,
 } from "../src/ir/field-emission-policy.js";
 import { emitTypeScriptFile } from "../src/languages/typescript/emitter.js";
 import { TypeScriptExprVisitor } from "../src/languages/typescript/visitor.js";
@@ -184,6 +186,29 @@ describe("shared save-side field emission policy", () => {
       saveFieldEmissionPolicy({ ...connection, hasExplicitDefault: true }, "rust-value-sentinel"),
       "omit-when-absent",
     );
+  });
+});
+
+describe("shared optional absence/default policy", () => {
+  it("preserves absent optional fields unless an explicit default materializes them", () => {
+    const custom = file.types.find(candidate => candidate.typeName.name === "GuardCustomTool")!;
+    const connection = custom.fields.find(field => field.name === "connection")!;
+    const optionalCollection = {
+      ...connection,
+      isOptional: true,
+      hasExplicitDefault: false,
+      category: { kind: "collection_complex" as const, typeName: "GuardConnection" },
+    };
+    const defaultedOptionalCollection = {
+      ...optionalCollection,
+      hasExplicitDefault: true,
+    };
+
+    assert.equal(optionalFieldAbsencePolicy(optionalCollection), "preserve-absence");
+    assert.equal(shouldPreserveOptionalAbsence(optionalCollection), true);
+    assert.equal(optionalFieldAbsencePolicy(defaultedOptionalCollection), "materialize-default");
+    assert.equal(shouldPreserveOptionalAbsence(defaultedOptionalCollection), false);
+    assert.equal(optionalFieldAbsencePolicy(connection), "materialize-default");
   });
 });
 
