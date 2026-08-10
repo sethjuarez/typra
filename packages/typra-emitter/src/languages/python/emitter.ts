@@ -38,7 +38,7 @@ import {
   WireFieldMapping,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField } from "../../ir/field-emission-policy.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
@@ -1286,8 +1286,12 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
   lines.push("");
   for (const a of type.save.assignments) {
     const snake = toSnakeCase(a.fieldName);
-    lines.push(`        if obj.${snake} is not None:`);
-    lines.push(`            ${emitSaveAssignment(a)}`);
+    if (shouldOmitAbsentOnSave(a, "always-check")) {
+      lines.push(`        if obj.${snake} is not None:`);
+      lines.push(`            ${emitSaveAssignment(a)}`);
+    } else {
+      lines.push(`        ${emitSaveAssignment(a)}`);
+    }
   }
 
   // Context post-processing (only for root types without base)

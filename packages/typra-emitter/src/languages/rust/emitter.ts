@@ -50,7 +50,7 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField } from "../../ir/field-emission-policy.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import {
   INTEGRAL_SCALAR_TYPES,
   FRACTIONAL_SCALAR_TYPES,
@@ -2160,7 +2160,7 @@ function emitSaveField(
 
   // Named enum — serialize via .to_string()
   if (a.enumName) {
-    if (a.isOptional) {
+    if (shouldOmitAbsentOnSave(a)) {
       lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.to_string()));`);
       lines.push(`${indent}}`);
@@ -2178,7 +2178,7 @@ function emitSaveField(
       if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
         // Struct fields keep Value::Null as the "absent" sentinel (see fieldType).
         // Save may omit exactly the fields that load does not require.
-        if (a.isOptional || a.hasExplicitDefault) {
+        if (shouldOmitAbsentOnSave(a, "rust-value-sentinel")) {
           lines.push(`${indent}if !${fieldRef}.is_null() {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
           lines.push(`${indent}}`);
@@ -2187,7 +2187,7 @@ function emitSaveField(
         }
         return;
       }
-      if (a.isOptional) {
+      if (shouldOmitAbsentOnSave(a)) {
         lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    let nested = val.to_value(ctx);`);
         lines.push(`${indent}    if !nested.is_null() {`);
@@ -2203,7 +2203,7 @@ function emitSaveField(
       return;
     }
     case "collection_scalar": {
-      if (a.isOptional && !a.hasExplicitDefault) {
+      if (shouldOmitAbsentOnSave(a, "rust-collection-default")) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
@@ -2216,7 +2216,7 @@ function emitSaveField(
       return;
     }
     case "collection_complex": {
-      if (a.isOptional && !a.hasExplicitDefault) {
+      if (shouldOmitAbsentOnSave(a, "rust-collection-default")) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(items, ctx));`);
         lines.push(`${indent}}`);
@@ -2230,14 +2230,14 @@ function emitSaveField(
     }
     case "dict": {
       if (!cat.valueType || cat.valueType === "unknown") {
-        if (a.isOptional) {
+        if (shouldOmitAbsentOnSave(a)) {
           lines.push(`${indent}if !${fieldRef}.is_null() {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
           lines.push(`${indent}}`);
         } else {
           lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
         }
-      } else if (a.isOptional) {
+      } else if (shouldOmitAbsentOnSave(a)) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), ${rustDictSaveExpr("items", cat.valueType)});`);
         lines.push(`${indent}}`);
@@ -2345,7 +2345,7 @@ function emitVariantSaveField(
 
   // Named enum — serialize via .to_string()
   if (field.enumName && field.allowedValues.length > 0) {
-    if (field.isOptional) {
+    if (shouldOmitAbsentOnSave(field)) {
       lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.to_string()));`);
       lines.push(`${indent}}`);
@@ -2362,11 +2362,11 @@ function emitVariantSaveField(
     case "complex": {
       if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
         // Save may omit exactly the fields that load does not require.
-        if (field.isOptional) {
+        if (shouldOmitAbsentOnSave(field)) {
           lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), val.clone());`);
           lines.push(`${indent}}`);
-        } else if (field.hasExplicitDefault) {
+        } else if (shouldOmitAbsentOnSave(field, "rust-value-sentinel")) {
           lines.push(`${indent}if !${fieldRef}.is_null() {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
           lines.push(`${indent}}`);
@@ -2375,7 +2375,7 @@ function emitVariantSaveField(
         }
         return;
       }
-      if (field.isOptional) {
+      if (shouldOmitAbsentOnSave(field)) {
         lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), val.to_value(ctx));`);
         lines.push(`${indent}}`);
@@ -2388,7 +2388,7 @@ function emitVariantSaveField(
       return;
     }
     case "collection_scalar": {
-      if (field.isOptional && !field.hasExplicitDefault) {
+      if (shouldOmitAbsentOnSave(field, "rust-collection-default")) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
@@ -2402,7 +2402,7 @@ function emitVariantSaveField(
     case "collection_complex": {
       if (collectionHelper?.hasNameProperty) {
         const saveHelper = `Self::save_${toSnakeCase(field.name)}`;
-        if (field.isOptional && !field.hasExplicitDefault) {
+        if (shouldOmitAbsentOnSave(field, "rust-collection-default")) {
           lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), ${saveHelper}(items, ctx));`);
           lines.push(`${indent}}`);
@@ -2413,7 +2413,7 @@ function emitVariantSaveField(
         }
         return;
       }
-      if (field.isOptional && !field.hasExplicitDefault) {
+      if (shouldOmitAbsentOnSave(field, "rust-collection-default")) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(items.iter().map(|item| item.to_value(ctx)).collect()));`);
         lines.push(`${indent}}`);
@@ -2426,14 +2426,14 @@ function emitVariantSaveField(
     }
     case "dict": {
       if (!cat.valueType || cat.valueType === "unknown") {
-        if (field.isOptional) {
+        if (shouldOmitAbsentOnSave(field)) {
           lines.push(`${indent}if !${fieldRef}.is_null() {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
           lines.push(`${indent}}`);
         } else {
           lines.push(`${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`);
         }
-      } else if (field.isOptional) {
+      } else if (shouldOmitAbsentOnSave(field)) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), ${rustDictSaveExpr("items", cat.valueType)});`);
         lines.push(`${indent}}`);

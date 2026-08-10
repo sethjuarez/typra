@@ -7,12 +7,12 @@ import {
   FieldDecl,
   MethodStubDecl,
   PolymorphicDispatchDecl,
-  PropertyCategory,
+  SaveAssignment,
   TypeDecl,
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField } from "../../ir/field-emission-policy.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
@@ -712,9 +712,7 @@ function emitSave(
       helper.propertyName === field.fieldName && helper.hasNameProperty
     );
     emitSaveField(
-      field.fieldName,
-      field.category,
-      field.isOpenEnum ? null : field.enumName,
+      field,
       collectionHelper,
       lines,
       polymorphicTypeNames,
@@ -725,46 +723,63 @@ function emitSave(
 }
 
 function emitSaveField(
-  name: string,
-  category: PropertyCategory,
-  enumName: string | null,
+  field: SaveAssignment,
   collectionHelper: CollectionHelperDecl | undefined,
   lines: string[],
   polymorphicTypeNames: Set<string>,
 ): void {
+  const name = field.fieldName;
+  const category = field.category;
+  const enumName = field.isOpenEnum ? null : field.enumName;
   const wireName = escapeJava(name);
   const propertyName = javaPropertyName(name);
   switch (category.kind) {
     case "scalar":
-      lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", ${enumName ? `obj.${propertyName}.value` : `serializeScalar(obj.${propertyName})`});`);
+      if (shouldOmitAbsentOnSave(field, "always-check")) {
+        lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", ${enumName ? `obj.${propertyName}.value` : `serializeScalar(obj.${propertyName})`});`);
+      } else {
+        lines.push(`    result.put("${wireName}", ${enumName ? `obj.${propertyName}.value` : `serializeScalar(obj.${propertyName})`});`);
+      }
       break;
     case "dict":
       if (category.valueType && category.valueType !== "unknown" && !JAVA_TYPE_MAP[category.valueType]) {
-        lines.push(`    if (obj.${propertyName} != null) {`);
+        if (shouldOmitAbsentOnSave(field, "always-check")) lines.push(`    if (obj.${propertyName} != null) {`);
         lines.push("      Map<String, Object> items = new LinkedHashMap<>();");
         lines.push(`      for (Map.Entry<String, ${javaDictValueType(category.valueType)}> entry : obj.${propertyName}.entrySet()) items.put(entry.getKey(), entry.getValue().save(ctx));`);
         lines.push(`      result.put("${wireName}", items);`);
-        lines.push("    }");
+        if (shouldOmitAbsentOnSave(field, "always-check")) lines.push("    }");
       } else {
-        lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", serializeScalar(obj.${propertyName}));`);
+        if (shouldOmitAbsentOnSave(field, "always-check")) {
+          lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", serializeScalar(obj.${propertyName}));`);
+        } else {
+          lines.push(`    result.put("${wireName}", serializeScalar(obj.${propertyName}));`);
+        }
       }
       break;
     case "complex":
-      lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", obj.${propertyName}.save(ctx));`);
+      if (shouldOmitAbsentOnSave(field, "always-check")) {
+        lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", obj.${propertyName}.save(ctx));`);
+      } else {
+        lines.push(`    result.put("${wireName}", obj.${propertyName}.save(ctx));`);
+      }
       break;
     case "collection_scalar":
       if (enumName) {
-        lines.push(`    if (obj.${propertyName} != null) {`);
+        if (shouldOmitAbsentOnSave(field, "always-check")) lines.push(`    if (obj.${propertyName} != null) {`);
         lines.push("      List<Object> items = new ArrayList<>();");
         lines.push(`      for (${javaEnumTypeName(enumName)} item : obj.${propertyName}) items.add(item.value);`);
         lines.push(`      result.put("${wireName}", items);`);
-        lines.push("    }");
+        if (shouldOmitAbsentOnSave(field, "always-check")) lines.push("    }");
       } else {
-        lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", new ArrayList<>(obj.${propertyName}));`);
+        if (shouldOmitAbsentOnSave(field, "always-check")) {
+          lines.push(`    if (obj.${propertyName} != null) result.put("${wireName}", new ArrayList<>(obj.${propertyName}));`);
+        } else {
+          lines.push(`    result.put("${wireName}", new ArrayList<>(obj.${propertyName}));`);
+        }
       }
       break;
     case "collection_complex":
-      lines.push(`    if (obj.${propertyName} != null) {`);
+      if (shouldOmitAbsentOnSave(field, "always-check")) lines.push(`    if (obj.${propertyName} != null) {`);
       if (collectionHelper?.hasNameProperty) {
         lines.push("      List<Object> serializedItems = new ArrayList<>();");
         lines.push("      List<String> itemNames = new ArrayList<>();");
@@ -799,7 +814,7 @@ function emitSaveField(
         lines.push(`      for (${javaTypeName(category.typeName)} item : obj.${propertyName}) items.add(item.save(ctx));`);
         lines.push(`      result.put("${wireName}", items);`);
       }
-      lines.push("    }");
+      if (shouldOmitAbsentOnSave(field, "always-check")) lines.push("    }");
       break;
   }
   void polymorphicTypeNames;

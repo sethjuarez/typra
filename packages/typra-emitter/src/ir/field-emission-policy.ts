@@ -1,4 +1,4 @@
-import { FieldDecl, LoadAssignment, PropertyCategory } from "./declarations.js";
+import { FieldDecl, LoadAssignment, PropertyCategory, SaveAssignment } from "./declarations.js";
 
 export interface RequiredFieldGuardOptions {
   /**
@@ -11,6 +11,14 @@ export interface RequiredFieldGuardOptions {
 }
 
 export type LoadFieldPresencePolicy = "guard-then-fail" | "load-when-present";
+export type SaveFieldEmissionPolicy = "emit-always" | "omit-when-absent";
+
+export type SaveFieldEmissionProfile =
+  | "optional-only"
+  | "always-check"
+  | "go"
+  | "rust-collection-default"
+  | "rust-value-sentinel";
 
 function isRequiredWithoutDefault(field: {
   isOptional: boolean;
@@ -51,4 +59,37 @@ export function shouldGuardMissingRequiredField(
   options: RequiredFieldGuardOptions = {},
 ): boolean {
   return loadFieldPresencePolicy(field, options) === "guard-then-fail";
+}
+
+export function saveFieldEmissionPolicy(
+  field: FieldDecl | SaveAssignment | undefined,
+  profile: SaveFieldEmissionProfile = "optional-only",
+): SaveFieldEmissionPolicy {
+  if (!field) return "omit-when-absent";
+
+  switch (profile) {
+    case "always-check":
+      return "omit-when-absent";
+    case "go":
+      return field.isOptional || field.category.kind === "collection_complex"
+        ? "omit-when-absent"
+        : "emit-always";
+    case "rust-collection-default":
+      return field.isOptional && !field.hasExplicitDefault
+        ? "omit-when-absent"
+        : "emit-always";
+    case "rust-value-sentinel":
+      return field.isOptional || field.hasExplicitDefault
+        ? "omit-when-absent"
+        : "emit-always";
+    case "optional-only":
+      return field.isOptional ? "omit-when-absent" : "emit-always";
+  }
+}
+
+export function shouldOmitAbsentOnSave(
+  field: FieldDecl | SaveAssignment | undefined,
+  profile: SaveFieldEmissionProfile = "optional-only",
+): boolean {
+  return saveFieldEmissionPolicy(field, profile) === "omit-when-absent";
 }

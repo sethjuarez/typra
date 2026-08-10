@@ -36,7 +36,7 @@ import {
   MethodStubDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField } from "../../ir/field-emission-policy.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   isIntegralScalar,
@@ -1103,7 +1103,7 @@ function emitSaveAssignment(assign: SaveAssignment, lines: string[]): void {
 
   lines.push("");
 
-  if (assign.isOptional) {
+  if (shouldOmitAbsentOnSave(assign)) {
     lines.push(`        if (obj.${propName} is not null)`);
     lines.push("        {");
     lines.push(`            ${getSaveExpression(assign, propName)}`);

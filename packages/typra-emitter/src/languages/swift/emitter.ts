@@ -10,7 +10,7 @@ import {
   WireFieldMapping,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField } from "../../ir/field-emission-policy.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
 import { swiftFunctionName, swiftPropertyName, swiftStringLiteral, swiftTypeName } from "./identifiers.js";
@@ -581,7 +581,7 @@ function emitSave(type: TypeDecl, lines: string[], polymorphicTypeNames: Set<str
       polymorphicTypeNames,
       collectionHelper,
     );
-    if (assignment.isOptional) {
+    if (shouldOmitAbsentOnSave(assignment)) {
       lines.push(`    if let value = ${prop} {`);
       lines.push(`      result[${swiftStringLiteral(assignment.targetName)}] = ${swiftSaveExpression(assignment.category, assignment.enumName, "value", polymorphicTypeNames, collectionHelper)}`);
       lines.push("    }");

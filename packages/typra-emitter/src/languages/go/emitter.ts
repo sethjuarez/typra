@@ -36,7 +36,7 @@ import {
   EntryShorthandAssignment,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField } from "../../ir/field-emission-policy.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import {
   INTEGRAL_SCALAR_TYPES,
   FRACTIONAL_SCALAR_TYPES,
@@ -1214,7 +1214,7 @@ function emitSaveScalar(
   const saveExpr = assign.enumName ? `string(obj.${fieldName})` : `obj.${fieldName}`;
   const saveExprDeref = assign.enumName ? `string(*obj.${fieldName})` : `*obj.${fieldName}`;
 
-  if (assign.isOptional) {
+  if (shouldOmitAbsentOnSave(assign, "go")) {
     lines.push(`\tif obj.${fieldName} != nil {`);
     lines.push(`\t\tresult["${assign.targetName}"] = ${saveExprDeref}`);
     lines.push("\t}");
@@ -1233,7 +1233,7 @@ function emitSaveComplex(
   const isPolymorphic = polymorphicTypeNames.has(typeName);
 
   if (isPolymorphic) {
-    if (assign.isOptional) {
+    if (shouldOmitAbsentOnSave(assign, "go")) {
       // Optional polymorphic complex — double nil check pattern
       lines.push(`\tif obj.${fieldName} != nil {`);
       lines.push(`\t\t// Handle polymorphic type (stored as interface{} without pointer)`);
@@ -1262,7 +1262,7 @@ function emitSaveComplex(
       lines.push("\t}");
     }
   } else {
-    if (assign.isOptional) {
+    if (shouldOmitAbsentOnSave(assign, "go")) {
       lines.push(`\tif obj.${fieldName} != nil {`);
       lines.push(`\t\tresult["${assign.targetName}"] = obj.${fieldName}.Save(ctx)`);
       lines.push("\t}");
@@ -1279,7 +1279,7 @@ function emitSaveCollectionScalar(
   fieldName: string,
   lines: string[],
 ): void {
-  if (assign.isOptional) {
+  if (shouldOmitAbsentOnSave(assign, "go")) {
     lines.push(`\tif obj.${fieldName} != nil {`);
     lines.push(`\t\tresult["${assign.targetName}"] = obj.${fieldName}`);
     lines.push("\t}");
@@ -1298,7 +1298,9 @@ function emitSaveCollectionComplex(
 ): void {
   const isPolymorphic = polymorphicTypeNames.has(typeName);
 
-  lines.push(`\tif obj.${fieldName} != nil {`);
+  if (shouldOmitAbsentOnSave(assign, "go")) {
+    lines.push(`\tif obj.${fieldName} != nil {`);
+  }
 
   lines.push(`\t\tarr := make([]interface{}, len(obj.${fieldName}))`);
   if (isPolymorphic) {
@@ -1368,7 +1370,9 @@ function emitSaveCollectionComplex(
     lines.push(`\t\tresult["${assign.targetName}"] = arr`);
   }
 
-  lines.push("\t}");
+  if (shouldOmitAbsentOnSave(assign, "go")) {
+    lines.push("\t}");
+  }
 }
 
 function emitSaveDict(

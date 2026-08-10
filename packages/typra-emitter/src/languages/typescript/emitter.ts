@@ -44,7 +44,7 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField } from "../../ir/field-emission-policy.js";
+import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
@@ -1331,14 +1331,12 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
 
   // Per-property save assignments
   for (const a of type.save.assignments) {
-    if (a.isOptional) {
+    if (shouldOmitAbsentOnSave(a, "always-check")) {
       lines.push(`    if (obj.${a.fieldName} !== undefined && obj.${a.fieldName} !== null) {`);
       lines.push(`      ${emitSaveAssignment(a)}`);
       lines.push("    }");
     } else {
-      lines.push(`    if (obj.${a.fieldName} !== undefined && obj.${a.fieldName} !== null) {`);
-      lines.push(`      ${emitSaveAssignment(a)}`);
-      lines.push("    }");
+      lines.push(`    ${emitSaveAssignment(a)}`);
     }
   }
 
