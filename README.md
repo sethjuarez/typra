@@ -319,11 +319,11 @@ CI also runs a TypeSpec compatibility matrix for each explicitly supported
 before widening the package peer range.
 
 `npm run check:toolchain` reports the local tools needed by
-`validate:fixtures`: Node.js, npm, Python plus `pydantic`/`pytest`/PyYAML, Go/gofmt,
-Java/javac, .NET, Swift, and Cargo. It intentionally gates fixture validation,
-not the TypeScript build or unit suite. Run it before interpreting
-fixture-validation failures so missing or outdated local toolchains do not look
-like emitter regressions.
+`validate:fixtures`: Node.js, npm, `uv run --python 3.12 --with pydantic
+--with pytest --with PyYAML python`, Go/gofmt, Java/javac, .NET, Swift, and
+Cargo. It intentionally gates fixture validation, not the TypeScript build or
+unit suite. Run it before interpreting fixture-validation failures so missing
+or outdated local toolchains do not look like emitter regressions.
 
 `validate:fixtures` also runs the save-side conformance oracle: each available
 runtime loads the canonical fixture sample, saves it back to a normalized

@@ -38,7 +38,11 @@ import {
   WireFieldMapping,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
+import {
+  shouldGuardMissingRequiredField,
+  shouldMaterializeCollectionDefault,
+  shouldOmitAbsentOnSave,
+} from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
@@ -762,7 +766,7 @@ function pythonDefaultValue(f: FieldDecl, options: PythonEmitterOptions = {}, wi
   const cat = f.category;
 
   if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
-    return f.isOptional && !f.hasExplicitDefault ? " = None" : " = field(default_factory=list)";
+    return shouldMaterializeCollectionDefault(f) ? " = field(default_factory=list)" : " = None";
   }
 
   if (f.isOptional) {
@@ -774,10 +778,10 @@ function pythonDefaultValue(f: FieldDecl, options: PythonEmitterOptions = {}, wi
     const args: string[] = [];
 
     if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
-      if (f.isOptional && !f.hasExplicitDefault) {
-        args.push("default=None");
-      } else {
+      if (shouldMaterializeCollectionDefault(f)) {
         args.push("default_factory=list");
+      } else {
+        args.push("default=None");
       }
     } else if (f.isOptional) {
       args.push("default=None");

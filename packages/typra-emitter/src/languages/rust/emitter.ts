@@ -50,7 +50,12 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
+import {
+  shouldGuardMissingRequiredField,
+  shouldMaterializeCollectionDefault,
+  shouldOmitAbsentOnSave,
+  shouldPreserveOptionalAbsence,
+} from "../../ir/field-emission-policy.js";
 import {
   INTEGRAL_SCALAR_TYPES,
   FRACTIONAL_SCALAR_TYPES,
@@ -1881,7 +1886,7 @@ function fieldType(
     }
     case "collection_scalar": {
       const elemType = RUST_TYPE_MAP[cat.scalarType] || cat.scalarType;
-      const isOptional = field.isOptional && !field.hasExplicitDefault;
+      const isOptional = shouldPreserveOptionalAbsence(field);
       if (isValueType(cat.scalarType)) {
         return isOptional ? "Option<Vec<serde_json::Value>>" : "Vec<serde_json::Value>";
       }
@@ -1889,7 +1894,7 @@ function fieldType(
     }
     case "collection_complex": {
       const elemType = cat.typeName === "unknown" ? "serde_json::Value" : cat.typeName;
-      return field.isOptional && !field.hasExplicitDefault
+      return shouldPreserveOptionalAbsence(field)
         ? `Option<Vec<${elemType}>>`
         : `Vec<${elemType}>`;
     }
@@ -1936,7 +1941,7 @@ function fieldDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): stri
     }
     case "collection_scalar":
     case "collection_complex":
-      return field.isOptional && !field.hasExplicitDefault ? "None" : "Vec::new()";
+      return shouldMaterializeCollectionDefault(field) ? "Vec::new()" : "None";
     case "dict":
       if (!cat.valueType || cat.valueType === "unknown") return "serde_json::Value::Null";
       return field.isOptional ? "None" : "std::collections::HashMap::new()";
@@ -1982,12 +1987,12 @@ function loadExpr(a: LoadAssignment, polymorphicTypeNames: Set<string>): string 
       return collectionScalarLoadExpr(
         key,
         cat.scalarType,
-        a.isOptional && !a.hasExplicitDefault,
+        shouldPreserveOptionalAbsence(a),
       );
     }
     case "collection_complex": {
       const loaded = `value.get("${key}").map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx))`;
-      return a.isOptional && !a.hasExplicitDefault
+      return shouldPreserveOptionalAbsence(a)
         ? loaded
         : `${loaded}.unwrap_or_default()`;
     }
@@ -2128,13 +2133,13 @@ function variantLoadExpr(
       return collectionScalarLoadExpr(
         key,
         cat.scalarType,
-        field.isOptional && !field.hasExplicitDefault,
+        shouldPreserveOptionalAbsence(field),
       );
     }
     case "collection_complex": {
       // Collection in a variant — use the parent type's helper
       const loaded = `value.get("${key}").map(|v| Self::load_${toSnakeCase(field.name)}(v, ctx))`;
-      return field.isOptional && !field.hasExplicitDefault
+      return shouldPreserveOptionalAbsence(field)
         ? loaded
         : `${loaded}.unwrap_or_default()`;
     }
@@ -2172,7 +2177,7 @@ function emitSaveField(
 
   switch (cat.kind) {
     case "scalar":
-      emitScalarSave(key, fieldRef, cat.scalarType, a.isOptional, lines, indent);
+      emitScalarSave(key, fieldRef, cat.scalarType, shouldOmitAbsentOnSave(a), lines, indent);
       return;
     case "complex": {
       if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
@@ -2207,7 +2212,7 @@ function emitSaveField(
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
-      } else if (a.hasExplicitDefault) {
+      } else if (shouldMaterializeCollectionDefault(a, "explicit-only")) {
         const borrowed = prefix ? `&${fieldRef}` : fieldRef;
         lines.push(`${indent}result.insert("${key}".to_string(), serde_json::to_value(${borrowed}).unwrap_or(serde_json::Value::Null));`);
       } else {
@@ -2220,7 +2225,7 @@ function emitSaveField(
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(items, ctx));`);
         lines.push(`${indent}}`);
-      } else if (a.hasExplicitDefault) {
+      } else if (shouldMaterializeCollectionDefault(a, "explicit-only")) {
         const borrowed = prefix ? `&${fieldRef}` : fieldRef;
         lines.push(`${indent}result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(${borrowed}, ctx));`);
       } else {
@@ -2260,17 +2265,17 @@ function emitScalarSave(
   key: string,
   fieldRef: string,
   scalarType: string,
-  isOptional: boolean,
+  omitAbsentOnSave: boolean,
   lines: string[],
   indent: string,
 ): void {
   if (isValueType(scalarType)) {
-    if (scalarType !== "dictionary" && isOptional) {
+    if (scalarType !== "dictionary" && omitAbsentOnSave) {
       // Optional value types (any, object, unknown) are Option<Value>
       lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), val.clone());`);
       lines.push(`${indent}}`);
-    } else if (isOptional) {
+    } else if (omitAbsentOnSave) {
       // Optional dictionary fields use Value::Null as the absent sentinel.
       lines.push(`${indent}if !${fieldRef}.is_null() {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
@@ -2283,7 +2288,7 @@ function emitScalarSave(
 
   switch (scalarType) {
     case "string":
-      if (isOptional) {
+      if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.clone()));`);
         lines.push(`${indent}}`);
@@ -2292,7 +2297,7 @@ function emitScalarSave(
       }
       return;
     case "boolean":
-      if (isOptional) {
+      if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Bool(*val));`);
         lines.push(`${indent}}`);
@@ -2304,7 +2309,7 @@ function emitScalarSave(
     case "int32":
     case "int64":
     case "integer":
-      if (isOptional) {
+      if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(*val)));`);
         lines.push(`${indent}}`);
@@ -2317,7 +2322,7 @@ function emitScalarSave(
     case "float":
     case "number":
     case "numeric":
-      if (isOptional) {
+      if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Number::from_f64(*val as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
@@ -2357,7 +2362,7 @@ function emitVariantSaveField(
 
   switch (cat.kind) {
     case "scalar":
-      emitVariantScalarSave(key, fieldRef, cat.scalarType, field.isOptional, lines, indent);
+      emitVariantScalarSave(key, fieldRef, cat.scalarType, shouldOmitAbsentOnSave(field), lines, indent);
       return;
     case "complex": {
       if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
@@ -2392,7 +2397,7 @@ function emitVariantSaveField(
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);
-      } else if (field.hasExplicitDefault) {
+      } else if (shouldMaterializeCollectionDefault(field, "explicit-only")) {
         lines.push(`${indent}result.insert("${key}".to_string(), serde_json::to_value(${fieldRef}).unwrap_or(serde_json::Value::Null));`);
       } else {
         lines.push(`${indent}result.insert("${key}".to_string(), serde_json::to_value(${fieldRef}).unwrap_or(serde_json::Value::Null));`);
@@ -2406,7 +2411,7 @@ function emitVariantSaveField(
           lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
           lines.push(`${indent}    result.insert("${key}".to_string(), ${saveHelper}(items, ctx));`);
           lines.push(`${indent}}`);
-        } else if (field.hasExplicitDefault) {
+        } else if (shouldMaterializeCollectionDefault(field, "explicit-only")) {
           lines.push(`${indent}result.insert("${key}".to_string(), ${saveHelper}(${fieldRef}, ctx));`);
         } else {
           lines.push(`${indent}result.insert("${key}".to_string(), ${saveHelper}(${fieldRef}, ctx));`);
@@ -2417,7 +2422,7 @@ function emitVariantSaveField(
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(items.iter().map(|item| item.to_value(ctx)).collect()));`);
         lines.push(`${indent}}`);
-      } else if (field.hasExplicitDefault) {
+      } else if (shouldMaterializeCollectionDefault(field, "explicit-only")) {
         lines.push(`${indent}result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`);
       } else {
         lines.push(`${indent}result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`);
@@ -2449,17 +2454,17 @@ function emitVariantScalarSave(
   key: string,
   fieldRef: string,
   scalarType: string,
-  isOptional: boolean,
+  omitAbsentOnSave: boolean,
   lines: string[],
   indent: string,
 ): void {
   if (isValueType(scalarType)) {
-    if (scalarType !== "dictionary" && isOptional) {
+    if (scalarType !== "dictionary" && omitAbsentOnSave) {
       // Optional value types — variant fields are references, use direct pattern
       lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), val.clone());`);
       lines.push(`${indent}}`);
-    } else if (isOptional) {
+    } else if (omitAbsentOnSave) {
       lines.push(`${indent}if !${fieldRef}.is_null() {`);
       lines.push(`${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`);
       lines.push(`${indent}}`);
@@ -2471,7 +2476,7 @@ function emitVariantScalarSave(
 
   switch (scalarType) {
     case "string":
-      if (isOptional) {
+      if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.clone()));`);
         lines.push(`${indent}}`);
@@ -2480,7 +2485,7 @@ function emitVariantScalarSave(
       }
       return;
     case "boolean":
-      if (isOptional) {
+      if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Bool(*val));`);
         lines.push(`${indent}}`);
@@ -2491,7 +2496,7 @@ function emitVariantScalarSave(
     case "int32":
     case "int64":
     case "integer":
-      if (isOptional) {
+      if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(*val)));`);
         lines.push(`${indent}}`);
@@ -2504,7 +2509,7 @@ function emitVariantScalarSave(
     case "float":
     case "number":
     case "numeric":
-      if (isOptional) {
+      if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
         lines.push(`${indent}    result.insert("${key}".to_string(), serde_json::Number::from_f64(*val as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`);
         lines.push(`${indent}}`);

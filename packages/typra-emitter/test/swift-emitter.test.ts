@@ -51,6 +51,7 @@ function addStringField(type: TypeDecl, name: string, isOptional = false, defaul
     category,
     isOptional,
     defaultValue,
+    hasExplicitDefault: defaultValue !== null,
     allowedValues: [],
     parseAliases: {},
     enumName: null,
@@ -68,6 +69,7 @@ function addStringField(type: TypeDecl, name: string, isOptional = false, defaul
     allowedValues: [],
     parseAliases: {},
     defaultValue,
+    hasExplicitDefault: defaultValue !== null,
     isOpenEnum: false,
   });
   type.save.assignments.push({
@@ -82,6 +84,19 @@ function addStringField(type: TypeDecl, name: string, isOptional = false, defaul
 }
 
 describe("Swift polymorphic enums", () => {
+  it("keeps optional scalar explicit defaults absent until assigned", () => {
+    const defaults = typeDecl("FixtureOptionalDefaults");
+    addStringField(defaults, "mode", true, "auto");
+
+    const source = emitSwiftFile(fileDecl(defaults), new SwiftExprVisitor(), new Set());
+
+    assert.match(source, /public var mode: String\? = nil/);
+    assert.match(source, /public init\(mode: String\? = nil\)/);
+    assert.match(source, /if let value = self\.mode \{/);
+    assert.doesNotMatch(source, /public var mode: String\? = "auto"/);
+    assert.doesNotMatch(source, /public init\(mode: String\? = "auto"\)/);
+  });
+
   it("uses the concrete wildcard child without declaring an unreachable unknown case", () => {
     const tool = typeDecl("Tool");
     tool.isAbstract = true;

@@ -1590,14 +1590,21 @@ function resolveCommand(candidates) {
   return candidates.find((command) => commandExists(command));
 }
 
-function requirePythonCommand(label) {
-  const command = resolveCommand(["python3", "python"]);
-  if (!command) {
-    fail(
-      `${label} cannot run because neither python nor python3 is available.`,
-    );
+function requirePythonRunner(label) {
+  if (!commandExists("uv")) {
+    fail(`${label} cannot run because uv is not available.`);
+    return undefined;
   }
-  return command;
+  return {
+    command: "uv",
+    argsPrefix: ["run", "--python", "3.12", "--with", "pydantic", "--with", "pytest", "--with", "PyYAML", "python"],
+  };
+}
+
+function runPythonCommand(label, args, options = {}) {
+  const runner = requirePythonRunner(label);
+  if (!runner) return;
+  runCommand(label, runner.command, [...runner.argsPrefix, ...args], options);
 }
 
 function runCommand(label, command, args, options = {}) {
@@ -1650,11 +1657,7 @@ function runPythonCompile(target = "python") {
     fail(`No generated ${target} files found to compile.`);
     return;
   }
-  const python = requirePythonCommand(
-    `Generated ${target} source syntax validation`,
-  );
-  if (!python) return;
-  runCommand(`Generated ${target} source syntax validation`, python, [
+  runPythonCommand(`Generated ${target} source syntax validation`, [
     "-m",
     "py_compile",
     ...sourceFiles,
@@ -1676,9 +1679,6 @@ function runPythonGeneratedTests(target = "python", packageName = "fixtures") {
     fail(`No generated ${target} tests found to run.`);
     return;
   }
-  const python = requirePythonCommand(`Generated ${target} tests`);
-  if (!python) return;
-
   // The generated tests import a configured package name, but validation target directories are
   // named for their mode. Stage a copy under the import name rather than a symlink: symlinks need
   // elevation on Windows.
@@ -1695,9 +1695,12 @@ function runPythonGeneratedTests(target = "python", packageName = "fixtures") {
     let output = "";
     let crashed = null;
     try {
+      const runner = requirePythonRunner(`Generated ${target} tests`);
+      if (!runner) return;
       output = execFileSync(
-        python,
+        runner.command,
         [
+          ...runner.argsPrefix,
           "-m",
           "pytest",
           path.join(packageDir, "tests"),
@@ -3272,13 +3275,15 @@ function runPythonExecutableConformance(
     fail(`No generated ${target} directory found for executable conformance.`);
     return;
   }
-  const python = requirePythonCommand(
+  const python = requirePythonRunner(
     `Generated ${target} executable conformance`,
   );
   if (!python) return;
 
+  const runnerPath = path.join(validationRoot, `${target}-conformance.py`);
+  writeFileSync(runnerPath, runner);
   try {
-    const output = execFileSync(python, ["-c", runner], {
+    const output = execFileSync(python.command, [...python.argsPrefix, runnerPath], {
       cwd: packageRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -3290,6 +3295,10 @@ function runPythonExecutableConformance(
     fail(
       `Generated ${target} executable conformance failed:\n${output || error.message}`,
     );
+  } finally {
+    if (existsSync(runnerPath)) {
+      unlinkSync(runnerPath);
+    }
   }
 }
 

@@ -15,26 +15,27 @@ const checks = [
   },
   {
     name: "npm",
-    command: "npm",
-    args: ["--version"],
+    command: process.platform === "win32" ? "cmd.exe" : "npm",
+    args: process.platform === "win32" ? ["/d", "/s", "/c", "npm", "--version"] : ["--version"],
+    displayCommand: "npm",
     required: true,
     minimumVersion: "11.0.0",
     expected: "11.x in CI.",
   },
   {
-    name: "Python",
-    command: ["python3", "python"],
-    args: ["--version"],
+    name: "Python via uv",
+    command: "uv",
+    args: ["run", "--python", "3.12", "--with", "pydantic", "--with", "pytest", "--with", "PyYAML", "python", "--version"],
     required: true,
     minimumVersion: "3.12.0",
-    expected: "3.12 in CI; used for generated Python compile/tests/conformance.",
+    expected: "uv-managed Python 3.12 in CI; used for generated Python compile/tests/conformance.",
   },
   {
-    name: "Python test dependencies",
-    command: ["python3", "python"],
-    args: ["-c", "import pydantic, pytest, yaml"],
+    name: "Python test dependencies via uv",
+    command: "uv",
+    args: ["run", "--python", "3.12", "--with", "pydantic", "--with", "pytest", "--with", "PyYAML", "python", "-c", "import pydantic, pytest, yaml"],
     required: true,
-    expected: "pydantic, pytest, and PyYAML; install with `python -m pip install pydantic pytest PyYAML` for the interpreter reported above.",
+    expected: "pydantic, pytest, and PyYAML available through `uv run --python 3.12 --with ... python`.",
   },
   {
     name: "Go",
@@ -143,6 +144,7 @@ for (const check of checks) {
     const output = execFileSync(command, check.args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform === "win32" && command.endsWith(".cmd"),
     });
     const version = (check.stderr ? "" : output).trim().split(/\r?\n/)[0];
     if (check.minimumVersion || check.versionRanges) {
@@ -159,7 +161,8 @@ for (const check of checks) {
         continue;
       }
     }
-    console.log(`✔ ${check.name}: ${command}${version ? ` (${version})` : ""}`);
+    const displayCommand = check.displayCommand ?? command;
+    console.log(`✔ ${check.name}: ${displayCommand}${version ? ` (${version})` : ""}`);
   } catch (error) {
     const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
     if (check.allowNonZero && output) {

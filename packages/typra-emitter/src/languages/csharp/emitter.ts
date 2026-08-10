@@ -36,7 +36,11 @@ import {
   MethodStubDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
+import {
+  shouldGuardMissingRequiredField,
+  shouldMaterializeCollectionDefault,
+  shouldOmitAbsentOnSave,
+} from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   isIntegralScalar,
@@ -532,10 +536,7 @@ function getCSharpType(category: PropertyCategory, isOptional: boolean, enumName
 
 function getPropertyDefault(field: FieldDecl): string {
   if (field.isOptional) {
-    if (
-      field.hasExplicitDefault &&
-      (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex")
-    ) {
+    if (shouldMaterializeCollectionDefault(field)) {
       return " = [];";
     }
     return "";

@@ -36,7 +36,12 @@ import {
   EntryShorthandAssignment,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
+import {
+  shouldGuardMissingRequiredField,
+  shouldMaterializeCollectionDefault,
+  shouldOmitAbsentOnSave,
+  shouldPreserveOptionalAbsence,
+} from "../../ir/field-emission-policy.js";
 import {
   INTEGRAL_SCALAR_TYPES,
   FRACTIONAL_SCALAR_TYPES,
@@ -414,7 +419,7 @@ function emitStruct(
   for (const field of type.fields) {
     const goType = getGoFieldType(field.category, field.isOptional, polymorphicTypeNames, field.enumName);
     const fieldName = fieldNames.get(field.name) ?? goFieldName(field.name);
-    const tag = getStructTag(field.name, field.isOptional, field.hasExplicitDefault);
+    const tag = getStructTag(field.name, shouldPreserveOptionalAbsence(field));
     lines.push(`\t${fieldName} ${goType} ${tag}`);
   }
   if (absorbsUnknownIntoBase(type.polymorphicDispatch)) {
@@ -460,8 +465,7 @@ function emitLoadFunction(
   lines.push("\t}");
   if (!hasTerminalDispatch) {
     const explicitCollectionDefaults = type.fields.filter(field =>
-      field.hasExplicitDefault &&
-      (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex")
+      shouldMaterializeCollectionDefault(field, "explicit-only")
     );
     if (explicitCollectionDefaults.length === 0) {
       lines.push(`\tresult := ${typeName}{}`);
@@ -1383,7 +1387,7 @@ function emitSaveDict(
 ): void {
   const valueType = assign.category.kind === "dict" ? assign.category.valueType : undefined;
   const serializesComplexValues = Boolean(valueType && valueType !== "unknown" && !GO_TYPE_MAP[valueType]);
-  if (assign.isOptional) {
+  if (shouldOmitAbsentOnSave(assign, "go")) {
     lines.push(`\tif obj.${fieldName} != nil {`);
     emitGoDictSaveResult(assign.targetName, `obj.${fieldName}`, serializesComplexValues, polymorphicTypeNames.has(valueType ?? ""), lines, "\t\t");
     lines.push("\t}");
@@ -1578,10 +1582,9 @@ function getGoDictFieldType(valueType: string | undefined, polymorphicTypeNames:
   return polymorphicTypeNames.has(valueType) ? "map[string]interface{}" : `map[string]${valueType}`;
 }
 
-function getStructTag(fieldName: string, isOptional: boolean, hasExplicitDefault = false): string {
-  const omitEmpty = isOptional && !hasExplicitDefault;
-  const jsonTag = omitEmpty ? `${fieldName},omitempty` : fieldName;
-  const yamlTag = omitEmpty ? `${fieldName},omitempty` : fieldName;
+function getStructTag(fieldName: string, preserveOptionalAbsence: boolean): string {
+  const jsonTag = preserveOptionalAbsence ? `${fieldName},omitempty` : fieldName;
+  const yamlTag = preserveOptionalAbsence ? `${fieldName},omitempty` : fieldName;
   return `\`json:"${jsonTag}" yaml:"${yamlTag}"\``;
 }
 

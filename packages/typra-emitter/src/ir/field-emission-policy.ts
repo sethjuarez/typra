@@ -12,6 +12,8 @@ export interface RequiredFieldGuardOptions {
 
 export type LoadFieldPresencePolicy = "guard-then-fail" | "load-when-present";
 export type SaveFieldEmissionPolicy = "emit-always" | "omit-when-absent";
+export type OptionalFieldAbsencePolicy = "preserve-absence" | "materialize-default";
+export type CollectionDefaultProfile = "required-or-explicit" | "explicit-only";
 
 export type SaveFieldEmissionProfile =
   | "optional-only"
@@ -36,6 +38,10 @@ function isGuardedCategory(
   return options.includeInheritedScalarAndDict === true
     && options.hasBase === true
     && (category.kind === "scalar" || category.kind === "dict");
+}
+
+function isCollectionCategory(category: PropertyCategory): boolean {
+  return category.kind === "collection_scalar" || category.kind === "collection_complex";
 }
 
 /**
@@ -75,7 +81,7 @@ export function saveFieldEmissionPolicy(
         ? "omit-when-absent"
         : "emit-always";
     case "rust-collection-default":
-      return field.isOptional && !field.hasExplicitDefault
+      return shouldPreserveOptionalAbsence(field)
         ? "omit-when-absent"
         : "emit-always";
     case "rust-value-sentinel":
@@ -92,4 +98,32 @@ export function shouldOmitAbsentOnSave(
   profile: SaveFieldEmissionProfile = "optional-only",
 ): boolean {
   return saveFieldEmissionPolicy(field, profile) === "omit-when-absent";
+}
+
+export function optionalFieldAbsencePolicy(field: {
+  isOptional: boolean;
+  hasExplicitDefault?: boolean;
+} | undefined): OptionalFieldAbsencePolicy {
+  if (!field?.isOptional) return "materialize-default";
+  return field.hasExplicitDefault ? "materialize-default" : "preserve-absence";
+}
+
+export function shouldPreserveOptionalAbsence(field: {
+  isOptional: boolean;
+  hasExplicitDefault?: boolean;
+} | undefined): boolean {
+  return optionalFieldAbsencePolicy(field) === "preserve-absence";
+}
+
+export function shouldMaterializeCollectionDefault(
+  field: { category: PropertyCategory; isOptional: boolean; hasExplicitDefault?: boolean } | undefined,
+  profile: CollectionDefaultProfile = "required-or-explicit",
+): boolean {
+  if (!field || !isCollectionCategory(field.category)) return false;
+  switch (profile) {
+    case "explicit-only":
+      return field.hasExplicitDefault === true;
+    case "required-or-explicit":
+      return !shouldPreserveOptionalAbsence(field);
+  }
 }

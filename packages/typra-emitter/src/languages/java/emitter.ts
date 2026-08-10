@@ -12,7 +12,11 @@ import {
   WireDecl,
   isClosedPolymorphicDispatch,
 } from "../../ir/declarations.js";
-import { shouldGuardMissingRequiredField, shouldOmitAbsentOnSave } from "../../ir/field-emission-policy.js";
+import {
+  shouldGuardMissingRequiredField,
+  shouldMaterializeCollectionDefault,
+  shouldOmitAbsentOnSave,
+} from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
@@ -1013,10 +1017,7 @@ function javaScalarType(typeName: string): string {
 }
 
 function javaDefault(field: FieldDecl, polymorphicTypeNames: Set<string>): string {
-  if (
-    field.hasExplicitDefault &&
-    (field.category.kind === "collection_scalar" || field.category.kind === "collection_complex")
-  ) {
+  if (shouldMaterializeCollectionDefault(field, "explicit-only")) {
     return " = new ArrayList<>()";
   }
   if (field.isOptional) {
