@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   compareConformanceMatrixTargets,
   REQUIRED_CONFORMANCE_MATRIX_TARGETS,
+  validateConformanceMatrix,
 } from "./conformance-matrix-policy.mjs";
 
 const matrixPath = path.join(
@@ -54,5 +55,55 @@ describe("conformance matrix target coverage", () => {
         `${rule.id} must declare every backend cell`,
       );
     }
+  });
+
+  it("validates the current matrix schema and waiver policy", () => {
+    const comparison = validateConformanceMatrix(matrix);
+
+    assert.equal(comparison.ok, true, comparison.failures.join("\n"));
+  });
+
+  it("rejects waived backend cells on enforced rules", () => {
+    const invalid = structuredClone(matrix);
+    invalid.rules[0].backends.typescript = { status: "waived", issue: "#49" };
+    const comparison = validateConformanceMatrix(invalid);
+
+    assert.equal(comparison.ok, false);
+    assert.match(
+      comparison.failures.join("\n"),
+      /fixture-root-sample-shape\.typescript.*not marked known-gap/i,
+    );
+  });
+
+  it("requires known-gap rules and backend waivers to cite the same tracker", () => {
+    const invalid = structuredClone(matrix);
+    const rule = invalid.rules.find(
+      (candidate) => candidate.id === "keyed-collection-ambiguous-names",
+    );
+    assert.ok(rule);
+    rule.issue = "#120";
+    const comparison = validateConformanceMatrix(invalid);
+
+    assert.equal(comparison.ok, false);
+    assert.match(
+      comparison.failures.join("\n"),
+      /keyed-collection-ambiguous-names\.typescript.*does not match #120/i,
+    );
+  });
+
+  it("rejects implemented backend cells on known-gap rules", () => {
+    const invalid = structuredClone(matrix);
+    const rule = invalid.rules.find(
+      (candidate) => candidate.id === "keyed-collection-ambiguous-names",
+    );
+    assert.ok(rule);
+    rule.backends.swift = "implemented";
+    const comparison = validateConformanceMatrix(invalid);
+
+    assert.equal(comparison.ok, false);
+    assert.match(
+      comparison.failures.join("\n"),
+      /keyed-collection-ambiguous-names\.swift.*cannot be implemented/i,
+    );
   });
 });

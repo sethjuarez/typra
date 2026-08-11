@@ -18,6 +18,7 @@ import path from "node:path";
 import {
   compareConformanceMatrixTargets,
   REQUIRED_CONFORMANCE_MATRIX_TARGETS,
+  validateConformanceMatrix,
 } from "./conformance-matrix-policy.mjs";
 import {
   compareExpectedExecution,
@@ -769,6 +770,11 @@ function assertRuleBackendMatrix(rule, targets) {
 function assertConformanceMatrix() {
   const matrix = readJson(path.join("fixtures", "conformance-matrix.json"));
   if (!matrix) return;
+
+  const policyComparison = validateConformanceMatrix(matrix);
+  for (const message of policyComparison.failures) {
+    fail(message);
+  }
 
   if (matrix.version !== 1) {
     fail("Conformance matrix has an unexpected version.");
