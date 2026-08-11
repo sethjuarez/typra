@@ -69,7 +69,9 @@ be explicit in diagnostics, the conformance matrix, or a tracked known failure.
   unknown fallback.
 - A well-formed but unclaimed discriminator value on an open base loads an
   unknown carrier that preserves the raw payload.
-- An unclaimed value on a closed base is a load error.
+- On a non-abstract base, a discriminator value permitted by a closed union but
+  claimed by no subtype loads the base itself and preserves the base fields. A
+  value outside the closed union is a load error.
 - Saving a known subtype emits its canonical discriminator value. Saving an
   unknown carrier replays the original discriminator and preserved payload.
 
