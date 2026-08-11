@@ -35,6 +35,22 @@
       "description": "Generated fixture evidence covers closed discriminator subtype selection and discriminator-specific serialization."
     },
     {
+      "id": "nonabstract-base-unclaimed-discriminator",
+      "status": "enforced",
+      "verification": "unit-test",
+      "test": "packages/typra-emitter/scripts/validate-fixtures.mjs",
+      "backends": {
+        "typescript": "implemented",
+        "python": "implemented",
+        "csharp": "implemented",
+        "go": "implemented",
+        "java": "implemented",
+        "rust": "implemented",
+        "swift": "implemented"
+      },
+      "description": "A non-abstract discriminated base with a closed union loads values that are permitted by the union but claimed by no subtype as the base type instead of treating the union as exhaustive."
+    },
+    {
       "id": "provider-wire-mapping",
       "status": "enforced",
       "case": "provider-wire-mapping",
