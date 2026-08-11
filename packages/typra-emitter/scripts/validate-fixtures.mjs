@@ -2921,7 +2921,7 @@ function runTypeScriptExecutableConformance() {
   writeFileSync(
     runnerPath,
     [
-      'import { FixtureBag, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, SaveContext, WireOptions } from "./index";',
+      'import { FixtureBag, FixtureClaimedVariant, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, FixtureUnclaimedBase, SaveContext, WireOptions } from "./index";',
       "",
       `const propertyCases = JSON.parse(${propertyCorpusJsonLiteral}) as Array<{ id: string; seed: string; caseId: string; input: Record<string, unknown> }>;`,
       `const root = FixtureRoot.load(JSON.parse(${fixtureRootSampleJsonLiteral}));`,
@@ -2955,6 +2955,10 @@ function runTypeScriptExecutableConformance() {
       'if (caseCollision.constructor !== FixtureConnection || caseCollisionSaved.kind !== "Custom" || caseCollisionSaved.name !== "case-sensitive-unknown" || (caseCollisionSaved.payload as { mode: string }).mode !== "future" || Object.keys(caseCollisionSaved).length !== 3) throw new Error("wrong-case connection discriminator did not remain unknown");',
       'const knownConnection = FixtureConnection.load({ kind: "custom", name: "known", endpoint: "https://example.test" });',
       'if (knownConnection.constructor === FixtureConnection || knownConnection.save().endpoint !== "https://example.test") throw new Error("known connection dispatch regressed");',
+      'const unclaimed = FixtureUnclaimedBase.load({ kind: "plain", label: "leftover" });',
+      'if (unclaimed.constructor !== FixtureUnclaimedBase || unclaimed.kind !== "plain" || unclaimed.label !== "leftover") throw new Error("unclaimed closed discriminator value did not load as the base type");',
+      'const claimed = FixtureUnclaimedBase.load({ kind: "managed", label: "known", resourceId: "res-1" });',
+      'if (!(claimed instanceof FixtureClaimedVariant) || claimed.save().resourceId !== "res-1") throw new Error("claimed discriminator value stopped dispatching to its subtype");',
       'for (const invalidConnectionInput of [{}, { kind: "" }, { kind: null }, { kind: 42 }]) {',
       "  let rejected = false;",
       "  try {",
@@ -3167,7 +3171,7 @@ function runPythonExecutableConformance(
     "import json",
     "import sys",
     `sys.path.insert(0, ${JSON.stringify(path.dirname(sourceDir))})`,
-    `from ${packageName} import FixtureBag, FixtureCheckpoint, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, LoadContext, ModelInfo, SaveContext, WireOptions`,
+    `from ${packageName} import FixtureBag, FixtureCheckpoint, FixtureClaimedVariant, FixtureConnection, FixtureContent, FixtureCustomTool, FixtureIndexedList, FixtureNamedPayloadCollection, FixtureNamedRoot, FixtureReference, FixtureRoot, FixtureTool, FixtureToolbox, FixtureUnclaimedBase, LoadContext, ModelInfo, SaveContext, WireOptions`,
     `property_cases = json.loads(${propertyCorpusJsonLiteral})`,
     `root = FixtureRoot.load(json.loads(${fixtureRootSampleJsonLiteral}))`,
     "root = FixtureRoot.load(json.loads(json.dumps(root.save())))",
@@ -3212,6 +3216,10 @@ function runPythonExecutableConformance(
     "assert type(case_collision) is FixtureConnection and case_collision.save() == case_collision_input",
     'known_connection = FixtureConnection.load({"kind": "custom", "name": "known", "endpoint": "https://example.test"})',
     'assert type(known_connection) is not FixtureConnection and known_connection.save()["endpoint"] == "https://example.test"',
+    'unclaimed = FixtureUnclaimedBase.load({"kind": "plain", "label": "leftover"})',
+    'assert type(unclaimed) is FixtureUnclaimedBase and unclaimed.kind == "plain" and unclaimed.label == "leftover", "unclaimed closed discriminator value did not load as the base type"',
+    'claimed = FixtureUnclaimedBase.load({"kind": "managed", "label": "known", "resourceId": "res-1"})',
+    'assert type(claimed) is FixtureClaimedVariant and claimed.save()["resourceId"] == "res-1", "claimed discriminator value stopped dispatching to its subtype"',
     'for invalid_connection_input in ({}, {"kind": ""}, {"kind": None}, {"kind": 42}):',
     "    try:",
     "        FixtureConnection.load(invalid_connection_input)",
@@ -3925,6 +3933,20 @@ function runRustExecutableConformance(target = "rust", packageName = "fixtures")
         ? '    let named_open_known = serde_json::from_value::<FixtureNamedOpenBase>(json!({"kind": "managed", "label": "known", "resourceId": "res-1"})).unwrap();'
         : '    let named_open_known = FixtureNamedOpenBase::load_from_value(&json!({"kind": "managed", "label": "known", "resourceId": "res-1"}), &load_ctx);',
       "    assert!(matches!(&named_open_known.kind, FixtureNamedOpenBaseKind::FixtureNamedOpenVariant { .. }));",
+      '    let unclaimed_input = json!({"kind": "plain", "label": "leftover"});',
+      useSerdeFeature
+        ? "    let unclaimed = serde_json::from_value::<FixtureUnclaimedBase>(unclaimed_input.clone()).unwrap();"
+        : "    let unclaimed = FixtureUnclaimedBase::load_from_value(&unclaimed_input, &load_ctx);",
+      "    let canonical_unclaimed = FixtureUnclaimedBase::load_from_value(&unclaimed_input, &load_ctx);",
+      '    assert!(matches!(&unclaimed.kind, FixtureUnclaimedBaseKind::Custom { kind_name, .. } if kind_name == "plain"), "unclaimed closed discriminator value did not load as the base type");',
+      useSerdeFeature
+        ? "    assert_eq!(serde_json::to_value(&unclaimed).unwrap(), canonical_unclaimed.to_value(&save_ctx));"
+        : "    assert_eq!(unclaimed.to_value(&save_ctx), unclaimed_input);",
+      '    let claimed_input = json!({"kind": "managed", "label": "known", "resourceId": "res-1"});',
+      useSerdeFeature
+        ? "    let claimed = serde_json::from_value::<FixtureUnclaimedBase>(claimed_input.clone()).unwrap();"
+        : "    let claimed = FixtureUnclaimedBase::load_from_value(&claimed_input, &load_ctx);",
+      '    assert!(matches!(&claimed.kind, FixtureUnclaimedBaseKind::FixtureClaimedVariant { resource_id } if resource_id == "res-1"), "claimed discriminator value stopped dispatching to its subtype");',
       useSerdeFeature
         ? '    let missing_connection_error = serde_json::from_str::<FixtureToolbox>(r#"{"tools":{"custom":{"kind":"vendor"}},"inheritedMapBindingTool":{"kind":"function","name":"map","command":"run"},"inheritedListBindingTool":{"kind":"function","name":"list","command":"run"}}"#).expect_err("serde missing required CustomTool.connection");'
         : '    let missing_connection_error = FixtureToolbox::from_json(r#"{"tools":{"custom":{"kind":"vendor"}},"inheritedMapBindingTool":{"kind":"function","name":"map","command":"run"},"inheritedListBindingTool":{"kind":"function","name":"list","command":"run"}}"#, &load_ctx).expect_err("missing required CustomTool.connection");',
@@ -4319,6 +4341,10 @@ function runCSharpExecutableConformance() {
       'if (FixtureTool.Load(wildcardToolSaved).GetType() != typeof(FixtureCustomTool)) throw new InvalidOperationException("wildcard tool did not survive reload");',
       'var knownConnection = FixtureConnection.Load(new Dictionary<string, object?> { ["kind"] = "custom", ["name"] = "known", ["endpoint"] = "https://example.test" });',
       'if (knownConnection.GetType() == typeof(FixtureConnection) || !Equals(knownConnection.Save()["endpoint"], "https://example.test")) throw new InvalidOperationException("known connection dispatch regressed");',
+      'var unclaimed = FixtureUnclaimedBase.Load(new Dictionary<string, object?> { ["kind"] = "plain", ["label"] = "leftover" });',
+      'if (unclaimed.GetType() != typeof(FixtureUnclaimedBase) || unclaimed.Kind != "plain" || unclaimed.Label != "leftover") throw new InvalidOperationException("unclaimed closed discriminator value did not load as the base type");',
+      'var claimed = FixtureUnclaimedBase.Load(new Dictionary<string, object?> { ["kind"] = "managed", ["label"] = "known", ["resourceId"] = "res-1" });',
+      'if (claimed.GetType() != typeof(FixtureClaimedVariant) || !Equals(claimed.Save()["resourceId"], "res-1")) throw new InvalidOperationException("claimed discriminator value stopped dispatching to its subtype");',
       "foreach (var invalidConnectionInput in new Dictionary<string, object?>[]",
       "{",
       "    new(),",
@@ -4519,6 +4545,10 @@ function runJavaExecutableConformance() {
       '    require(FixtureTool.load(wildcardToolSaved, new LoadContext()).getClass() == FixtureCustomTool.class, "wildcard tool did not survive reload");',
       '    FixtureConnection knownConnection = FixtureConnection.load(Map.of("kind", "custom", "name", "known", "endpoint", "https://example.test"), new LoadContext());',
       '    require(knownConnection instanceof FixtureCustomConnection && "https://example.test".equals(knownConnection.save(new SaveContext()).get("endpoint")), "known connection dispatch regressed");',
+      '    FixtureUnclaimedBase unclaimed = FixtureUnclaimedBase.load(Map.of("kind", "plain", "label", "leftover"), new LoadContext());',
+      '    require(unclaimed.getClass() == FixtureUnclaimedBase.class && "plain".equals(unclaimed.kind) && "leftover".equals(unclaimed.label), "unclaimed closed discriminator value did not load as the base type");',
+      '    FixtureUnclaimedBase claimed = FixtureUnclaimedBase.load(Map.of("kind", "managed", "label", "known", "resourceId", "res-1"), new LoadContext());',
+      '    require(claimed instanceof FixtureClaimedVariant && "res-1".equals(claimed.save(new SaveContext()).get("resourceId")), "claimed discriminator value stopped dispatching to its subtype");',
       "    List<Map<String, Object>> invalidConnectionInputs = new java.util.ArrayList<>();",
       "    invalidConnectionInputs.add(new LinkedHashMap<>());",
       '    invalidConnectionInputs.add(new LinkedHashMap<>(Map.of("kind", "")));',
@@ -4865,6 +4895,24 @@ final class ConformanceValidateTests: XCTestCase {
           message.contains("kind") || message.contains("discriminator"),
           "invalid FixtureConnection discriminator diagnostic lost field context: \\(message)"
         )
+      }
+
+      func testClosedUnionUnclaimedDiscriminatorLoadsBase() throws {
+        let unclaimedInput: [String: Any] = ["kind": "plain", "label": "leftover"]
+        let unclaimed = try FixtureUnclaimedBase.load(unclaimedInput)
+        guard case .unknown(let saved) = unclaimed else {
+          XCTFail("unclaimed closed discriminator value did not load as the base type")
+          return
+        }
+        XCTAssertEqual(saved["kind"] as? String, "plain")
+        XCTAssertEqual(saved["label"] as? String, "leftover")
+
+        let claimed = try FixtureUnclaimedBase.load(["kind": "managed", "label": "known", "resourceId": "res-1"])
+        guard case .fixtureClaimedVariant(let value) = claimed else {
+          XCTFail("claimed discriminator value stopped dispatching to its subtype")
+          return
+        }
+        XCTAssertEqual(value.resourceId, "res-1")
       }
     }
   }
