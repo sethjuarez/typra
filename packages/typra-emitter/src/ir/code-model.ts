@@ -3,6 +3,7 @@ import type {
   CallableVectorSnapshotEntry,
 } from "./vector.js";
 import { scalarRuntimeKind } from "./scalar-kinds.js";
+import type { TypeNode } from "./ast.js";
 
 export interface CodeModelJsonConstant {
   name: string;
@@ -33,6 +34,7 @@ export interface VectorConformanceCodeModel {
 
 export interface VectorConformanceCodeModelOptions {
   loadSaveTypes?: ReadonlySet<string> | readonly string[];
+  typeNodes?: readonly TypeNode[];
 }
 
 export function buildVectorConformanceCodeModel(
@@ -50,10 +52,7 @@ export function buildVectorConformanceCodeModel(
         imports.add(typeName);
         return { paramName, typeName };
       });
-    const expectedRoundTrip =
-      "expected" in entry.vector && isCodeModelType(entry.returns, loadSaveTypes)
-        ? entry.returns
-        : undefined;
+    const expectedRoundTrip = expectedRoundTripType(entry, loadSaveTypes, options.typeNodes);
     if (expectedRoundTrip) imports.add(expectedRoundTrip);
 
     return {
@@ -73,6 +72,32 @@ export function buildVectorConformanceCodeModel(
     modelImports: Array.from(imports).sort(),
     cases,
   };
+}
+
+function expectedRoundTripType(
+  entry: CallableVectorSnapshotEntry,
+  loadSaveTypes: ReadonlySet<string> | undefined,
+  typeNodes: readonly TypeNode[] | undefined,
+): string | undefined {
+  if (!("expected" in entry.vector) || !isCodeModelType(entry.returns, loadSaveTypes)) {
+    return undefined;
+  }
+  if (entry.vector.stage !== "transport") return entry.returns;
+
+  const envelopeBodyType = findBodyEnvelopeType(entry.returns, typeNodes);
+  if (!envelopeBodyType) return entry.returns;
+  return isCodeModelType(envelopeBodyType, loadSaveTypes) ? envelopeBodyType : undefined;
+}
+
+function findBodyEnvelopeType(
+  typeName: string,
+  typeNodes: readonly TypeNode[] | undefined,
+): string | undefined {
+  const node = typeNodes?.find((candidate) => candidate.typeName.name === typeName);
+  if (!node || node.properties.length !== 1) return undefined;
+  const [property] = node.properties;
+  if (property.name !== "body") return undefined;
+  return property.typeName.name;
 }
 
 function isCodeModelType(

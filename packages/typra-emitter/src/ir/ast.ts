@@ -12,6 +12,7 @@ import {
   getDiscriminator,
   isErrorModel,
 } from "@typespec/compiler";
+import { isStatusCode } from "@typespec/http";
 import {
   getStateScalar,
   getStateValue,
@@ -462,6 +463,7 @@ export const resolveModel = (
   if (model.kind === "Model") {
     const properties: PropertyNode[] = [];
     for (const [_, value] of model.properties) {
+      if (isHttpStatusCodeMetadataProperty(program, value)) continue;
       const prop = resolveProperty(
         program,
         value,
@@ -494,6 +496,13 @@ export const resolveModel = (
 
   return node;
 };
+
+function isHttpStatusCodeMetadataProperty(
+  program: Program,
+  property: ModelProperty,
+): boolean {
+  return isStatusCode(program, property);
+}
 
 export const resolveModelChildren = (
   program: Program,

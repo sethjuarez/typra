@@ -8,6 +8,61 @@ runtimes.
 Typra is emitter-only: it generates model/protocol surfaces, but it does not
 ship runtime service implementations or product-specific contracts.
 
+## Transport ownership boundary
+
+TypeSpec remains the durable source of truth for HTTP contracts. Typra lowers the
+contract-visible transport shape into shared IR and projects equivalent
+producer/consumer seams from that IR, including path, query, header, cookie,
+body, content type, status, auth requirements, and success/error response
+selection behavior.
+
+Generated producer seams bind HTTP requests to callable handler
+protocols/interfaces. Generated consumer seams bind callable-shaped client
+methods to an injected transport function and hydrate only status-matched 2xx
+success bodies through Typra model `load()` helpers. Non-2xx responses are
+reported through the transport error seam with the original status/body instead
+of being loaded as success models. Wildcard/default response bodies are used as a
+2xx success fallback only when an operation has no explicit success response, so
+default error envelopes do not override declared success models.
+
+Auth requirements modeled with TypeSpec HTTP are emitted as metadata on the
+adapter/client seams. Generated code reports the requirement shape, but it does
+not acquire tokens, refresh credentials, store secrets, or enforce provider
+policy.
+
+Host applications own runtime policy: business logic, token acquisition and
+refresh, credential storage, cookie jars, retries, logging, tracing, persistence,
+deployment, and provider-specific identity behavior. Cookie values modeled in
+TypeSpec are projected as contract-visible bindings; session management and
+cookie persistence remain host-owned.
+
+### Runtime auth integration
+
+Typra treats TypeSpec HTTP auth as contract metadata, not runtime behavior. A
+producer projection can expose `AUTH_REQUIREMENTS` so the host can wire its own
+middleware, dependency injection, or request guards. A consumer projection passes
+the same requirement metadata to the injected transport seam so the host can
+choose how to attach credentials.
+
+For example, a generated TypeScript fetch client passes:
+
+```ts
+{
+  method: "GET",
+  url,
+  headers,
+  cookies,
+  auth: {
+    options: [{ schemes: [{ id: "BearerAuth", type: "http", scheme: "Bearer" }] }],
+  },
+}
+```
+
+The host-owned transport decides whether that metadata means a bearer token,
+API-key lookup, mTLS context, test credential, or no credential at all. Typra
+does not synthesize an `Authorization` header, manage refresh, persist tokens,
+retry after challenges, or interpret provider-specific identity policy.
+
 ## Install
 
 ```powershell

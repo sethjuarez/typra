@@ -14,6 +14,13 @@ emit-targets:
     import-path: "fixtures"
     protocol-scaffolds: "compile-only"
     native-serialization: "none"
+    outputs:
+      - kind: server
+        provider: fastapi
+      - kind: server
+        provider: starlette
+      - kind: consumer
+        provider: httpx
 ```
 
 | Option | Why it matters |
@@ -23,6 +30,7 @@ emit-targets:
 | `import-path` | Module path used by generated tests. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
 | `native-serialization` | `"none"` keeps dataclass output. `"pydantic"` emits Pydantic v2 `BaseModel` types. |
+| `outputs` | Optional generated surfaces. `server:fastapi` and `server:starlette` emit HTTP route factories; `consumer:httpx` emits contract clients backed by an injected async transport. |
 
 Generated Python surfaces include model surfaces, loader/saver helpers, JSON/YAML helpers, import-pruned output, and tests.
 
@@ -42,3 +50,33 @@ saved = root.to_json()
 Python models expose instance `to_json()` and `to_yaml()` helpers plus the static `load()` and instance `save()` methods. There is no `from_json`; parse the text yourself (for example with `json.loads`) and pass the parsed value to `load()`.
 
 Review generated tests for the exact helper names emitted by your selected contract and target options.
+
+## HTTP transport projections
+
+`outputs` can request Python HTTP server and consumer surfaces from TypeSpec HTTP
+metadata:
+
+```yaml
+outputs:
+  - kind: server
+    provider: fastapi
+  - kind: server
+    provider: starlette
+  - kind: consumer
+    provider: httpx
+```
+
+FastAPI and Starlette outputs emit route factories, `AUTH_REQUIREMENTS`
+metadata, and transport vector tests. The route factories bind
+path/query/header/cookie/body values, load request bodies through generated model
+helpers, call a handwritten handler protocol, and save model responses with the
+declared success status.
+
+The httpx consumer output emits clients backed by an injected async transport.
+Generated methods serialize the TypeSpec HTTP request shape, include cookie
+bindings and auth requirements as metadata, require a declared success status
+before hydrating a response body, and raise `TypraHttpxResponseError` with the
+original status/body for non-matching or non-2xx responses. Typra does not attach
+credentials, manage cookie jars, retry requests, or enforce provider identity
+policy; those runtime behaviors stay in the host transport and server
+middleware.

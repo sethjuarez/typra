@@ -684,6 +684,9 @@ function isMethodStyle(name: string): boolean {
 
 /** Map a protocol type string to a Python type annotation. */
 function protocolType(typeStr: string): string {
+  if (typeStr.includes(" | ")) {
+    return typeStr.split(" | ").map((part) => protocolType(part.trim())).join(" | ");
+  }
   // Handle nullable types
   if (typeStr.endsWith("?")) {
     const inner = typeStr.slice(0, -1);

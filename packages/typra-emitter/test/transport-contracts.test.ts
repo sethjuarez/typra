@@ -5,11 +5,99 @@ import { describe, it } from "node:test";
 import { Namespace } from "@typespec/compiler";
 import { createTestHost } from "@typespec/compiler/testing";
 
-import { lowerTypeSpecTransportContracts } from "../src/ir/transport.js";
+import {
+  lowerTypeSpecTransportContracts,
+  successOrFallbackBodyResponses,
+  type TransportOperation,
+} from "../src/ir/transport.js";
 
 const require = createRequire(import.meta.url);
 
 describe("transport-contract IR", () => {
+  it("uses wildcard response bodies only as a success fallback when no explicit success response exists", () => {
+    const baseOperation: TransportOperation = {
+      contract: "Pets",
+      operation: "read",
+      callable: {
+        name: "read",
+        returns: "Pet",
+        description: "",
+        params: {},
+        optional: false,
+        sync: false,
+        runtimeCancellable: false,
+        atomic: false,
+        nonFatal: false,
+        source: {
+          kind: "typespec-interface",
+          namespace: "Typra.HttpProbe",
+          symbol: "Pets",
+          group: "",
+        },
+      },
+      verb: "get",
+      path: "/pets",
+      uriTemplate: "/pets",
+      bindings: [],
+      responses: [],
+    };
+
+    const wildcardOnly: TransportOperation = {
+      ...baseOperation,
+      responses: [
+        {
+          statusCodes: ["*"],
+          kind: "unknown",
+          body: "Pet",
+          contentTypes: ["application/json"],
+        },
+      ],
+    };
+    assert.deepEqual(successOrFallbackBodyResponses(wildcardOnly), [
+      wildcardOnly.responses[0],
+    ]);
+
+    const explicitSuccessWithWildcard: TransportOperation = {
+      ...baseOperation,
+      responses: [
+        {
+          statusCodes: ["200"],
+          kind: "success",
+          body: "Pet",
+          contentTypes: ["application/json"],
+        },
+        {
+          statusCodes: ["*"],
+          kind: "unknown",
+          body: "ErrorBody",
+          contentTypes: ["application/json"],
+        },
+      ],
+    };
+    assert.deepEqual(successOrFallbackBodyResponses(explicitSuccessWithWildcard), [
+      explicitSuccessWithWildcard.responses[0],
+    ]);
+
+    const explicitVoidSuccessWithWildcard: TransportOperation = {
+      ...baseOperation,
+      responses: [
+        {
+          statusCodes: ["204"],
+          kind: "success",
+          body: "void",
+          contentTypes: [],
+        },
+        {
+          statusCodes: ["*"],
+          kind: "unknown",
+          body: "ErrorBody",
+          contentTypes: ["application/json"],
+        },
+      ],
+    };
+    assert.deepEqual(successOrFallbackBodyResponses(explicitVoidSuccessWithWildcard), []);
+  });
+
   it("lowers official TypeSpec HTTP route metadata onto callable contracts", async () => {
     const httpPackageRoot = path.resolve(
       path.dirname(require.resolve("@typespec/http")),
@@ -59,11 +147,21 @@ describe("transport-contract IR", () => {
         name: string;
       }
 
+      model ErrorBody {
+        message: string;
+      }
+
+      model PetNotFound {
+        @statusCode statusCode: 404;
+        @body body: ErrorBody;
+      }
+
       @route("/pets")
+      @useAuth(BearerAuth)
       interface Pets {
         @get
         @route("/{pet-id}")
-        read(@path("pet-id") petId: string, @query("include-details") includeDetails?: boolean): Pet;
+        read(@path("pet-id") petId: string, @query("include-details") includeDetails?: boolean, @cookie sessionId: string): Pet | PetNotFound;
 
         @post
         @route("/{petId}")
@@ -105,9 +203,13 @@ describe("transport-contract IR", () => {
             operations: [
               {
                 name: "read",
-                returns: "Pet",
+                returns: "Pet | PetNotFound",
                 description: "",
-                params: { petId: "string", includeDetails: "boolean" },
+                params: {
+                  petId: "string",
+                  includeDetails: "boolean",
+                  sessionId: "string",
+                },
                 optional: false,
                 sync: false,
                 runtimeCancellable: false,
@@ -149,9 +251,13 @@ describe("transport-contract IR", () => {
               operation: "read",
               callable: {
                 name: "read",
-                returns: "Pet",
+                returns: "Pet | PetNotFound",
                 description: "",
-                params: { petId: "string", includeDetails: "boolean" },
+                params: {
+                  petId: "string",
+                  includeDetails: "boolean",
+                  sessionId: "string",
+                },
                 optional: false,
                 sync: false,
                 runtimeCancellable: false,
@@ -169,6 +275,13 @@ describe("transport-contract IR", () => {
               uriTemplate: "/pets/{pet-id}{?include%2Ddetails}",
               bindings: [
                 {
+                  name: "sessionId",
+                  wireName: "session_id",
+                  type: "string",
+                  kind: "cookie",
+                  optional: false,
+                },
+                {
                   name: "petId",
                   wireName: "pet-id",
                   type: "string",
@@ -183,10 +296,30 @@ describe("transport-contract IR", () => {
                   optional: true,
                 },
               ],
+              auth: {
+                options: [
+                  {
+                    schemes: [
+                      {
+                        id: "BearerAuth",
+                        type: "http",
+                        scheme: "Bearer",
+                      },
+                    ],
+                  },
+                ],
+              },
               responses: [
                 {
                   statusCodes: ["200"],
+                  kind: "success",
                   body: "Pet",
+                  contentTypes: ["application/json"],
+                },
+                {
+                  statusCodes: ["404"],
+                  kind: "error",
+                  body: "ErrorBody",
                   contentTypes: ["application/json"],
                 },
               ],
@@ -241,9 +374,23 @@ describe("transport-contract IR", () => {
                   optional: false,
                 },
               ],
+              auth: {
+                options: [
+                  {
+                    schemes: [
+                      {
+                        id: "BearerAuth",
+                        type: "http",
+                        scheme: "Bearer",
+                      },
+                    ],
+                  },
+                ],
+              },
               responses: [
                 {
                   statusCodes: ["200"],
+                  kind: "success",
                   body: "Pet",
                   contentTypes: ["application/json"],
                 },

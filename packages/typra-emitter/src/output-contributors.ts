@@ -60,6 +60,17 @@ const CONTRIBUTOR_REGISTRY: OutputContributor[] = [
     provider: "fastapi",
     runtimeDependencies: ["fastapi"],
   },
+  {
+    target: "python",
+    kind: "server",
+    provider: "starlette",
+    runtimeDependencies: ["starlette"],
+  },
+  {
+    target: "python",
+    kind: "consumer",
+    provider: "httpx",
+  },
 ];
 
 function nativeSerialization(
