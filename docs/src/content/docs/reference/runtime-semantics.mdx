@@ -24,6 +24,10 @@ be explicit in diagnostics, the conformance matrix, or a tracked known failure.
 - Optional properties have distinct wire states: absent, present with a value,
   and present with an explicitly empty value such as `""`, `0`, `false`, or
   `[]`. Saving must not collapse explicit zero values into absence.
+- Optional properties without explicit defaults preserve absence. Optional
+  properties with explicit defaults may materialize that default when the
+  target's generated representation cannot otherwise distinguish an omitted
+  field from a field intentionally set to the default.
 - Required zero values are still required values. Saving a required string,
   number, boolean, or collection at its zero value must emit the field.
 
@@ -102,6 +106,9 @@ be explicit in diagnostics, the conformance matrix, or a tracked known failure.
   original TypeSpec or payload.
 - If a TypeSpec shape cannot be represented portably across targets, Typra
   should emit an actionable diagnostic instead of generating divergent behavior.
+- Native interop surfaces such as Zod, Pydantic, Jackson, serde, and Codable are
+  adapters over Typra semantics. They must delegate to generated `load` and
+  `save` behavior rather than defining a second serialization contract.
 
 ## Review rule
 

@@ -13,6 +13,7 @@ emit-targets:
     test-dir: "generated/java/tests"
     package-name: "typra.fixtures"
     protocol-scaffolds: "compile-only"
+    native-serialization: "jackson"
 ```
 
 | Option | Why it matters |
@@ -21,8 +22,9 @@ emit-targets:
 | `test-dir` | Where generated Java tests are written. |
 | `package-name` | Java package for generated classes. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+| `native-serialization` | Defaults to `"none"`. Set to `"jackson"` to emit Jackson serializers and deserializers that delegate to Typra load/save. |
 
-Generated Java surfaces include models with load, save, `fromJson`, `toJson`, `fromYaml`, `toYaml`, scalar coercion, enum handling, polymorphic dispatch, and tests.
+Generated Java surfaces include models with load, save, `fromJson`, `toJson`, `fromYaml`, `toYaml`, scalar coercion, enum handling, polymorphic dispatch, tests, and optional Jackson interop.
 
 ## Typical usage shape
 
@@ -36,3 +38,8 @@ String yamlSaved = yamlRoot.toYaml();
 ```
 
 Confirm package layout and generated API shape before publishing Java output for downstream consumers.
+
+`native-serialization: "jackson"` adds Jackson annotations plus generated
+serializer/deserializer classes. The emitter does not edit a consumer build
+manifest, so projects enabling this option must provide `jackson-databind` on
+their Java compile/runtime classpath.
