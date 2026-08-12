@@ -16,7 +16,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
-  compareConformanceMatrixTargets,
   REQUIRED_CONFORMANCE_MATRIX_TARGETS,
   validateConformanceMatrix,
 } from "./conformance-matrix-policy.mjs";
@@ -706,67 +705,6 @@ function assertArrayIncludes(label, actual, ...expected) {
   }
 }
 
-function normalizeBackendCell(cell) {
-  if (cell === "implemented") {
-    return { status: "implemented" };
-  }
-  if (cell && typeof cell === "object" && cell.status === "waived") {
-    return cell;
-  }
-  return undefined;
-}
-
-function assertRuleBackendMatrix(rule, targets) {
-  if (
-    !rule.backends ||
-    typeof rule.backends !== "object" ||
-    Array.isArray(rule.backends)
-  ) {
-    fail(
-      `Conformance rule ${rule.id} must declare a backend capability matrix.`,
-    );
-    return;
-  }
-
-  const declared = new Set(Object.keys(rule.backends));
-  for (const target of targets) {
-    if (!declared.has(target)) {
-      fail(
-        `Conformance rule ${rule.id} is missing backend matrix cell for ${target}.`,
-      );
-      continue;
-    }
-
-    const cell = normalizeBackendCell(rule.backends[target]);
-    if (!cell) {
-      fail(
-        `Conformance rule ${rule.id}/${target} must be "implemented" or a waiver object.`,
-      );
-      continue;
-    }
-    if (cell.status === "implemented" && rule.status !== "enforced") {
-      fail(
-        `Conformance rule ${rule.id}/${target} cannot be implemented while the rule is ${rule.status}.`,
-      );
-    }
-    if (
-      cell.status === "waived" &&
-      (typeof cell.issue !== "string" || !/^#\d+$/.test(cell.issue))
-    ) {
-      fail(
-        `Conformance rule ${rule.id}/${target} waiver must cite a GitHub issue like #123.`,
-      );
-    }
-  }
-  for (const target of declared) {
-    if (!targets.includes(target)) {
-      fail(
-        `Conformance rule ${rule.id} declares an unknown backend matrix target: ${target}.`,
-      );
-    }
-  }
-}
-
 function assertConformanceMatrix() {
   const matrix = readJson(path.join("fixtures", "conformance-matrix.json"));
   if (!matrix) return;
@@ -776,22 +714,10 @@ function assertConformanceMatrix() {
     fail(message);
   }
 
-  if (matrix.version !== 1) {
-    fail("Conformance matrix has an unexpected version.");
-  }
-  const targetComparison = compareConformanceMatrixTargets(matrix.targets);
-  for (const message of targetComparison.failures) {
-    fail(message);
-  }
-  if (!targetComparison.ok) {
-    return;
-  }
   if (!Array.isArray(matrix.cases) || matrix.cases.length === 0) {
-    fail("Conformance matrix must declare at least one case.");
     return;
   }
   if (!Array.isArray(matrix.rules) || matrix.rules.length === 0) {
-    fail("Conformance matrix must declare at least one semantic rule.");
     return;
   }
 
@@ -810,17 +736,16 @@ function assertConformanceMatrix() {
   }
 
   const enforcedCases = new Set();
-  const ruleIds = new Set();
   for (const rule of matrix.rules) {
-    if (!rule.id) {
-      fail("Conformance matrix contains a rule without an id.");
+    if (
+      !rule ||
+      typeof rule !== "object" ||
+      Array.isArray(rule) ||
+      typeof rule.id !== "string" ||
+      rule.id.length === 0
+    ) {
       continue;
     }
-    if (ruleIds.has(rule.id)) {
-      fail(`Conformance matrix contains duplicate rule id: ${rule.id}`);
-    }
-    ruleIds.add(rule.id);
-    assertRuleBackendMatrix(rule, REQUIRED_CONFORMANCE_MATRIX_TARGETS);
 
     if (rule.status === "enforced") {
       if (rule.verification === "fixture-evidence") {
@@ -841,10 +766,6 @@ function assertConformanceMatrix() {
             `Unit-test conformance rule ${rule.id} must not reference a fixture case.`,
           );
         }
-      } else {
-        fail(
-          `Enforced conformance rule ${rule.id} must declare verification as fixture-evidence or unit-test.`,
-        );
       }
       if (
         (rule.verification === "unit-test" ||
@@ -867,15 +788,6 @@ function assertConformanceMatrix() {
           `Known-gap conformance rule ${rule.id} collides with an existing case id.`,
         );
       }
-      if (typeof rule.issue !== "string" || !/^#\d+$/.test(rule.issue)) {
-        fail(
-          `Known-gap conformance rule ${rule.id} must reference a GitHub issue like #123.`,
-        );
-      }
-    } else {
-      fail(
-        `Conformance rule ${rule.id} has unsupported status: ${rule.status}`,
-      );
     }
   }
 

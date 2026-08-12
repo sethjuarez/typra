@@ -63,6 +63,24 @@ describe("conformance matrix target coverage", () => {
     assert.equal(comparison.ok, true, comparison.failures.join("\n"));
   });
 
+  it("rejects an unsupported matrix version", () => {
+    const invalid = structuredClone(matrix);
+    invalid.version = 2;
+    const comparison = validateConformanceMatrix(invalid);
+
+    assert.equal(comparison.ok, false);
+    assert.match(comparison.failures.join("\n"), /unexpected version/i);
+  });
+
+  it("requires at least one conformance case", () => {
+    const invalid = structuredClone(matrix);
+    invalid.cases = [];
+    const comparison = validateConformanceMatrix(invalid);
+
+    assert.equal(comparison.ok, false);
+    assert.match(comparison.failures.join("\n"), /at least one case/i);
+  });
+
   it("rejects waived backend cells on enforced rules", () => {
     const invalid = structuredClone(matrix);
     invalid.rules[0].backends.typescript = { status: "waived", issue: "#49" };
