@@ -4120,7 +4120,13 @@ function runRustUnknownAbstractConformance() {
   }
   if (failures.length > initialFailureCount) return;
 
-  const connectionPath = path.join(sourceDir, "connection.rs");
+  const directConnectionPath = path.join(sourceDir, "connection.rs");
+  const connectionPath = existsSync(directConnectionPath)
+    ? directConnectionPath
+    : walkFiles(
+        sourceDir,
+        (filePath) => path.basename(filePath) === "connection.rs",
+      )[0];
   const connectionSource = existsSync(connectionPath)
     ? readFileSync(connectionPath, "utf8")
     : "";
@@ -4169,7 +4175,7 @@ function runRustUnknownAbstractConformance() {
   writeFileSync(
     runnerPath,
     [
-      "use rust_unknown::model::*;",
+      "use ::rust_unknown::model::*;",
       "use serde_json::json;",
       "",
       "fn main() {",
