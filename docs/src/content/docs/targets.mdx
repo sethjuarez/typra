@@ -10,13 +10,13 @@ Typra emits generated model surfaces, tests, metadata, and documentation from th
 
 | Target | Generated surface |
 | --- | --- |
-| `TypeScript` | Model classes, runtime helpers, JSON/YAML helpers, tests, and protocol scaffold tests. |
-| `Python` | Model surfaces, loader/saver helpers, JSON/YAML helpers, import-pruned output, and tests. |
+| `TypeScript` | Model classes, runtime helpers, JSON/YAML helpers, tests, protocol scaffold tests, and optional Zod validators. |
+| `Python` | Model surfaces, loader/saver helpers, JSON/YAML helpers, import-pruned output, tests, and optional Pydantic v2 models. |
 | `CSharp` | C# model types, `System.Text.Json` helpers, tests, and protocol scaffolds. |
 | `Go` | Structs, load/save helpers, JSON/YAML helpers, scalar shorthand coercion, polymorphic dispatch, and generated tests. |
-| `Java` | Models with load, save, `fromJson`, `toJson`, `fromYaml`, `toYaml`, scalar coercion, enum handling, polymorphic dispatch, and tests. |
-| `Rust` | serde-oriented structs with `from_json`/`to_json`, `from_yaml`/`to_yaml`, provider wire mapping, and optional case-insensitive enum parsing. |
-| `Swift` | A SwiftPM package with `TypraModel` types, `fromJSON`/`toJSON`, `fromYAML`/`toYAML`, scalar coercion, polymorphic enums, provider wire mapping, and XCTest tests. |
+| `Java` | Models with load, save, `fromJson`, `toJson`, `fromYaml`, `toYaml`, scalar coercion, enum handling, polymorphic dispatch, tests, and optional Jackson interop. |
+| `Rust` | structs with `from_json`/`to_json`, `from_yaml`/`to_yaml`, provider wire mapping, optional case-insensitive enum parsing, and optional explicit serde impls. |
+| `Swift` | A SwiftPM package with `TypraModel` types, `fromJSON`/`toJSON`, `fromYAML`/`toYAML`, scalar coercion, polymorphic enums, provider wire mapping, optional explicit `Codable`, and XCTest tests. |
 
 ## Reference targets
 
@@ -80,14 +80,14 @@ Target support is intentionally evidence-driven. The fixture suite validates gen
 | --- | --- |
 | `TypeScript`, `Python`, `Go` | Best fit when JSON/YAML helper behavior and scalar shorthand loading matter. |
 | `CSharp`, `Java` | Confirm package/namespace conventions before publishing generated output. Both include JSON and YAML helper surfaces. |
-| `Rust` | Choose `enum-parsing` deliberately; default behavior is case-sensitive. |
-| `Swift` | Emits a SwiftPM package with a Yams dependency for YAML; requires a Swift toolchain to build and test. |
+| `Rust` | Choose `enum-parsing` deliberately; default behavior is case-sensitive. Use `native-serialization: "serde"` when consumers need serde interop. |
+| `Swift` | Emits a SwiftPM package with a Yams dependency for YAML; use `native-serialization: "codable"` when consumers need `JSONEncoder`/`JSONDecoder` interop. Requires a Swift toolchain to build and test. |
 | `Markdown` | Treat as generated reference output, not a replacement for product narrative docs. |
 | JSON AST | Use for tooling and review; do not treat it as a runtime API. |
 
 ## Confidence model
 
-The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust, Swift, Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture validation also exercises generated metadata, verifier CLI output, consumer smoke wiring, and cross-language generated-code compile/test surfaces. For Go, that includes `gofmt`, `go vet`, `go test`, scalar coercion helper coverage, and executable conformance. Swift build and test run when a Swift toolchain is available, and are gated to a hard requirement with `CI_SWIFT_REQUIRED=1`.
+The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust, Swift, Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture validation also exercises generated metadata, verifier CLI output, consumer smoke wiring, native-interop variants (`typescript-zod`, `python_pydantic`, `java-jackson`, `rust-serde`, and `swift-codable`), and cross-language generated-code compile/test surfaces. For Go, that includes `gofmt`, `go vet`, `go test`, scalar coercion helper coverage, and executable conformance. Swift build and test run when a Swift toolchain is available, and are gated to a hard requirement with `CI_SWIFT_REQUIRED=1`.
 
 The fixture source is the compact reference for supported shapes:
 

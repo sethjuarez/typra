@@ -89,6 +89,7 @@ export default defineConfig({
             { label: "Overview", link: "/reference/" },
             { label: "Configuration", link: "/reference/configuration/" },
             { label: "CLI and verification", link: "/reference/cli-verification/" },
+            { label: "Runtime semantics", link: "/reference/runtime-semantics/" },
             { label: "Compatibility", link: "/reference/compatibility/" },
             { label: "Roadmap", link: "/roadmap/" },
           ],

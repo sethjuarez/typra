@@ -4,11 +4,16 @@ description: Best-in-class roadmap for Typra emitter confidence and runtime gene
 draft: false
 ---
 
-Typra is in a strong shipped state. The next investments move confidence from known fixtures to systematic coverage across the TypeSpec input space.
+Typra is in a strong shipped state. The active roadmap now extends shipped
+validation and native-interop coverage into broader generated-shape confidence.
 
 ## Executable conformance specification
 
-Define a language-neutral semantic contract and make every target prove it with executable tests. Cover `load`, `save`, JSON helpers, provider wire mappings, scalar coercions, enums, optionals, nulls, polymorphic dispatch, and error behavior.
+The language-neutral runtime semantics contract and save-side executable
+conformance oracle are in place. Next steps are to grow more load-side and
+negative-path conformance cases across `load`, JSON helpers, provider wire
+mappings, scalar coercions, enums, optionals, nulls, polymorphic dispatch, and
+error behavior.
 
 ## Fixture and shape fuzzing
 
@@ -20,7 +25,10 @@ Snapshot generated API shape for each target so accidental breaking changes are 
 
 ## Runtime semantics contract
 
-Write down shared emitted-runtime behavior for unknown fields, missing required fields, nulls, coercion failures, enum failures, provider mappings, and discriminator dispatch.
+Keep the shared runtime semantics contract current as normalization continues,
+especially around unknown fields, missing required fields, nulls, coercion
+failures, enum failures, provider mappings, discriminator dispatch, and native
+interop delegation.
 
 ## Production-grade diagnostics
 

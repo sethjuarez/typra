@@ -221,6 +221,16 @@ emit-targets:
 Standard Schema-compatible TypeScript path and currently fails fast rather than
 approximating behavior.
 
+Other native interop modes are target-specific and also delegate to Typra's
+generated load/save contract instead of defining a second serializer:
+
+| Target | `native-serialization` mode | Contract |
+| --- | --- | --- |
+| Python | `"pydantic"` | Emits Pydantic v2 `BaseModel` types whose validation and dump entry points call Typra `load`, `save`, and `to_json`. |
+| Java | `"jackson"` | Emits Jackson annotations plus serializers/deserializers that call Typra `save` and `load`; consumers provide `jackson-databind`. |
+| Rust | `"serde"` | Emits cfg-gated `Serialize`/`Deserialize` impls that route through Typra `to_value` and `load_from_value`. |
+| Swift | `"codable"` | Emits explicit `Codable` conformance that bridges through Typra `save` and `load`. |
+
 Methods can attach runtime effect metadata through the backward-compatible
 eighth `@method` argument:
 

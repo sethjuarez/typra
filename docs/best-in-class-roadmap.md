@@ -1,13 +1,13 @@
 # Best-in-class emitter roadmap
 
-Typra is now in a strong "ship after review" state for the current emitter work. This roadmap captures the next investments that would move it from high confidence on known fixtures to best-in-class confidence across the TypeSpec input space.
+Typra is now in a strong "ship after review" state for the current emitter work. This roadmap captures remaining investments after the first runtime-semantics contract, conformance matrix, native-interop variants, and save-side executable conformance oracle have shipped.
 
 ## 1. Executable conformance specification
 
-Define a language-neutral semantic contract and make every target prove it with executable tests.
+Extend the language-neutral semantic contract and make every target prove more of it with executable tests.
 
 - Cover `load`, `save`, `fromJson`, `toJson`, `fromYaml`, `toYaml`, provider wire mappings, scalar coercions, enums, open enums, polymorphic dispatch, optionals, null handling, and error behavior.
-- Track each semantic feature by target language in a generated conformance matrix.
+- Keep tracking each semantic feature by target language in the conformance matrix.
 - Treat missing or divergent semantics as explicit gaps, not implicit emitter behavior.
 
 ## 2. Fixture and shape fuzzing
@@ -28,10 +28,10 @@ Snapshot the public generated API shape for each target so accidental breaking c
 
 ## 4. Runtime semantics contract
 
-Write down the exact behavior shared by all emitted runtimes.
+Keep the exact behavior shared by all emitted runtimes current as normalization continues.
 
 - Unknown fields: preserved, ignored, or rejected.
-- Missing required fields: defaulted or rejected.
+- Missing required fields: rejected, with target-specific known gaps made explicit.
 - Nulls: accepted, defaulted, or rejected by field kind.
 - Coercion failures: error shape and timing.
 - Enum failures and open enum behavior.
@@ -80,4 +80,4 @@ Make release confidence explicit.
 
 ## Suggested next step
 
-The highest-leverage next investment is the executable conformance specification plus fuzzed fixture generation. Together, they move confidence from "high for current known cases" to "systematically defended across the input space."
+The highest-leverage next investment is fuzzed fixture generation plus broader load-side conformance. Together, they move confidence from "high for current known cases" to "systematically defended across the input space."

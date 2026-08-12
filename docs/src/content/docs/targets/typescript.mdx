@@ -13,6 +13,7 @@ emit-targets:
     test-dir: "generated/typescript/tests"
     import-path: "../index"
     protocol-scaffolds: "compile-only"
+    native-serialization: "zod"
 ```
 
 | Option | Why it matters |
@@ -21,8 +22,16 @@ emit-targets:
 | `test-dir` | Where generated Node test files are written. |
 | `import-path` | Import path used by generated tests. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
+| `native-serialization` | Defaults to `"none"`. Set to `"zod"` to emit class-attached Zod validators. `"standard-schema"` is reserved and fails fast. |
 
-Generated TypeScript surfaces include model classes, runtime helpers, JSON/YAML helpers, tests, and protocol scaffold tests.
+Generated TypeScript surfaces include model classes, runtime helpers, JSON/YAML helpers, tests, protocol scaffold tests, and optional Zod validation artifacts.
+
+`native-serialization: "zod"` emits `schema`, `wireSchema`, and
+`wireObjectSchemaWithoutName` validators on generated classes. `schema.parse()`
+canonicalizes through Typra's generated `load(input).save()` path before
+validating the saved wire shape, so Zod validation cannot drift from provider
+wire names, discriminator dispatch, optional/default handling, or raw fallback
+preservation.
 
 ## Typical usage shape
 

@@ -19,20 +19,23 @@ Typra currently validates against TypeSpec compiler and JSON schema emitter
 set `allow-unsupported-typespec-version: true` only when you intentionally accept
 possible generated output churn.
 
-## 0.4.0 release highlights
+## Current release highlights
 
-This release makes the published CLI and release pipeline dependable across all
-supported targets:
+The current package focuses on cross-runtime semantic parity, native interop
+options that delegate to Typra's canonical load/save path, and validation that
+keeps generated output reviewable:
 
 - `typra-generate` supports every emitted runtime, accepts a `--spec`
   TypeSpec entrypoint, and resolves the installed TypeSpec compiler directly.
 - Invalid programmatic targets and misspelled `emit-targets` configuration now
   fail clearly instead of being ignored.
-- Consumer smoke commands and verification paths resolve from the smoke-config
-  directory.
+- TypeScript can opt into Zod validators; Python can opt into Pydantic v2;
+  Java can opt into Jackson; Rust can opt into explicit serde; and Swift can opt
+  into explicit `Codable`.
 - Publish runs generated-fixture validation, including Swift, and npm packing
   always builds the distributable artifacts.
-- Cross-language conformance evidence now includes Swift.
+- Cross-language validation includes generated native-interop variants and a
+  save-side executable conformance oracle.
 
 ## Configure TypeSpec
 

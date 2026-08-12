@@ -10,17 +10,17 @@ Unsupported TypeSpec versions report an emitter diagnostic unless `allow-unsuppo
 
 ## Target confidence
 
-Target support is evidence-driven. The fixture suite validates generated compile/test surfaces across TypeScript, Python, C#, Go, Java, Rust, Swift, Markdown, and JSON AST generation.
+Target support is evidence-driven. The fixture suite validates generated compile/test surfaces across TypeScript, Python, C#, Go, Java, Rust, Swift, Markdown, and JSON AST generation. It also validates opt-in native-interop variants for TypeScript/Zod, Python/Pydantic, Java/Jackson, Rust/serde, and Swift/Codable.
 
 | Target | Current confidence note |
 | --- | --- |
-| TypeScript | Best fit when JSON/YAML helper behavior matters. |
-| Python | Best fit when JSON/YAML helper behavior matters. |
+| TypeScript | Best fit when JSON/YAML helper behavior matters; use `native-serialization: "zod"` for Zod validation artifacts. |
+| Python | Best fit when JSON/YAML helper behavior matters; use `native-serialization: "pydantic"` for Pydantic v2 models. |
 | Go | Best fit when JSON/YAML helper behavior matters. |
 | C# | JSON and YAML model helper surfaces; confirm namespace conventions before publishing generated output. |
-| Java | JSON/YAML model helper surfaces; confirm package conventions before publishing generated output. |
-| Rust | Choose `enum-parsing` deliberately; default behavior is case-sensitive. |
-| Swift | SwiftPM package with JSON/YAML helpers; build and test require a Swift toolchain (gated by `CI_SWIFT_REQUIRED`). |
+| Java | JSON/YAML model helper surfaces and optional Jackson interop; confirm package conventions before publishing generated output. |
+| Rust | Choose `enum-parsing` deliberately; default behavior is case-sensitive. Use explicit serde mode when consumers need serde traits. |
+| Swift | SwiftPM package with JSON/YAML helpers and optional explicit `Codable`; build and test require a Swift toolchain (gated by `CI_SWIFT_REQUIRED`). |
 | Markdown | Generated reference output; review before publishing product docs. |
 | JSON AST | Tooling and review artifact, not a runtime API. |
 
