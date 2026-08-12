@@ -28,7 +28,8 @@ function asHex(seed) {
 
 export function parsePropertySeed(value, fallback = DEFAULT_SEED) {
   if (value === undefined || value === null || value === "") return fallback;
-  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 0);
+  const parsed =
+    typeof value === "number" ? value : Number.parseInt(String(value), 0);
   if (!Number.isSafeInteger(parsed)) {
     throw new Error(`Invalid property corpus seed: ${value}`);
   }
@@ -44,9 +45,11 @@ function walkTypes(node, byName, visited = new Set()) {
     if (visited.has(key)) return;
     visited.add(key);
     const existing = byName.get(name);
-    const nodeScore = (node.childTypes?.length ?? 0) * 100 + (node.properties?.length ?? 0);
+    const nodeScore =
+      (node.childTypes?.length ?? 0) * 100 + (node.properties?.length ?? 0);
     const existingScore = existing
-      ? (existing.childTypes?.length ?? 0) * 100 + (existing.properties?.length ?? 0)
+      ? (existing.childTypes?.length ?? 0) * 100 +
+        (existing.properties?.length ?? 0)
       : -1;
     if (!existing || nodeScore > existingScore) byName.set(name, node);
   }
@@ -75,12 +78,16 @@ function buildTypeRegistry(modelJson) {
 
 function choose(state, values, salt) {
   if (values.length === 0) return undefined;
-  const index = Math.floor(state.random() * values.length + stableHash(salt)) % values.length;
+  const index =
+    Math.floor(state.random() * values.length + stableHash(salt)) %
+    values.length;
   return values[index];
 }
 
 function discriminatorLiteral(type, discriminator) {
-  const prop = type.properties?.find((candidate) => candidate.name === discriminator);
+  const prop = type.properties?.find(
+    (candidate) => candidate.name === discriminator,
+  );
   return typeof prop?.defaultValue === "string" && prop.defaultValue !== "null"
     ? prop.defaultValue
     : undefined;
@@ -133,7 +140,7 @@ function scalarValue(typeName, state, path) {
     case "numeric":
     case "decimal":
     case "decimal128":
-      return ((salt % 17) + 1) + 0.25;
+      return (salt % 17) + 1 + 0.25;
     case "string":
     default:
       return `property-${state.caseIndex}-${path.replace(/[^a-zA-Z0-9]+/g, "-")}`;
@@ -166,8 +173,10 @@ function generateDictValue(prop, state, path) {
 function richerType(left, right) {
   if (!left) return right;
   if (!right) return left;
-  const leftScore = (left.childTypes?.length ?? 0) * 100 + (left.properties?.length ?? 0);
-  const rightScore = (right.childTypes?.length ?? 0) * 100 + (right.properties?.length ?? 0);
+  const leftScore =
+    (left.childTypes?.length ?? 0) * 100 + (left.properties?.length ?? 0);
+  const rightScore =
+    (right.childTypes?.length ?? 0) * 100 + (right.properties?.length ?? 0);
   return rightScore > leftScore ? right : left;
 }
 
@@ -184,12 +193,19 @@ function generatePropertyValue(prop, state, path) {
     }
     return choose(state, prop.allowedValues, path);
   }
-  if (prop.isAny) return prop.isCollection ? [unknownValue(state, `${path}[0]`)] : unknownValue(state, path);
+  if (prop.isAny)
+    return prop.isCollection
+      ? [unknownValue(state, `${path}[0]`)]
+      : unknownValue(state, path);
   if (prop.isDict) {
     const entryCount = prop.isCollection ? 1 : 2;
     const value = {};
     for (let index = 0; index < entryCount; index += 1) {
-      value[`key${index}_${state.caseIndex}`] = generateDictValue(prop, state, `${path}.${index}`);
+      value[`key${index}_${state.caseIndex}`] = generateDictValue(
+        prop,
+        state,
+        `${path}.${index}`,
+      );
     }
     return prop.isCollection ? [value] : value;
   }
@@ -208,8 +224,10 @@ function generatePropertyValue(prop, state, path) {
     const first = generateType(target, state, `${path}.entry0`);
     const second = generateType(target, state, `${path}.entry1`);
     if (first === undefined || second === undefined) return {};
-    if (first && typeof first === "object" && !Array.isArray(first)) delete first.name;
-    if (second && typeof second === "object" && !Array.isArray(second)) delete second.name;
+    if (first && typeof first === "object" && !Array.isArray(first))
+      delete first.name;
+    if (second && typeof second === "object" && !Array.isArray(second))
+      delete second.name;
     return {
       [`entry${state.caseIndex}`]: first,
       [`entry${state.caseIndex + 1}`]: second,
@@ -223,7 +241,10 @@ function shouldIncludeOptional(prop, state, path) {
   if (!prop.isOptional) return true;
   if (prop.isNamedCollection) return false;
   if (state.depth >= state.maxDepth) return false;
-  return (stableHash(`${state.seed}:${state.caseIndex}:${path}:${prop.name}`) % 3) !== 0;
+  return (
+    stableHash(`${state.seed}:${state.caseIndex}:${path}:${prop.name}`) % 3 !==
+    0
+  );
 }
 
 function generateType(type, parentState, path) {
@@ -241,16 +262,23 @@ function generateType(type, parentState, path) {
 
   const children = type.childTypes ?? [];
   if (type.discriminator && children.length > 0) {
-    const first = children.indexOf(choose(state, children, `${path}:${type.discriminator}`) ?? children[0]);
-    const ordered = [
-      ...children.slice(first),
-      ...children.slice(0, first),
-    ];
+    const first = children.indexOf(
+      choose(state, children, `${path}:${type.discriminator}`) ?? children[0],
+    );
+    const ordered = [...children.slice(first), ...children.slice(0, first)];
     for (const concrete of ordered) {
       const literal = discriminatorLiteral(concrete, type.discriminator);
       const wildcardDiscriminator =
-        literal === "*" ? `vendor-${state.caseIndex}-${stableHash(path) % 997}` : undefined;
-      const payload = generateConcretePayload(type, concrete, state, path, wildcardDiscriminator);
+        literal === "*"
+          ? `vendor-${state.caseIndex}-${stableHash(path) % 997}`
+          : undefined;
+      const payload = generateConcretePayload(
+        type,
+        concrete,
+        state,
+        path,
+        wildcardDiscriminator,
+      );
       if (payload !== undefined) return payload;
     }
     return undefined;
@@ -259,7 +287,13 @@ function generateType(type, parentState, path) {
   return generateConcretePayload(type, type, state, path);
 }
 
-function generateConcretePayload(type, concrete, state, path, wildcardDiscriminator) {
+function generateConcretePayload(
+  type,
+  concrete,
+  state,
+  path,
+  wildcardDiscriminator,
+) {
   const payload = {};
   const properties = new Map();
   for (const prop of type.properties ?? []) properties.set(prop.name, prop);
@@ -282,11 +316,13 @@ function generateConcretePayload(type, concrete, state, path, wildcardDiscrimina
 
 function filterCases(cases, onlyCase) {
   if (!onlyCase) return cases;
-  return cases.filter((entry) =>
-    entry.id === onlyCase ||
-    entry.caseId === onlyCase ||
-    String(entry.caseIndex) === String(onlyCase) ||
-    String(entry.caseIndex).padStart(3, "0") === String(onlyCase).replace(/^case-/, ""),
+  return cases.filter(
+    (entry) =>
+      entry.id === onlyCase ||
+      entry.caseId === onlyCase ||
+      String(entry.caseIndex) === String(onlyCase) ||
+      String(entry.caseIndex).padStart(3, "0") ===
+        String(onlyCase).replace(/^case-/, ""),
   );
 }
 
@@ -305,15 +341,19 @@ export function buildPropertyCorpus(modelJson, options = {}) {
   for (let caseIndex = 0; caseIndex < caseCount; caseIndex += 1) {
     const caseId = `case-${String(caseIndex).padStart(3, "0")}`;
     const random = mulberry32((seed ^ stableHash(caseId)) >>> 0);
-    const input = generateType(root, {
-      seed,
-      caseIndex,
-      random,
-      maxDepth,
-      depth: 0,
-      seen: new Map(),
-      types,
-    }, rootType);
+    const input = generateType(
+      root,
+      {
+        seed,
+        caseIndex,
+        random,
+        maxDepth,
+        depth: 0,
+        seen: new Map(),
+        types,
+      },
+      rootType,
+    );
     cases.push({
       id: `${rootType.toLowerCase()}-${asHex(seed)}-${caseId}`,
       seed: asHex(seed),
@@ -329,22 +369,34 @@ export function buildPropertyCorpus(modelJson, options = {}) {
 function firstDifference(left, right, path = "$") {
   if (Object.is(left, right)) return undefined;
   if (Array.isArray(left) || Array.isArray(right)) {
-    if (!Array.isArray(left) || !Array.isArray(right)) return { path, left, right };
+    if (!Array.isArray(left) || !Array.isArray(right))
+      return { path, left, right };
     const length = Math.max(left.length, right.length);
     for (let index = 0; index < length; index += 1) {
-      if (index >= left.length || index >= right.length) return { path: `${path}[${index}]`, left: left[index], right: right[index] };
-      const nested = firstDifference(left[index], right[index], `${path}[${index}]`);
+      if (index >= left.length || index >= right.length)
+        return {
+          path: `${path}[${index}]`,
+          left: left[index],
+          right: right[index],
+        };
+      const nested = firstDifference(
+        left[index],
+        right[index],
+        `${path}[${index}]`,
+      );
       if (nested) return nested;
     }
     return undefined;
   }
-  if (
-    left && typeof left === "object" &&
-    right && typeof right === "object"
-  ) {
-    const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
+  if (left && typeof left === "object" && right && typeof right === "object") {
+    const keys = [
+      ...new Set([...Object.keys(left), ...Object.keys(right)]),
+    ].sort();
     for (const key of keys) {
-      if (!Object.prototype.hasOwnProperty.call(left, key) || !Object.prototype.hasOwnProperty.call(right, key)) {
+      if (
+        !Object.prototype.hasOwnProperty.call(left, key) ||
+        !Object.prototype.hasOwnProperty.call(right, key)
+      ) {
         return { path: `${path}.${key}`, left: left[key], right: right[key] };
       }
       const nested = firstDifference(left[key], right[key], `${path}.${key}`);
@@ -356,7 +408,9 @@ function firstDifference(left, right, path = "$") {
 }
 
 export function shrinkPropertyDifference(expected, actual) {
-  const expectedCases = new Map((expected?.propertyCases ?? []).map((entry) => [entry.id, entry]));
+  const expectedCases = new Map(
+    (expected?.propertyCases ?? []).map((entry) => [entry.id, entry]),
+  );
   for (const actualCase of actual?.propertyCases ?? []) {
     const expectedCase = expectedCases.get(actualCase.id);
     if (!expectedCase) {
@@ -382,7 +436,11 @@ export function shrinkPropertyDifference(expected, actual) {
     }
   }
   for (const expectedCase of expectedCases.values()) {
-    if (!(actual?.propertyCases ?? []).some((entry) => entry.id === expectedCase.id)) {
+    if (
+      !(actual?.propertyCases ?? []).some(
+        (entry) => entry.id === expectedCase.id,
+      )
+    ) {
       return {
         id: expectedCase.id,
         seed: expectedCase.seed,
@@ -399,7 +457,10 @@ export function shrinkPropertyDifference(expected, actual) {
 export function formatPropertyCaseFailure(expected, actual) {
   const shrunk = shrinkPropertyDifference(expected, actual);
   if (!shrunk) return "";
-  const caseIndex = Number.parseInt(String(shrunk.caseId).replace(/^case-/, ""), 10);
+  const caseIndex = Number.parseInt(
+    String(shrunk.caseId).replace(/^case-/, ""),
+    10,
+  );
   const caseCount = Math.max(
     expected?.propertyCases?.length ?? 0,
     Number.isSafeInteger(caseIndex) ? caseIndex + 1 : 0,

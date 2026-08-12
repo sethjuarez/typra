@@ -1,57 +1,98 @@
 import { EmitContext, resolvePath } from "@typespec/compiler";
 import { execFileSync } from "child_process";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import { resolve } from "path";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
-import {
-  BaseTestContext,
-  enumerateTypes,
-  TypeNode,
-} from "../../ir/ast.js";
+import { BaseTestContext, enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { RustExprVisitor } from "./visitor.js";
-import { buildBaseTestContext, rustTestOptions } from "../../testing/test-context.js";
+import {
+  buildBaseTestContext,
+  rustTestOptions,
+} from "../../testing/test-context.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
 import { emitRustFile as emitRustFileDecl } from "./emitter.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
-import { collectProtocolNodes, emitRustProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
+import {
+  collectProtocolNodes,
+  emitRustProtocolScaffolds,
+  shouldEmitCompileOnlyProtocolScaffolds,
+} from "../../protocol-scaffolds.js";
 
 /**
  * Type mapping from TypeSpec scalar types to Rust types.
  * Retained for use by the test template context.
  */
 export const rustTypeMapper: Record<string, string> = {
-  "string": "String",
-  "number": "f64",
-  "array": "Vec<serde_json::Value>",
-  "object": "serde_json::Value",
-  "boolean": "bool",
-  "int64": "i64",
-  "int32": "i32",
-  "float64": "f64",
-  "float32": "f32",
-  "integer": "i64",
-  "float": "f64",
-  "numeric": "f64",
-  "any": "serde_json::Value",
-  "dictionary": "serde_json::Value",
+  string: "String",
+  number: "f64",
+  array: "Vec<serde_json::Value>",
+  object: "serde_json::Value",
+  boolean: "bool",
+  int64: "i64",
+  int32: "i32",
+  float64: "f64",
+  float32: "f32",
+  integer: "i64",
+  float: "f64",
+  numeric: "f64",
+  any: "serde_json::Value",
+  dictionary: "serde_json::Value",
 };
 
 const RUST_KEYWORDS = new Set([
-  "as", "break", "const", "continue", "crate", "else", "enum", "extern",
-  "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod",
-  "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct",
-  "super", "trait", "true", "type", "unsafe", "use", "where", "while",
-  "async", "await", "dyn",
+  "as",
+  "break",
+  "const",
+  "continue",
+  "crate",
+  "else",
+  "enum",
+  "extern",
+  "false",
+  "fn",
+  "for",
+  "if",
+  "impl",
+  "in",
+  "let",
+  "loop",
+  "match",
+  "mod",
+  "move",
+  "mut",
+  "pub",
+  "ref",
+  "return",
+  "self",
+  "Self",
+  "static",
+  "struct",
+  "super",
+  "trait",
+  "true",
+  "type",
+  "unsafe",
+  "use",
+  "where",
+  "while",
+  "async",
+  "await",
+  "dyn",
 ]);
 
 function rustFieldName(name: string): string {
   const snake = toSnakeCase(name);
   return RUST_KEYWORDS.has(snake) ? `r#${snake}` : snake;
 }
-
 
 /**
  * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the
@@ -65,12 +106,13 @@ export const generateRust = async (
   context: EmitContext<TypraEmitterOptions>,
   node: TypeNode,
   emitTarget: EmitTarget,
-  options?: GeneratorOptions
+  options?: GeneratorOptions,
 ): Promise<void> => {
   const allTypes = Array.from(enumerateTypes(node));
   const nodes = filterNodes(allTypes, options);
   const requestedNativeSerialization = emitTarget["native-serialization"];
-  const nativeSerialization = requestedNativeSerialization === "none" ? "none" : "serde";
+  const nativeSerialization =
+    requestedNativeSerialization === "none" ? "none" : "serde";
 
   // Build the expression IR infrastructure for this compilation
   const registry = TypeRegistry.fromTypeGraph(allTypes);
@@ -97,7 +139,12 @@ export const generateRust = async (
 
   // Render context.rs
   const contextContent = emitRustContext("Prompty Context");
-  await emitRustFile(context, 'context.rs', contextContent, emitTarget["output-dir"]);
+  await emitRustFile(
+    context,
+    "context.rs",
+    contextContent,
+    emitTarget["output-dir"],
+  );
 
   // Group root nodes by semantic group folder
   const groupMap = new Map<string, TypeNode[]>();
@@ -116,21 +163,39 @@ export const generateRust = async (
     if (!n.base) {
       const group = n.group || "";
       const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
-      const fileContent = emitRustFileDecl(fileDecl, visitor, polymorphicTypeNames, childToParent, {
-        enumParsing: emitTarget["enum-parsing"] ?? "case-sensitive",
-        cancellationTokenPath: emitTarget["cancellation-token-path"],
-        nativeSerialization,
-      });
-      const fileName = toSnakeCase(n.typeName.name) + '.rs';
-      const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
-      await emitRustFile(context, fileName, fileContent, outDir, emitTarget["output-dir"]);
+      const fileContent = emitRustFileDecl(
+        fileDecl,
+        visitor,
+        polymorphicTypeNames,
+        childToParent,
+        {
+          enumParsing: emitTarget["enum-parsing"] ?? "case-sensitive",
+          cancellationTokenPath: emitTarget["cancellation-token-path"],
+          nativeSerialization,
+        },
+      );
+      const fileName = toSnakeCase(n.typeName.name) + ".rs";
+      const outDir = group
+        ? `${emitTarget["output-dir"]}/${group}`
+        : emitTarget["output-dir"];
+      await emitRustFile(
+        context,
+        fileName,
+        fileContent,
+        outDir,
+        emitTarget["output-dir"],
+      );
 
       if (!groupModuleNames.has(group)) groupModuleNames.set(group, []);
       groupModuleNames.get(group)!.push(toSnakeCase(n.typeName.name));
     }
 
     // Render test file — skip children of polymorphic hierarchies (they're enum variants now) and protocols
-    if (emitTarget["test-dir"] && !childToParent.has(n.typeName.name) && !n.isProtocol) {
+    if (
+      emitTarget["test-dir"] &&
+      !childToParent.has(n.typeName.name) &&
+      !n.isProtocol
+    ) {
       const importPath = emitTarget["import-path"] || "crate";
       const testContext = buildTestContext(n, registry);
       const isPolymorphicBase = !!(n.discriminator && n.childTypes.length > 0);
@@ -140,23 +205,43 @@ export const generateRust = async (
         isPolymorphicBase,
         nativeSerialization,
       });
-      const testFileName = toSnakeCase(n.typeName.name) + '_test.rs';
+      const testFileName = toSnakeCase(n.typeName.name) + "_test.rs";
       const testGroup = n.group || "";
-      const testDir = testGroup ? `${emitTarget["test-dir"]}/${testGroup}` : emitTarget["test-dir"];
-      await emitRustFile(context, testFileName, testContent, testDir, emitTarget["test-dir"]);
-      if (!testGroupModuleNames.has(testGroup)) testGroupModuleNames.set(testGroup, []);
-      testGroupModuleNames.get(testGroup)!.push(toSnakeCase(n.typeName.name) + '_test');
+      const testDir = testGroup
+        ? `${emitTarget["test-dir"]}/${testGroup}`
+        : emitTarget["test-dir"];
+      await emitRustFile(
+        context,
+        testFileName,
+        testContent,
+        testDir,
+        emitTarget["test-dir"],
+      );
+      if (!testGroupModuleNames.has(testGroup))
+        testGroupModuleNames.set(testGroup, []);
+      testGroupModuleNames
+        .get(testGroup)!
+        .push(toSnakeCase(n.typeName.name) + "_test");
     }
   }
 
-  if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
+  if (
+    emitTarget["test-dir"] &&
+    shouldEmitCompileOnlyProtocolScaffolds(emitTarget)
+  ) {
     const importPath = emitTarget["import-path"] || "crate";
     const scaffoldContent = emitRustProtocolScaffolds(
       collectProtocolNodes(nodes),
       importPath,
       emitTarget["cancellation-token-path"],
     );
-    await emitRustFile(context, "protocol_scaffolds_test.rs", scaffoldContent, emitTarget["test-dir"], emitTarget["test-dir"]);
+    await emitRustFile(
+      context,
+      "protocol_scaffolds_test.rs",
+      scaffoldContent,
+      emitTarget["test-dir"],
+      emitTarget["test-dir"],
+    );
     if (!testGroupModuleNames.has("")) testGroupModuleNames.set("", []);
     testGroupModuleNames.get("")!.push("protocol_scaffolds_test");
   }
@@ -165,7 +250,13 @@ export const generateRust = async (
   for (const [group, modules] of groupModuleNames) {
     if (!group) continue; // Root-level types handled in root mod.rs
     const groupModContent = emitRustGroupMod(modules);
-    await emitRustFile(context, 'mod.rs', groupModContent, `${emitTarget["output-dir"]}/${group}`, emitTarget["output-dir"]);
+    await emitRustFile(
+      context,
+      "mod.rs",
+      groupModContent,
+      `${emitTarget["output-dir"]}/${group}`,
+      emitTarget["output-dir"],
+    );
   }
 
   // Render test group mod.rs files and test main.rs
@@ -174,25 +265,40 @@ export const generateRust = async (
     const testGroups: string[] = [];
     for (const [group, testMods] of testGroupModuleNames) {
       if (group) {
-        const groupModContent = '// Code generated by Typra emitter; DO NOT EDIT.\n\n#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, clippy::all)]\n\n'
-          + testMods.map(m => `mod ${m};`).join('\n') + '\n';
-        await emitRustFile(context, 'mod.rs', groupModContent, `${emitTarget["test-dir"]}/${group}`, emitTarget["test-dir"]);
+        const groupModContent =
+          "// Code generated by Typra emitter; DO NOT EDIT.\n\n#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, clippy::all)]\n\n" +
+          testMods.map((m) => `mod ${m};`).join("\n") +
+          "\n";
+        await emitRustFile(
+          context,
+          "mod.rs",
+          groupModContent,
+          `${emitTarget["test-dir"]}/${group}`,
+          emitTarget["test-dir"],
+        );
         testGroups.push(group);
       }
     }
     // Emit root-level test files (no group)
     const rootTestMods = testGroupModuleNames.get("") || [];
-    const allTopLevel = [...rootTestMods.map(m => `mod ${m};`), ...testGroups.sort().map(g => `mod ${g};`)];
-    const mainContent = '// Code generated by Typra emitter; DO NOT EDIT.\n\n#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, clippy::all)]\n\n'
-      + allTopLevel.join('\n') + '\n';
-    await emitRustFile(context, 'main.rs', mainContent, emitTarget["test-dir"]);
+    const allTopLevel = [
+      ...rootTestMods.map((m) => `mod ${m};`),
+      ...testGroups.sort().map((g) => `mod ${g};`),
+    ];
+    const mainContent =
+      "// Code generated by Typra emitter; DO NOT EDIT.\n\n#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, clippy::all)]\n\n" +
+      allTopLevel.join("\n") +
+      "\n";
+    await emitRustFile(context, "main.rs", mainContent, emitTarget["test-dir"]);
   }
 
   // Render root mod.rs
   const rootModules = groupModuleNames.get("") || [];
-  const groups = Array.from(groupModuleNames.keys()).filter(g => g !== "").sort();
-  const libContent = emitRustLib(['context', ...rootModules], groups);
-  await emitRustFile(context, 'mod.rs', libContent, emitTarget["output-dir"]);
+  const groups = Array.from(groupModuleNames.keys())
+    .filter((g) => g !== "")
+    .sort();
+  const libContent = emitRustLib(["context", ...rootModules], groups);
+  await emitRustFile(context, "mod.rs", libContent, emitTarget["output-dir"]);
 
   // Format emitted files
   if (emitTarget.format !== false) {
@@ -208,14 +314,14 @@ export const generateRust = async (
  */
 function formatRustFiles(outputDir: string): void {
   // Run cargo fmt if Cargo.toml exists in parent
-  const cargoToml = resolve(outputDir, '../Cargo.toml');
+  const cargoToml = resolve(outputDir, "../Cargo.toml");
   if (existsSync(cargoToml)) {
     try {
       execFileSync("cargo", ["fmt", "--manifest-path", cargoToml], {
-        stdio: 'pipe',
-        encoding: 'utf-8'
+        stdio: "pipe",
+        encoding: "utf-8",
       });
-      normalizeRustFileEndings(resolve(outputDir, '..'));
+      normalizeRustFileEndings(resolve(outputDir, ".."));
     } catch (error) {
       console.warn(`Warning: cargo fmt failed. You may need to install Rust.`);
     }
@@ -241,8 +347,13 @@ function normalizeRustFileEndings(dir: string): void {
 /**
  * Build context for rendering a test file.
  */
-function buildTestContext(node: TypeNode, registry: TypeRegistry): BaseTestContext {
-  return buildBaseTestContext(node, undefined, rustTestOptions, name => registry.get(name));
+function buildTestContext(
+  node: TypeNode,
+  registry: TypeRegistry,
+): BaseTestContext {
+  return buildBaseTestContext(node, undefined, rustTestOptions, (name) =>
+    registry.get(name),
+  );
 }
 
 /**
@@ -257,7 +368,9 @@ async function emitRustFile(
 ): Promise<void> {
   outputDir = outputDir || `${context.emitterOutputDir}/rust`;
   const filePath = resolvePath(outputDir, filename);
-  await emitGeneratedFile(context, filePath, `${content.trimEnd()}\n`, { outputRoot: outputRoot || outputDir });
+  await emitGeneratedFile(context, filePath, `${content.trimEnd()}\n`, {
+    outputRoot: outputRoot || outputDir,
+  });
 }
 
 /**
@@ -445,8 +558,12 @@ impl SaveContext {
  * @param rootModules - Module names emitted directly in the root (e.g. ["context"])
  * @param groups - Group subfolder names (e.g. ["connection", "tools"])
  */
-export function emitRustLib(rootModules: string[], groups: string[] = []): string {
-  let out = '// Code generated by Typra emitter; DO NOT EDIT.\n\n#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, clippy::all)]\n';
+export function emitRustLib(
+  rootModules: string[],
+  groups: string[] = [],
+): string {
+  let out =
+    "// Code generated by Typra emitter; DO NOT EDIT.\n\n#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, clippy::all)]\n";
   for (const module of rootModules) {
     out += `\npub mod ${module};\npub use ${module}::*;\n`;
   }
@@ -460,7 +577,8 @@ export function emitRustLib(rootModules: string[], groups: string[] = []): strin
  * Emit a per-group mod.rs file that declares and re-exports all modules in that group.
  */
 export function emitRustGroupMod(moduleNames: string[]): string {
-  let out = '// Code generated by Typra emitter; DO NOT EDIT.\n\n#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, clippy::all)]\n';
+  let out =
+    "// Code generated by Typra emitter; DO NOT EDIT.\n\n#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, clippy::all)]\n";
   for (const module of moduleNames) {
     out += `\npub mod ${module};\npub use ${module}::*;\n`;
   }
@@ -472,26 +590,48 @@ export function emitRustGroupMod(moduleNames: string[]): string {
  */
 function factoryParamTestValue(typeStr: string): string {
   switch (typeStr) {
-    case "string": return '"test".to_string()';
-    case "boolean": return "true";
+    case "string":
+      return '"test".to_string()';
+    case "boolean":
+      return "true";
     case "integer":
-    case "int32": return "42";
-    case "int64": return "42i64";
+    case "int32":
+      return "42";
+    case "int64":
+      return "42i64";
     case "float":
-    case "float64": return "3.14";
-    case "unknown": return 'serde_json::json!("test")';
-    default: return 'serde_json::json!("test")';
+    case "float64":
+      return "3.14";
+    case "unknown":
+      return 'serde_json::json!("test")';
+    default:
+      return 'serde_json::json!("test")';
   }
 }
 
-function rustAssertionValue(node: TypeNode, key: string, value: unknown, delimiter: string): string {
-  if (delimiter !== "" || typeof value !== "number" || !Number.isInteger(value)) {
+function rustAssertionValue(
+  node: TypeNode,
+  key: string,
+  value: unknown,
+  delimiter: string,
+): string {
+  if (
+    delimiter !== "" ||
+    typeof value !== "number" ||
+    !Number.isInteger(value)
+  ) {
     return `${delimiter}${value}${delimiter}`;
   }
 
-  const prop = node.properties.find(p => rustFieldName(p.name) === key);
+  const prop = node.properties.find((p) => rustFieldName(p.name) === key);
   const scalar = prop?.typeName.name;
-  if (scalar === "float" || scalar === "float32" || scalar === "float64" || scalar === "number" || scalar === "numeric") {
+  if (
+    scalar === "float" ||
+    scalar === "float32" ||
+    scalar === "float64" ||
+    scalar === "number" ||
+    scalar === "numeric"
+  ) {
     return `${value}.0`;
   }
 
@@ -514,7 +654,9 @@ function hasNonIntegerNumber(v: unknown): boolean {
   if (typeof v === "number") return !Number.isInteger(v);
   if (Array.isArray(v)) return v.some(hasNonIntegerNumber);
   if (v && typeof v === "object") {
-    return Object.values(v as Record<string, unknown>).some(hasNonIntegerNumber);
+    return Object.values(v as Record<string, unknown>).some(
+      hasNonIntegerNumber,
+    );
   }
   return false;
 }
@@ -523,10 +665,19 @@ function hasNonIntegerNumber(v: unknown): boolean {
  * Emit an integration test file for a TypeSpec model type.
  */
 export function emitRustTest(ctx: RustTestContext): string {
-  const { node, isAbstract, examples, coercions, factories, importPath, isPolymorphicBase, nativeSerialization } = ctx;
+  const {
+    node,
+    isAbstract,
+    examples,
+    coercions,
+    factories,
+    importPath,
+    isPolymorphicBase,
+    nativeSerialization,
+  } = ctx;
   const typeName = node.typeName.name;
   const snakeName = toSnakeCase(typeName);
-  let out = '';
+  let out = "";
 
   // Collect enum types referenced in properties (for use imports)
   const enumImports = new Set<string>();
@@ -536,10 +687,11 @@ export function emitRustTest(ctx: RustTestContext): string {
     }
   }
 
-  out += '// Code generated by Typra emitter; DO NOT EDIT.\n';
-  out += '\n';
-  out += '#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, clippy::all)]\n';
-  out += '\n';
+  out += "// Code generated by Typra emitter; DO NOT EDIT.\n";
+  out += "\n";
+  out +=
+    "#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, clippy::all)]\n";
+  out += "\n";
   out += `use ${importPath}::${typeName};\n`;
   for (const enumName of [...enumImports].sort()) {
     if (enumName !== typeName) {
@@ -547,26 +699,27 @@ export function emitRustTest(ctx: RustTestContext): string {
     }
   }
   out += `use ${importPath}::context::{LoadContext, SaveContext};\n`;
-  out += '\n';
+  out += "\n";
 
   // Example tests (load JSON, load YAML, roundtrip)
   for (let i = 0; i < examples.length; i++) {
     const sample = examples[i];
-    const suffix = i === 0 ? '' : `_${i}`;
+    const suffix = i === 0 ? "" : `_${i}`;
 
     // JSON load test
-    out += '#[test]\n';
+    out += "#[test]\n";
     out += `fn test_${snakeName}_load_json${suffix}() {\n`;
     out += '    let json = r####"\n';
     for (const line of sample.json) {
       out += `${line}\n`;
     }
     out += '"####;\n';
-    out += '    let ctx = LoadContext::default();\n';
+    out += "    let ctx = LoadContext::default();\n";
     out += `    let result = ${typeName}::from_json(json, &ctx);\n`;
-    out += '    assert!(result.is_ok(), "Failed to load from JSON: {:?}", result.err());\n';
+    out +=
+      '    assert!(result.is_ok(), "Failed to load from JSON: {:?}", result.err());\n';
     if (!isAbstract) {
-      out += '    let instance = result.unwrap();\n';
+      out += "    let instance = result.unwrap();\n";
       if (sample.validations.length > 0) {
         for (const v of sample.validations) {
           if (v.isOptional) {
@@ -579,25 +732,27 @@ export function emitRustTest(ctx: RustTestContext): string {
           }
         }
       } else {
-        out += '    let _ = instance; // load succeeded, no scalar properties to validate\n';
+        out +=
+          "    let _ = instance; // load succeeded, no scalar properties to validate\n";
       }
     }
-    out += '}\n';
-    out += '\n';
+    out += "}\n";
+    out += "\n";
 
     // YAML load test
-    out += '#[test]\n';
+    out += "#[test]\n";
     out += `fn test_${snakeName}_load_yaml${suffix}() {\n`;
     out += '    let yaml = r####"\n';
     for (const line of sample.yaml) {
       out += `${line}\n`;
     }
     out += '"####;\n';
-    out += '    let ctx = LoadContext::default();\n';
+    out += "    let ctx = LoadContext::default();\n";
     out += `    let result = ${typeName}::from_yaml(yaml, &ctx);\n`;
-    out += '    assert!(result.is_ok(), "Failed to load from YAML: {:?}", result.err());\n';
+    out +=
+      '    assert!(result.is_ok(), "Failed to load from YAML: {:?}", result.err());\n';
     if (!isAbstract) {
-      out += '    let instance = result.unwrap();\n';
+      out += "    let instance = result.unwrap();\n";
       if (sample.validations.length > 0) {
         for (const v of sample.validations) {
           if (v.isOptional) {
@@ -609,31 +764,34 @@ export function emitRustTest(ctx: RustTestContext): string {
           }
         }
       } else {
-        out += '    let _ = instance; // load succeeded, no scalar properties to validate\n';
+        out +=
+          "    let _ = instance; // load succeeded, no scalar properties to validate\n";
       }
     }
-    out += '}\n';
-    out += '\n';
+    out += "}\n";
+    out += "\n";
 
     // Roundtrip test
-    out += '#[test]\n';
+    out += "#[test]\n";
     out += `fn test_${snakeName}_roundtrip${suffix}() {\n`;
     out += '    let json = r####"\n';
     for (const line of sample.json) {
       out += `${line}\n`;
     }
     out += '"####;\n';
-    out += '    let load_ctx = LoadContext::default();\n';
+    out += "    let load_ctx = LoadContext::default();\n";
     out += `    let result = ${typeName}::from_json(json, &load_ctx);\n`;
-    out += '    assert!(result.is_ok(), "Failed to load: {:?}", result.err());\n';
+    out +=
+      '    assert!(result.is_ok(), "Failed to load: {:?}", result.err());\n';
     if (!isAbstract) {
-      out += '    let instance = result.unwrap();\n';
-      out += '    let save_ctx = SaveContext::default();\n';
-      out += '    let json_output = instance.to_json(&save_ctx);\n';
-      out += '    assert!(json_output.is_ok(), "Failed to serialize to JSON: {:?}", json_output.err());\n';
+      out += "    let instance = result.unwrap();\n";
+      out += "    let save_ctx = SaveContext::default();\n";
+      out += "    let json_output = instance.to_json(&save_ctx);\n";
+      out +=
+        '    assert!(json_output.is_ok(), "Failed to serialize to JSON: {:?}", json_output.err());\n';
     }
-    out += '}\n';
-    out += '\n';
+    out += "}\n";
+    out += "\n";
 
     // Serde round-trip test: deserialize EXTERNAL canonical JSON via serde,
     // re-serialize via serde, and deserialize again — proving Serialize +
@@ -643,7 +801,7 @@ export function emitRustTest(ctx: RustTestContext): string {
     // discriminated values (e.g. `{"kind":"text",...}`).
     if (!isAbstract && nativeSerialization !== "none") {
       out += '#[cfg(feature = "serde")]\n';
-      out += '#[test]\n';
+      out += "#[test]\n";
       out += `fn test_${snakeName}_serde_roundtrip${suffix}() {\n`;
       out += '    let json = r####"\n';
       for (const line of sample.json) {
@@ -652,14 +810,15 @@ export function emitRustTest(ctx: RustTestContext): string {
       out += '"####;\n';
       out += `    let instance: ${typeName} = serde_json::from_str(json)\n`;
       out += '        .expect("serde should deserialize canonical JSON");\n';
-      out += '    let value = serde_json::to_value(&instance)\n';
+      out += "    let value = serde_json::to_value(&instance)\n";
       out += '        .expect("serde should serialize");\n';
       // Parse the ORIGINAL canonical (internally-tagged) JSON so we can assert the
       // serde-re-serialized polymorphic sub-values are byte-identical to it — this is
       // the acceptance gate: it proves serde produces canonical internally-tagged wire
       // (`{"kind":"text",...}`), NOT the externally-tagged derive form
       // (`{"kind":{"TextContent":{...}}}`), with empty-omission preserved.
-      out += '    let canonical: serde_json::Value = serde_json::from_str(json)\n';
+      out +=
+        "    let canonical: serde_json::Value = serde_json::from_str(json)\n";
       out += '        .expect("canonical json parses");\n';
       // Delegation-equivalence (ALWAYS): the uniform manual serde impls route Serialize
       // through `to_value` and Deserialize through `load_from_value`, so serde output/input
@@ -668,7 +827,8 @@ export function emitRustTest(ctx: RustTestContext): string {
       // This is the sample-agnostic invariant that holds for arbitrary consumer models
       // (whose `@sample` annotates only some fields); the byte-identity assertions below are
       // ADDITIONALLY emitted only for complete, byte-safe samples (typra's own fixtures).
-      out += '    assert_eq!(value, instance.to_value(&SaveContext::default()), "serde serialize must equal canonical to_value");\n';
+      out +=
+        '    assert_eq!(value, instance.to_value(&SaveContext::default()), "serde serialize must equal canonical to_value");\n';
       out += `    assert_eq!(instance, ${typeName}::load_from_value(&canonical, &LoadContext::default()), "serde deserialize must equal canonical load_from_value");\n`;
       // A whole-object/nested byte-identity assertion against the `@sample` JSON is only
       // valid when the sample is a canonical fixed point: every REQUIRED field is present
@@ -677,7 +837,13 @@ export function emitRustTest(ctx: RustTestContext): string {
       // `12.0`, which serde_json::Value compares unequal). Consumer models annotate partial
       // samples and must fall back to the delegation-equivalence above; typra's own fixtures
       // author complete samples and keep the stronger byte-identity checks.
-      const floatScalarNames = new Set(["float", "float32", "float64", "number", "numeric"]);
+      const floatScalarNames = new Set([
+        "float",
+        "float32",
+        "float64",
+        "number",
+        "numeric",
+      ]);
       const isByteSafeSample = (
         tn: TypeNode | undefined,
         sv: unknown,
@@ -695,7 +861,8 @@ export function emitRustTest(ctx: RustTestContext): string {
             // default (materialized on load, so present on save even when the `@sample`
             // omits it, e.g. prompty's `status`/`contextState`) — must be present in the
             // sample for whole-object byte-identity vs that sample to be valid.
-            if ((!p.isOptional || p.hasExplicitDefault) && !(p.name in obj)) return false;
+            if ((!p.isOptional || p.hasExplicitDefault) && !(p.name in obj))
+              return false;
             const pv = obj[p.name];
             // Cause D (mirror image of the above): a REQUIRED field authored in the sample
             // at its zero/empty value is OMITTED by to_value — required string == "", int
@@ -705,9 +872,22 @@ export function emitRustTest(ctx: RustTestContext): string {
             // `errors:[]`, turn_model_request `iteration:0`). Optional fields authored at zero
             // ARE emitted (`Some(0)`), so this only applies to required (non-`?`) fields.
             if (!p.isOptional && p.name in obj) {
-              if (p.isCollection && Array.isArray(pv) && pv.length === 0) return false;
-              if (p.isScalar && !p.isCollection && typeof pv === "string" && pv === "") return false;
-              if (p.isScalar && !p.isCollection && typeof pv === "number" && pv === 0) return false;
+              if (p.isCollection && Array.isArray(pv) && pv.length === 0)
+                return false;
+              if (
+                p.isScalar &&
+                !p.isCollection &&
+                typeof pv === "string" &&
+                pv === ""
+              )
+                return false;
+              if (
+                p.isScalar &&
+                !p.isCollection &&
+                typeof pv === "number" &&
+                pv === 0
+              )
+                return false;
             }
             if (
               p.isScalar &&
@@ -732,7 +912,9 @@ export function emitRustTest(ctx: RustTestContext): string {
         }
       };
       const byteSafeSample = isByteSafeSample(node, sample.sample, new Set());
-      const kindV = sample.validations.find(v => v.key === "kind" && !v.isOptional);
+      const kindV = sample.validations.find(
+        (v) => v.key === "kind" && !v.isOptional,
+      );
       if (isPolymorphicBase && kindV) {
         out += `    assert_eq!(value.get("kind").and_then(|v| v.as_str()), Some(${rustAssertionValue(node, "kind", kindV.value, kindV.delimiter)}), "discriminator must round-trip to its canonical wire value");\n`;
         // A directly-sampled polymorphic type must re-serialize byte-identical to its
@@ -740,7 +922,8 @@ export function emitRustTest(ctx: RustTestContext): string {
         // (complete + no int/float ambiguity). Partial consumer samples rely on the
         // delegation-equivalence assertions above instead.
         if (byteSafeSample) {
-          out += '    assert_eq!(value, canonical, "polymorphic type must re-serialize to byte-identical canonical internally-tagged JSON");\n';
+          out +=
+            '    assert_eq!(value, canonical, "polymorphic type must re-serialize to byte-identical canonical internally-tagged JSON");\n';
         }
       }
       // Nested discriminated-union canonicity (discriminator string + exact sub-value
@@ -754,8 +937,9 @@ export function emitRustTest(ctx: RustTestContext): string {
       // Only Record<T>|Named<T>[] explicitly opts into keyed-map wire semantics.
       // A regular list whose element happens to have a `name` field must remain an
       // ordered array so duplicate names are not collapsed.
-      const isKeyedCollection = (prop: TypeNode["properties"][number]): boolean =>
-        prop.isCollection && prop.isNamedCollection;
+      const isKeyedCollection = (
+        prop: TypeNode["properties"][number],
+      ): boolean => prop.isCollection && prop.isNamedCollection;
       // Keyed-collection canonicalization for the explicit property-bag pattern
       // (e.g. prompty's `inputs`/`outputs`/`parameters`, declared as the union
       // `Record<T> | Named<T>[]`) that a plain
@@ -772,7 +956,7 @@ export function emitRustTest(ctx: RustTestContext): string {
         let keys: string[] = [];
         if (Array.isArray(sampleVal)) {
           keys = sampleVal
-            .map(e =>
+            .map((e) =>
               e && typeof e === "object"
                 ? (e as Record<string, unknown>).name
                 : undefined,
@@ -811,22 +995,28 @@ export function emitRustTest(ctx: RustTestContext): string {
             }
             if (sv === undefined || sv === null) continue;
             const isPrimitive =
-              typeof sv === "string" || typeof sv === "number" || typeof sv === "boolean";
-            const isComplexModel = !prop.isScalar && !prop.isCollection && !prop.enumName;
+              typeof sv === "string" ||
+              typeof sv === "number" ||
+              typeof sv === "boolean";
+            const isComplexModel =
+              !prop.isScalar && !prop.isCollection && !prop.enumName;
             if (isPrimitive && isComplexModel) {
               byteStable = false;
               break;
             }
           }
         }
-        const hasFloat = sample.sample ? hasNonIntegerNumber(sample.sample) : false;
+        const hasFloat = sample.sample
+          ? hasNonIntegerNumber(sample.sample)
+          : false;
         if (byteStable && !hasFloat && byteSafeSample) {
           out += `    assert_eq!(value, canonical, "serde must serialize to byte-identical canonical wire (empty-omission preserved; no plain-derive divergence)");\n`;
         }
       }
       out += `    let reparsed: ${typeName} = serde_json::from_value(value)\n`;
       out += '        .expect("serde should re-deserialize");\n';
-      out += '    assert_eq!(instance, reparsed, "serde round-trip must be stable");\n';
+      out +=
+        '    assert_eq!(instance, reparsed, "serde round-trip must be stable");\n';
       // Synthesized MAP-form input regression (Rust-only). The canonical wire form of a
       // keyed collection (property bag) is a name-keyed MAP, but a fixture may author its
       // `@sample` in ARRAY shorthand so the shared cross-language gate (incl. Swift, which
@@ -870,28 +1060,31 @@ export function emitRustTest(ctx: RustTestContext): string {
           }
           out += '"####;\n';
           out += `    let from_map: ${typeName} = serde_json::from_str(map_json)\n`;
-          out += '        .expect("serde must deserialize the canonical name-keyed MAP form (a plain Vec derive fails here with \\"invalid type: map, expected a sequence\\")");\n';
-          out += '    assert_eq!(from_map, instance, "map-form and array-form inputs must load to equal instances");\n';
-          out += '    let map_value = serde_json::to_value(&from_map)\n';
-          out += '        .expect("serde should serialize the map-loaded instance");\n';
+          out +=
+            '        .expect("serde must deserialize the canonical name-keyed MAP form (a plain Vec derive fails here with \\"invalid type: map, expected a sequence\\")");\n';
+          out +=
+            '    assert_eq!(from_map, instance, "map-form and array-form inputs must load to equal instances");\n';
+          out += "    let map_value = serde_json::to_value(&from_map)\n";
+          out +=
+            '        .expect("serde should serialize the map-loaded instance");\n';
           for (const name of keyedMapProps) {
             out += `    assert!(map_value.get(${JSON.stringify(name)}).map(|v| v.is_object()).unwrap_or(false), "keyed collection loaded from a MAP must re-serialize to the canonical name-keyed map");\n`;
           }
         }
       }
-      out += '}\n';
-      out += '\n';
+      out += "}\n";
+      out += "\n";
     }
   }
   // Coercion tests
   for (let i = 0; i < coercions.length; i++) {
     const alt = coercions[i];
-    const suffix = i === 0 ? '' : `_${i + 1}`;
+    const suffix = i === 0 ? "" : `_${i + 1}`;
 
-    out += '#[test]\n';
+    out += "#[test]\n";
     out += `fn test_${snakeName}_from_${alt.title.toLowerCase()}${suffix}() {\n`;
     out += `    let value = serde_json::json!(${alt.value});\n`;
-    out += '    let ctx = LoadContext::default();\n';
+    out += "    let ctx = LoadContext::default();\n";
     out += `    let instance = ${typeName}::load_from_value(&value, &ctx);\n`;
     if (!isAbstract) {
       if (alt.validations.length > 0) {
@@ -905,24 +1098,28 @@ export function emitRustTest(ctx: RustTestContext): string {
           }
         }
       } else {
-        out += '    let _ = instance; // load succeeded, no scalar properties to validate\n';
+        out +=
+          "    let _ = instance; // load succeeded, no scalar properties to validate\n";
       }
     } else {
-      out += '    let saved = instance.to_value(&SaveContext::default());\n';
+      out += "    let saved = instance.to_value(&SaveContext::default());\n";
       out += `    let reloaded = ${typeName}::load_from_value(&saved, &ctx);\n`;
-      out += '    assert_eq!(reloaded, instance, "scalar-coerced abstract models must survive save/reload");\n';
+      out +=
+        '    assert_eq!(reloaded, instance, "scalar-coerced abstract models must survive save/reload");\n';
     }
-    out += '}\n';
-    out += '\n';
+    out += "}\n";
+    out += "\n";
   }
 
   // Factory tests
   for (const factory of factories) {
     const factorySnake = toSnakeCase(factory.name);
     const paramEntries = Object.entries(factory.params);
-    const paramValues = paramEntries.map(([, pType]) => factoryParamTestValue(pType)).join(', ');
+    const paramValues = paramEntries
+      .map(([, pType]) => factoryParamTestValue(pType))
+      .join(", ");
 
-    out += '#[test]\n';
+    out += "#[test]\n";
     out += `fn test_${snakeName}_factory_${factorySnake}() {\n`;
     out += `    let instance = ${typeName}::${factorySnake}(${paramValues});\n`;
 
@@ -935,14 +1132,14 @@ export function emitRustTest(ctx: RustTestContext): string {
     }
 
     for (const [pName] of paramEntries) {
-      const prop = node.properties.find(p => p.name === pName);
+      const prop = node.properties.find((p) => p.name === pName);
       if (prop && prop.isOptional) {
         out += `    assert!(instance.${toSnakeCase(pName)}.is_some());\n`;
       }
     }
 
-    out += '}\n';
-    out += '\n';
+    out += "}\n";
+    out += "\n";
   }
 
   return out;

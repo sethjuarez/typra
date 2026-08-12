@@ -15,7 +15,11 @@
  *   - Factory methods
  */
 
-import { PropertyValidation, PythonClassContext, BaseTestContext } from "../../ir/ast.js";
+import {
+  PropertyValidation,
+  PythonClassContext,
+  BaseTestContext,
+} from "../../ir/ast.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 
 // ============================================================================
@@ -28,16 +32,21 @@ import { toSnakeCase } from "../../ir/utilities.js";
  */
 function factoryParamTestValue(typeStr: string): string {
   switch (typeStr) {
-    case "string": return '"test"';
-    case "boolean": return "True";
+    case "string":
+      return '"test"';
+    case "boolean":
+      return "True";
     case "integer":
     case "int32":
-    case "int64": return "42";
+    case "int64":
+      return "42";
     case "float":
     case "float64":
-    case "float32": return "3.14";
+    case "float32":
+      return "3.14";
     case "unknown":
-    default: return '"test"';
+    default:
+      return '"test"';
   }
 }
 
@@ -65,11 +74,12 @@ function renderValidation(v: PropertyValidation, varName: string): string {
   } else if (v.value === "False") {
     return `    assert not ${varName}.${v.key}`;
   } else {
-    const expected = typeof v.value === "string" && /[\r\n\t]/.test(v.value)
-      ? `"${v.value.replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t")}"`
-      : v.delimiter === ""
-        ? pythonScalarLiteral(v.value)
-        : `${v.delimiter}${v.value}${v.delimiter}`;
+    const expected =
+      typeof v.value === "string" && /[\r\n\t]/.test(v.value)
+        ? `"${v.value.replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t")}"`
+        : v.delimiter === ""
+          ? pythonScalarLiteral(v.value)
+          : `${v.delimiter}${v.value}${v.delimiter}`;
     return `    assert ${varName}.${v.key} == ${expected}`;
   }
 }
@@ -82,8 +92,11 @@ function renderValidation(v: PropertyValidation, varName: string): string {
  * Emit the test_context.py file content (tests for LoadContext + SaveContext).
  * Replaces test_context.py.njk template.
  */
-export function emitPythonTestContext(header: string, packageName: string): string {
-  const headerLine = header ? `# ${header}\n` : '';
+export function emitPythonTestContext(
+  header: string,
+  packageName: string,
+): string {
+  const headerLine = header ? `# ${header}\n` : "";
   return `${headerLine}from ${packageName}._context import LoadContext, SaveContext
 
 
@@ -289,30 +302,38 @@ export function emitPythonTest(
   options: PythonTestEmitterOptions = {},
 ): string {
   const { node, examples, coercions, factories, classCtx } = ctx;
-  if (examples.length === 0 && coercions.length === 0 && factories.length === 0) {
+  if (
+    examples.length === 0 &&
+    coercions.length === 0 &&
+    factories.length === 0
+  ) {
     return "";
   }
 
-  const packageName = ctx.package || '';
+  const packageName = ctx.package || "";
   const typeName = node.typeName.name;
   const typeNameLower = typeName.toLowerCase();
   const lines: string[] = [];
 
   // Imports
   if (examples.length > 0) {
-    lines.push('import json');
-    lines.push('import yaml');
-    lines.push('');
+    lines.push("import json");
+    lines.push("import yaml");
+    lines.push("");
   }
   lines.push(`from ${packageName} import ${typeName}`);
-  lines.push('');
+  lines.push("");
 
   // Example tests: load_json, load_yaml, roundtrip_json, to_json, to_yaml
   for (let i = 0; i < examples.length; i++) {
     const sample = examples[i];
-    const suffix = i === 0 ? '' : `_${i}`;
-    const jsonBlock = sample.json.map(line => line.length > 0 ? `    ${line}` : '').join('\n');
-    const yamlBlock = sample.yaml.map(line => line.length > 0 ? `    ${line}` : '').join('\n');
+    const suffix = i === 0 ? "" : `_${i}`;
+    const jsonBlock = sample.json
+      .map((line) => (line.length > 0 ? `    ${line}` : ""))
+      .join("\n");
+    const yamlBlock = sample.yaml
+      .map((line) => (line.length > 0 ? `    ${line}` : ""))
+      .join("\n");
 
     // test_load_json
     lines.push(`def test_load_json_${typeNameLower}${suffix}():`);
@@ -323,9 +344,9 @@ export function emitPythonTest(
     lines.push(`    instance = ${typeName}.load(data)`);
     lines.push(`    assert instance is not None`);
     for (const v of sample.validations) {
-      lines.push(renderValidation(v, 'instance'));
+      lines.push(renderValidation(v, "instance"));
     }
-    lines.push('');
+    lines.push("");
 
     // test_load_yaml
     lines.push(`def test_load_yaml_${typeNameLower}${suffix}():`);
@@ -336,13 +357,15 @@ export function emitPythonTest(
     lines.push(`    instance = ${typeName}.load(data)`);
     lines.push(`    assert instance is not None`);
     for (const v of sample.validations) {
-      lines.push(renderValidation(v, 'instance'));
+      lines.push(renderValidation(v, "instance"));
     }
-    lines.push('');
+    lines.push("");
 
     // test_roundtrip_json
     lines.push(`def test_roundtrip_json_${typeNameLower}${suffix}():`);
-    lines.push(`    """Test that load -> save -> load produces equivalent data."""`);
+    lines.push(
+      `    """Test that load -> save -> load produces equivalent data."""`,
+    );
     lines.push(`    json_data = r'''`);
     lines.push(jsonBlock);
     lines.push(`    '''`);
@@ -351,22 +374,30 @@ export function emitPythonTest(
     lines.push(`    saved_data = instance.save()`);
     if (options.nativeSerialization === "pydantic") {
       lines.push(`    assert instance.model_dump() == saved_data`);
-      lines.push(`    assert json.loads(instance.model_dump_json()) == saved_data`);
-      lines.push(`    assert ${typeName}.model_validate(original_data).save() == saved_data`);
-      lines.push(`    assert ${typeName}.model_validate_json(json_data).save() == saved_data`);
+      lines.push(
+        `    assert json.loads(instance.model_dump_json()) == saved_data`,
+      );
+      lines.push(
+        `    assert ${typeName}.model_validate(original_data).save() == saved_data`,
+      );
+      lines.push(
+        `    assert ${typeName}.model_validate_json(json_data).save() == saved_data`,
+      );
       lines.push(`    try:`);
       lines.push(`        ${typeName}.model_validate_strings(original_data)`);
       lines.push(`    except TypeError as error:`);
       lines.push(`        assert "model_validate_strings" in str(error)`);
       lines.push(`    else:`);
-      lines.push(`        raise AssertionError("model_validate_strings bypassed Typra load")`);
+      lines.push(
+        `        raise AssertionError("model_validate_strings bypassed Typra load")`,
+      );
     }
     lines.push(`    reloaded = ${typeName}.load(saved_data)`);
     lines.push(`    assert reloaded is not None`);
     for (const v of sample.validations) {
-      lines.push(renderValidation(v, 'reloaded'));
+      lines.push(renderValidation(v, "reloaded"));
     }
-    lines.push('');
+    lines.push("");
 
     // test_to_json
     lines.push(`def test_to_json_${typeNameLower}${suffix}():`);
@@ -380,7 +411,7 @@ export function emitPythonTest(
     lines.push(`    assert json_output is not None`);
     lines.push(`    parsed = json.loads(json_output)`);
     lines.push(`    assert isinstance(parsed, dict)`);
-    lines.push('');
+    lines.push("");
 
     // test_to_yaml
     lines.push(`def test_to_yaml_${typeNameLower}${suffix}():`);
@@ -394,19 +425,21 @@ export function emitPythonTest(
     lines.push(`    assert yaml_output is not None`);
     lines.push(`    parsed = yaml.safe_load(yaml_output)`);
     lines.push(`    assert isinstance(parsed, dict)`);
-    lines.push('');
+    lines.push("");
   }
 
   // Coercion tests
   if (coercions.length > 0) {
     for (const alt of coercions) {
       lines.push(`def test_load_${typeNameLower}_from_${alt.scalarType}():`);
-      lines.push(`    instance = ${typeName}.load(${pythonScalarLiteral(alt.value)})`);
+      lines.push(
+        `    instance = ${typeName}.load(${pythonScalarLiteral(alt.value)})`,
+      );
       lines.push(`    assert instance is not None`);
       for (const v of alt.validations) {
-        lines.push(renderValidation(v, 'instance'));
+        lines.push(renderValidation(v, "instance"));
       }
-      lines.push('');
+      lines.push("");
     }
   }
 
@@ -417,7 +450,7 @@ export function emitPythonTest(
       const factorySnake = toSnakeCase(factory.name);
       const params = Object.entries(factory.params)
         .map(([_, pType]) => factoryParamTestValue(pType))
-        .join(', ');
+        .join(", ");
 
       // `sets` values may embed `{param}` placeholders resolved at call time. The generated
       // call passes concrete test values, so the assertions must compare against those
@@ -428,36 +461,44 @@ export function emitPythonTest(
         const rendered = factoryParamTestValue(pType);
         paramLiterals.set(
           pName,
-          rendered.length > 1 && rendered.startsWith('"') && rendered.endsWith('"')
+          rendered.length > 1 &&
+            rendered.startsWith('"') &&
+            rendered.endsWith('"')
             ? rendered.slice(1, -1)
             : rendered,
         );
       }
       const substituteParams = (raw: string): string =>
-        raw.replace(/\{(\w+)\}/g, (match, param) => paramLiterals.get(param) ?? match);
+        raw.replace(
+          /\{(\w+)\}/g,
+          (match, param) => paramLiterals.get(param) ?? match,
+        );
 
       lines.push(`def test_factory_${factorySnake}_${typeNameLower}():`);
-      lines.push(`    """Test that ${factory.name}() factory creates a valid instance."""`);
+      lines.push(
+        `    """Test that ${factory.name}() factory creates a valid instance."""`,
+      );
       lines.push(`    instance = ${typeName}.${safeName}(${params})`);
       lines.push(`    assert instance is not None`);
       lines.push(`    assert isinstance(instance, ${typeName})`);
 
       for (const [propName, rawValue] of Object.entries(factory.sets)) {
         const snakeProp = toSnakeCase(propName);
-        const value = typeof rawValue === 'string' ? substituteParams(rawValue) : rawValue;
+        const value =
+          typeof rawValue === "string" ? substituteParams(rawValue) : rawValue;
         if (value === true) {
           lines.push(`    assert instance.${snakeProp}`);
         } else if (value === false) {
           lines.push(`    assert not instance.${snakeProp}`);
-        } else if (typeof value === 'number') {
+        } else if (typeof value === "number") {
           lines.push(`    assert instance.${snakeProp} == ${value}`);
-        } else if (typeof value === 'string') {
+        } else if (typeof value === "string") {
           lines.push(`    assert instance.${snakeProp} == "${value}"`);
         }
       }
-      lines.push('');
+      lines.push("");
     }
   }
 
-  return lines.join('\n') + '\n';
+  return lines.join("\n") + "\n";
 }

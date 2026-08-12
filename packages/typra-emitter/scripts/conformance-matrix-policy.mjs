@@ -93,7 +93,9 @@ export function validateConformanceMatrix(matrix) {
     return { ok: false, failures };
   }
   if (matrix.rules.length === 0) {
-    failures.push("Conformance matrix must declare at least one semantic rule.");
+    failures.push(
+      "Conformance matrix must declare at least one semantic rule.",
+    );
   }
 
   const seenRuleIds = new Set();

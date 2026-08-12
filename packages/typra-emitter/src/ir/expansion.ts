@@ -134,19 +134,19 @@ export function collectExprTypeRefs(expr: Expr): TypeName[] {
     switch (e.kind) {
       case "construct":
         refs.push(e.typeName);
-        e.fields.forEach(f => walk(f.value));
+        e.fields.forEach((f) => walk(f.value));
         break;
       case "variant":
         refs.push(e.baseTypeName);
         refs.push(e.variantTypeName);
-        e.fields.forEach(f => walk(f.value));
+        e.fields.forEach((f) => walk(f.value));
         break;
       case "array":
         refs.push(e.elementTypeName);
         e.items.forEach(walk);
         break;
       case "dict":
-        e.entries.forEach(ent => walk(ent.value));
+        e.entries.forEach((ent) => walk(ent.value));
         break;
       case "string":
       case "number":
@@ -237,11 +237,11 @@ export function resolveFactoryExpr(
 
   // 1. Resolve each explicitly-set field
   for (const [fieldName, value] of Object.entries(sets)) {
-    const prop = targetType.properties.find(p => p.name === fieldName);
+    const prop = targetType.properties.find((p) => p.name === fieldName);
     if (!prop) {
       throw new Error(
         `Property '${fieldName}' not found on type '${targetType.typeName.name}'. ` +
-        `Available: [${targetType.properties.map(p => p.name).join(", ")}]`
+          `Available: [${targetType.properties.map((p) => p.name).join(", ")}]`,
       );
     }
     fields.push({
@@ -256,11 +256,11 @@ export function resolveFactoryExpr(
     if (paramName in sets) continue; // already handled as a nested placeholder
     // Check if this param was consumed as a placeholder inside sets
     if (isParamConsumedInSets(paramName, sets)) continue;
-    const prop = targetType.properties.find(p => p.name === paramName);
+    const prop = targetType.properties.find((p) => p.name === paramName);
     if (!prop) {
       throw new Error(
         `Parameter '${paramName}' does not match any property on type '${targetType.typeName.name}'. ` +
-        `Available: [${targetType.properties.map(p => p.name).join(", ")}]`
+          `Available: [${targetType.properties.map((p) => p.name).join(", ")}]`,
       );
     }
     fields.push({
@@ -298,7 +298,12 @@ export function resolveCoerceExpr(
 ): Construct {
   // The expansion uses {value} as the fixed placeholder. Resolve with "value" as param,
   // then rename the ParamRef to the caller's desired paramName.
-  const expr = resolveFactoryExpr(expansion, { value: scalarType }, targetType, registry);
+  const expr = resolveFactoryExpr(
+    expansion,
+    { value: scalarType },
+    targetType,
+    registry,
+  );
   if (paramName !== "value") {
     renameParam(expr, "value", paramName);
   }
@@ -379,10 +384,17 @@ function resolveValue(
 
   // Object — resolve as a typed construction (possibly polymorphic)
   if (typeof value === "object") {
-    return resolveObjectValue(value as Record<string, unknown>, prop, params, registry);
+    return resolveObjectValue(
+      value as Record<string, unknown>,
+      prop,
+      params,
+      registry,
+    );
   }
 
-  throw new Error(`Cannot resolve value of type '${typeof value}' for property '${prop.name}'`);
+  throw new Error(
+    `Cannot resolve value of type '${typeof value}' for property '${prop.name}'`,
+  );
 }
 
 /**
@@ -401,7 +413,7 @@ function resolveStringValue(
     }
     throw new Error(
       `Placeholder '{${paramName}}' does not match any declared parameter. ` +
-      `Available: [${Object.keys(params).join(", ")}]`
+        `Available: [${Object.keys(params).join(", ")}]`,
     );
   }
   return { kind: "string", value };
@@ -425,8 +437,18 @@ function resolveArrayValue(
   const elementTypeName = prop.typeName;
 
   const resolvedItems = items.map((item, index) => {
-    if (elementType && typeof item === "object" && item !== null && !Array.isArray(item)) {
-      return resolveObjectAgainstType(item as Record<string, unknown>, elementType, params, registry);
+    if (
+      elementType &&
+      typeof item === "object" &&
+      item !== null &&
+      !Array.isArray(item)
+    ) {
+      return resolveObjectAgainstType(
+        item as Record<string, unknown>,
+        elementType,
+        params,
+        registry,
+      );
     }
     // For scalar array elements, create a synthetic property to resolve against
     if (typeof item === "string") {
@@ -438,7 +460,9 @@ function resolveArrayValue(
     if (typeof item === "number") {
       return { kind: "number" as const, value: item };
     }
-    throw new Error(`Cannot resolve array element at index ${index} for property '${prop.name}'`);
+    throw new Error(
+      `Cannot resolve array element at index ${index} for property '${prop.name}'`,
+    );
   });
 
   return {
@@ -466,7 +490,7 @@ function resolveObjectValue(
 
   if (!targetType) {
     throw new Error(
-      `Cannot resolve object for property '${prop.name}': type '${prop.typeName.name}' not found in registry`
+      `Cannot resolve object for property '${prop.name}': type '${prop.typeName.name}' not found in registry`,
     );
   }
 
@@ -487,7 +511,13 @@ function resolveObjectAgainstType(
   if (targetType.discriminator && targetType.childTypes.length > 0) {
     const discriminatorValue = obj[targetType.discriminator];
     if (typeof discriminatorValue === "string") {
-      return resolveVariantConstruct(obj, targetType, discriminatorValue, params, registry);
+      return resolveVariantConstruct(
+        obj,
+        targetType,
+        discriminatorValue,
+        params,
+        registry,
+      );
     }
   }
 
@@ -508,18 +538,24 @@ function resolveVariantConstruct(
   registry: TypeRegistry,
 ): VariantConstruct {
   // Find the child type matching this discriminator value
-  const childType = baseType.childTypes.find(child => {
-    const discProp = child.properties.find(p => p.name === baseType.discriminator);
+  const childType = baseType.childTypes.find((child) => {
+    const discProp = child.properties.find(
+      (p) => p.name === baseType.discriminator,
+    );
     return discProp?.defaultValue === discriminatorValue;
   });
 
   if (!childType) {
     throw new Error(
       `No child type of '${baseType.typeName.name}' has ${baseType.discriminator}='${discriminatorValue}'. ` +
-      `Available: [${baseType.childTypes.map(c => {
-        const dp = c.properties.find(p => p.name === baseType.discriminator);
-        return dp?.defaultValue ?? "*";
-      }).join(", ")}]`
+        `Available: [${baseType.childTypes
+          .map((c) => {
+            const dp = c.properties.find(
+              (p) => p.name === baseType.discriminator,
+            );
+            return dp?.defaultValue ?? "*";
+          })
+          .join(", ")}]`,
     );
   }
 
@@ -528,12 +564,13 @@ function resolveVariantConstruct(
   for (const [fieldName, value] of Object.entries(obj)) {
     if (fieldName === baseType.discriminator) continue; // discriminator is implicit
     // Look for the property on the child type first, then base type
-    const prop = childType.properties.find(p => p.name === fieldName)
-      ?? baseType.properties.find(p => p.name === fieldName);
+    const prop =
+      childType.properties.find((p) => p.name === fieldName) ??
+      baseType.properties.find((p) => p.name === fieldName);
     if (!prop) {
       throw new Error(
         `Property '${fieldName}' not found on variant '${childType.typeName.name}' ` +
-        `or base '${baseType.typeName.name}'`
+          `or base '${baseType.typeName.name}'`,
       );
     }
     fields.push({
@@ -564,11 +601,11 @@ function resolveConstruct(
 ): Construct {
   const fields: FieldAssignment[] = [];
   for (const [fieldName, value] of Object.entries(obj)) {
-    const prop = targetType.properties.find(p => p.name === fieldName);
+    const prop = targetType.properties.find((p) => p.name === fieldName);
     if (!prop) {
       throw new Error(
         `Property '${fieldName}' not found on type '${targetType.typeName.name}'. ` +
-        `Available: [${targetType.properties.map(p => p.name).join(", ")}]`
+          `Available: [${targetType.properties.map((p) => p.name).join(", ")}]`,
       );
     }
     fields.push({
@@ -590,7 +627,10 @@ function resolveConstruct(
  * Used to avoid double-emitting params that appear both as top-level property
  * matches and as nested placeholders.
  */
-function isParamConsumedInSets(paramName: string, sets: Record<string, unknown>): boolean {
+function isParamConsumedInSets(
+  paramName: string,
+  sets: Record<string, unknown>,
+): boolean {
   const placeholder = `{${paramName}}`;
   function search(value: unknown): boolean {
     if (value === placeholder) return true;

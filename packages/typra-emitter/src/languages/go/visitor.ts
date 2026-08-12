@@ -2,7 +2,13 @@
  * Go expression visitor — Expr IR → Go source fragments.
  */
 
-import { Expr, Construct, VariantConstruct, ArrayLiteral, TypeRegistry } from "../../ir/expansion.js";
+import {
+  Expr,
+  Construct,
+  VariantConstruct,
+  ArrayLiteral,
+  TypeRegistry,
+} from "../../ir/expansion.js";
 import { ExprVisitor, assertNever } from "../../ir/visitor.js";
 import { goFieldName } from "./identifiers.js";
 
@@ -32,7 +38,7 @@ export class GoExprVisitor implements ExprVisitor {
       case "array":
         return this.visitArray(expr);
       case "dict":
-        return `map[string]interface{}{${expr.entries.map(e => `"${e.key}": ${this.visitExpr(e.value)}`).join(", ")}}`;
+        return `map[string]interface{}{${expr.entries.map((e) => `"${e.key}": ${this.visitExpr(e.value)}`).join(", ")}}`;
       case "field_read":
         return `${expr.objectName}.${goFieldName(expr.fieldName)}`;
       default:
@@ -47,13 +53,18 @@ export class GoExprVisitor implements ExprVisitor {
     }
     // Look up the target type to check which fields are optional (pointer types in Go)
     const typeNode = this.registry?.get(typeName);
-    const fields = expr.fields.map(f => {
-      const val = this.visitExpr(f.value);
-      const prop = typeNode?.properties.find(p => p.name === f.propertyName);
-      // Optional fields are pointers in Go — wrap scalar values with a helper
-      const needsAddr = prop?.isOptional && !prop.isCollection && !prop.isDict;
-      return `${goFieldName(f.propertyName)}: ${needsAddr ? `ptrOf(${val})` : val}`;
-    }).join(", ");
+    const fields = expr.fields
+      .map((f) => {
+        const val = this.visitExpr(f.value);
+        const prop = typeNode?.properties.find(
+          (p) => p.name === f.propertyName,
+        );
+        // Optional fields are pointers in Go — wrap scalar values with a helper
+        const needsAddr =
+          prop?.isOptional && !prop.isCollection && !prop.isDict;
+        return `${goFieldName(f.propertyName)}: ${needsAddr ? `ptrOf(${val})` : val}`;
+      })
+      .join(", ");
     return `${typeName}{ ${fields} }`;
   }
 
@@ -62,8 +73,8 @@ export class GoExprVisitor implements ExprVisitor {
     const variantName = expr.variantTypeName.name;
     // Include the discriminator (e.g., Kind: "text") since Go has no default field values.
     const discField = `${goFieldName(expr.discriminator)}: "${expr.discriminatorValue}"`;
-    const dataFields = expr.fields.map(f =>
-      `${goFieldName(f.propertyName)}: ${this.visitExpr(f.value)}`
+    const dataFields = expr.fields.map(
+      (f) => `${goFieldName(f.propertyName)}: ${this.visitExpr(f.value)}`,
     );
     const allFields = [discField, ...dataFields].join(", ");
     return `${variantName}{ ${allFields} }`;
@@ -74,12 +85,13 @@ export class GoExprVisitor implements ExprVisitor {
     // Polymorphic types are stored as []interface{} in Go (no inheritance).
     // A type is polymorphic if it has child types in the registry.
     const typeNode = this.registry?.get(elementType);
-    const isPolymorphic = typeNode !== undefined && typeNode.childTypes.length > 0;
+    const isPolymorphic =
+      typeNode !== undefined && typeNode.childTypes.length > 0;
     const goElementType = isPolymorphic ? "interface{}" : elementType;
     if (expr.items.length === 0) {
       return `[]${goElementType}{}`;
     }
-    const items = expr.items.map(i => this.visitExpr(i)).join(", ");
+    const items = expr.items.map((i) => this.visitExpr(i)).join(", ");
     return `[]${goElementType}{${items}}`;
   }
 

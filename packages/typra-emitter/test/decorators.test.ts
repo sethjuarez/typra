@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { type DecoratorContext, type Program, type Type } from "@typespec/compiler";
+import {
+  type DecoratorContext,
+  type Program,
+  type Type,
+} from "@typespec/compiler";
 
 import {
   $abstract,
@@ -59,7 +63,11 @@ describe("decorator state helpers", () => {
     appendStateValue(context, key, target, "first");
     appendStateValue(context, key, target, ["second", "third"]);
 
-    assert.deepEqual(getStateValue(program, key, target), ["first", "second", "third"]);
+    assert.deepEqual(getStateValue(program, key, target), [
+      "first",
+      "second",
+      "third",
+    ]);
   });
 
   it("stores scalar state and treats absent values as undefined", () => {
@@ -113,7 +121,12 @@ describe("TypeSpec decorators", () => {
       "Load from string",
       "ref-1",
     );
-    $coerce(context, target as never, { kind: "Model", name: "NotScalar" } as Type, { id: "{value}" });
+    $coerce(
+      context,
+      target as never,
+      { kind: "Model", name: "NotScalar" } as Type,
+      { id: "{value}" },
+    );
 
     assert.deepEqual(getStateValue(program, StateKeys.coercions, target), [
       {
@@ -132,7 +145,13 @@ describe("TypeSpec decorators", () => {
     const { context, program } = createContext();
     const target = { kind: "Model", name: "FixtureReference" } as Type;
 
-    $factory(context, target as never, "named", { id: "{id}" }, { id: "string" });
+    $factory(
+      context,
+      target as never,
+      "named",
+      { id: "{id}" },
+      { id: "string" },
+    );
     $method(
       context,
       target as never,

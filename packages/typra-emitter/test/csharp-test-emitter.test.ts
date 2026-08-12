@@ -10,24 +10,29 @@ describe("C# test emitter", () => {
       typeName: { namespace: "Prompty", name: "Prompty" },
       properties: [],
     } as unknown as TypeNode;
-    const expected = "first line with trailing space \nsecond line \u2028third line";
+    const expected =
+      "first line with trailing space \nsecond line \u2028third line";
     const code = emitCSharpTest({
       node,
       namespace: "Prompty.Core.Tests",
-      examples: [{
-        json: ["{}"],
-        yaml: ["{}"],
-        validations: [{
-          key: "Instructions",
-          value: expected,
-          isExpression: false,
-        }],
-      }],
+      examples: [
+        {
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [
+            {
+              key: "Instructions",
+              value: expected,
+              isExpression: false,
+            },
+          ],
+        },
+      ],
       coercions: [],
       factories: [],
       singlePrecisionKeys: new Set<string>(),
-      renderName: name => name,
-      renderCsharpFactoryMethodName: name => name,
+      renderName: (name) => name,
+      renderCsharpFactoryMethodName: (name) => name,
       renderCsharpFactoryTestValue: () => "default",
     });
 
@@ -36,12 +41,16 @@ describe("C# test emitter", () => {
     // survives the round trip and the YAML assertion is identical to the JSON one.
     // Previously the YAML variant was trailing-space normalized to compensate for the
     // space the fold silently dropped. See #93.
-    const assertions = code.match(/Assert\.Equal\("[^"]+", instance\.Instructions\);/g);
+    const assertions = code.match(
+      /Assert\.Equal\("[^"]+", instance\.Instructions\);/g,
+    );
     assert.deepEqual(assertions, [
       'Assert.Equal("first line with trailing space \\nsecond line \\u2028third line", instance.Instructions);',
       'Assert.Equal("first line with trailing space \\nsecond line \\u2028third line", instance.Instructions);',
     ]);
-    const roundtrips = code.match(/Assert\.Equal\("[^"]+", reloaded\.Instructions\);/g);
+    const roundtrips = code.match(
+      /Assert\.Equal\("[^"]+", reloaded\.Instructions\);/g,
+    );
     assert.deepEqual(roundtrips, [
       'Assert.Equal("first line with trailing space \\nsecond line \\u2028third line", reloaded.Instructions);',
       'Assert.Equal("first line with trailing space \\nsecond line \\u2028third line", reloaded.Instructions);',
@@ -58,20 +67,22 @@ describe("C# test emitter", () => {
     const code = emitCSharpTest({
       node,
       namespace: "Fixtures.Tests",
-      examples: [{
-        json: ["{}"],
-        yaml: ["{}"],
-        validations: [
-          { key: "Temperature", value: 0.7, isExpression: false },
-          { key: "TopP", value: 0.9, isExpression: false },
-        ],
-      }],
+      examples: [
+        {
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [
+            { key: "Temperature", value: 0.7, isExpression: false },
+            { key: "TopP", value: 0.9, isExpression: false },
+          ],
+        },
+      ],
       coercions: [],
       factories: [],
       // Only Temperature is float32; TopP is a 64-bit double.
       singlePrecisionKeys: new Set(["Temperature"]),
-      renderName: name => name,
-      renderCsharpFactoryMethodName: name => name,
+      renderName: (name) => name,
+      renderCsharpFactoryMethodName: (name) => name,
       renderCsharpFactoryTestValue: () => "default",
     });
 
@@ -92,15 +103,18 @@ describe("C# test emitter", () => {
       namespace: "Fixtures.Tests",
       examples: [],
       coercions: [],
-      factories: [{
-        name: "named",
-        params: { id: "string", label: "string" },
-        // `sets` values are templates resolved from the call arguments at runtime.
-        sets: { id: "{id}", label: "{label}" },
-      }],
+      factories: [
+        {
+          name: "named",
+          params: { id: "string", label: "string" },
+          // `sets` values are templates resolved from the call arguments at runtime.
+          sets: { id: "{id}", label: "{label}" },
+        },
+      ],
       singlePrecisionKeys: new Set<string>(),
-      renderName: name => name.charAt(0).toUpperCase() + name.slice(1),
-      renderCsharpFactoryMethodName: name => name.charAt(0).toUpperCase() + name.slice(1),
+      renderName: (name) => name.charAt(0).toUpperCase() + name.slice(1),
+      renderCsharpFactoryMethodName: (name) =>
+        name.charAt(0).toUpperCase() + name.slice(1),
       renderCsharpFactoryTestValue: () => '"test"',
     });
 

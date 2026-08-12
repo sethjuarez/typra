@@ -12,7 +12,16 @@ import {
   getDiscriminator,
   isErrorModel,
 } from "@typespec/compiler";
-import { getStateScalar, getStateValue, SampleEntry, FactoryEntry, MethodEntry, KnownAsEntry, DefaultForEntry, ParseAliasEntry } from "../decorators.js";
+import {
+  getStateScalar,
+  getStateValue,
+  SampleEntry,
+  FactoryEntry,
+  MethodEntry,
+  KnownAsEntry,
+  DefaultForEntry,
+  ParseAliasEntry,
+} from "../decorators.js";
 import { StateKeys } from "../lib.js";
 import { scalarRuntimeKind } from "./scalar-kinds.js";
 
@@ -25,15 +34,19 @@ import { scalarRuntimeKind } from "./scalar-kinds.js";
  * silently falls back to the positional target, which is exactly the unsound
  * behaviour the decorator exists to replace. Report it rather than degrade.
  */
-const reportUnusableEntryShorthand = (program: Program, model: Model, node: TypeNode): void => {
+const reportUnusableEntryShorthand = (
+  program: Program,
+  model: Model,
+  node: TypeNode,
+): void => {
   if (!node.entryShorthand) return;
 
   if (node.coercions.length === 0) {
     program.reportDiagnostic({
       code: "typra-emitter-entry-shorthand-no-coercions",
       message:
-        `@entryShorthand("${node.entryShorthand}") on ${model.name} has no @coerce declarations to expand, `
-        + `so no shorthand arm can be emitted and immediate scalar entries fall back to positional assignment.`,
+        `@entryShorthand("${node.entryShorthand}") on ${model.name} has no @coerce declarations to expand, ` +
+        `so no shorthand arm can be emitted and immediate scalar entries fall back to positional assignment.`,
       severity: "warning",
       target: model,
     });
@@ -41,30 +54,34 @@ const reportUnusableEntryShorthand = (program: Program, model: Model, node: Type
   }
 
   const unmappable = node.coercions
-    .map(c => c.scalar)
-    .filter(scalar => scalarRuntimeKind(scalar) === null);
+    .map((c) => c.scalar)
+    .filter((scalar) => scalarRuntimeKind(scalar) === null);
   if (unmappable.length === node.coercions.length) {
     program.reportDiagnostic({
       code: "typra-emitter-entry-shorthand-unmappable",
       message:
-        `@entryShorthand("${node.entryShorthand}") on ${model.name} declares only scalar types with no `
-        + `distinguishable JSON form (${unmappable.join(", ")}), so no shorthand arm can be emitted.`,
+        `@entryShorthand("${node.entryShorthand}") on ${model.name} declares only scalar types with no ` +
+        `distinguishable JSON form (${unmappable.join(", ")}), so no shorthand arm can be emitted.`,
       severity: "warning",
       target: model,
     });
   }
 };
 
-
 export interface TypeName {
   namespace: string;
   name: string;
 }
 
-const getModelType = (model: Model, rootNamespace: string, rootAlias: string): TypeName => {
-  let namespace = model.namespace ? getNamespaceFullName(model.namespace) : rootNamespace || "";
-  if (rootNamespace.includes('.'))
-    namespace = rootNamespace;
+const getModelType = (
+  model: Model,
+  rootNamespace: string,
+  rootAlias: string,
+): TypeName => {
+  let namespace = model.namespace
+    ? getNamespaceFullName(model.namespace)
+    : rootNamespace || "";
+  if (rootNamespace.includes(".")) namespace = rootNamespace;
   else {
     const parts = namespace.split(".");
     parts[0] = rootNamespace;
@@ -79,13 +96,13 @@ const getModelType = (model: Model, rootNamespace: string, rootAlias: string): T
     const rootName = rootNamespace.split(".").at(-1) || rootNamespace;
     return {
       namespace: namespace,
-      name: name.replace(rootName, rootAlias)
+      name: name.replace(rootName, rootAlias),
     };
   }
 
   return {
     namespace: namespace,
-    name: name
+    name: name,
   };
 };
 
@@ -98,7 +115,6 @@ export interface Coercion {
   title?: string;
   description?: string;
 }
-
 
 /**
  * Walk up the AST parent chain from `node` to find the enclosing
@@ -143,7 +159,7 @@ function extractGroup(sourcePath: string): string {
 export class TypeNode {
   public typeName: TypeName = {
     namespace: "",
-    name: ""
+    name: "",
   };
   public description: string;
   public base: TypeName | null = null;
@@ -160,7 +176,10 @@ export class TypeNode {
   /** Semantic group derived from the TSP source subfolder (e.g. "connection", "tools"). */
   public group: string = "";
 
-  constructor(public model: Model, description: string) {
+  constructor(
+    public model: Model,
+    description: string,
+  ) {
     this.model = model;
     this.description = description;
   }
@@ -168,9 +187,11 @@ export class TypeNode {
   retrievePolymorphicTypes(): any {
     let instances: any[] = [];
     if (this.discriminator && this.childTypes.length > 0) {
-      instances = this.childTypes.map(child => ({
+      instances = this.childTypes.map((child) => ({
         discriminator: this.discriminator,
-        value: child.properties.find(p => p.name === this.discriminator)?.defaultValue || "*",
+        value:
+          child.properties.find((p) => p.name === this.discriminator)
+            ?.defaultValue || "*",
         instance: child,
       }));
 
@@ -178,18 +199,23 @@ export class TypeNode {
       // Duplicate schema-declared literal wildcards are rejected upstream by the TypeSpec
       // compiler itself (invalid-discriminator-value), which points at each offending model.
       if (!this.isAbstract) {
-        instances = [...instances, { discriminator: this.discriminator, value: "*", instance: this }];
+        instances = [
+          ...instances,
+          { discriminator: this.discriminator, value: "*", instance: this },
+        ];
       }
 
-      const filteredInstances = instances.filter(instance => instance.value !== "*");
-      const defaultInstance = instances.filter(i => i.value === "*")[0];
+      const filteredInstances = instances.filter(
+        (instance) => instance.value !== "*",
+      );
+      const defaultInstance = instances.filter((i) => i.value === "*")[0];
       return {
         types: filteredInstances,
         default: defaultInstance,
       };
     }
     return undefined;
-  };
+  }
 
   getSanitizedObject(): Record<string, any> {
     return {
@@ -203,8 +229,8 @@ export class TypeNode {
       coercions: this.coercions,
       factories: this.factories,
       methods: this.methods,
-      childTypes: this.childTypes.map(ct => ct.getSanitizedObject()),
-      properties: this.properties.map(prop => prop.getSanitizedObject()),
+      childTypes: this.childTypes.map((ct) => ct.getSanitizedObject()),
+      properties: this.properties.map((prop) => prop.getSanitizedObject()),
     };
   }
 }
@@ -213,7 +239,7 @@ export class PropertyNode {
   public name: string;
   public typeName: TypeName = {
     namespace: "",
-    name: ""
+    name: "",
   };
   public description: string;
 
@@ -285,22 +311,32 @@ export class PropertyNode {
   }
 }
 
-
-export const enumerateTypes = function* (node: TypeNode, visited: Set<string> = new Set()): IterableIterator<TypeNode> {
+export const enumerateTypes = function* (
+  node: TypeNode,
+  visited: Set<string> = new Set(),
+): IterableIterator<TypeNode> {
   for (const prop of node.properties) {
     if (prop.type) {
       // enumerate
       for (const subNode of enumerateTypes(prop.type, visited)) {
-        if (!visited.has(`${subNode.typeName.namespace}.${subNode.typeName.name}`)) {
+        if (
+          !visited.has(`${subNode.typeName.namespace}.${subNode.typeName.name}`)
+        ) {
           yield subNode;
           visited.add(`${subNode.typeName.namespace}.${subNode.typeName.name}`);
         }
       }
       for (const child of prop.type.childTypes) {
         for (const subNode of enumerateTypes(child, visited)) {
-          if (!visited.has(`${subNode.typeName.namespace}.${subNode.typeName.name}`)) {
+          if (
+            !visited.has(
+              `${subNode.typeName.namespace}.${subNode.typeName.name}`,
+            )
+          ) {
             yield subNode;
-            visited.add(`${subNode.typeName.namespace}.${subNode.typeName.name}`);
+            visited.add(
+              `${subNode.typeName.namespace}.${subNode.typeName.name}`,
+            );
           }
         }
       }
@@ -311,7 +347,9 @@ export const enumerateTypes = function* (node: TypeNode, visited: Set<string> = 
     yield node;
     for (const child of node.childTypes) {
       for (const subNode of enumerateTypes(child, visited)) {
-        if (!visited.has(`${subNode.typeName.namespace}.${subNode.typeName.name}`)) {
+        if (
+          !visited.has(`${subNode.typeName.namespace}.${subNode.typeName.name}`)
+        ) {
           yield subNode;
           visited.add(`${subNode.typeName.namespace}.${subNode.typeName.name}`);
         }
@@ -321,8 +359,13 @@ export const enumerateTypes = function* (node: TypeNode, visited: Set<string> = 
   }
 };
 
-export const resolveModel = (program: Program, model: Model, visited: Set<string> = new Set(), rootNamespace: string, rootAlias: string): TypeNode => {
-
+export const resolveModel = (
+  program: Program,
+  model: Model,
+  visited: Set<string> = new Set(),
+  rootNamespace: string,
+  rootAlias: string,
+): TypeNode => {
   const node = new TypeNode(model, getDoc(program, model) || "");
 
   if (model.name === "Named") {
@@ -332,36 +375,81 @@ export const resolveModel = (program: Program, model: Model, visited: Set<string
       throw new Error(`Invalid Named<T> model: ${model.name}`);
     }
     node.typeName = getModelType(innerModel, rootNamespace, rootAlias);
-    node.childTypes = resolveModelChildren(program, innerModel, visited, rootNamespace, rootAlias);
+    node.childTypes = resolveModelChildren(
+      program,
+      innerModel,
+      visited,
+      rootNamespace,
+      rootAlias,
+    );
     node.description = getDoc(program, innerModel) || "";
-    node.isAbstract = getStateScalar<boolean>(program, StateKeys.abstracts, innerModel) || false;
-    node.isProtocol = getStateScalar<boolean>(program, StateKeys.protocols, innerModel) || false;
-    node.entryShorthand = getStateScalar<string>(program, StateKeys.entryShorthands, innerModel) || null;
+    node.isAbstract =
+      getStateScalar<boolean>(program, StateKeys.abstracts, innerModel) ||
+      false;
+    node.isProtocol =
+      getStateScalar<boolean>(program, StateKeys.protocols, innerModel) ||
+      false;
+    node.entryShorthand =
+      getStateScalar<string>(program, StateKeys.entryShorthands, innerModel) ||
+      null;
     node.isError = isErrorModel(program, innerModel);
     const discriminator = getDiscriminator(program, innerModel);
     node.discriminator = discriminator ? discriminator.propertyName : undefined;
     // coercion .ctor
-    node.coercions = getStateValue<Coercion>(program, StateKeys.coercions, innerModel);
+    node.coercions = getStateValue<Coercion>(
+      program,
+      StateKeys.coercions,
+      innerModel,
+    );
     // factory and method stubs
-    node.factories = getStateValue<FactoryEntry>(program, StateKeys.factories, innerModel);
-    node.methods = getStateValue<MethodEntry>(program, StateKeys.methods, innerModel);
+    node.factories = getStateValue<FactoryEntry>(
+      program,
+      StateKeys.factories,
+      innerModel,
+    );
+    node.methods = getStateValue<MethodEntry>(
+      program,
+      StateKeys.methods,
+      innerModel,
+    );
     node.group = extractGroup(getNodeFilePath(innerModel.node));
     reportUnusableEntryShorthand(program, innerModel, node);
     visited.add(innerModel.name);
   } else {
     node.typeName = getModelType(model, rootNamespace, rootAlias);
-    node.childTypes = resolveModelChildren(program, model, visited, rootNamespace, rootAlias);
-    node.isAbstract = getStateScalar<boolean>(program, StateKeys.abstracts, model) || false;
-    node.isProtocol = getStateScalar<boolean>(program, StateKeys.protocols, model) || false;
-    node.entryShorthand = getStateScalar<string>(program, StateKeys.entryShorthands, model) || null;
+    node.childTypes = resolveModelChildren(
+      program,
+      model,
+      visited,
+      rootNamespace,
+      rootAlias,
+    );
+    node.isAbstract =
+      getStateScalar<boolean>(program, StateKeys.abstracts, model) || false;
+    node.isProtocol =
+      getStateScalar<boolean>(program, StateKeys.protocols, model) || false;
+    node.entryShorthand =
+      getStateScalar<string>(program, StateKeys.entryShorthands, model) || null;
     node.isError = isErrorModel(program, model);
     const discriminator = getDiscriminator(program, model);
     node.discriminator = discriminator ? discriminator.propertyName : undefined;
     // coercion .ctor
-    node.coercions = getStateValue<Coercion>(program, StateKeys.coercions, model);
+    node.coercions = getStateValue<Coercion>(
+      program,
+      StateKeys.coercions,
+      model,
+    );
     // factory and method stubs
-    node.factories = getStateValue<FactoryEntry>(program, StateKeys.factories, model);
-    node.methods = getStateValue<MethodEntry>(program, StateKeys.methods, model);
+    node.factories = getStateValue<FactoryEntry>(
+      program,
+      StateKeys.factories,
+      model,
+    );
+    node.methods = getStateValue<MethodEntry>(
+      program,
+      StateKeys.methods,
+      model,
+    );
     node.group = extractGroup(getNodeFilePath(model.node));
     reportUnusableEntryShorthand(program, model, node);
     visited.add(model.name);
@@ -371,18 +459,34 @@ export const resolveModel = (program: Program, model: Model, visited: Set<string
     node.base = getModelType(model.baseModel, rootNamespace, rootAlias);
   }
 
-
-
   // resolve properties if model
   if (model.kind === "Model") {
     const properties: PropertyNode[] = [];
     for (const [_, value] of model.properties) {
-      const prop = resolveProperty(program, value, visited, rootNamespace, rootAlias);
+      const prop = resolveProperty(
+        program,
+        value,
+        visited,
+        rootNamespace,
+        rootAlias,
+      );
       // samples
-      prop.samples = getStateValue<SampleEntry>(program, StateKeys.samples, value);
+      prop.samples = getStateValue<SampleEntry>(
+        program,
+        StateKeys.samples,
+        value,
+      );
       // wire mappings
-      prop.knownAs = getStateValue<KnownAsEntry>(program, StateKeys.knownAs, value);
-      prop.defaultFor = getStateValue<DefaultForEntry>(program, StateKeys.defaultFor, value);
+      prop.knownAs = getStateValue<KnownAsEntry>(
+        program,
+        StateKeys.knownAs,
+        value,
+      );
+      prop.defaultFor = getStateValue<DefaultForEntry>(
+        program,
+        StateKeys.defaultFor,
+        value,
+      );
 
       properties.push(prop);
     }
@@ -392,13 +496,35 @@ export const resolveModel = (program: Program, model: Model, visited: Set<string
   return node;
 };
 
-export const resolveModelChildren = (program: Program, model: Model, visited: Set<string>, rootNamespace: string, rootAlias: string): TypeNode[] => {
-  return model.derivedModels.filter(derived => !visited.has(derived.name)).flatMap(derived => {
-    return [resolveModel(program, derived, visited, rootNamespace, rootAlias), ...resolveModelChildren(program, derived, visited, rootNamespace, rootAlias)];
-  });
+export const resolveModelChildren = (
+  program: Program,
+  model: Model,
+  visited: Set<string>,
+  rootNamespace: string,
+  rootAlias: string,
+): TypeNode[] => {
+  return model.derivedModels
+    .filter((derived) => !visited.has(derived.name))
+    .flatMap((derived) => {
+      return [
+        resolveModel(program, derived, visited, rootNamespace, rootAlias),
+        ...resolveModelChildren(
+          program,
+          derived,
+          visited,
+          rootNamespace,
+          rootAlias,
+        ),
+      ];
+    });
 };
 
-function reportUnsupportedDefault(program: Program, property: ModelProperty, prop: PropertyNode, reason: string): void {
+function reportUnsupportedDefault(
+  program: Program,
+  property: ModelProperty,
+  prop: PropertyNode,
+  reason: string,
+): void {
   if (property.defaultValue === undefined) return;
 
   program.reportDiagnostic({
@@ -411,32 +537,54 @@ function reportUnsupportedDefault(program: Program, property: ModelProperty, pro
   prop.defaultValue = null;
 }
 
-export const resolveProperty = (program: Program, property: ModelProperty, visited: Set<string>, rootNamespace: string, rootAlias: string): PropertyNode => {
+export const resolveProperty = (
+  program: Program,
+  property: ModelProperty,
+  visited: Set<string>,
+  rootNamespace: string,
+  rootAlias: string,
+): PropertyNode => {
   let prop: PropertyNode;
   switch (property.type.kind) {
     case "Scalar":
       prop = resolveScalarProperty(program, property, property.type);
       break;
     case "Model":
-      prop = resolveModelProperty(program, property, property.type, visited, rootNamespace, rootAlias);
+      prop = resolveModelProperty(
+        program,
+        property,
+        property.type,
+        visited,
+        rootNamespace,
+        rootAlias,
+      );
       break;
     case "Union":
-      prop = resolveUnionProperty(program, property, property.type, visited, rootNamespace, rootAlias);
+      prop = resolveUnionProperty(
+        program,
+        property,
+        property.type,
+        visited,
+        rootNamespace,
+        rootAlias,
+      );
       break;
     case "Intrinsic":
-      prop = resolveIntrinsicProperty(program, property, property.type, visited);
+      prop = resolveIntrinsicProperty(
+        program,
+        property,
+        property.type,
+        visited,
+      );
       break;
     case "String":
       // this is for default values in discriminated types
-      prop = new PropertyNode(
-        property,
-        getDoc(program, property) || ""
-      );
+      prop = new PropertyNode(property, getDoc(program, property) || "");
 
       prop.defaultValue = property.type.value;
       prop.typeName = {
         namespace: "",
-        name: "string"
+        name: "string",
       };
 
       prop.isScalar = true;
@@ -451,7 +599,7 @@ export const resolveProperty = (program: Program, property: ModelProperty, visit
         code: "typra-emitter-unsupported-property-type",
         message: `Unsupported property type: ${property.type.kind}`,
         severity: "error",
-        target: property
+        target: property,
       });
       prop = new PropertyNode(property, getDoc(program, property) || "");
       break;
@@ -464,7 +612,11 @@ export const resolveProperty = (program: Program, property: ModelProperty, visit
       "Typra does not support complex object defaults yet; remove the default so runtime behavior stays portable.",
     );
   }
-  if (!property.optional && prop.hasExplicitDefault && prop.defaultValue === null) {
+  if (
+    !property.optional &&
+    prop.hasExplicitDefault &&
+    prop.defaultValue === null
+  ) {
     reportUnsupportedDefault(
       program,
       property,
@@ -475,15 +627,16 @@ export const resolveProperty = (program: Program, property: ModelProperty, visit
   return prop;
 };
 
-export const resolveScalarProperty = (program: Program, property: ModelProperty, scalar: Scalar): PropertyNode => {
-  const prop = new PropertyNode(
-    property,
-    getDoc(program, property) || ""
-  );
+export const resolveScalarProperty = (
+  program: Program,
+  property: ModelProperty,
+  scalar: Scalar,
+): PropertyNode => {
+  const prop = new PropertyNode(property, getDoc(program, property) || "");
 
   prop.typeName = {
     namespace: "",
-    name: getTypeName(scalar, { nameOnly: true })
+    name: getTypeName(scalar, { nameOnly: true }),
   };
 
   prop.isScalar = true;
@@ -513,21 +666,24 @@ export const resolveScalarProperty = (program: Program, property: ModelProperty,
   return prop;
 };
 
-export const resolveIntrinsicProperty = (program: Program, property: ModelProperty, intrinsic: Type, visited: Set<string>): PropertyNode => {
-  const prop = new PropertyNode(
-    property,
-    getDoc(program, property) || ""
-  );
+export const resolveIntrinsicProperty = (
+  program: Program,
+  property: ModelProperty,
+  intrinsic: Type,
+  visited: Set<string>,
+): PropertyNode => {
+  const prop = new PropertyNode(property, getDoc(program, property) || "");
 
   prop.typeName = {
     namespace: "",
-    name: getTypeName(intrinsic, { nameOnly: true })
+    name: getTypeName(intrinsic, { nameOnly: true }),
   };
 
   prop.isScalar = true;
   prop.isAny = true;
   prop.isOptional = property.optional;
-  prop.isCollection = prop.typeName.name.includes("[") && prop.typeName.name.includes("]");
+  prop.isCollection =
+    prop.typeName.name.includes("[") && prop.typeName.name.includes("]");
 
   // defaults
   if (property.defaultValue) {
@@ -551,13 +707,16 @@ export const resolveIntrinsicProperty = (program: Program, property: ModelProper
   return prop;
 };
 
-export const resolveModelProperty = (program: Program, property: ModelProperty, model: Model, visited: Set<string>, rootNamespace: string, rootAlias: string): PropertyNode => {
-  const prop = new PropertyNode(
-    property,
-    getDoc(program, property) || ""
-  );
+export const resolveModelProperty = (
+  program: Program,
+  property: ModelProperty,
+  model: Model,
+  visited: Set<string>,
+  rootNamespace: string,
+  rootAlias: string,
+): PropertyNode => {
+  const prop = new PropertyNode(property, getDoc(program, property) || "");
   if (model.name === "Array") {
-
     const innerModel = getTemplateModel(model);
     if (innerModel) {
       // Use innerModel for naming and docs
@@ -570,14 +729,15 @@ export const resolveModelProperty = (program: Program, property: ModelProperty, 
         prop.isOptional = property.optional;
         prop.isCollection = true;
         prop.isDict = true;
-        prop.dictValueType = recordValueType?.kind === "Model"
-          ? getModelType(recordValueType, rootNamespace, rootAlias).name
-          : recordValueType
-            ? getTypeName(recordValueType)
-            : "unknown";
+        prop.dictValueType =
+          recordValueType?.kind === "Model"
+            ? getModelType(recordValueType, rootNamespace, rootAlias).name
+            : recordValueType
+              ? getTypeName(recordValueType)
+              : "unknown";
         prop.typeName = {
           namespace: "",
-          name: "dictionary"
+          name: "dictionary",
         };
       } else {
         prop.isScalar = false;
@@ -586,7 +746,13 @@ export const resolveModelProperty = (program: Program, property: ModelProperty, 
         prop.isCollection = true;
         prop.typeName = getModelType(innerModel, rootNamespace, rootAlias);
         if (!visited.has(model.name)) {
-          prop.type = resolveModel(program, innerModel, visited, rootNamespace, rootAlias);
+          prop.type = resolveModel(
+            program,
+            innerModel,
+            visited,
+            rootNamespace,
+            rootAlias,
+          );
         }
       }
     } else {
@@ -599,7 +765,7 @@ export const resolveModelProperty = (program: Program, property: ModelProperty, 
         prop.isCollection = true;
         prop.typeName = {
           namespace: "",
-          name: getTypeName(innerType, { nameOnly: true })
+          name: getTypeName(innerType, { nameOnly: true }),
         };
       } else if (innerType && innerType.kind === "Intrinsic") {
         prop.isScalar = true;
@@ -608,14 +774,14 @@ export const resolveModelProperty = (program: Program, property: ModelProperty, 
         prop.isCollection = true;
         prop.typeName = {
           namespace: "",
-          name: "unknown"
+          name: "unknown",
         };
       } else {
         program.reportDiagnostic({
           code: "typra-emitter-unsupported-array-type",
           message: `Unsupported array type: ${getTypeName(model)}`,
           severity: "error",
-          target: property
+          target: property,
         });
       }
     }
@@ -630,30 +796,41 @@ export const resolveModelProperty = (program: Program, property: ModelProperty, 
       const recordValueType = getTemplateType(model);
       prop.isScalar = true;
       prop.isDict = true;
-      prop.dictValueType = recordValueType?.kind === "Model"
-        ? getModelType(recordValueType, rootNamespace, rootAlias).name
-        : recordValueType
-          ? getTypeName(recordValueType, { nameOnly: true })
-          : "unknown";
+      prop.dictValueType =
+        recordValueType?.kind === "Model"
+          ? getModelType(recordValueType, rootNamespace, rootAlias).name
+          : recordValueType
+            ? getTypeName(recordValueType, { nameOnly: true })
+            : "unknown";
       prop.typeName = {
         namespace: "",
-        name: "dictionary"
+        name: "dictionary",
       };
       // need to clear this out as a model type
       prop.type = undefined;
     }
     if (!visited.has(model.name) && prop.typeName.name !== "dictionary") {
-      prop.type = resolveModel(program, model, visited, rootNamespace, rootAlias);
+      prop.type = resolveModel(
+        program,
+        model,
+        visited,
+        rootNamespace,
+        rootAlias,
+      );
     }
   }
   return prop;
 };
 
-export const resolveUnionProperty = (program: Program, property: ModelProperty, union: Union, visited: Set<string>, rootNamespace: string, rootAlias: string): PropertyNode => {
-  const prop = new PropertyNode(
-    property,
-    getDoc(program, property) || ""
-  );
+export const resolveUnionProperty = (
+  program: Program,
+  property: ModelProperty,
+  union: Union,
+  visited: Set<string>,
+  rootNamespace: string,
+  rootAlias: string,
+): PropertyNode => {
+  const prop = new PropertyNode(property, getDoc(program, property) || "");
 
   prop.isScalar = false;
   prop.isAny = false;
@@ -661,15 +838,21 @@ export const resolveUnionProperty = (program: Program, property: ModelProperty, 
   prop.isCollection = false;
 
   const variants = Array.from(union.variants).map(([, v]) => v.type);
-  const models = variants.filter(v => v.kind === "Model");
+  const models = variants.filter((v) => v.kind === "Model");
 
   if (models.length === 1) {
     prop.typeName = getModelType(models[0], rootNamespace, rootAlias);
     if (!visited.has(models[0].name)) {
-      prop.type = resolveModel(program, models[0], visited, rootNamespace, rootAlias);
+      prop.type = resolveModel(
+        program,
+        models[0],
+        visited,
+        rootNamespace,
+        rootAlias,
+      );
     }
   } else if (models.length === 2) {
-    const modelNames = models.map(m => m.name);
+    const modelNames = models.map((m) => m.name);
     // collection situation
     if (modelNames.includes("Record") && modelNames.includes("Array")) {
       // Should be Record<T> -> T
@@ -679,7 +862,12 @@ export const resolveUnionProperty = (program: Program, property: ModelProperty, 
       // Should be Named<T> -> T
       const arrayType = getTemplateModel(namedType);
 
-      if (recordType && arrayType && namedType && recordType.name === arrayType.name) {
+      if (
+        recordType &&
+        arrayType &&
+        namedType &&
+        recordType.name === arrayType.name
+      ) {
         prop.isCollection = true;
         // Elements carry an injected `name` (from the `Named<T>` wrapper) → keyed MAP wire.
         // Set structurally so a 2nd same-element-typed sibling (whose `.type` is left unset
@@ -689,18 +877,23 @@ export const resolveUnionProperty = (program: Program, property: ModelProperty, 
         prop.typeName = getModelType(arrayType, rootNamespace, rootAlias);
         // Use Named<T> for actual model props
         if (!visited.has(arrayType.name)) {
-          prop.type = resolveModel(program, namedType, visited, rootNamespace, rootAlias);
+          prop.type = resolveModel(
+            program,
+            namedType,
+            visited,
+            rootNamespace,
+            rootAlias,
+          );
         }
       } else {
         program.reportDiagnostic({
           code: "typra-emitter-unsupported-union-types",
           message: `Unsupported union types for Record/Array: ${recordType?.name} / ${arrayType?.name} - they should match.`,
           severity: "error",
-          target: property
+          target: property,
         });
         return prop;
       }
-
     } else if (modelNames.includes("Named")) {
       const namedIdx = modelNames.indexOf("Named");
       const namedModel = getTemplateModel(models[namedIdx]);
@@ -708,14 +901,20 @@ export const resolveUnionProperty = (program: Program, property: ModelProperty, 
       if (namedModel && namedModel.name === mainModel.name) {
         prop.typeName = getModelType(namedModel, rootNamespace, rootAlias);
         if (!visited.has(mainModel.name)) {
-          prop.type = resolveModel(program, namedModel, visited, rootNamespace, rootAlias);
+          prop.type = resolveModel(
+            program,
+            namedModel,
+            visited,
+            rootNamespace,
+            rootAlias,
+          );
         }
       } else {
         program.reportDiagnostic({
           code: "typra-emitter-named-model-union-types",
-          message: `Named model union types must match! (${models.map(m => m.name).join(", ")})`,
+          message: `Named model union types must match! (${models.map((m) => m.name).join(", ")})`,
           severity: "error",
-          target: property
+          target: property,
         });
         return prop;
       }
@@ -724,23 +923,31 @@ export const resolveUnionProperty = (program: Program, property: ModelProperty, 
         code: "typra-emitter-unsupported-union-types",
         message: `Unsupported union type: ${union.kind}`,
         severity: "error",
-        target: property
+        target: property,
       });
       return prop;
     }
   } else {
     // string variants for `kind` scalar type
-    const acceptableVariants = variants.filter(v => v.kind === "String" || (v.kind === "Scalar" && v.name === "string")).length;
+    const acceptableVariants = variants.filter(
+      (v) =>
+        v.kind === "String" || (v.kind === "Scalar" && v.name === "string"),
+    ).length;
     if (acceptableVariants === variants.length) {
       prop.typeName = {
-        "namespace": "",
-        "name": "string"
+        namespace: "",
+        name: "string",
       };
       prop.isScalar = true;
-      if (property.defaultValue && property.defaultValue.valueKind === "StringValue") {
+      if (
+        property.defaultValue &&
+        property.defaultValue.valueKind === "StringValue"
+      ) {
         prop.defaultValue = property.defaultValue?.value || null;
       }
-      prop.allowedValues = variants.filter(v => v.kind === "String").map(v => v.value);
+      prop.allowedValues = variants
+        .filter((v) => v.kind === "String")
+        .map((v) => v.value);
       prop.parseAliases = normalizeParseAliases(
         program,
         union,
@@ -764,13 +971,15 @@ export const resolveUnionProperty = (program: Program, property: ModelProperty, 
         prop.enumName = enumName;
       }
       // Check if the union includes a bare `string` scalar (open enum)
-      prop.isOpenEnum = variants.some(v => v.kind === "Scalar" && v.name === "string");
+      prop.isOpenEnum = variants.some(
+        (v) => v.kind === "Scalar" && v.name === "string",
+      );
     } else {
       program.reportDiagnostic({
         code: "typra-emitter-unsupported-union-types",
-        message: `Unable to resolve ${union.name} - too many variants: (${models.map(m => m.name).join(", ")})`,
+        message: `Unable to resolve ${union.name} - too many variants: (${models.map((m) => m.name).join(", ")})`,
         severity: "error",
-        target: property
+        target: property,
       });
     }
     return prop;
@@ -804,10 +1013,14 @@ function normalizeParseAliases(
       const existingCanonical = seen.get(alias);
       if (existingCanonical) {
         program.reportDiagnostic({
-          code: existingCanonical === entry.canonical ? "typra-emitter-parse-alias-duplicate" : "typra-emitter-parse-alias-conflict",
-          message: existingCanonical === entry.canonical
-            ? `parseAlias alias '${alias}' is already declared for canonical value '${entry.canonical}'.`
-            : `parseAlias alias '${alias}' maps to both '${existingCanonical}' and '${entry.canonical}'.`,
+          code:
+            existingCanonical === entry.canonical
+              ? "typra-emitter-parse-alias-duplicate"
+              : "typra-emitter-parse-alias-conflict",
+          message:
+            existingCanonical === entry.canonical
+              ? `parseAlias alias '${alias}' is already declared for canonical value '${entry.canonical}'.`
+              : `parseAlias alias '${alias}' maps to both '${existingCanonical}' and '${entry.canonical}'.`,
           severity: "error",
           target: union,
         });
@@ -830,7 +1043,9 @@ function normalizeParseAliases(
     aliases[entry.canonical] = canonicalAliases;
   }
 
-  return Object.fromEntries(Object.entries(aliases).filter(([, value]) => value.length > 0));
+  return Object.fromEntries(
+    Object.entries(aliases).filter(([, value]) => value.length > 0),
+  );
 }
 
 const getTemplateModel = (type: Type | undefined): Model | undefined => {
@@ -855,7 +1070,6 @@ const getTemplateType = (type: Type | undefined): Type | undefined => {
   return undefined;
 };
 
-
 // ============================================================================
 // Render Context Interfaces
 // ============================================================================
@@ -874,7 +1088,9 @@ export interface PythonClassContext {
   /** Processed coercion representations for scalar-to-object constructors */
   coercions: Array<{ scalar: string; alternate: string }>;
   /** Polymorphic type information if this is a discriminated type */
-  polymorphicTypes: ReturnType<TypeNode['retrievePolymorphicTypes']> | undefined;
+  polymorphicTypes:
+    | ReturnType<TypeNode["retrievePolymorphicTypes"]>
+    | undefined;
   /** Import types needed from other modules */
   imports: string[];
   /** Collection properties with their nested type info for load_* methods */
@@ -884,7 +1100,12 @@ export interface PythonClassContext {
   /** Maps factory.name → safe Python method name (prefixed with create_ on field collision) */
   factoryNameMap: Record<string, string>;
   /** Pre-rendered factory method bodies via expression IR */
-  renderedFactories: Array<{ name: string; safeName: string; params: Record<string, string>; body: string }>;
+  renderedFactories: Array<{
+    name: string;
+    safeName: string;
+    params: Record<string, string>;
+    body: string;
+  }>;
   /** Pre-rendered coercion expressions via expression IR */
   renderedCoercions: Array<{ scalar: string; expression: string }>;
   /** Type names referenced in factory expressions (for file-level import resolution) */

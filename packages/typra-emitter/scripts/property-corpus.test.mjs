@@ -41,8 +41,16 @@ describe("property corpus generator", () => {
     ]);
 
     assert.deepEqual(
-      buildPropertyCorpus(root, { rootType: "Root", seed: 0xabc, caseCount: 3 }),
-      buildPropertyCorpus(root, { rootType: "Root", seed: 0xabc, caseCount: 3 }),
+      buildPropertyCorpus(root, {
+        rootType: "Root",
+        seed: 0xabc,
+        caseCount: 3,
+      }),
+      buildPropertyCorpus(root, {
+        rootType: "Root",
+        seed: 0xabc,
+        caseCount: 3,
+      }),
     );
   });
 
@@ -53,7 +61,11 @@ describe("property corpus generator", () => {
       prop("optionalName", "string", { isScalar: true, isOptional: true }),
     ]);
 
-    for (const entry of buildPropertyCorpus(root, { rootType: "Root", seed: 0x117, caseCount: 4 })) {
+    for (const entry of buildPropertyCorpus(root, {
+      rootType: "Root",
+      seed: 0x117,
+      caseCount: 4,
+    })) {
       assert.ok("requiredName" in entry.input);
       assert.ok("requiredItems" in entry.input);
     }
@@ -87,12 +99,12 @@ describe("property corpus generator", () => {
       prop("kind", "string", { isScalar: true, defaultValue: "*" }),
       prop("payload", "unknown", { isAny: true }),
     ]);
-    const content = type("Content", [
-      prop("kind", "string", { isScalar: true, allowedValues: ["text"] }),
-    ], { discriminator: "kind", childTypes: [text, wildcard] });
-    const root = type("Root", [
-      prop("content", "Content", { type: content }),
-    ]);
+    const content = type(
+      "Content",
+      [prop("kind", "string", { isScalar: true, allowedValues: ["text"] })],
+      { discriminator: "kind", childTypes: [text, wildcard] },
+    );
+    const root = type("Root", [prop("content", "Content", { type: content })]);
 
     const cases = buildPropertyCorpus(root, {
       rootType: "Root",

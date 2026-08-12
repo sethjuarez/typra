@@ -60,7 +60,9 @@ async function main(): Promise<void> {
     const result = verifyTypraMetadata({
       baselineRoot: path.resolve(configDirectory, config.verify.baseline),
       currentRoot: path.resolve(configDirectory, config.verify.current),
-      configPath: config.verify.config ? path.resolve(configDirectory, config.verify.config) : undefined,
+      configPath: config.verify.config
+        ? path.resolve(configDirectory, config.verify.config)
+        : undefined,
     });
     if (!result.ok) {
       console.error(JSON.stringify(result, null, 2));
@@ -74,14 +76,28 @@ function readConfig(configPath: string): ConsumerSmokeConfig {
   if (!existsSync(configPath)) {
     throw new Error(`Missing consumer smoke config: ${configPath}`);
   }
-  const config = JSON.parse(readFileSync(configPath, "utf8")) as ConsumerSmokeConfig;
+  const config = JSON.parse(
+    readFileSync(configPath, "utf8"),
+  ) as ConsumerSmokeConfig;
   for (const key of ["install", "generate", "smoke"] as const) {
-    if (config[key] !== undefined && (!Array.isArray(config[key]) || config[key]?.some((entry) => typeof entry !== "string"))) {
-      throw new Error(`Invalid consumer smoke config: ${key} must be an array of commands.`);
+    if (
+      config[key] !== undefined &&
+      (!Array.isArray(config[key]) ||
+        config[key]?.some((entry) => typeof entry !== "string"))
+    ) {
+      throw new Error(
+        `Invalid consumer smoke config: ${key} must be an array of commands.`,
+      );
     }
   }
-  if (config.verify && (typeof config.verify.baseline !== "string" || typeof config.verify.current !== "string")) {
-    throw new Error("Invalid consumer smoke config: verify.baseline and verify.current are required strings.");
+  if (
+    config.verify &&
+    (typeof config.verify.baseline !== "string" ||
+      typeof config.verify.current !== "string")
+  ) {
+    throw new Error(
+      "Invalid consumer smoke config: verify.baseline and verify.current are required strings.",
+    );
   }
   return config;
 }

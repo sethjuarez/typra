@@ -329,7 +329,9 @@ export interface PolymorphicDispatchDecl {
  * absorbs values no concrete variant claims. Treating such a dispatch as closed emits
  * validation that rejects those values before dispatch, leaving the fallback arm unreachable.
  */
-export function isClosedPolymorphicDispatch(dispatch: PolymorphicDispatchDecl): boolean {
+export function isClosedPolymorphicDispatch(
+  dispatch: PolymorphicDispatchDecl,
+): boolean {
   return dispatch.isClosed && dispatch.defaultVariant === null;
 }
 

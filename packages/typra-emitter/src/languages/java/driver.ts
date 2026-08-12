@@ -8,17 +8,40 @@ import { enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { collectPolymorphicTypeNames, lowerFile } from "../../ir/lower.js";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
-import { buildBaseTestContext, TestContextOptions } from "../../testing/test-context.js";
-import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper, emitJavaUnknownCarrier, ensureJavaEditableSeamMarker } from "./emitter.js";
-import { emitJavaContext, emitJavaJson, emitJavaMaps, emitJavaSaveContext, emitJavaYaml } from "./scaffolding.js";
-import { emitJavaTest, emitJavaTestRunner, javaTestClassName } from "./test-emitter.js";
+import {
+  buildBaseTestContext,
+  TestContextOptions,
+} from "../../testing/test-context.js";
+import {
+  emitJavaEnum,
+  emitJavaFileContent,
+  emitJavaMethodHelper,
+  emitJavaUnknownCarrier,
+  ensureJavaEditableSeamMarker,
+} from "./emitter.js";
+import {
+  emitJavaContext,
+  emitJavaJson,
+  emitJavaMaps,
+  emitJavaSaveContext,
+  emitJavaYaml,
+} from "./scaffolding.js";
+import {
+  emitJavaTest,
+  emitJavaTestRunner,
+  javaTestClassName,
+} from "./test-emitter.js";
 import { JavaExprVisitor } from "./visitor.js";
-import { collectProtocolNodes, emitJavaProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
+import {
+  collectProtocolNodes,
+  emitJavaProtocolScaffolds,
+  shouldEmitCompileOnlyProtocolScaffolds,
+} from "../../protocol-scaffolds.js";
 import { javaEnumTypeName, javaTypeName } from "./identifiers.js";
 
 export const javaTestOptions: TestContextOptions = {
   renderKey: (key: string) => key,
-  renderBoolean: (value: boolean) => value ? "true" : "false",
+  renderBoolean: (value: boolean) => (value ? "true" : "false"),
   escapeString: (value: string) => value,
   getDelimiter: () => '"',
   scalarValues: {
@@ -41,10 +64,13 @@ export const javaTestOptions: TestContextOptions = {
     float64: "Double",
     number: "Double",
   },
-  renderEnumValue: (enumName, rawValue, _fieldName, isOpenEnum) => isOpenEnum ? null : ({
-    value: `${javaEnumTypeName(enumName)}.fromValue(${JSON.stringify(rawValue)})`,
-    delimiter: "",
-  }),
+  renderEnumValue: (enumName, rawValue, _fieldName, isOpenEnum) =>
+    isOpenEnum
+      ? null
+      : {
+          value: `${javaEnumTypeName(enumName)}.fromValue(${JSON.stringify(rawValue)})`,
+          delimiter: "",
+        },
 };
 
 export const generateJava = async (
@@ -57,25 +83,70 @@ export const generateJava = async (
   const nodes = filterNodes(allTypes, options);
   const registry = TypeRegistry.fromTypeGraph(allTypes);
   const visitor = new JavaExprVisitor(registry);
-  const packageName = javaPackageName(emitTarget.namespace ?? emitTarget["package-name"] ?? node.typeName.namespace);
+  const packageName = javaPackageName(
+    emitTarget.namespace ??
+      emitTarget["package-name"] ??
+      node.typeName.namespace,
+  );
   const polymorphicTypeNames = collectPolymorphicTypeNames(node, registry);
-  const fileDecls = nodes.map(n => lowerFile(n, registry, polymorphicTypeNames));
-  const allTypeDecls = fileDecls.flatMap(fileDecl => fileDecl.types);
+  const fileDecls = nodes.map((n) =>
+    lowerFile(n, registry, polymorphicTypeNames),
+  );
+  const allTypeDecls = fileDecls.flatMap((fileDecl) => fileDecl.types);
 
-  await emitJavaFile(context, "LoadContext.java", emitJavaContext(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
-  await emitJavaFile(context, "SaveContext.java", emitJavaSaveContext(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
-  await emitJavaFile(context, "TypraMaps.java", emitJavaMaps(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
-  await emitJavaFile(context, "TypraJson.java", emitJavaJson(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
-  await emitJavaFile(context, "TypraYaml.java", emitJavaYaml(packageName), emitTarget["output-dir"], emitTarget["output-dir"]);
+  await emitJavaFile(
+    context,
+    "LoadContext.java",
+    emitJavaContext(packageName),
+    emitTarget["output-dir"],
+    emitTarget["output-dir"],
+  );
+  await emitJavaFile(
+    context,
+    "SaveContext.java",
+    emitJavaSaveContext(packageName),
+    emitTarget["output-dir"],
+    emitTarget["output-dir"],
+  );
+  await emitJavaFile(
+    context,
+    "TypraMaps.java",
+    emitJavaMaps(packageName),
+    emitTarget["output-dir"],
+    emitTarget["output-dir"],
+  );
+  await emitJavaFile(
+    context,
+    "TypraJson.java",
+    emitJavaJson(packageName),
+    emitTarget["output-dir"],
+    emitTarget["output-dir"],
+  );
+  await emitJavaFile(
+    context,
+    "TypraYaml.java",
+    emitJavaYaml(packageName),
+    emitTarget["output-dir"],
+    emitTarget["output-dir"],
+  );
 
-  const enums = new Map<string, ReturnType<typeof lowerFile>["enums"][number]>();
+  const enums = new Map<
+    string,
+    ReturnType<typeof lowerFile>["enums"][number]
+  >();
   for (const fileDecl of fileDecls) {
     for (const enumDef of fileDecl.enums) {
       if (!enumDef.isOpen) enums.set(javaEnumTypeName(enumDef.name), enumDef);
     }
   }
   for (const [enumName, enumDef] of enums) {
-    await emitJavaFile(context, `${enumName}.java`, emitJavaEnum(enumDef, packageName, javaNativeSerialization(emitTarget)), emitTarget["output-dir"], emitTarget["output-dir"]);
+    await emitJavaFile(
+      context,
+      `${enumName}.java`,
+      emitJavaEnum(enumDef, packageName, javaNativeSerialization(emitTarget)),
+      emitTarget["output-dir"],
+      emitTarget["output-dir"],
+    );
   }
 
   const testClassNames: string[] = [];
@@ -91,41 +162,96 @@ export const generateJava = async (
       allTypeDecls,
       javaNativeSerialization(emitTarget),
     );
-    await emitJavaFile(context, `${javaTypeName(n.typeName.name)}.java`, fileContent, emitTarget["output-dir"], emitTarget["output-dir"]);
-    const carrier = emitJavaUnknownCarrier(fileDecls[index].types[0], packageName, javaNativeSerialization(emitTarget));
+    await emitJavaFile(
+      context,
+      `${javaTypeName(n.typeName.name)}.java`,
+      fileContent,
+      emitTarget["output-dir"],
+      emitTarget["output-dir"],
+    );
+    const carrier = emitJavaUnknownCarrier(
+      fileDecls[index].types[0],
+      packageName,
+      javaNativeSerialization(emitTarget),
+    );
     if (carrier) {
-      await emitJavaFile(context, carrier.filename, carrier.source, emitTarget["output-dir"], emitTarget["output-dir"]);
+      await emitJavaFile(
+        context,
+        carrier.filename,
+        carrier.source,
+        emitTarget["output-dir"],
+        emitTarget["output-dir"],
+      );
     }
     const helper = emitJavaMethodHelper(fileDecls[index].types[0], packageName);
     if (helper) {
       helperFiles.add(helper.filename);
-      await emitJavaMethodHelperIfMissing(context, helper.filename, helper.source, emitTarget["output-dir"]);
+      await emitJavaMethodHelperIfMissing(
+        context,
+        helper.filename,
+        helper.source,
+        emitTarget["output-dir"],
+      );
     }
 
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const testClass = javaTestClassName(n.typeName.name);
       testClassNames.push(testClass);
-      const testContext = buildBaseTestContext(n, packageName, javaTestOptions, name => registry.get(name));
-      await emitJavaFile(context, `${testClass}.java`, emitJavaTest(testContext, javaNativeSerialization(emitTarget)), emitTarget["test-dir"], emitTarget["test-dir"]);
+      const testContext = buildBaseTestContext(
+        n,
+        packageName,
+        javaTestOptions,
+        (name) => registry.get(name),
+      );
+      await emitJavaFile(
+        context,
+        `${testClass}.java`,
+        emitJavaTest(testContext, javaNativeSerialization(emitTarget)),
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
     }
   }
 
-  if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
-    const scaffold = emitJavaProtocolScaffolds(collectProtocolNodes(nodes), packageName);
+  if (
+    emitTarget["test-dir"] &&
+    shouldEmitCompileOnlyProtocolScaffolds(emitTarget)
+  ) {
+    const scaffold = emitJavaProtocolScaffolds(
+      collectProtocolNodes(nodes),
+      packageName,
+    );
     if (scaffold) {
       testClassNames.push(scaffold.className);
-      await emitJavaFile(context, `${scaffold.className}.java`, scaffold.source, emitTarget["test-dir"], emitTarget["test-dir"]);
+      await emitJavaFile(
+        context,
+        `${scaffold.className}.java`,
+        scaffold.source,
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
     }
   }
 
   if (emitTarget["test-dir"] && testClassNames.length > 0) {
-    await emitJavaFile(context, "TypraGeneratedTests.java", emitJavaTestRunner(packageName, testClassNames), emitTarget["test-dir"], emitTarget["test-dir"]);
+    await emitJavaFile(
+      context,
+      "TypraGeneratedTests.java",
+      emitJavaTestRunner(packageName, testClassNames),
+      emitTarget["test-dir"],
+      emitTarget["test-dir"],
+    );
   }
 
   if (emitTarget.format !== false) {
-    formatJavaFiles(resolve(process.cwd(), emitTarget["output-dir"] ?? context.emitterOutputDir), helperFiles);
+    formatJavaFiles(
+      resolve(
+        process.cwd(),
+        emitTarget["output-dir"] ?? context.emitterOutputDir,
+      ),
+      helperFiles,
+    );
   }
-
 };
 
 function javaNativeSerialization(emitTarget: EmitTarget): "none" | "jackson" {
@@ -133,7 +259,12 @@ function javaNativeSerialization(emitTarget: EmitTarget): "none" | "jackson" {
 }
 
 export function javaPackageName(namespace: string): string {
-  return namespace.toLowerCase().replace(/[^a-z0-9.]+/g, ".").replace(/^\.+|\.+$/g, "") || "typra";
+  return (
+    namespace
+      .toLowerCase()
+      .replace(/[^a-z0-9.]+/g, ".")
+      .replace(/^\.+|\.+$/g, "") || "typra"
+  );
 }
 
 async function emitJavaFile(
@@ -143,8 +274,13 @@ async function emitJavaFile(
   outputDir?: string,
   outputRoot?: string,
 ): Promise<void> {
-  const filePath = resolvePath(outputDir || `${context.emitterOutputDir}/java`, filename);
-  await emitGeneratedFile(context, filePath, content, { outputRoot: outputRoot || outputDir });
+  const filePath = resolvePath(
+    outputDir || `${context.emitterOutputDir}/java`,
+    filename,
+  );
+  await emitGeneratedFile(context, filePath, content, {
+    outputRoot: outputRoot || outputDir,
+  });
 }
 
 async function emitJavaMethodHelperIfMissing(
@@ -153,7 +289,10 @@ async function emitJavaMethodHelperIfMissing(
   content: string,
   outputDir?: string,
 ): Promise<void> {
-  const filePath = resolvePath(outputDir || `${context.emitterOutputDir}/java`, filename);
+  const filePath = resolvePath(
+    outputDir || `${context.emitterOutputDir}/java`,
+    filename,
+  );
   if (!existsSync(filePath)) {
     await emitFile(context.program, { path: filePath, content });
     return;
@@ -170,8 +309,8 @@ async function emitJavaMethodHelperIfMissing(
 function formatJavaFiles(outputDir: string, excludedFiles: Set<string>): void {
   if (!existsSync(outputDir)) return;
   const javaFiles = readdirSync(outputDir)
-    .filter(file => file.endsWith(".java") && !excludedFiles.has(file))
-    .map(file => resolve(outputDir, file));
+    .filter((file) => file.endsWith(".java") && !excludedFiles.has(file))
+    .map((file) => resolve(outputDir, file));
   if (javaFiles.length === 0) return;
 
   try {

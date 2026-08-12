@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Model, ModelProperty } from "@typespec/compiler";
 
-import type { CoercionDecl, FieldDecl, FileDecl, TypeDecl } from "../src/ir/declarations.js";
+import type {
+  CoercionDecl,
+  FieldDecl,
+  FileDecl,
+  TypeDecl,
+} from "../src/ir/declarations.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { TypeNode, PropertyNode } from "../src/ir/ast.js";
 import { lowerFile } from "../src/ir/lower.js";
@@ -17,7 +22,11 @@ interface PropOptions {
   isOptional?: boolean;
 }
 
-function makeProp(name: string, typeName: string, options: PropOptions = {}): PropertyNode {
+function makeProp(
+  name: string,
+  typeName: string,
+  options: PropOptions = {},
+): PropertyNode {
   const prop = new PropertyNode({} as ModelProperty, `Test ${name}`);
   prop.name = name;
   prop.typeName = { namespace: "Test", name: typeName };
@@ -36,7 +45,11 @@ interface TypeOptions {
   base?: { namespace: string; name: string } | null;
 }
 
-function makeType(name: string, properties: PropertyNode[], options: TypeOptions = {}): TypeNode {
+function makeType(
+  name: string,
+  properties: PropertyNode[],
+  options: TypeOptions = {},
+): TypeNode {
   const node = new TypeNode({} as Model, `Test ${name}`);
   node.typeName = { namespace: "Test", name };
   node.properties = properties;
@@ -55,7 +68,9 @@ function makeType(name: string, properties: PropertyNode[], options: TypeOptions
  * (`alias ConnectionType = "reference" | "key" | string`), which is how an open
  * discriminator is most naturally spelled in TypeSpec.
  */
-function emitOpenDiscriminatorBase(extraBaseProps: PropertyNode[] = []): string {
+function emitOpenDiscriminatorBase(
+  extraBaseProps: PropertyNode[] = [],
+): string {
   const reference = makeType(
     "ReferenceConnection",
     [makeProp("kind", "string", { isScalar: true, defaultValue: "reference" })],
@@ -69,7 +84,10 @@ function emitOpenDiscriminatorBase(extraBaseProps: PropertyNode[] = []): string 
   const base = makeType(
     "Conn",
     [
-      makeProp("kind", "ConnectionType", { allowedValues: ["reference", "key"], isOpenEnum: true }),
+      makeProp("kind", "ConnectionType", {
+        allowedValues: ["reference", "key"],
+        isOpenEnum: true,
+      }),
       ...extraBaseProps,
     ],
     { discriminator: "kind", childTypes: [reference, key], isAbstract: true },
@@ -77,7 +95,11 @@ function emitOpenDiscriminatorBase(extraBaseProps: PropertyNode[] = []): string 
 
   const registry = TypeRegistry.fromTypeGraph([base, reference, key]);
   const polymorphic = new Set(["Conn"]);
-  return emitRustFile(lowerFile(base, registry, polymorphic), new RustExprVisitor(registry), polymorphic);
+  return emitRustFile(
+    lowerFile(base, registry, polymorphic),
+    new RustExprVisitor(registry),
+    polymorphic,
+  );
 }
 
 describe("rust emitter — open polymorphic discriminators", () => {
@@ -94,7 +116,10 @@ describe("rust emitter — open polymorphic discriminators", () => {
     );
 
     // The fallback arm the pre-validation would have made unreachable.
-    assert.ok(/Unknown \{/.test(code), "open dispatch must emit an Unknown fallback variant");
+    assert.ok(
+      /Unknown \{/.test(code),
+      "open dispatch must emit an Unknown fallback variant",
+    );
     assert.ok(
       /raw: serde_json::Map/.test(code),
       "Unknown fallback must retain the raw payload so undeclared keys survive a roundtrip",
@@ -106,7 +131,10 @@ describe("rust emitter — open polymorphic discriminators", () => {
 
     assert.match(code, /Unknown \{/);
     assert.match(code, /_ => ConnKind::Unknown \{/);
-    assert.match(code, /ConnKind::Unknown \{ kind_name, \.\. \} => kind_name\.as_str\(\)/);
+    assert.match(
+      code,
+      /ConnKind::Unknown \{ kind_name, \.\. \} => kind_name\.as_str\(\)/,
+    );
     assert.match(code, /ConnKind::Unknown \{ raw, \.\. \} => \{/);
     assert.doesNotMatch(code, /_ => ConnKind::default\(\)/);
   });
@@ -142,7 +170,11 @@ describe("rust emitter — open polymorphic discriminators", () => {
     );
     const registry = TypeRegistry.fromTypeGraph([base, fallback]);
     const polymorphic = new Set(["Conn"]);
-    const code = emitRustFile(lowerFile(base, registry, polymorphic), new RustExprVisitor(registry), polymorphic);
+    const code = emitRustFile(
+      lowerFile(base, registry, polymorphic),
+      new RustExprVisitor(registry),
+      polymorphic,
+    );
 
     assert.match(code, /endpoint: String,/);
     assert.match(code, /kind_name: String,/);
@@ -157,19 +189,35 @@ describe("rust emitter — native serialization option", () => {
   it("preserves default serde Serialize/Deserialize impls for compatibility", () => {
     const code = emitOpenDiscriminatorBase();
 
-    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for Conn/);
-    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl<'de> serde::Deserialize<'de> for Conn/);
+    assert.match(
+      code,
+      /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for Conn/,
+    );
+    assert.match(
+      code,
+      /#\[cfg\(feature = "serde"\)\]\nimpl<'de> serde::Deserialize<'de> for Conn/,
+    );
   });
 
   it("omits serde Serialize/Deserialize impls when explicitly disabled", () => {
     const reference = makeType(
       "ReferenceConnection",
-      [makeProp("kind", "string", { isScalar: true, defaultValue: "reference" })],
+      [
+        makeProp("kind", "string", {
+          isScalar: true,
+          defaultValue: "reference",
+        }),
+      ],
       { base: { namespace: "Test", name: "Conn" } },
     );
     const base = makeType(
       "Conn",
-      [makeProp("kind", "ConnectionType", { allowedValues: ["reference"], isOpenEnum: true })],
+      [
+        makeProp("kind", "ConnectionType", {
+          allowedValues: ["reference"],
+          isOpenEnum: true,
+        }),
+      ],
       { discriminator: "kind", childTypes: [reference], isAbstract: true },
     );
     const registry = TypeRegistry.fromTypeGraph([base, reference]);
@@ -188,12 +236,22 @@ describe("rust emitter — native serialization option", () => {
   it("emits feature-gated serde impls that delegate through canonical load/save when opted in", () => {
     const reference = makeType(
       "ReferenceConnection",
-      [makeProp("kind", "string", { isScalar: true, defaultValue: "reference" })],
+      [
+        makeProp("kind", "string", {
+          isScalar: true,
+          defaultValue: "reference",
+        }),
+      ],
       { base: { namespace: "Test", name: "Conn" } },
     );
     const base = makeType(
       "Conn",
-      [makeProp("kind", "ConnectionType", { allowedValues: ["reference"], isOpenEnum: true })],
+      [
+        makeProp("kind", "ConnectionType", {
+          allowedValues: ["reference"],
+          isOpenEnum: true,
+        }),
+      ],
       { discriminator: "kind", childTypes: [reference], isAbstract: true },
     );
     const registry = TypeRegistry.fromTypeGraph([base, reference]);
@@ -205,11 +263,23 @@ describe("rust emitter — native serialization option", () => {
       { nativeSerialization: "serde" },
     );
 
-    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for Conn/);
+    assert.match(
+      code,
+      /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for Conn/,
+    );
     assert.match(code, /self\.to_value\(&SaveContext::default\(\)\)/);
-    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl<'de> serde::Deserialize<'de> for Conn/);
-    assert.match(code, /Conn::load_from_value\(&value, &LoadContext::default\(\)\)/);
-    assert.match(code, /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for ConnKind/);
+    assert.match(
+      code,
+      /#\[cfg\(feature = "serde"\)\]\nimpl<'de> serde::Deserialize<'de> for Conn/,
+    );
+    assert.match(
+      code,
+      /Conn::load_from_value\(&value, &LoadContext::default\(\)\)/,
+    );
+    assert.match(
+      code,
+      /#\[cfg\(feature = "serde"\)\]\nimpl serde::Serialize for ConnKind/,
+    );
   });
 });
 
@@ -245,7 +315,11 @@ function emitValueBackedVariantOwner(): string {
 
   const registry = TypeRegistry.fromTypeGraph([base, arrayVariant]);
   const polymorphic = new Set(["Prop"]);
-  return emitRustFile(lowerFile(base, registry, polymorphic), new RustExprVisitor(registry), polymorphic);
+  return emitRustFile(
+    lowerFile(base, registry, polymorphic),
+    new RustExprVisitor(registry),
+    polymorphic,
+  );
 }
 
 describe("rust emitter — optional serde_json::Value fields", () => {
@@ -278,17 +352,25 @@ describe("rust emitter — optional serde_json::Value fields", () => {
       "a required polymorphic variant field must stay a bare serde_json::Value",
     );
     assert.ok(
-      !/items: Option<serde_json::Value>/.test(code.replace(/fallback_items/g, "")),
+      !/items: Option<serde_json::Value>/.test(
+        code.replace(/fallback_items/g, ""),
+      ),
       "a required polymorphic variant field must not be wrapped in Option",
     );
     assert.ok(
-      /items: value\.get\("items"\)\.cloned\(\)\.unwrap_or\(serde_json::Value::Null\),/.test(code),
+      /items: value\.get\("items"\)\.cloned\(\)\.unwrap_or\(serde_json::Value::Null\),/.test(
+        code,
+      ),
       "a required polymorphic variant field must keep its Null sentinel on load",
     );
   });
 });
 
-function scalarField(name: string, scalarType: string, isOptional = true): FieldDecl {
+function scalarField(
+  name: string,
+  scalarType: string,
+  isOptional = true,
+): FieldDecl {
   return {
     name,
     typeName: { namespace: "Test", name: scalarType },
@@ -304,7 +386,10 @@ function scalarField(name: string, scalarType: string, isOptional = true): Field
   } as unknown as FieldDecl;
 }
 
-function numericCoercion(scalarType: string, kindLiteral: string): CoercionDecl {
+function numericCoercion(
+  scalarType: string,
+  kindLiteral: string,
+): CoercionDecl {
   return {
     scalarType,
     assignments: [
@@ -315,16 +400,27 @@ function numericCoercion(scalarType: string, kindLiteral: string): CoercionDecl 
   } as unknown as CoercionDecl;
 }
 
-function emitCoercingType(coercions: CoercionDecl[], exampleType = "unknown"): string {
+function emitCoercingType(
+  coercions: CoercionDecl[],
+  exampleType = "unknown",
+): string {
   const type = {
     typeName: { namespace: "Test", name: "Property" },
     base: null,
     isAbstract: false,
     isProtocol: false,
     description: "",
-    fields: [scalarField("example", exampleType), scalarField("kind", "string")],
+    fields: [
+      scalarField("example", exampleType),
+      scalarField("kind", "string"),
+    ],
     coercionProperty: null,
-    load: { coercions, assignments: [], hasPolymorphicDispatch: false, hasContextHooks: false },
+    load: {
+      coercions,
+      assignments: [],
+      hasPolymorphicDispatch: false,
+      hasContextHooks: false,
+    },
     save: { assignments: [], hasBase: false, hasContextHooks: false },
     factories: [],
     collectionHelpers: [],
@@ -333,8 +429,17 @@ function emitCoercingType(coercions: CoercionDecl[], exampleType = "unknown"): s
     wire: null,
   } as unknown as TypeDecl;
 
-  const file = { group: "", imports: [], enums: [], types: [type] } as unknown as FileDecl;
-  return emitRustFile(file, new RustExprVisitor(TypeRegistry.fromTypeGraph([])), new Set<string>());
+  const file = {
+    group: "",
+    imports: [],
+    enums: [],
+    types: [type],
+  } as unknown as FileDecl;
+  return emitRustFile(
+    file,
+    new RustExprVisitor(TypeRegistry.fromTypeGraph([])),
+    new Set<string>(),
+  );
 }
 
 describe("rust emitter — numeric coercion bridging", () => {
@@ -349,8 +454,14 @@ describe("rust emitter — numeric coercion bridging", () => {
     // violating the vector's "the exact primitive kind". Declaration order must not decide this.
     const integral = code.indexOf("value.as_i64()");
     const fractional = code.indexOf("value.as_f64()");
-    assert.ok(integral > -1, "expected an as_i64 guard for the integral coercion");
-    assert.ok(fractional > -1, "expected an as_f64 guard for the fractional coercion");
+    assert.ok(
+      integral > -1,
+      "expected an as_i64 guard for the integral coercion",
+    );
+    assert.ok(
+      fractional > -1,
+      "expected an as_f64 guard for the fractional coercion",
+    );
     assert.ok(
       integral < fractional,
       "the integral coercion must be tested first — as_f64() also matches whole numbers",
@@ -370,7 +481,10 @@ describe("rust emitter — numeric coercion bridging", () => {
     // Go must use math.Trunc because encoding/json decodes every number as float64. serde_json
     // keeps the token's own int/float distinction, so rebuilding it from f64 would store 4.0
     // where the vector requires the unmodified 4.
-    assert.ok(!/trunc\(\)/.test(code), "serde_json distinguishes int from float natively");
+    assert.ok(
+      !/trunc\(\)/.test(code),
+      "serde_json distinguishes int from float natively",
+    );
   });
 
   it("keeps full f64 precision when the destination field is not f32", () => {
@@ -394,7 +508,10 @@ describe("rust emitter — numeric coercion bridging", () => {
 
   it("still narrows when the destination field is genuinely f32", () => {
     // Counterpart guard: the fix removes gratuitous narrowing, not required narrowing.
-    const code = emitCoercingType([numericCoercion("float32", "float")], "float32");
+    const code = emitCoercingType(
+      [numericCoercion("float32", "float")],
+      "float32",
+    );
 
     assert.ok(
       /\(value as f32\)\.into\(\)/.test(code),
@@ -405,16 +522,31 @@ describe("rust emitter — numeric coercion bridging", () => {
   it("emits only the guard a lone integral coercion needs", () => {
     const code = emitCoercingType([numericCoercion("integer", "integer")]);
 
-    assert.ok(/if let Some\(value\) = value\.as_i64\(\)/.test(code), "expected an as_i64 guard");
-    assert.ok(!/as_f64\(\)/.test(code), "an integral-only type needs no fractional guard");
+    assert.ok(
+      /if let Some\(value\) = value\.as_i64\(\)/.test(code),
+      "expected an as_i64 guard",
+    );
+    assert.ok(
+      !/as_f64\(\)/.test(code),
+      "an integral-only type needs no fractional guard",
+    );
   });
 
   it("does not bridge non-numeric coercions", () => {
     const code = emitCoercingType([numericCoercion("string", "string")]);
 
-    assert.ok(/if let Some\(s\) = value\.as_str\(\)/.test(code), "expected the declared string coercion");
-    assert.ok(!/as_f64\(\)/.test(code), "string-only coercions must gain no numeric bridge");
-    assert.ok(!/as_i64\(\)/.test(code), "string-only coercions must gain no numeric bridge");
+    assert.ok(
+      /if let Some\(s\) = value\.as_str\(\)/.test(code),
+      "expected the declared string coercion",
+    );
+    assert.ok(
+      !/as_f64\(\)/.test(code),
+      "string-only coercions must gain no numeric bridge",
+    );
+    assert.ok(
+      !/as_i64\(\)/.test(code),
+      "string-only coercions must gain no numeric bridge",
+    );
   });
 });
 
@@ -428,7 +560,12 @@ describe("rust emitter — provider wire mapping", () => {
       description: "",
       fields: [scalarField("temperature", "float32")],
       coercionProperty: null,
-      load: { coercions: [], assignments: [], hasPolymorphicDispatch: false, hasContextHooks: false },
+      load: {
+        coercions: [],
+        assignments: [],
+        hasPolymorphicDispatch: false,
+        hasContextHooks: false,
+      },
       save: { assignments: [], hasBase: false, hasContextHooks: false },
       factories: [],
       collectionHelpers: [],
@@ -445,10 +582,22 @@ describe("rust emitter — provider wire mapping", () => {
       },
     } as unknown as TypeDecl;
 
-    const file = { group: "", imports: [], enums: [], types: [type] } as unknown as FileDecl;
-    const code = emitRustFile(file, new RustExprVisitor(TypeRegistry.fromTypeGraph([])), new Set<string>());
+    const file = {
+      group: "",
+      imports: [],
+      enums: [],
+      types: [type],
+    } as unknown as FileDecl;
+    const code = emitRustFile(
+      file,
+      new RustExprVisitor(TypeRegistry.fromTypeGraph([])),
+      new Set<string>(),
+    );
 
-    assert.match(code, /let data = self\.to_value\(&SaveContext::default\(\)\);/);
+    assert.match(
+      code,
+      /let data = self\.to_value\(&SaveContext::default\(\)\);/,
+    );
     assert.doesNotMatch(code, /serde_json::to_value\(self\)/);
   });
 });
@@ -491,7 +640,11 @@ function emitNamedCollectionOwner(options: EntryShorthandOptions = {}): string {
 
   const owner = makeType("Prompty", [inputs]);
   const registry = TypeRegistry.fromTypeGraph([owner, element]);
-  return emitRustFile(lowerFile(owner, registry, new Set<string>()), new RustExprVisitor(registry), new Set<string>());
+  return emitRustFile(
+    lowerFile(owner, registry, new Set<string>()),
+    new RustExprVisitor(registry),
+    new Set<string>(),
+  );
 }
 
 describe("rust emitter — named-collection entry shorthand", () => {
@@ -499,11 +652,15 @@ describe("rust emitter — named-collection entry shorthand", () => {
     const code = emitNamedCollectionOwner({ entryShorthand: "default" });
 
     assert.ok(
-      /is_string\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "string", "default": value \}\)/.test(code),
+      /is_string\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "string", "default": value \}\)/.test(
+        code,
+      ),
       'a string entry must infer kind "string" and populate the declared field',
     );
     assert.ok(
-      /is_boolean\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "boolean", "default": value \}\)/.test(code),
+      /is_boolean\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "boolean", "default": value \}\)/.test(
+        code,
+      ),
       'a boolean entry must infer kind "boolean" and populate the declared field',
     );
     assert.ok(
@@ -519,8 +676,8 @@ describe("rust emitter — named-collection entry shorthand", () => {
   it("classifies integers before floats", () => {
     const code = emitNamedCollectionOwner({ entryShorthand: "default" });
 
-    const integral = code.indexOf('is_i64() {');
-    const fractional = code.indexOf('is_f64() {');
+    const integral = code.indexOf("is_i64() {");
+    const fractional = code.indexOf("is_f64() {");
     assert.ok(integral !== -1, "expected an integral entry arm");
     assert.ok(fractional !== -1, "expected a fractional entry arm");
     assert.ok(
@@ -528,11 +685,15 @@ describe("rust emitter — named-collection entry shorthand", () => {
       "is_i64 must be tested before is_f64 or every integer collapses into a float",
     );
     assert.ok(
-      /is_i64\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "integer", "default": value \}\)/.test(code),
+      /is_i64\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "integer", "default": value \}\)/.test(
+        code,
+      ),
       'an integer entry must infer kind "integer"',
     );
     assert.ok(
-      /is_f64\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "float", "default": value \}\)/.test(code),
+      /is_f64\(\) \{\s*\n\s*serde_json::json!\(\{ "kind": "float", "default": value \}\)/.test(
+        code,
+      ),
       'a float entry must infer kind "float"',
     );
   });
@@ -544,6 +705,9 @@ describe("rust emitter — named-collection entry shorthand", () => {
       /serde_json::json!\(\{ "example": value \}\)/.test(code),
       "without @entryShorthand the coercion property remains the shorthand target",
     );
-    assert.ok(!/is_i64\(\) \{/.test(code), "an undeclared collection gains no inference arms");
+    assert.ok(
+      !/is_i64\(\) \{/.test(code),
+      "an undeclared collection gains no inference arms",
+    );
   });
 });

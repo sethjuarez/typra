@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { CoercionDecl, CollectionHelperDecl, TypeDecl } from "../src/ir/declarations.js";
+import type {
+  CoercionDecl,
+  CollectionHelperDecl,
+  TypeDecl,
+} from "../src/ir/declarations.js";
 import { emitGoFileContent } from "../src/languages/go/emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
 
@@ -25,7 +29,12 @@ function typeWith(coercions: CoercionDecl[]): TypeDecl {
     description: "",
     fields: [],
     coercionProperty: null,
-    load: { coercions, assignments: [], hasPolymorphicDispatch: false, hasContextHooks: false },
+    load: {
+      coercions,
+      assignments: [],
+      hasPolymorphicDispatch: false,
+      hasContextHooks: false,
+    },
     save: { assignments: [], hasBase: false, hasContextHooks: false },
     factories: [],
     collectionHelpers: [],
@@ -53,8 +62,14 @@ function helperWith(hasNameProperty: boolean): CollectionHelperDecl {
     entryShorthand: {
       valueField: "default",
       cases: [
-        { scalarType: "integer", assignments: [{ fieldName: "kind", literalValue: "integer" }] },
-        { scalarType: "float32", assignments: [{ fieldName: "kind", literalValue: "number" }] },
+        {
+          scalarType: "integer",
+          assignments: [{ fieldName: "kind", literalValue: "integer" }],
+        },
+        {
+          scalarType: "float32",
+          assignments: [{ fieldName: "kind", literalValue: "number" }],
+        },
       ],
     },
     hasNameProperty,
@@ -76,11 +91,13 @@ function emitWithHelper(helper: CollectionHelperDecl): string {
     isOpenEnum: false,
   } as unknown as TypeDecl["load"]["assignments"][number];
   return emitGoFileContent(
-    [{
-      ...type,
-      collectionHelpers: [helper],
-      load: { ...type.load, assignments: [assignment] },
-    } as TypeDecl],
+    [
+      {
+        ...type,
+        collectionHelpers: [helper],
+        load: { ...type.load, assignments: [assignment] },
+      } as TypeDecl,
+    ],
     "model",
     new GoExprVisitor(),
     new Set<string>(),
@@ -89,22 +106,35 @@ function emitWithHelper(helper: CollectionHelperDecl): string {
 
 describe("Go emitter numeric coercion bridging", () => {
   it("bridges decoder-native float64 and int for mixed integral/fractional coercions", () => {
-    const out = emit([coercion("integer", "integer"), coercion("float32", "float")]);
+    const out = emit([
+      coercion("integer", "integer"),
+      coercion("float32", "float"),
+    ]);
 
     // encoding/json decodes every JSON number as float64, so without this case a schema
     // that declares `integer`/`float32` coercions never matches a decoded number.
-    assert.ok(out.includes("case float64:"), "expected a decoder-native float64 case");
+    assert.ok(
+      out.includes("case float64:"),
+      "expected a decoder-native float64 case",
+    );
     // gopkg.in/yaml.v3 decodes integral YAML scalars as int.
     assert.ok(out.includes("case int:"), "expected a decoder-native int case");
 
     // 4 must stay an integer and 3.14 must stay a float, so the float64 case has to
     // discriminate rather than collapsing both onto one coercion.
-    assert.ok(out.includes("if v == math.Trunc(v) {"), "expected integral discrimination");
-    assert.ok(out.includes('"math"'), "expected the math import to be plumbed through");
+    assert.ok(
+      out.includes("if v == math.Trunc(v) {"),
+      "expected integral discrimination",
+    );
+    assert.ok(
+      out.includes('"math"'),
+      "expected the math import to be plumbed through",
+    );
 
     const truncIndex = out.indexOf("if v == math.Trunc(v) {");
     assert.ok(
-      out.indexOf('"kind": "integer"', truncIndex) < out.indexOf('"kind": "float"', truncIndex),
+      out.indexOf('"kind": "integer"', truncIndex) <
+        out.indexOf('"kind": "float"', truncIndex),
       "whole numbers must route to the integral coercion, fractions to the fractional one",
     );
   });
@@ -112,17 +142,35 @@ describe("Go emitter numeric coercion bridging", () => {
   it("does not emit math.Trunc when only one numeric coercion is declared", () => {
     const out = emit([coercion("integer", "integer")]);
 
-    assert.ok(out.includes("case float64:"), "expected a decoder-native float64 case");
-    assert.ok(!out.includes("math.Trunc"), "single-numeric coercions need no discrimination");
-    assert.ok(!out.includes('"math"'), "the math import must not be emitted when unused");
+    assert.ok(
+      out.includes("case float64:"),
+      "expected a decoder-native float64 case",
+    );
+    assert.ok(
+      !out.includes("math.Trunc"),
+      "single-numeric coercions need no discrimination",
+    );
+    assert.ok(
+      !out.includes('"math"'),
+      "the math import must not be emitted when unused",
+    );
   });
 
   it("does not add numeric bridging for non-numeric coercions", () => {
     const out = emit([coercion("string", "string")]);
 
-    assert.ok(out.includes("case string:"), "expected the declared string coercion");
-    assert.ok(!out.includes("case float64:"), "string-only coercions need no numeric bridge");
-    assert.ok(!out.includes("case int:"), "string-only coercions need no numeric bridge");
+    assert.ok(
+      out.includes("case string:"),
+      "expected the declared string coercion",
+    );
+    assert.ok(
+      !out.includes("case float64:"),
+      "string-only coercions need no numeric bridge",
+    );
+    assert.ok(
+      !out.includes("case int:"),
+      "string-only coercions need no numeric bridge",
+    );
   });
 });
 
@@ -133,14 +181,26 @@ describe("Go emitter entry-shorthand math import", () => {
   it("omits the math import for a plain array helper", () => {
     const out = emitWithHelper(helperWith(false));
 
-    assert.ok(!out.includes("math.Trunc"), "a plain array helper emits no shorthand arms");
-    assert.ok(!out.includes('"math"'), "the math import must not be emitted when unused");
+    assert.ok(
+      !out.includes("math.Trunc"),
+      "a plain array helper emits no shorthand arms",
+    );
+    assert.ok(
+      !out.includes('"math"'),
+      "the math import must not be emitted when unused",
+    );
   });
 
   it("keeps the math import for a name-keyed helper that discriminates integrality", () => {
     const out = emitWithHelper(helperWith(true));
 
-    assert.ok(out.includes("math.Trunc"), "a name-keyed helper discriminates integrality");
-    assert.ok(out.includes('"math"'), "expected the math import to be plumbed through");
+    assert.ok(
+      out.includes("math.Trunc"),
+      "a name-keyed helper discriminates integrality",
+    );
+    assert.ok(
+      out.includes('"math"'),
+      "expected the math import to be plumbed through",
+    );
   });
 });

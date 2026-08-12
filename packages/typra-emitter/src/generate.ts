@@ -24,7 +24,7 @@ export const SUPPORTED_TARGET_LANGUAGES = [
 /**
  * Target language for code generation.
  */
-export type TargetLanguage = typeof SUPPORTED_TARGET_LANGUAGES[number];
+export type TargetLanguage = (typeof SUPPORTED_TARGET_LANGUAGES)[number];
 
 /**
  * Options for a specific target language.
@@ -41,14 +41,21 @@ export interface TargetOptions {
   /** Enum/string-union parsing policy for targets that support it */
   enumParsing?: "case-sensitive" | "case-insensitive";
   /** Opt-in native serialization framework for targets that support it */
-  nativeSerialization?: "none" | "pydantic" | "jackson" | "serde" | "zod" | "standard-schema" | "codable";
+  nativeSerialization?:
+    | "none"
+    | "pydantic"
+    | "jackson"
+    | "serde"
+    | "zod"
+    | "standard-schema"
+    | "codable";
 }
 
 /**
  * Options for the generate function.
  */
 export interface GenerateOptions {
-  /** 
+  /**
    * Output directory for generated code.
    * Each target will create a subdirectory (e.g., output/python, output/csharp)
    */
@@ -120,11 +127,11 @@ export interface GenerateResult {
 
 /**
  * Generate Typra runtime surfaces.
- * 
+ *
  * @example
  * ```typescript
  * import { generate } from '@typra/emitter/generate';
- * 
+ *
  * await generate({
  *   output: './generated',
  *   targets: ['python', 'csharp'],
@@ -133,7 +140,9 @@ export interface GenerateResult {
  * });
  * ```
  */
-export async function generate(options: GenerateOptions): Promise<GenerateResult> {
+export async function generate(
+  options: GenerateOptions,
+): Promise<GenerateResult> {
   const {
     output,
     targets = ["python", "csharp", "typescript", "go"],
@@ -148,7 +157,8 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
   } = options;
   const targetNames = Array.isArray(targets) ? targets : Object.keys(targets);
   const unsupportedTargets = targetNames.filter(
-    (target): target is string => !SUPPORTED_TARGET_LANGUAGES.includes(target as TargetLanguage),
+    (target): target is string =>
+      !SUPPORTED_TARGET_LANGUAGES.includes(target as TargetLanguage),
   );
 
   if (unsupportedTargets.length > 0) {
@@ -156,7 +166,9 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
       success: false,
       outputDir: path.resolve(output),
       targets: targetNames,
-      errors: [`Unsupported target language(s): ${unsupportedTargets.join(", ")}. Supported targets: ${SUPPORTED_TARGET_LANGUAGES.join(", ")}.`],
+      errors: [
+        `Unsupported target language(s): ${unsupportedTargets.join(", ")}. Supported targets: ${SUPPORTED_TARGET_LANGUAGES.join(", ")}.`,
+      ],
     };
   }
 
@@ -176,8 +188,14 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
   // Build emit targets configuration
   const outputDir = path.resolve(output);
-  const emitTargets = buildEmitTargets(targets, outputDir, generateTests, format);
-  const nativeSerializationErrors = validateNativeSerializationTargets(emitTargets);
+  const emitTargets = buildEmitTargets(
+    targets,
+    outputDir,
+    generateTests,
+    format,
+  );
+  const nativeSerializationErrors =
+    validateNativeSerializationTargets(emitTargets);
   if (nativeSerializationErrors.length > 0) {
     return {
       success: false,
@@ -214,10 +232,14 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
   try {
     // Resolve the peer dependency directly so the API and CLI work outside npm scripts.
-    execFileSync(process.execPath, [resolveTypeSpecCli(), "compile", modelPath, "--config", tempConfigPath], {
-      stdio: "inherit",
-      cwd: outputDir,
-    });
+    execFileSync(
+      process.execPath,
+      [resolveTypeSpecCli(), "compile", modelPath, "--config", tempConfigPath],
+      {
+        stdio: "inherit",
+        cwd: outputDir,
+      },
+    );
 
     return {
       success: true,
@@ -238,7 +260,6 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     } catch {
       // Ignore cleanup errors
     }
-
   }
 }
 
@@ -252,7 +273,7 @@ function buildEmitTargets(
   targets: TargetLanguage[] | Record<TargetLanguage, TargetOptions>,
   baseOutput: string,
   generateTests: boolean,
-  format: boolean
+  format: boolean,
 ): Array<{
   type: string;
   "output-dir": string;
@@ -260,14 +281,23 @@ function buildEmitTargets(
   format?: boolean;
   namespace?: string;
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
-  "native-serialization"?: "none" | "pydantic" | "jackson" | "serde" | "zod" | "standard-schema" | "codable";
+  "native-serialization"?:
+    | "none"
+    | "pydantic"
+    | "jackson"
+    | "serde"
+    | "zod"
+    | "standard-schema"
+    | "codable";
 }> {
   if (Array.isArray(targets)) {
     // Simple array of target names - use default directories
-    return targets.map(target => ({
+    return targets.map((target) => ({
       type: target,
       "output-dir": path.join(baseOutput, target),
-      "test-dir": generateTests ? path.join(baseOutput, target, "tests") : undefined,
+      "test-dir": generateTests
+        ? path.join(baseOutput, target, "tests")
+        : undefined,
       format,
     }));
   } else {

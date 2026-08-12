@@ -1,18 +1,25 @@
 import { createTypeSpecLibrary, JSONSchemaType } from "@typespec/compiler";
 
 export interface EmitTarget {
-  "type": string;
+  type: string;
   "output-dir"?: string;
   "test-dir"?: string;
-  "alias"?: { [key: string]: any };
-  "format"?: boolean;
-  "namespace"?: string;
+  alias?: { [key: string]: any };
+  format?: boolean;
+  namespace?: string;
   "import-path"?: string;
   "package-name"?: string;
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
   "protocol-scaffolds"?: "none" | "compile-only";
   "cancellation-token-path"?: string;
-  "native-serialization"?: "none" | "pydantic" | "jackson" | "serde" | "zod" | "standard-schema" | "codable";
+  "native-serialization"?:
+    | "none"
+    | "pydantic"
+    | "jackson"
+    | "serde"
+    | "zod"
+    | "standard-schema"
+    | "codable";
 }
 export interface TypraEmitterOptions {
   "root-object": string;
@@ -38,134 +45,168 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
         type: "object",
         additionalProperties: false,
         properties: {
-          "type": {
+          type: {
             type: "string",
             enum: [
-              "TypeScript", "Python", "CSharp", "Go", "Java", "Rust", "Swift", "Markdown",
-              "typescript", "python", "csharp", "go", "java", "rust", "swift", "markdown",
+              "TypeScript",
+              "Python",
+              "CSharp",
+              "Go",
+              "Java",
+              "Rust",
+              "Swift",
+              "Markdown",
+              "typescript",
+              "python",
+              "csharp",
+              "go",
+              "java",
+              "rust",
+              "swift",
+              "markdown",
             ],
           },
           "output-dir": {
             type: "string",
-            nullable: true
+            nullable: true,
           },
           "test-dir": {
             type: "string",
-            nullable: true
+            nullable: true,
           },
-          "alias": {
+          alias: {
             type: "object",
             additionalProperties: true,
-            nullable: true
+            nullable: true,
           },
-          "format": {
+          format: {
             type: "boolean",
             nullable: true,
             default: true,
-            description: "Run formatters on emitted files"
+            description: "Run formatters on emitted files",
           },
-          "namespace": {
+          namespace: {
             type: "string",
             nullable: true,
-            description: "Override the namespace for the emitted code"
+            description: "Override the namespace for the emitted code",
           },
           "import-path": {
             type: "string",
             nullable: true,
-            description: "Import path for generated code in tests. Defaults vary by language."
+            description:
+              "Import path for generated code in tests. Defaults vary by language.",
           },
           "package-name": {
             type: "string",
             nullable: true,
-            description: "Language package/module name override. Used by Go, Java, and Swift; defaults to the emitted root namespace."
+            description:
+              "Language package/module name override. Used by Go, Java, and Swift; defaults to the emitted root namespace.",
           },
           "enum-parsing": {
             type: "string",
             enum: ["case-sensitive", "case-insensitive"],
             nullable: true,
-            description: "Enum/string-union parsing policy. Currently used by Rust; defaults to case-sensitive for existing behavior."
+            description:
+              "Enum/string-union parsing policy. Currently used by Rust; defaults to case-sensitive for existing behavior.",
           },
           "protocol-scaffolds": {
             type: "string",
             enum: ["none", "compile-only"],
             nullable: true,
             default: "none",
-            description: "Opt-in generated test scaffolds for protocol conformance. 'compile-only' emits test-dir-only implementations that compile but do not provide runtime fake behavior."
+            description:
+              "Opt-in generated test scaffolds for protocol conformance. 'compile-only' emits test-dir-only implementations that compile but do not provide runtime fake behavior.",
           },
           "native-serialization": {
             type: "string",
-            enum: ["none", "pydantic", "jackson", "serde", "zod", "standard-schema", "codable"],
+            enum: [
+              "none",
+              "pydantic",
+              "jackson",
+              "serde",
+              "zod",
+              "standard-schema",
+              "codable",
+            ],
             nullable: true,
             default: "none",
-            description: "Native serialization/validation artifact for the target. Python supports opt-in 'pydantic'; Java supports opt-in 'jackson'; Rust supports 'serde' with cfg(feature = \"serde\") impls that delegate to Typra's canonical load/save mapping; TypeScript supports opt-in 'zod'; Swift supports opt-in 'codable'; 'standard-schema' is reserved for TypeScript. Defaults to 'none'."
+            description:
+              "Native serialization/validation artifact for the target. Python supports opt-in 'pydantic'; Java supports opt-in 'jackson'; Rust supports 'serde' with cfg(feature = \"serde\") impls that delegate to Typra's canonical load/save mapping; TypeScript supports opt-in 'zod'; Swift supports opt-in 'codable'; 'standard-schema' is reserved for TypeScript. Defaults to 'none'.",
           },
           "cancellation-token-path": {
             type: "string",
             nullable: true,
-            description: "Full runtime-native cancellation token symbol path. Rust uses :: separators; Python uses dotted module.symbol syntax."
-          }
+            description:
+              "Full runtime-native cancellation token symbol path. Rust uses :: separators; Python uses dotted module.symbol syntax.",
+          },
         },
-        required: ["type"]
+        required: ["type"],
       },
       nullable: true,
-      description: "List of target languages to emit code for"
+      description: "List of target languages to emit code for",
     },
     "root-namespace": {
       type: "string",
       nullable: true,
-      description: "Root namespace for the emitted code"
+      description: "Root namespace for the emitted code",
     },
     "root-object": {
       type: "string",
       nullable: false,
-      description: "Root object for the emitted artifacts"
+      description: "Root object for the emitted artifacts",
     },
     "root-alias": {
       type: "string",
       nullable: true,
-      description: "Alias for the root object"
+      description: "Alias for the root object",
     },
     "omit-models": {
       type: "array",
       items: { type: "string" },
       nullable: true,
-      description: "List of model names to omit from generation"
+      description: "List of model names to omit from generation",
     },
     "schema-output-dir": {
       type: "string",
       nullable: true,
-      description: "Directory containing JSON schema files. Reserved for future manifest-based cleanup of omitted models."
+      description:
+        "Directory containing JSON schema files. Reserved for future manifest-based cleanup of omitted models.",
     },
     "additional-roots": {
       type: "array",
       items: { type: "string" },
       nullable: true,
-      description: "Additional root types to resolve and generate alongside the main root object. These types need not be referenced from the main root. Specified as fully-qualified names (e.g., 'Typra.Message')."
+      description:
+        "Additional root types to resolve and generate alongside the main root object. These types need not be referenced from the main root. Specified as fully-qualified names (e.g., 'Typra.Message').",
     },
     "allow-unsupported-typespec-version": {
       type: "boolean",
       nullable: true,
       default: false,
-      description: "Allow generation with an unvalidated TypeSpec compiler/json-schema version. Unsupported versions report a warning instead of an error."
+      description:
+        "Allow generation with an unvalidated TypeSpec compiler/json-schema version. Unsupported versions report a warning instead of an error.",
     },
     "protected-paths": {
       type: "array",
       items: { type: "string" },
       nullable: true,
-      description: "Hand-authored paths Typra must not own. Recorded for verifier boundary checks; generation still does not delete files."
+      description:
+        "Hand-authored paths Typra must not own. Recorded for verifier boundary checks; generation still does not delete files.",
     },
     "hydration-zones": {
       type: "array",
       items: { type: "string" },
       nullable: true,
-      description: "Hand-authored extension zones adjacent to generated output. Recorded as verifier boundary metadata; Typra does not generate runtime behavior."
+      description:
+        "Hand-authored extension zones adjacent to generated output. Recorded as verifier boundary metadata; Typra does not generate runtime behavior.",
     },
     "deterministic-output": {
       type: "boolean",
       nullable: true,
       default: false,
-      description: "Emit stable metadata for CI verification. When enabled, generated manifest timestamps use a fixed value instead of wall-clock time."
-    }
+      description:
+        "Emit stable metadata for CI verification. When enabled, generated manifest timestamps use a fixed value instead of wall-clock time.",
+    },
   },
   required: ["root-object"],
 };
@@ -184,8 +225,11 @@ export const $lib = createTypeSpecLibrary({
     defaultFor: { description: "Per-target required default values" },
     protocols: { description: "Pipeline interface markers" },
     parseAliases: { description: "Parse-only aliases for named string unions" },
-    entryShorthands: { description: "Field populated by an immediate scalar in name-keyed collection form" }
-  }
+    entryShorthands: {
+      description:
+        "Field populated by an immediate scalar in name-keyed collection form",
+    },
+  },
 });
 
 export const { reportDiagnostic, createDiagnostic } = $lib;

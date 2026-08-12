@@ -34,7 +34,10 @@ interface CompatibilityDiagnosticContext {
 }
 
 export function getToolchainMetadata(): ToolchainMetadata {
-  const emitterVersion = resolveNearestPackageVersion("@typra/emitter", dirname(fileURLToPath(import.meta.url)));
+  const emitterVersion = resolveNearestPackageVersion(
+    "@typra/emitter",
+    dirname(fileURLToPath(import.meta.url)),
+  );
   return buildToolchainMetadata([
     {
       name: "@typespec/compiler",
@@ -55,19 +58,26 @@ export function getToolchainMetadata(): ToolchainMetadata {
 }
 
 export function buildToolchainMetadata(
-  packages: Array<Omit<ToolchainPackageMetadata, "supported"> & Partial<Pick<ToolchainPackageMetadata, "supported">>>,
+  packages: Array<
+    Omit<ToolchainPackageMetadata, "supported"> &
+      Partial<Pick<ToolchainPackageMetadata, "supported">>
+  >,
 ): ToolchainMetadata {
   return {
     packages: packages
       .map((entry) => ({
         ...entry,
-        supported: entry.supported ?? isSupportedVersion(entry.version, entry.supportedRange),
+        supported:
+          entry.supported ??
+          isSupportedVersion(entry.version, entry.supportedRange),
       }))
       .sort((left, right) => left.name.localeCompare(right.name)),
   };
 }
 
-export function reportTypeSpecCompatibility(context: EmitContext<TypraEmitterOptions>): ToolchainMetadata {
+export function reportTypeSpecCompatibility(
+  context: EmitContext<TypraEmitterOptions>,
+): ToolchainMetadata {
   const toolchain = getToolchainMetadata();
   reportToolchainCompatibility(context, toolchain);
   return toolchain;
@@ -77,10 +87,16 @@ export function shouldBlockUnsupportedTypeSpecToolchain(
   options: Pick<TypraEmitterOptions, "allow-unsupported-typespec-version">,
   toolchain: ToolchainMetadata,
 ): boolean {
-  return options["allow-unsupported-typespec-version"] !== true && getUnsupportedTypeSpecPackages(toolchain).length > 0;
+  return (
+    options["allow-unsupported-typespec-version"] !== true &&
+    getUnsupportedTypeSpecPackages(toolchain).length > 0
+  );
 }
 
-export function reportToolchainCompatibility(context: CompatibilityDiagnosticContext, toolchain: ToolchainMetadata): void {
+export function reportToolchainCompatibility(
+  context: CompatibilityDiagnosticContext,
+  toolchain: ToolchainMetadata,
+): void {
   const unsupported = getUnsupportedTypeSpecPackages(toolchain);
   if (unsupported.length === 0) {
     return;
@@ -88,15 +104,26 @@ export function reportToolchainCompatibility(context: CompatibilityDiagnosticCon
 
   context.program.reportDiagnostic({
     code: "typra-emitter-unsupported-typespec-version",
-    message: formatUnsupportedTypeSpecVersionMessage(unsupported, context.options["allow-unsupported-typespec-version"] === true),
-    severity: context.options["allow-unsupported-typespec-version"] === true ? "warning" : "error",
+    message: formatUnsupportedTypeSpecVersionMessage(
+      unsupported,
+      context.options["allow-unsupported-typespec-version"] === true,
+    ),
+    severity:
+      context.options["allow-unsupported-typespec-version"] === true
+        ? "warning"
+        : "error",
     target: NoTarget,
   });
 }
 
-export function getUnsupportedTypeSpecPackages(toolchain: ToolchainMetadata): ToolchainPackageMetadata[] {
+export function getUnsupportedTypeSpecPackages(
+  toolchain: ToolchainMetadata,
+): ToolchainPackageMetadata[] {
   return toolchain.packages.filter(
-    (entry) => (entry.name === "@typespec/compiler" || entry.name === "@typespec/json-schema") && !entry.supported,
+    (entry) =>
+      (entry.name === "@typespec/compiler" ||
+        entry.name === "@typespec/json-schema") &&
+      !entry.supported,
   );
 }
 
@@ -104,8 +131,12 @@ export function formatUnsupportedTypeSpecVersionMessage(
   unsupported: ToolchainPackageMetadata[],
   allowedUnsupportedVersion: boolean,
 ): string {
-  const actual = unsupported.map((entry) => `${entry.name}@${entry.version}`).join(", ");
-  const expected = unsupported.map((entry) => `${entry.name}@${entry.supportedRange}`).join(", ");
+  const actual = unsupported
+    .map((entry) => `${entry.name}@${entry.version}`)
+    .join(", ");
+  const expected = unsupported
+    .map((entry) => `${entry.name}@${entry.supportedRange}`)
+    .join(", ");
   const action = allowedUnsupportedVersion
     ? "Generation will continue because allow-unsupported-typespec-version is enabled."
     : "Pin the TypeSpec toolchain to the supported versions, or set allow-unsupported-typespec-version: true to continue with a warning.";
@@ -126,13 +157,22 @@ function resolveInstalledPackageVersion(packageName: string): string {
   }
 }
 
-function resolveNearestPackageVersion(expectedPackageName: string, startDir: string): string {
+function resolveNearestPackageVersion(
+  expectedPackageName: string,
+  startDir: string,
+): string {
   let current = startDir;
   while (current !== dirname(current)) {
     const candidate = join(current, "package.json");
     if (existsSync(candidate)) {
-      const metadata = JSON.parse(readFileSync(candidate, "utf8")) as { name?: unknown; version?: unknown };
-      if (metadata.name === expectedPackageName && typeof metadata.version === "string") {
+      const metadata = JSON.parse(readFileSync(candidate, "utf8")) as {
+        name?: unknown;
+        version?: unknown;
+      };
+      if (
+        metadata.name === expectedPackageName &&
+        typeof metadata.version === "string"
+      ) {
         return metadata.version;
       }
     }

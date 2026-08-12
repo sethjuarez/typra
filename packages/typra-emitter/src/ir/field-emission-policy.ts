@@ -1,4 +1,9 @@
-import { FieldDecl, LoadAssignment, PropertyCategory, SaveAssignment } from "./declarations.js";
+import {
+  FieldDecl,
+  LoadAssignment,
+  PropertyCategory,
+  SaveAssignment,
+} from "./declarations.js";
 
 export interface RequiredFieldGuardOptions {
   /**
@@ -12,7 +17,9 @@ export interface RequiredFieldGuardOptions {
 
 export type LoadFieldPresencePolicy = "guard-then-fail" | "load-when-present";
 export type SaveFieldEmissionPolicy = "emit-always" | "omit-when-absent";
-export type OptionalFieldAbsencePolicy = "preserve-absence" | "materialize-default";
+export type OptionalFieldAbsencePolicy =
+  | "preserve-absence"
+  | "materialize-default";
 export type CollectionDefaultProfile = "required-or-explicit" | "explicit-only";
 
 export type SaveFieldEmissionProfile =
@@ -27,7 +34,11 @@ function isRequiredWithoutDefault(field: {
   hasExplicitDefault?: boolean;
   defaultValue?: string | number | boolean | null;
 }): boolean {
-  return !field.isOptional && !field.hasExplicitDefault && field.defaultValue === null;
+  return (
+    !field.isOptional &&
+    !field.hasExplicitDefault &&
+    field.defaultValue === null
+  );
 }
 
 function isGuardedCategory(
@@ -35,13 +46,18 @@ function isGuardedCategory(
   options: RequiredFieldGuardOptions,
 ): boolean {
   if (category.kind === "complex") return true;
-  return options.includeInheritedScalarAndDict === true
-    && options.hasBase === true
-    && (category.kind === "scalar" || category.kind === "dict");
+  return (
+    options.includeInheritedScalarAndDict === true &&
+    options.hasBase === true &&
+    (category.kind === "scalar" || category.kind === "dict")
+  );
 }
 
 function isCollectionCategory(category: PropertyCategory): boolean {
-  return category.kind === "collection_scalar" || category.kind === "collection_complex";
+  return (
+    category.kind === "collection_scalar" ||
+    category.kind === "collection_complex"
+  );
 }
 
 /**
@@ -57,7 +73,9 @@ export function loadFieldPresencePolicy(
 ): LoadFieldPresencePolicy {
   if (!field) return "load-when-present";
   if (!isRequiredWithoutDefault(field)) return "load-when-present";
-  return isGuardedCategory(field.category, options) ? "guard-then-fail" : "load-when-present";
+  return isGuardedCategory(field.category, options)
+    ? "guard-then-fail"
+    : "load-when-present";
 }
 
 export function shouldGuardMissingRequiredField(
@@ -100,23 +118,37 @@ export function shouldOmitAbsentOnSave(
   return saveFieldEmissionPolicy(field, profile) === "omit-when-absent";
 }
 
-export function optionalFieldAbsencePolicy(field: {
-  isOptional: boolean;
-  hasExplicitDefault?: boolean;
-} | undefined): OptionalFieldAbsencePolicy {
+export function optionalFieldAbsencePolicy(
+  field:
+    | {
+        isOptional: boolean;
+        hasExplicitDefault?: boolean;
+      }
+    | undefined,
+): OptionalFieldAbsencePolicy {
   if (!field?.isOptional) return "materialize-default";
   return field.hasExplicitDefault ? "materialize-default" : "preserve-absence";
 }
 
-export function shouldPreserveOptionalAbsence(field: {
-  isOptional: boolean;
-  hasExplicitDefault?: boolean;
-} | undefined): boolean {
+export function shouldPreserveOptionalAbsence(
+  field:
+    | {
+        isOptional: boolean;
+        hasExplicitDefault?: boolean;
+      }
+    | undefined,
+): boolean {
   return optionalFieldAbsencePolicy(field) === "preserve-absence";
 }
 
 export function shouldMaterializeCollectionDefault(
-  field: { category: PropertyCategory; isOptional: boolean; hasExplicitDefault?: boolean } | undefined,
+  field:
+    | {
+        category: PropertyCategory;
+        isOptional: boolean;
+        hasExplicitDefault?: boolean;
+      }
+    | undefined,
   profile: CollectionDefaultProfile = "required-or-explicit",
 ): boolean {
   if (!field || !isCollectionCategory(field.category)) return false;

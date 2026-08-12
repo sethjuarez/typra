@@ -12,11 +12,12 @@ function field(
   isOptional: boolean,
   hasExplicitDefault = false,
 ): FieldDecl {
-  const typeName = category.kind === "collection_complex"
-    ? category.typeName
-    : category.kind === "collection_scalar"
-      ? category.scalarType
-      : "unknown";
+  const typeName =
+    category.kind === "collection_complex"
+      ? category.typeName
+      : category.kind === "collection_scalar"
+        ? category.scalarType
+        : "unknown";
   return {
     name,
     typeName: { namespace: "Test", name: typeName },
@@ -44,7 +45,7 @@ function typeDecl(fields: FieldDecl[]): TypeDecl {
     coercionProperty: null,
     load: {
       coercions: [],
-      assignments: fields.map(item => ({
+      assignments: fields.map((item) => ({
         sourceName: item.name,
         fieldName: item.name,
         category: item.category,
@@ -60,7 +61,7 @@ function typeDecl(fields: FieldDecl[]): TypeDecl {
       hasContextHooks: true,
     },
     save: {
-      assignments: fields.map(item => ({
+      assignments: fields.map((item) => ({
         targetName: item.name,
         fieldName: item.name,
         category: item.category,
@@ -74,8 +75,8 @@ function typeDecl(fields: FieldDecl[]): TypeDecl {
     },
     factories: [],
     collectionHelpers: fields
-      .filter(item => item.category.kind === "collection_complex")
-      .map(item => ({
+      .filter((item) => item.category.kind === "collection_complex")
+      .map((item) => ({
         propertyName: item.name,
         elementTypeName: item.typeName,
         innerFields: [],
@@ -103,7 +104,7 @@ function fileDecls(types: TypeDecl[]): FileDecl {
     typeName: types[0].typeName,
     types,
     imports: [],
-    containsAbstract: types.some(type => type.isAbstract),
+    containsAbstract: types.some((type) => type.isAbstract),
     enums: [],
     group: "",
   };
@@ -118,11 +119,13 @@ interface GeneratedCollectionModel {
 }
 
 interface GeneratedCollectionModelConstructor {
-  new(init?: Partial<GeneratedCollectionModel>): GeneratedCollectionModel;
+  new (init?: Partial<GeneratedCollectionModel>): GeneratedCollectionModel;
   load(data: Record<string, unknown>): GeneratedCollectionModel;
 }
 
-function evaluateCollectionModel(source: string): GeneratedCollectionModelConstructor {
+function evaluateCollectionModel(
+  source: string,
+): GeneratedCollectionModelConstructor {
   const output = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
@@ -158,13 +161,34 @@ function evaluateCollectionModel(source: string): GeneratedCollectionModelConstr
 describe("TypeScript optional collection defaults", () => {
   it("preserves omitted optional collections while accepting explicit empty arrays", () => {
     const type = typeDecl([
-      field("inputModalities", { kind: "collection_scalar", scalarType: "string" }, true),
+      field(
+        "inputModalities",
+        { kind: "collection_scalar", scalarType: "string" },
+        true,
+      ),
       field("owners", { kind: "collection_complex", typeName: "Owner" }, true),
-      field("outputModalities", { kind: "collection_scalar", scalarType: "string" }, true, true),
-      field("defaultOwners", { kind: "collection_complex", typeName: "Owner" }, true, true),
-      field("requiredTags", { kind: "collection_scalar", scalarType: "string" }, false),
+      field(
+        "outputModalities",
+        { kind: "collection_scalar", scalarType: "string" },
+        true,
+        true,
+      ),
+      field(
+        "defaultOwners",
+        { kind: "collection_complex", typeName: "Owner" },
+        true,
+        true,
+      ),
+      field(
+        "requiredTags",
+        { kind: "collection_scalar", scalarType: "string" },
+        false,
+      ),
     ]);
-    const source = emitTypeScriptFile(fileDecl(type), new TypeScriptExprVisitor());
+    const source = emitTypeScriptFile(
+      fileDecl(type),
+      new TypeScriptExprVisitor(),
+    );
     assert.match(source, /inputModalities\?: string\[\];/);
     assert.match(source, /owners\?: Owner\[\];/);
     assert.match(source, /outputModalities\?: string\[\] = \[\];/);
@@ -173,14 +197,35 @@ describe("TypeScript optional collection defaults", () => {
     assert.doesNotMatch(source, /owners\?: Owner\[\] = \[\];/);
     assert.match(source, /requiredTags: string\[\] = \[\];/);
 
-    assert.match(source, /if \(init\?\.inputModalities !== undefined\) \{\s+this\.inputModalities = init\.inputModalities;\s+\}/);
-    assert.match(source, /if \(init\?\.owners !== undefined\) \{\s+this\.owners = init\.owners;\s+\}/);
-    assert.match(source, /this\.requiredTags = init\?\.requiredTags \?\? \[\];/);
-    assert.match(source, /this\.outputModalities = init\?\.outputModalities \?\? \[\];/);
-    assert.match(source, /this\.defaultOwners = init\?\.defaultOwners \?\? \[\];/);
+    assert.match(
+      source,
+      /if \(init\?\.inputModalities !== undefined\) \{\s+this\.inputModalities = init\.inputModalities;\s+\}/,
+    );
+    assert.match(
+      source,
+      /if \(init\?\.owners !== undefined\) \{\s+this\.owners = init\.owners;\s+\}/,
+    );
+    assert.match(
+      source,
+      /this\.requiredTags = init\?\.requiredTags \?\? \[\];/,
+    );
+    assert.match(
+      source,
+      /this\.outputModalities = init\?\.outputModalities \?\? \[\];/,
+    );
+    assert.match(
+      source,
+      /this\.defaultOwners = init\?\.defaultOwners \?\? \[\];/,
+    );
 
-    assert.match(source, /if \(data\["inputModalities"\] !== undefined && data\["inputModalities"\] !== null\) \{\s+instance\.inputModalities = \(data\["inputModalities"\] as unknown\[\]\)\.map\(v => String\(v\)\);\s+\}/);
-    assert.match(source, /if \(data\["owners"\] !== undefined && data\["owners"\] !== null\) \{\s+instance\.owners = CollectionModel\.loadOwners\(data\["owners"\] as unknown\[\], context\.at\("owners"\)\);\s+\}/);
+    assert.match(
+      source,
+      /if \(data\["inputModalities"\] !== undefined && data\["inputModalities"\] !== null\) \{\s+instance\.inputModalities = \(data\["inputModalities"\] as unknown\[\]\)\.map\(v => String\(v\)\);\s+\}/,
+    );
+    assert.match(
+      source,
+      /if \(data\["owners"\] !== undefined && data\["owners"\] !== null\) \{\s+instance\.owners = CollectionModel\.loadOwners\(data\["owners"\] as unknown\[\], context\.at\("owners"\)\);\s+\}/,
+    );
 
     const CollectionModel = evaluateCollectionModel(source);
     const omitted = new CollectionModel();
@@ -193,7 +238,10 @@ describe("TypeScript optional collection defaults", () => {
       requiredTags: [],
     });
 
-    const explicit = new CollectionModel({ inputModalities: [], outputModalities: [] });
+    const explicit = new CollectionModel({
+      inputModalities: [],
+      outputModalities: [],
+    });
     assert.deepEqual(explicit.inputModalities, []);
     assert.deepEqual(explicit.outputModalities, []);
     assert.deepEqual(explicit.save(), {
@@ -206,16 +254,27 @@ describe("TypeScript optional collection defaults", () => {
     assert.equal(CollectionModel.load({}).inputModalities, undefined);
     assert.deepEqual(CollectionModel.load({}).outputModalities, []);
     assert.deepEqual(CollectionModel.load({}).defaultOwners, []);
-    assert.deepEqual(CollectionModel.load({ inputModalities: [] }).inputModalities, []);
-    assert.deepEqual(CollectionModel.load({ outputModalities: [] }).outputModalities, []);
+    assert.deepEqual(
+      CollectionModel.load({ inputModalities: [] }).inputModalities,
+      [],
+    );
+    assert.deepEqual(
+      CollectionModel.load({ outputModalities: [] }).outputModalities,
+      [],
+    );
   });
 });
 
 describe("TypeScript native serialization option", () => {
   it("keeps the default TypeScript output free of Zod imports and schemas", () => {
-    const source = emitTypeScriptFile(fileDecl(typeDecl([
-      field("name", { kind: "scalar", scalarType: "string" }, false),
-    ])), new TypeScriptExprVisitor());
+    const source = emitTypeScriptFile(
+      fileDecl(
+        typeDecl([
+          field("name", { kind: "scalar", scalarType: "string" }, false),
+        ]),
+      ),
+      new TypeScriptExprVisitor(),
+    );
 
     assert.doesNotMatch(source, /from "zod"/);
     assert.doesNotMatch(source, /wireSchema/);
@@ -223,19 +282,45 @@ describe("TypeScript native serialization option", () => {
   });
 
   it("emits Zod validators that delegate input canonicalization to load/save", () => {
-    const source = emitTypeScriptFile(fileDecl(typeDecl([
-      field("name", { kind: "scalar", scalarType: "string" }, false),
-    ])), new TypeScriptExprVisitor(), undefined, "", { nativeSerialization: "zod" });
+    const source = emitTypeScriptFile(
+      fileDecl(
+        typeDecl([
+          field("name", { kind: "scalar", scalarType: "string" }, false),
+        ]),
+      ),
+      new TypeScriptExprVisitor(),
+      undefined,
+      "",
+      { nativeSerialization: "zod" },
+    );
 
     assert.match(source, /import \{ z \} from "zod";/);
-    assert.match(source, /static readonly wireObjectSchema: z\.ZodObject<any> = z\.object\(\{/);
+    assert.match(
+      source,
+      /static readonly wireObjectSchema: z\.ZodObject<any> = z\.object\(\{/,
+    );
     assert.match(source, /"name": z\.string\(\),/);
-    assert.match(source, /static readonly wireSchema: z\.ZodType<Record<string, unknown>> = z\.lazy\(\(\) => CollectionModel\.wireObjectSchema\);/);
-    assert.match(source, /static readonly schema = z\.any\(\)\.transform\(\(data, ctx\) => \{/);
-    assert.match(source, /return CollectionModel\.load\(data as Record<string, unknown>\)\.save\(\);/);
-    assert.match(source, /ctx\.addIssue\(\{ code: z\.ZodIssueCode\.custom, message: String\(error\) \}\);/);
+    assert.match(
+      source,
+      /static readonly wireSchema: z\.ZodType<Record<string, unknown>> = z\.lazy\(\(\) => CollectionModel\.wireObjectSchema\);/,
+    );
+    assert.match(
+      source,
+      /static readonly schema = z\.any\(\)\.transform\(\(data, ctx\) => \{/,
+    );
+    assert.match(
+      source,
+      /return CollectionModel\.load\(data as Record<string, unknown>\)\.save\(\);/,
+    );
+    assert.match(
+      source,
+      /ctx\.addIssue\(\{ code: z\.ZodIssueCode\.custom, message: String\(error\) \}\);/,
+    );
     assert.match(source, /\}\)\.pipe\(CollectionModel\.wireSchema\);/);
-    assert.match(source, /export type CollectionModelWire = z\.infer<typeof CollectionModel\.wireSchema>;/);
+    assert.match(
+      source,
+      /export type CollectionModelWire = z\.infer<typeof CollectionModel\.wireSchema>;/,
+    );
   });
 
   it("guards open discriminator Zod fallback from accepting known discriminator claims", () => {
@@ -245,14 +330,23 @@ describe("TypeScript native serialization option", () => {
     base.typeName = { namespace: "Test", name: "BaseModel" };
     base.polymorphicDispatch = {
       discriminatorField: "kind",
-      variants: [{ value: "known", typeName: { namespace: "Test", name: "KnownModel" } }],
-      defaultVariant: { typeName: { namespace: "Test", name: "BaseModel" }, isSelfReference: true },
+      variants: [
+        { value: "known", typeName: { namespace: "Test", name: "KnownModel" } },
+      ],
+      defaultVariant: {
+        typeName: { namespace: "Test", name: "BaseModel" },
+        isSelfReference: true,
+      },
       isAbstract: false,
       isClosed: false,
     };
     base.load.hasPolymorphicDispatch = true;
 
-    const knownKind = field("kind", { kind: "scalar", scalarType: "string" }, false);
+    const knownKind = field(
+      "kind",
+      { kind: "scalar", scalarType: "string" },
+      false,
+    );
     knownKind.defaultValue = "known";
     const known = typeDecl([
       knownKind,
@@ -261,18 +355,27 @@ describe("TypeScript native serialization option", () => {
     known.typeName = { namespace: "Test", name: "KnownModel" };
     known.base = { namespace: "Test", name: "BaseModel" };
     known.save.hasBase = true;
-    known.load.assignments = known.load.assignments.map(assignment => ({
+    known.load.assignments = known.load.assignments.map((assignment) => ({
       ...assignment,
       parentTypeName: "KnownModel",
     }));
-    known.save.assignments = known.save.assignments.map(assignment => ({
+    known.save.assignments = known.save.assignments.map((assignment) => ({
       ...assignment,
       parentTypeName: "KnownModel",
     }));
 
-    const source = emitTypeScriptFile(fileDecls([base, known]), new TypeScriptExprVisitor(), undefined, "", { nativeSerialization: "zod" });
+    const source = emitTypeScriptFile(
+      fileDecls([base, known]),
+      new TypeScriptExprVisitor(),
+      undefined,
+      "",
+      { nativeSerialization: "zod" },
+    );
 
-    assert.match(source, /z\.union\(\[KnownModel\.wireObjectSchema as any, BaseModel\.wireObjectSchema\.passthrough\(\)\.refine\(data => !\["known"\]\.includes\(String\(\(data as Record<string, unknown>\)\["kind"\]\)\), \{ message: "Known kind discriminator values must match their concrete schema\." \}\)\]\)/);
+    assert.match(
+      source,
+      /z\.union\(\[KnownModel\.wireObjectSchema as any, BaseModel\.wireObjectSchema\.passthrough\(\)\.refine\(data => !\["known"\]\.includes\(String\(\(data as Record<string, unknown>\)\["kind"\]\)\), \{ message: "Known kind discriminator values must match their concrete schema\." \}\)\]\)/,
+    );
   });
 });
 
@@ -289,7 +392,9 @@ interface GeneratedNamedCollectionConstructor {
  * rejected one are asserted against real behaviour. The element type is not emitted here, so
  * `Parameter` is injected as a scope variable with a loader that echoes the payload it receives.
  */
-function evaluateNamedCollectionModel(source: string): GeneratedNamedCollectionConstructor {
+function evaluateNamedCollectionModel(
+  source: string,
+): GeneratedNamedCollectionConstructor {
   const output = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
@@ -340,9 +445,16 @@ describe("TypeScript named collection entry forms", () => {
    */
   it("accepts the collection-level array form while rejecting arrays under keys in object form", () => {
     const type = typeDecl([
-      field("parameters", { kind: "collection_complex", typeName: "Parameter" }, false),
+      field(
+        "parameters",
+        { kind: "collection_complex", typeName: "Parameter" },
+        false,
+      ),
     ]);
-    const source = emitTypeScriptFile(fileDecl(type), new TypeScriptExprVisitor());
+    const source = emitTypeScriptFile(
+      fileDecl(type),
+      new TypeScriptExprVisitor(),
+    );
     const CollectionModel = evaluateNamedCollectionModel(source);
 
     const listForm = CollectionModel.load({
@@ -359,13 +471,22 @@ describe("TypeScript named collection entry forms", () => {
     const objectForm = CollectionModel.load({
       parameters: { city: { kind: "string", required: true } },
     });
-    assert.deepEqual(objectForm.parameters, [{ name: "city", kind: "string", required: true }]);
+    assert.deepEqual(objectForm.parameters, [
+      { name: "city", kind: "string", required: true },
+    ]);
 
-    const shorthandForm = CollectionModel.load({ parameters: { city: "string" } });
-    assert.deepEqual(shorthandForm.parameters, [{ name: "city", kind: "string" }]);
+    const shorthandForm = CollectionModel.load({
+      parameters: { city: "string" },
+    });
+    assert.deepEqual(shorthandForm.parameters, [
+      { name: "city", kind: "string" },
+    ]);
 
     assert.throws(
-      () => CollectionModel.load({ parameters: { properties: [{ name: "city", kind: "string" }] } }),
+      () =>
+        CollectionModel.load({
+          parameters: { properties: [{ name: "city", kind: "string" }] },
+        }),
       /invalid named collection entry category array/,
     );
   });
@@ -415,8 +536,13 @@ function evaluateOpenConnection(source: string): GeneratedConnectionModule {
     }
     throw new Error(`Unexpected generated import: ${name}`);
   };
-  const preamble = "class ReferenceConnection extends exports.__base { static load() { return new ReferenceConnection(); } }\n";
-  const execute = new Function("exports", "require", `${output}\nexports.__base = exports.Connection;\n${preamble}exports.ReferenceConnection = ReferenceConnection;`);
+  const preamble =
+    "class ReferenceConnection extends exports.__base { static load() { return new ReferenceConnection(); } }\n";
+  const execute = new Function(
+    "exports",
+    "require",
+    `${output}\nexports.__base = exports.Connection;\n${preamble}exports.ReferenceConnection = ReferenceConnection;`,
+  );
   execute(exports, requireModule);
   return exports as unknown as GeneratedConnectionModule;
 }
@@ -437,10 +563,12 @@ function abstractOpenConnection(): TypeDecl {
   }
   connection.polymorphicDispatch = {
     discriminatorField: "kind",
-    variants: [{
-      value: "reference",
-      typeName: { namespace: "Test", name: "ReferenceConnection" },
-    }],
+    variants: [
+      {
+        value: "reference",
+        typeName: { namespace: "Test", name: "ReferenceConnection" },
+      },
+    ],
     defaultVariant: null,
     isClosed: false,
     isAbstract: true,
@@ -450,15 +578,27 @@ function abstractOpenConnection(): TypeDecl {
 
 describe("TypeScript abstract open polymorphic dispatch", () => {
   it("absorbs unknown discriminators into a carrier instead of throwing", () => {
-    const source = emitTypeScriptFile(fileDecl(abstractOpenConnection()), new TypeScriptExprVisitor());
+    const source = emitTypeScriptFile(
+      fileDecl(abstractOpenConnection()),
+      new TypeScriptExprVisitor(),
+    );
 
     // The base must stay abstract — the schema said @abstract, so `new Connection()` should
     // remain a compile error. The carrier is what makes the open fallback constructible.
     assert.match(source, /export abstract class Connection/);
-    assert.match(source, /export class UnknownConnection extends Connection \{/);
+    assert.match(
+      source,
+      /export class UnknownConnection extends Connection \{/,
+    );
     assert.doesNotMatch(source, /Unknown Connection discriminator field/);
-    assert.match(source, /default:\s+return UnknownConnection\.load\(data, context\);/);
-    assert.match(source, /Invalid Connection discriminator field 'kind': expected non-blank string/);
+    assert.match(
+      source,
+      /default:\s+return UnknownConnection\.load\(data, context\);/,
+    );
+    assert.match(
+      source,
+      /Invalid Connection discriminator field 'kind': expected non-blank string/,
+    );
 
     const { Connection } = evaluateOpenConnection(source);
 
@@ -484,8 +624,13 @@ describe("TypeScript abstract open polymorphic dispatch", () => {
   });
 
   it("matches unknown discriminators case-sensitively", () => {
-    const source = emitTypeScriptFile(fileDecl(abstractOpenConnection()), new TypeScriptExprVisitor());
-    const { Connection, ReferenceConnection } = evaluateOpenConnection(source) as unknown as {
+    const source = emitTypeScriptFile(
+      fileDecl(abstractOpenConnection()),
+      new TypeScriptExprVisitor(),
+    );
+    const { Connection, ReferenceConnection } = evaluateOpenConnection(
+      source,
+    ) as unknown as {
       Connection: { load(data: Record<string, unknown>): GeneratedConnection };
       ReferenceConnection: Function;
     };
@@ -493,10 +638,18 @@ describe("TypeScript abstract open polymorphic dispatch", () => {
     // spec/vectors/model/connection_roundtrip_vectors.json,
     // case "unknown_connection_case_collision_preserves_payload": "Reference" must NOT
     // coerce to the known "reference" variant.
-    const loaded = Connection.load({ kind: "Reference", name: "collision", extra: 1 });
+    const loaded = Connection.load({
+      kind: "Reference",
+      name: "collision",
+      extra: 1,
+    });
     assert.equal(loaded.kind, "Reference");
     assert.notEqual(loaded.constructor, ReferenceConnection);
-    assert.deepEqual(loaded.save(), { kind: "Reference", name: "collision", extra: 1 });
+    assert.deepEqual(loaded.save(), {
+      kind: "Reference",
+      name: "collision",
+      extra: 1,
+    });
   });
 
   it("does not emit a carrier for a closed abstract dispatch", () => {
@@ -504,12 +657,18 @@ describe("TypeScript abstract open polymorphic dispatch", () => {
     // rejecting them stays correct and no carrier should appear.
     const connection = abstractOpenConnection();
     connection.polymorphicDispatch!.isClosed = true;
-    const source = emitTypeScriptFile(fileDecl(connection), new TypeScriptExprVisitor());
+    const source = emitTypeScriptFile(
+      fileDecl(connection),
+      new TypeScriptExprVisitor(),
+    );
 
     assert.doesNotMatch(source, /class UnknownConnection/);
     assert.doesNotMatch(source, /protected raw: Record<string, unknown>/);
     assert.match(source, /Unknown Connection discriminator field/);
-    assert.match(source, /Invalid Connection discriminator field 'kind': expected non-blank string/);
+    assert.match(
+      source,
+      /Invalid Connection discriminator field 'kind': expected non-blank string/,
+    );
   });
 });
 
@@ -523,10 +682,12 @@ describe("TypeScript open polymorphic preservation", () => {
     connection.load.hasPolymorphicDispatch = true;
     connection.polymorphicDispatch = {
       discriminatorField: "kind",
-      variants: [{
-        value: "reference",
-        typeName: { namespace: "Test", name: "ReferenceConnection" },
-      }],
+      variants: [
+        {
+          value: "reference",
+          typeName: { namespace: "Test", name: "ReferenceConnection" },
+        },
+      ],
       defaultVariant: {
         typeName: { namespace: "Test", name: "Connection" },
         isSelfReference: true,
@@ -535,17 +696,30 @@ describe("TypeScript open polymorphic preservation", () => {
       isAbstract: false,
     };
 
-    const source = emitTypeScriptFile(fileDecl(connection), new TypeScriptExprVisitor());
+    const source = emitTypeScriptFile(
+      fileDecl(connection),
+      new TypeScriptExprVisitor(),
+    );
 
     assert.match(source, /protected raw: Record<string, unknown> = \{\};/);
-    assert.match(source, /protected static cloneRawValue\(value: unknown\): unknown/);
+    assert.match(
+      source,
+      /protected static cloneRawValue\(value: unknown\): unknown/,
+    );
     assert.match(source, /const discriminator = discriminatorValue;/);
     assert.doesNotMatch(source, /discriminatorValue\)\.toLowerCase\(\)/);
     assert.match(source, /if \(instance\.constructor === Connection\) \{/);
-    assert.match(source, /instance\.raw = Connection\.cloneRawValue\(data\) as Record<string, unknown>;/);
-    assert.match(source, /const result = Connection\.cloneRawValue\(obj\.raw\) as Record<string, unknown>;/);
+    assert.match(
+      source,
+      /instance\.raw = Connection\.cloneRawValue\(data\) as Record<string, unknown>;/,
+    );
+    assert.match(
+      source,
+      /const result = Connection\.cloneRawValue\(obj\.raw\) as Record<string, unknown>;/,
+    );
     assert.ok(
-      source.indexOf("const result = Connection.cloneRawValue(obj.raw)") < source.indexOf('result["kind"] = obj.kind'),
+      source.indexOf("const result = Connection.cloneRawValue(obj.raw)") <
+        source.indexOf('result["kind"] = obj.kind'),
       "modeled fields must overwrite retained raw payload",
     );
   });

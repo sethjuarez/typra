@@ -8,44 +8,41 @@ PR #36 has since been merged and `main` is once again the source of truth for re
 
 ## [0.5.0](https://github.com/sethjuarez/typra/compare/v0.4.31...v0.5.0) (2026-08-09)
 
-
 ### Features
 
-* **emitter:** gate Rust serde serialization option ([512c67d](https://github.com/sethjuarez/typra/commit/512c67d7ba266ae8ed48cf7b18488564b4213a93))
-* **java:** add opt-in Jackson serialization ([#152](https://github.com/sethjuarez/typra/issues/152)) ([d7c4155](https://github.com/sethjuarez/typra/commit/d7c4155f89ed719a3df592741328d95de351dba2))
-* **python:** add pydantic native serialization option ([655440b](https://github.com/sethjuarez/typra/commit/655440be95b5438379d3a65256b41d72ffa77eda))
-* **rust:** complete serde native serialization validation ([1221448](https://github.com/sethjuarez/typra/commit/122144896b541019f474b7281b91cc568a948f0d))
-* **swift:** add codable native serialization option ([#162](https://github.com/sethjuarez/typra/issues/162)) ([51f9f40](https://github.com/sethjuarez/typra/commit/51f9f40803f1be9134110f949064f5dedab0140e))
-* **typescript:** add zod native serialization option ([#155](https://github.com/sethjuarez/typra/issues/155)) ([d796512](https://github.com/sethjuarez/typra/commit/d796512e7021e6c000c17c7b3226e98692982deb))
-
+- **emitter:** gate Rust serde serialization option ([512c67d](https://github.com/sethjuarez/typra/commit/512c67d7ba266ae8ed48cf7b18488564b4213a93))
+- **java:** add opt-in Jackson serialization ([#152](https://github.com/sethjuarez/typra/issues/152)) ([d7c4155](https://github.com/sethjuarez/typra/commit/d7c4155f89ed719a3df592741328d95de351dba2))
+- **python:** add pydantic native serialization option ([655440b](https://github.com/sethjuarez/typra/commit/655440be95b5438379d3a65256b41d72ffa77eda))
+- **rust:** complete serde native serialization validation ([1221448](https://github.com/sethjuarez/typra/commit/122144896b541019f474b7281b91cc568a948f0d))
+- **swift:** add codable native serialization option ([#162](https://github.com/sethjuarez/typra/issues/162)) ([51f9f40](https://github.com/sethjuarez/typra/commit/51f9f40803f1be9134110f949064f5dedab0140e))
+- **typescript:** add zod native serialization option ([#155](https://github.com/sethjuarez/typra/issues/155)) ([d796512](https://github.com/sethjuarez/typra/commit/d796512e7021e6c000c17c7b3226e98692982deb))
 
 ### Bug Fixes
 
-* **emitter:** carry open discriminator fallbacks ([5a6ecdb](https://github.com/sethjuarez/typra/commit/5a6ecdb95847225bcb4eae6106e33559156e4c0a))
-* **emitter:** enforce discriminator runtime contract ([#158](https://github.com/sethjuarez/typra/issues/158)) ([e38b97f](https://github.com/sethjuarez/typra/commit/e38b97f77194d9ea4851292db0e9350caa71d762))
-* **emitter:** harden Swift unknown fallbacks ([#149](https://github.com/sethjuarez/typra/issues/149)) ([090edcc](https://github.com/sethjuarez/typra/commit/090edcc2e4c25ad2f5b89edc5f5c856219a2721a))
-* **emitter:** reject invalid discriminator states ([#157](https://github.com/sethjuarez/typra/issues/157)) ([8476b95](https://github.com/sethjuarez/typra/commit/8476b9525f9f5235bcfffcc8a1ef1921d3f52b40))
-* **harness:** detect fixture validation under-execution ([266e33c](https://github.com/sethjuarez/typra/commit/266e33cb0ef0d2557febddac3611d794ce543af1))
-* **python:** route pydantic validation entry points through typra ([5e9eab6](https://github.com/sethjuarez/typra/commit/5e9eab6e9ba6f972d33927cd9f4506e2f938eb07))
+- **emitter:** carry open discriminator fallbacks ([5a6ecdb](https://github.com/sethjuarez/typra/commit/5a6ecdb95847225bcb4eae6106e33559156e4c0a))
+- **emitter:** enforce discriminator runtime contract ([#158](https://github.com/sethjuarez/typra/issues/158)) ([e38b97f](https://github.com/sethjuarez/typra/commit/e38b97f77194d9ea4851292db0e9350caa71d762))
+- **emitter:** harden Swift unknown fallbacks ([#149](https://github.com/sethjuarez/typra/issues/149)) ([090edcc](https://github.com/sethjuarez/typra/commit/090edcc2e4c25ad2f5b89edc5f5c856219a2721a))
+- **emitter:** reject invalid discriminator states ([#157](https://github.com/sethjuarez/typra/issues/157)) ([8476b95](https://github.com/sethjuarez/typra/commit/8476b9525f9f5235bcfffcc8a1ef1921d3f52b40))
+- **harness:** detect fixture validation under-execution ([266e33c](https://github.com/sethjuarez/typra/commit/266e33cb0ef0d2557febddac3611d794ce543af1))
+- **python:** route pydantic validation entry points through typra ([5e9eab6](https://github.com/sethjuarez/typra/commit/5e9eab6e9ba6f972d33927cd9f4506e2f938eb07))
 
 ## [0.4.31](https://github.com/sethjuarez/typra/compare/v0.4.30...v0.4.31) (2026-08-09)
 
-
 ### Bug Fixes
 
-* **csharp:** stop folding multiline YAML fixtures and run every generated C# test ([625098b](https://github.com/sethjuarez/typra/commit/625098b1e3c832c6a263eebcf3846a478a0e47bf))
-* **csharp:** stop folding multiline YAML fixtures and run every generated C# test ([de356d8](https://github.com/sethjuarez/typra/commit/de356d8428cb73c4cb765bb78a1bd45169cbb79d)), closes [#93](https://github.com/sethjuarez/typra/issues/93) [#94](https://github.com/sethjuarez/typra/issues/94)
-* **emitter:** always fail load on a missing required complex field ([2572b95](https://github.com/sethjuarez/typra/commit/2572b9581223ebc729cb9fa8893604a7fe8ddc1a))
-* **emitter:** always fail load on a missing required complex field ([a27615c](https://github.com/sethjuarez/typra/commit/a27615ce4fc2bff2c128fc74db0c4af54f256b66)), closes [#104](https://github.com/sethjuarez/typra/issues/104) [#105](https://github.com/sethjuarez/typra/issues/105)
-* **emitter:** preserve typed record values ([4763f75](https://github.com/sethjuarez/typra/commit/4763f7555e2c2e657466b63224fbb1aa7d55fc0d))
-* **go:** guard math import to named collection shorthand ([#137](https://github.com/sethjuarez/typra/issues/137)) ([2ade20d](https://github.com/sethjuarez/typra/commit/2ade20d1fc1c8991ff1c21dd6673c099c26fa060))
-* **java:** absorb unrecognized discriminators on abstract open bases ([#131](https://github.com/sethjuarez/typra/issues/131)) ([fa6cc6a](https://github.com/sethjuarez/typra/commit/fa6cc6a431dbe23b0ee6e77692d405a8f6a90416))
-* **java:** escape control characters in generated JSON output ([#128](https://github.com/sethjuarez/typra/issues/128)) ([754b072](https://github.com/sethjuarez/typra/commit/754b072e032620632a3bbcf793dfc47400338481)), closes [#113](https://github.com/sethjuarez/typra/issues/113)
-* **python:** emit valid Python literals and substituted factory assertions in generated tests ([b842515](https://github.com/sethjuarez/typra/commit/b8425156cf316484af42f13eed40e14e422ecea6))
-* **python:** emit valid Python literals and substituted factory assertions in generated tests ([0f29dca](https://github.com/sethjuarez/typra/commit/0f29dca3cf4284cc18929701f1fd179d2f81438e)), closes [#107](https://github.com/sethjuarez/typra/issues/107)
-* **rust:** emit required zero values ([#124](https://github.com/sethjuarez/typra/issues/124)) ([838cb89](https://github.com/sethjuarez/typra/commit/838cb89194df42ef0f861a5278ee72f30360e50f)), closes [#97](https://github.com/sethjuarez/typra/issues/97)
-* **testing:** name a concrete variant when the fixture root is a discriminated base ([75a1007](https://github.com/sethjuarez/typra/commit/75a1007aa43cb286cd21d640089a1894f3dfc38f))
-* **testing:** name a concrete variant when the fixture root is a discriminated base ([b5a15fc](https://github.com/sethjuarez/typra/commit/b5a15fcf0445b243e4978eaf0bf8f81ad1dbb7a6)), closes [#92](https://github.com/sethjuarez/typra/issues/92)
+- **csharp:** stop folding multiline YAML fixtures and run every generated C# test ([625098b](https://github.com/sethjuarez/typra/commit/625098b1e3c832c6a263eebcf3846a478a0e47bf))
+- **csharp:** stop folding multiline YAML fixtures and run every generated C# test ([de356d8](https://github.com/sethjuarez/typra/commit/de356d8428cb73c4cb765bb78a1bd45169cbb79d)), closes [#93](https://github.com/sethjuarez/typra/issues/93) [#94](https://github.com/sethjuarez/typra/issues/94)
+- **emitter:** always fail load on a missing required complex field ([2572b95](https://github.com/sethjuarez/typra/commit/2572b9581223ebc729cb9fa8893604a7fe8ddc1a))
+- **emitter:** always fail load on a missing required complex field ([a27615c](https://github.com/sethjuarez/typra/commit/a27615ce4fc2bff2c128fc74db0c4af54f256b66)), closes [#104](https://github.com/sethjuarez/typra/issues/104) [#105](https://github.com/sethjuarez/typra/issues/105)
+- **emitter:** preserve typed record values ([4763f75](https://github.com/sethjuarez/typra/commit/4763f7555e2c2e657466b63224fbb1aa7d55fc0d))
+- **go:** guard math import to named collection shorthand ([#137](https://github.com/sethjuarez/typra/issues/137)) ([2ade20d](https://github.com/sethjuarez/typra/commit/2ade20d1fc1c8991ff1c21dd6673c099c26fa060))
+- **java:** absorb unrecognized discriminators on abstract open bases ([#131](https://github.com/sethjuarez/typra/issues/131)) ([fa6cc6a](https://github.com/sethjuarez/typra/commit/fa6cc6a431dbe23b0ee6e77692d405a8f6a90416))
+- **java:** escape control characters in generated JSON output ([#128](https://github.com/sethjuarez/typra/issues/128)) ([754b072](https://github.com/sethjuarez/typra/commit/754b072e032620632a3bbcf793dfc47400338481)), closes [#113](https://github.com/sethjuarez/typra/issues/113)
+- **python:** emit valid Python literals and substituted factory assertions in generated tests ([b842515](https://github.com/sethjuarez/typra/commit/b8425156cf316484af42f13eed40e14e422ecea6))
+- **python:** emit valid Python literals and substituted factory assertions in generated tests ([0f29dca](https://github.com/sethjuarez/typra/commit/0f29dca3cf4284cc18929701f1fd179d2f81438e)), closes [#107](https://github.com/sethjuarez/typra/issues/107)
+- **rust:** emit required zero values ([#124](https://github.com/sethjuarez/typra/issues/124)) ([838cb89](https://github.com/sethjuarez/typra/commit/838cb89194df42ef0f861a5278ee72f30360e50f)), closes [#97](https://github.com/sethjuarez/typra/issues/97)
+- **testing:** name a concrete variant when the fixture root is a discriminated base ([75a1007](https://github.com/sethjuarez/typra/commit/75a1007aa43cb286cd21d640089a1894f3dfc38f))
+- **testing:** name a concrete variant when the fixture root is a discriminated base ([b5a15fc](https://github.com/sethjuarez/typra/commit/b5a15fcf0445b243e4978eaf0bf8f81ad1dbb7a6)), closes [#92](https://github.com/sethjuarez/typra/issues/92)
 
 ## 0.4.30
 
@@ -107,7 +104,7 @@ PR #36 has since been merged and `main` is once again the source of truth for re
 
 - **Array-element diagnostics lost the element index in the Rust, C# and Swift backends** (#87).
   Loading a list whose second element omitted a required field reported `entries.detail: missing
-  required field` in those three backends, while TypeScript, Go, Python and Java correctly reported
+required field` in those three backends, while TypeScript, Go, Python and Java correctly reported
   `entries[1].detail`. With many entries every failure produced an identical path, so a diagnostic
   could not identify which element was at fault. TypeScript, Go, Python and Java thread a per-element
   context (`atIndex` / `AtIndex` / `at_index`); Rust reused the collection path for every element,
@@ -199,16 +196,16 @@ PR #36 has since been merged and `main` is once again the source of truth for re
 - **Rust: an optional union-typed field inside a discriminated variant generated
   uncompilable code** (#78). A variant field whose declared type has no generated
   Rust counterpart — a polymorphic base, a union containing one (`Property |
-  Named<Property>`), or `unknown` — is carried as `serde_json::Value`. The variant
-  *declaration* ignored `?` while the variant *load* and *save* paths both honoured
+Named<Property>`), or `unknown` — is carried as `serde_json::Value`. The variant
+  _declaration_ ignored `?` while the variant _load_ and _save_ paths both honoured
   it, so the generated crate failed with `error[E0308]: expected Value, found
-  Option<Value>`. An optional variant field is now declared
+Option<Value>`. An optional variant field is now declared
   `Option<serde_json::Value>`, matching the loader and saver.
 
   Struct fields are deliberately unchanged: there, `Value::Null` remains the
   "absent" sentinel and the declaration, loader, and saver already agreed.
 
-  Rust-only. It is the only backend that erases these types to a *non-nullable*
+  Rust-only. It is the only backend that erases these types to a _non-nullable_
   type — Go uses `interface{}`, and C#/TypeScript/Python/Java keep the declared
   class, all of which are already nullable.
 
@@ -217,7 +214,7 @@ PR #36 has since been merged and `main` is once again the source of truth for re
 - `fixtures/shapes/main.tsp` gains an optional union-typed field inside a
   discriminated variant (`FixtureArrayProperty.fallbackItems`), so the fixture gate
   — which compiles the generated Rust — now covers the shape that regressed. Only
-  a *required* field of this shape was previously declared, which is why the gate
+  a _required_ field of this shape was previously declared, which is why the gate
   never failed. Reverting the fix makes the gate reproduce the original `E0308`.
 - Two Rust emitter tests lock the declaration, load, and save sites against each
   other for both the optional and required cases.
@@ -230,13 +227,13 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   name-keyed collection is assigned to. `spec/vectors/model/named_collection_vectors.json`
   requires that "Immediate primitive Property values infer kind and **default** without
   leaking direct-coercion **example** semantics." Previously the target was chosen
-  *positionally* — the element's first declared field — which is unsound for a discriminated
+  _positionally_ — the element's first declared field — which is unsound for a discriminated
   element type, because its first declared field is the discriminator. `inputs: { city:
-  "Seattle" }` therefore loaded as `kind: "Seattle"`, a value the element's own validator
+"Seattle" }` therefore loaded as `kind: "Seattle"`, a value the element's own validator
   rejects (#76).
 
   The declaration is required rather than inferred because a bare scalar reaching a type
-  *directly* and the same scalar reaching it *as a named-collection entry* are genuinely
+  _directly_ and the same scalar reaching it _as a named-collection entry_ are genuinely
   different contexts that may populate different fields — the vector requires `default` set
   **and** `example` absent, which one `@coerce` table cannot express. The constant
   assignments are still inferred from the type's own `@coerce` table.
@@ -286,7 +283,7 @@ PR #36 has since been merged and `main` is once again the source of truth for re
      `serde_json::Value`, which holds an `f64` exactly, so the narrowing was gratuitous.
 
   Numeric coercions are now emitted as one ordered block with the `as_i64()` guard first, and
-  the `f32` cast is applied only when the *destination field* is genuinely `f32` rather than
+  the `f32` cast is applied only when the _destination field_ is genuinely `f32` rather than
   whenever the declared coercion scalar is `float32`.
 
   This is the Rust counterpart of #39 / PR #52, which fixed the same contract in Go. The two
@@ -300,7 +297,7 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   `f32`. The narrowing came from the coercion path alone.
 
   `scripts/validate-fixtures.mjs` had asserted the lossy
-  `as_f64().map(|value| value as f32)` line as *expected content*, so the defect was pinned in
+  `as_f64().map(|value| value as f32)` line as _expected content_, so the defect was pinned in
   place by its own gate. That assertion is now inverted into an `assertExcludes`.
 
   Measured against prompty: `cargo test --no-fail-fast --test property_scalar_coercion_vectors`
@@ -314,17 +311,17 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   claimed the emitted validator rejected the legal collection-level list form of a named
   collection, citing every one of prompty's 28 `agent_vectors` Rust tests failing with
   `tools.parameters.properties: invalid named collection entry category array`. The defect does
-  not exist: rewriting *only* the vector data from `parameters: {"properties": [...]}` to the
+  not exist: rewriting _only_ the vector data from `parameters: {"properties": [...]}` to the
   declared list form `parameters: [...]` took that suite from `0 passed / 28 failed` to
   `28 passed / 0 failed` with no emitter change. `FunctionTool.parameters` is declared
-  `Properties` (a named collection), so `{"properties": [...]}` is name-keyed *object* form
+  `Properties` (a named collection), so `{"properties": [...]}` is name-keyed _object_ form
   whose single entry holds an array — exactly what
   `spec/vectors/model/named_collection_vectors.json` requires be rejected:
 
   > Array-valued entries in name-keyed object form are rejected recursively, while arrays in
   > declared entry fields remain valid.
 
-  No test asserted the *accepting* half of that contract, so nothing contradicted the report.
+  No test asserted the _accepting_ half of that contract, so nothing contradicted the report.
   `test/typescript-emitter.test.ts` now transpiles and executes an emitted collection loader and
   asserts all four cases together: collection-level array form, name-keyed object form, scalar
   shorthand, and the rejected array-under-a-key. Both halves were verified by mutation —
@@ -335,7 +332,7 @@ PR #36 has since been merged and `main` is once again the source of truth for re
 ### Fixed
 
 - **C#, Python, and TypeScript no longer conflate `@abstract` with closed** (#59, PR #67).
-  An abstract base over an *open* discriminator threw
+  An abstract base over an _open_ discriminator threw
   `Unknown Connection discriminator field 'kind' value: future-auth` instead of absorbing
   the unrecognized kind. This completes the reject-before-the-open-fallback family — #37,
   #38, #54, #59 — four instances across four backends, which is what motivated the
@@ -352,7 +349,7 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   would silently discard the schema author's intent.
 
   The carrier needs no `kind` field and no `save()` override, because all three backends
-  emit `load()` as *dispatch first, then apply base assignments* — so the base assigns the
+  emit `load()` as _dispatch first, then apply base assignments_ — so the base assigns the
   unrecognized discriminator after dispatch, and the base's `save()` re-emits the preserved
   payload from `raw`. This ordering was verified against generated fixture output for each
   backend rather than assumed from TypeScript.
@@ -402,11 +399,11 @@ behind the stack of unmerged pull requests.
 
 - **Open discriminators no longer pre-validate the discriminator field** (Rust, #38, PR #51).
   `emitInputValidation` now excludes the discriminator's own assignment from the base field
-  validation that runs ahead of the dispatch match. See the note under *Known limitations*
+  validation that runs ahead of the dispatch match. See the note under _Known limitations_
   about the reachability of this defect.
 
 - **Go numeric coercions now match what decoders actually produce** (#39, PR #52).
-  `encoding/json` yields `float64` for *every* JSON number and `gopkg.in/yaml.v3` yields
+  `encoding/json` yields `float64` for _every_ JSON number and `gopkg.in/yaml.v3` yields
   `int` for integral YAML scalars, so emitted `case int:` / `case float32:` arms matched no
   decoded number at all and fell through to a zero-valued instance. Emitted coercion
   switches now carry decoder-native `case float64:` and `case int:` arms. When a type
@@ -416,7 +413,7 @@ behind the stack of unmerged pull requests.
 
 - **Generated tests no longer omit required complex fields** (#53, PR #55).
   `buildExamples()` built sample payloads from only those properties carrying `@sample`, so
-  a required *complex* property without one was silently dropped — and the emitters' own
+  a required _complex_ property without one was silently dropped — and the emitters' own
   `needsRequiredComplexValidation` then rejected the payload. A generated test could not
   pass its own generated validation. Required complex values are now synthesized
   recursively from the target type's own `@sample`s. This is shared code, so the fix
@@ -427,7 +424,7 @@ behind the stack of unmerged pull requests.
   to build, no dictionary test is emitted at all.
 
 - **Go no longer conflates `@abstract` with closed** (#54, PR #58).
-  An abstract base over an *open* discriminator must absorb an unrecognized kind
+  An abstract base over an _open_ discriminator must absorb an unrecognized kind
   losslessly, the way Rust's `Unknown { kind_name, raw }` variant does. Go emitted
   `fmt.Errorf("unknown ... discriminator")` instead, and its struct had no `raw` field to
   round-trip the payload with. Both halves are fixed. C#, Python, and TypeScript
@@ -487,10 +484,10 @@ pub default_owners: Vec<FixtureOwner>,   // unchanged
 
 `None` **is** distinct from `Some(vec![])`, and the wire form preserves the distinction:
 
-| declaration | input absent | input `[]` | saves as |
-| --- | --- | --- | --- |
-| `owners?: T[]` | `None` | `Some(vec![])` | key omitted when `None`; `"owners": []` when `Some(vec![])` |
-| `defaultOwners?: T[] = #[]` | `vec![]` | `vec![]` | always emitted as `"defaultOwners": []` |
+| declaration                 | input absent | input `[]`     | saves as                                                    |
+| --------------------------- | ------------ | -------------- | ----------------------------------------------------------- |
+| `owners?: T[]`              | `None`       | `Some(vec![])` | key omitted when `None`; `"owners": []` when `Some(vec![])` |
+| `defaultOwners?: T[] = #[]` | `vec![]`     | `vec![]`       | always emitted as `"defaultOwners": []`                     |
 
 So: declaring a default is a statement that absence and emptiness are the same thing for
 that field, and the emitter takes you at your word. Omitting a default is a statement that

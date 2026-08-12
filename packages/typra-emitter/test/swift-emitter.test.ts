@@ -7,9 +7,18 @@ import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { flattenInheritance } from "../src/ir/inheritance.js";
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
-import { emitSwiftProtocolScaffolds, emitSwiftRuntime } from "../src/languages/swift/scaffolding.js";
-import { emitSwiftConformanceTest, emitSwiftTests } from "../src/languages/swift/test-emitter.js";
-import { buildBaseTestContext, swiftTestOptions } from "../src/testing/test-context.js";
+import {
+  emitSwiftProtocolScaffolds,
+  emitSwiftRuntime,
+} from "../src/languages/swift/scaffolding.js";
+import {
+  emitSwiftConformanceTest,
+  emitSwiftTests,
+} from "../src/languages/swift/test-emitter.js";
+import {
+  buildBaseTestContext,
+  swiftTestOptions,
+} from "../src/testing/test-context.js";
 import { swiftType } from "../src/languages/swift/types.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 
@@ -22,7 +31,12 @@ function typeDecl(name: string): TypeDecl {
     description: "",
     fields: [],
     coercionProperty: null,
-    load: { coercions: [], assignments: [], hasPolymorphicDispatch: false, hasContextHooks: true },
+    load: {
+      coercions: [],
+      assignments: [],
+      hasPolymorphicDispatch: false,
+      hasContextHooks: true,
+    },
     save: { assignments: [], hasBase: false, hasContextHooks: true },
     factories: [],
     collectionHelpers: [],
@@ -43,7 +57,12 @@ function fileDecl(type: TypeDecl): FileDecl {
   };
 }
 
-function addStringField(type: TypeDecl, name: string, isOptional = false, defaultValue: string | null = null): void {
+function addStringField(
+  type: TypeDecl,
+  name: string,
+  isOptional = false,
+  defaultValue: string | null = null,
+): void {
   const category = { kind: "scalar" as const, scalarType: "string" };
   type.fields.push({
     name,
@@ -88,7 +107,11 @@ describe("Swift polymorphic enums", () => {
     const defaults = typeDecl("FixtureOptionalDefaults");
     addStringField(defaults, "mode", true, "auto");
 
-    const source = emitSwiftFile(fileDecl(defaults), new SwiftExprVisitor(), new Set());
+    const source = emitSwiftFile(
+      fileDecl(defaults),
+      new SwiftExprVisitor(),
+      new Set(),
+    );
 
     assert.match(source, /public var mode: String\? = nil/);
     assert.match(source, /public init\(mode: String\? = nil\)/);
@@ -102,7 +125,12 @@ describe("Swift polymorphic enums", () => {
     tool.isAbstract = true;
     tool.polymorphicDispatch = {
       discriminatorField: "kind",
-      variants: [{ value: "function", typeName: { namespace: "Test", name: "FunctionTool" } }],
+      variants: [
+        {
+          value: "function",
+          typeName: { namespace: "Test", name: "FunctionTool" },
+        },
+      ],
       defaultVariant: {
         typeName: { namespace: "Test", name: "CustomTool" },
         isSelfReference: false,
@@ -112,38 +140,58 @@ describe("Swift polymorphic enums", () => {
     };
     const customTool = typeDecl("CustomTool");
     const holder = typeDecl("ToolHolder");
-    holder.fields = [{
-      name: "tool",
-      typeName: tool.typeName,
-      category: { kind: "complex", typeName: "Tool" },
-      isOptional: false,
-      defaultValue: null,
-      allowedValues: [],
-      parseAliases: {},
-      enumName: null,
-      isOpenEnum: false,
-      description: "",
-      knownAs: {},
-    }];
+    holder.fields = [
+      {
+        name: "tool",
+        typeName: tool.typeName,
+        category: { kind: "complex", typeName: "Tool" },
+        isOptional: false,
+        defaultValue: null,
+        allowedValues: [],
+        parseAliases: {},
+        enumName: null,
+        isOpenEnum: false,
+        description: "",
+        knownAs: {},
+      },
+    ];
 
     const file = fileDecl(tool);
     file.types.push(customTool, holder);
-    const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set(["Tool"]));
+    const source = emitSwiftFile(
+      file,
+      new SwiftExprVisitor(),
+      new Set(["Tool"]),
+    );
     assert.match(source, /public enum Tool: TypraModel/);
     assert.match(source, /case customTool\(CustomTool, \[String: Any\]\)/);
-    assert.match(source, /default: return \.customTool\(try CustomTool\.load\(normalizedData, context: context\), object\)/);
+    assert.match(
+      source,
+      /default: return \.customTool\(try CustomTool\.load\(normalizedData, context: context\), object\)/,
+    );
     assert.match(source, /case \.customTool\(let value, let raw\):/);
     assert.match(source, /var result = raw/);
-    assert.doesNotMatch(source, /case unknown\(\[String: Any\]\)|case \.unknown/);
+    assert.doesNotMatch(
+      source,
+      /case unknown\(\[String: Any\]\)|case \.unknown/,
+    );
     assert.match(source, /expected: "non-blank string"/);
-    assert.match(source, /public var tool: Tool = \.customTool\(CustomTool\(\), \[:\]\)/);
+    assert.match(
+      source,
+      /public var tool: Tool = \.customTool\(CustomTool\(\), \[:\]\)/,
+    );
   });
 
   it("keeps self-reference fallbacks consistent through unknown", () => {
     const connection = typeDecl("Connection");
     connection.polymorphicDispatch = {
       discriminatorField: "kind",
-      variants: [{ value: "remote", typeName: { namespace: "Test", name: "RemoteConnection" } }],
+      variants: [
+        {
+          value: "remote",
+          typeName: { namespace: "Test", name: "RemoteConnection" },
+        },
+      ],
       defaultVariant: {
         typeName: connection.typeName,
         isSelfReference: true,
@@ -152,10 +200,20 @@ describe("Swift polymorphic enums", () => {
       isClosed: false,
     };
 
-    const source = emitSwiftFile(fileDecl(connection), new SwiftExprVisitor(), new Set(["Connection"]));
+    const source = emitSwiftFile(
+      fileDecl(connection),
+      new SwiftExprVisitor(),
+      new Set(["Connection"]),
+    );
     assert.match(source, /case unknown\(\[String: Any\]\)/);
-    assert.match(source, /let discriminator = try TypraRuntime\.string\(object\["kind"\] \?\? NSNull\(\), field: "kind"\)/);
-    assert.match(source, /if discriminator\.isEmpty \{\s+throw TypraRuntimeError\.invalidField\(field: context\.at\("kind"\)\.path, expected: "non-blank string"\)/);
+    assert.match(
+      source,
+      /let discriminator = try TypraRuntime\.string\(object\["kind"\] \?\? NSNull\(\), field: "kind"\)/,
+    );
+    assert.match(
+      source,
+      /if discriminator\.isEmpty \{\s+throw TypraRuntimeError\.invalidField\(field: context\.at\("kind"\)\.path, expected: "non-blank string"\)/,
+    );
     assert.match(source, /default: return \.unknown\(object\)/);
     assert.match(source, /case \.unknown\(let value\): return value/);
   });
@@ -164,132 +222,185 @@ describe("Swift polymorphic enums", () => {
     const property = typeDecl("Property");
     property.polymorphicDispatch = {
       discriminatorField: "kind",
-      variants: [{ value: "array", typeName: { namespace: "Test", name: "ArrayProperty" } }],
+      variants: [
+        {
+          value: "array",
+          typeName: { namespace: "Test", name: "ArrayProperty" },
+        },
+      ],
       defaultVariant: { typeName: property.typeName, isSelfReference: true },
       isAbstract: false,
       isClosed: false,
     };
     const arrayProperty = typeDecl("ArrayProperty");
-    arrayProperty.fields = [{
-      name: "items",
-      typeName: property.typeName,
-      category: { kind: "complex", typeName: "Property" },
-      isOptional: false,
-      defaultValue: null,
-      allowedValues: [],
-      parseAliases: {},
-      enumName: null,
-      isOpenEnum: false,
-      description: "",
-      knownAs: {},
-    }];
+    arrayProperty.fields = [
+      {
+        name: "items",
+        typeName: property.typeName,
+        category: { kind: "complex", typeName: "Property" },
+        isOptional: false,
+        defaultValue: null,
+        allowedValues: [],
+        parseAliases: {},
+        enumName: null,
+        isOpenEnum: false,
+        description: "",
+        knownAs: {},
+      },
+    ];
     const file = fileDecl(property);
     file.types.push(arrayProperty);
 
-    const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set(["Property"]));
+    const source = emitSwiftFile(
+      file,
+      new SwiftExprVisitor(),
+      new Set(["Property"]),
+    );
     assert.match(source, /public indirect enum Property: TypraModel/);
   });
 
   it("loads explicit named collections from maps, lists, and scalar shorthand", () => {
     const tool = typeDecl("Tool");
-    tool.fields = [{
-      name: "bindings",
-      typeName: { namespace: "Test", name: "Binding" },
-      category: { kind: "collection_complex", typeName: "Binding" },
-      isOptional: false,
-      defaultValue: null,
-      allowedValues: [],
-      parseAliases: {},
-      enumName: null,
-      isOpenEnum: false,
-      description: "",
-      knownAs: {},
-    }];
-    tool.load.assignments = [{
-      sourceName: "bindings",
-      fieldName: "bindings",
-      category: tool.fields[0].category,
-      isOptional: false,
-      parentTypeName: "Tool",
-      enumName: null,
-      allowedValues: [],
-      parseAliases: {},
-      defaultValue: null,
-      isOpenEnum: false,
-    }];
-    tool.collectionHelpers = [{
-      propertyName: "bindings",
-      elementTypeName: { namespace: "Test", name: "Binding" },
-      innerFields: ["source"],
-      hasNameProperty: true,
-    }];
+    tool.fields = [
+      {
+        name: "bindings",
+        typeName: { namespace: "Test", name: "Binding" },
+        category: { kind: "collection_complex", typeName: "Binding" },
+        isOptional: false,
+        defaultValue: null,
+        allowedValues: [],
+        parseAliases: {},
+        enumName: null,
+        isOpenEnum: false,
+        description: "",
+        knownAs: {},
+      },
+    ];
+    tool.load.assignments = [
+      {
+        sourceName: "bindings",
+        fieldName: "bindings",
+        category: tool.fields[0].category,
+        isOptional: false,
+        parentTypeName: "Tool",
+        enumName: null,
+        allowedValues: [],
+        parseAliases: {},
+        defaultValue: null,
+        isOpenEnum: false,
+      },
+    ];
+    tool.collectionHelpers = [
+      {
+        propertyName: "bindings",
+        elementTypeName: { namespace: "Test", name: "Binding" },
+        innerFields: ["source"],
+        hasNameProperty: true,
+      },
+    ];
 
     const binding = typeDecl("Binding");
     addStringField(binding, "source");
-    binding.load.coercions = [{
-      scalarType: "string",
-      assignments: [{ fieldName: "source", isInput: true }],
-      needsDispatch: false,
-    }];
+    binding.load.coercions = [
+      {
+        scalarType: "string",
+        assignments: [{ fieldName: "source", isInput: true }],
+        needsDispatch: false,
+      },
+    ];
 
     const file = fileDecl(tool);
     file.types.push(binding);
     const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set());
 
-    assert.match(source, /instance\.bindings = try loadBindings\(value, context: context\.at\("bindings"\)\)/);
-    assert.match(source, /public struct Binding: TypraModel \{[\s\S]*public var name: String\? = nil/);
+    assert.match(
+      source,
+      /instance\.bindings = try loadBindings\(value, context: context\.at\("bindings"\)\)/,
+    );
+    assert.match(
+      source,
+      /public struct Binding: TypraModel \{[\s\S]*public var name: String\? = nil/,
+    );
     // Issue #87: an array element must load under an indexed path so a diagnostic
-  // identifies which element failed, matching the other backends.
-  assert.match(
-    source,
-    /if let values = data as\? \[Any\] \{\s+return try values\.enumerated\(\)\.map \{ try Binding\.load\(\$1, context: context\.atIndex\(\$0\)\) \}/,
-  );
-    assert.match(source, /let values = try TypraRuntime\.dictionary\(data, field: "bindings"\)/);
+    // identifies which element failed, matching the other backends.
+    assert.match(
+      source,
+      /if let values = data as\? \[Any\] \{\s+return try values\.enumerated\(\)\.map \{ try Binding\.load\(\$1, context: context\.atIndex\(\$0\)\) \}/,
+    );
+    assert.match(
+      source,
+      /let values = try TypraRuntime\.dictionary\(data, field: "bindings"\)/,
+    );
     assert.match(source, /return try values\.keys\.sorted\(\)\.map \{ name in/);
-    assert.match(source, /itemData\["name"\] = name\s+return try Binding\.load\(itemData, context: context\.at\(name\)\)/);
+    assert.match(
+      source,
+      /itemData\["name"\] = name\s+return try Binding\.load\(itemData, context: context\.at\(name\)\)/,
+    );
     assert.match(source, /private static func saveBindings/);
-    assert.doesNotMatch(source, /where \(serialized\[index\]\["name"\] as\? String\) == ""/);
+    assert.doesNotMatch(
+      source,
+      /where \(serialized\[index\]\["name"\] as\? String\) == ""/,
+    );
     assert.match(source, /let value = itemData\["source"\]/);
-    assert.match(source, /if let scalar = data as\? String \{\s+var instance = Binding\(\)\s+instance\.source = try TypraRuntime\.string\(scalar, field: "source"\)/);
+    assert.match(
+      source,
+      /if let scalar = data as\? String \{\s+var instance = Binding\(\)\s+instance\.source = try TypraRuntime\.string\(scalar, field: "source"\)/,
+    );
   });
 
   it("injects map keys before loading polymorphic named collection elements", () => {
     const toolbox = typeDecl("Toolbox");
-    toolbox.fields = [{
-      name: "tools",
-      typeName: { namespace: "Test", name: "Tool" },
-      category: { kind: "collection_complex", typeName: "Tool" },
-      isOptional: false,
-      defaultValue: null,
-      allowedValues: [],
-      parseAliases: {},
-      enumName: null,
-      isOpenEnum: false,
-      description: "",
-      knownAs: {},
-    }];
-    toolbox.collectionHelpers = [{
-      propertyName: "tools",
-      elementTypeName: { namespace: "Test", name: "Tool" },
-      innerFields: [],
-      hasNameProperty: true,
-    }];
-    toolbox.load.assignments = [{
-      sourceName: "tools",
-      fieldName: "tools",
-      category: toolbox.fields[0].category,
-      isOptional: false,
-      parentTypeName: "Toolbox",
-      enumName: null,
-      allowedValues: [],
-      parseAliases: {},
-      defaultValue: null,
-      isOpenEnum: false,
-    }];
+    toolbox.fields = [
+      {
+        name: "tools",
+        typeName: { namespace: "Test", name: "Tool" },
+        category: { kind: "collection_complex", typeName: "Tool" },
+        isOptional: false,
+        defaultValue: null,
+        allowedValues: [],
+        parseAliases: {},
+        enumName: null,
+        isOpenEnum: false,
+        description: "",
+        knownAs: {},
+      },
+    ];
+    toolbox.collectionHelpers = [
+      {
+        propertyName: "tools",
+        elementTypeName: { namespace: "Test", name: "Tool" },
+        innerFields: [],
+        hasNameProperty: true,
+      },
+    ];
+    toolbox.load.assignments = [
+      {
+        sourceName: "tools",
+        fieldName: "tools",
+        category: toolbox.fields[0].category,
+        isOptional: false,
+        parentTypeName: "Toolbox",
+        enumName: null,
+        allowedValues: [],
+        parseAliases: {},
+        defaultValue: null,
+        isOpenEnum: false,
+      },
+    ];
 
-    const source = emitSwiftFile(fileDecl(toolbox), new SwiftExprVisitor(), new Set(["Tool"]));
-    assert.match(source, /private static func loadTools\(_ data: Any, context: LoadContext\) throws -> \[Tool\]/);
-    assert.match(source, /return try values\.keys\.sorted\(\)\.map \{ name in[\s\S]*itemData\["name"\] = name[\s\S]*return try Tool\.load\(itemData, context: context\.at\(name\)\)/);
+    const source = emitSwiftFile(
+      fileDecl(toolbox),
+      new SwiftExprVisitor(),
+      new Set(["Tool"]),
+    );
+    assert.match(
+      source,
+      /private static func loadTools\(_ data: Any, context: LoadContext\) throws -> \[Tool\]/,
+    );
+    assert.match(
+      source,
+      /return try values\.keys\.sorted\(\)\.map \{ name in[\s\S]*itemData\["name"\] = name[\s\S]*return try Tool\.load\(itemData, context: context\.at\(name\)\)/,
+    );
   });
 
   it("applies scalar coercions before polymorphic dispatch", () => {
@@ -301,18 +412,27 @@ describe("Swift polymorphic enums", () => {
       isAbstract: false,
       isClosed: false,
     };
-    property.load.coercions = [{
-      scalarType: "string",
-      assignments: [
-        { fieldName: "kind", isInput: false, literalValue: "string" },
-        { fieldName: "example", isInput: true },
-      ],
-      needsDispatch: false,
-    }];
+    property.load.coercions = [
+      {
+        scalarType: "string",
+        assignments: [
+          { fieldName: "kind", isInput: false, literalValue: "string" },
+          { fieldName: "example", isInput: true },
+        ],
+        needsDispatch: false,
+      },
+    ];
 
-    const source = emitSwiftFile(fileDecl(property), new SwiftExprVisitor(), new Set(["Property"]));
+    const source = emitSwiftFile(
+      fileDecl(property),
+      new SwiftExprVisitor(),
+      new Set(["Property"]),
+    );
 
-    assert.match(source, /var normalizedData: Any = data\s+if let scalar = normalizedData as\? String \{\s+normalizedData = \["kind": "string", "example": scalar\]\s+\}\s+let object = try TypraRuntime\.object\(normalizedData/);
+    assert.match(
+      source,
+      /var normalizedData: Any = data\s+if let scalar = normalizedData as\? String \{\s+normalizedData = \["kind": "string", "example": scalar\]\s+\}\s+let object = try TypraRuntime\.object\(normalizedData/,
+    );
   });
 });
 
@@ -332,11 +452,26 @@ describe("Swift inherited model fields", () => {
     file.types.push(union);
     const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set());
 
-    assert.match(source, /public struct UnionProperty: TypraModel \{[\s\S]*public var kind: String = "union"[\s\S]*public var name: String\? = nil[\s\S]*public var description: String\? = nil[\s\S]*public var anyOf: String/);
-    assert.match(source, /instance\.name = try TypraRuntime\.string\(value, field: "name"\)/);
-    assert.match(source, /instance\.description = try TypraRuntime\.string\(value, field: "description"\)/);
-    assert.match(source, /if let value = self\.name \{\s+result\["name"\] = value/);
-    assert.match(source, /if let value = self\.description \{\s+result\["description"\] = value/);
+    assert.match(
+      source,
+      /public struct UnionProperty: TypraModel \{[\s\S]*public var kind: String = "union"[\s\S]*public var name: String\? = nil[\s\S]*public var description: String\? = nil[\s\S]*public var anyOf: String/,
+    );
+    assert.match(
+      source,
+      /instance\.name = try TypraRuntime\.string\(value, field: "name"\)/,
+    );
+    assert.match(
+      source,
+      /instance\.description = try TypraRuntime\.string\(value, field: "description"\)/,
+    );
+    assert.match(
+      source,
+      /if let value = self\.name \{\s+result\["name"\] = value/,
+    );
+    assert.match(
+      source,
+      /if let value = self\.description \{\s+result\["description"\] = value/,
+    );
   });
 
   describe("Swift Codable native serialization", () => {
@@ -344,7 +479,11 @@ describe("Swift inherited model fields", () => {
       const model = typeDecl("Model");
       addStringField(model, "wireName");
 
-      const source = emitSwiftFile(fileDecl(model), new SwiftExprVisitor(), new Set());
+      const source = emitSwiftFile(
+        fileDecl(model),
+        new SwiftExprVisitor(),
+        new Set(),
+      );
 
       assert.match(source, /public struct Model: TypraModel \{/);
       assert.doesNotMatch(source, /public struct Model: TypraModel, Codable/);
@@ -355,7 +494,12 @@ describe("Swift inherited model fields", () => {
       const content = typeDecl("Content");
       content.polymorphicDispatch = {
         discriminatorField: "kind",
-        variants: [{ value: "text", typeName: { namespace: "Test", name: "TextContent" } }],
+        variants: [
+          {
+            value: "text",
+            typeName: { namespace: "Test", name: "TextContent" },
+          },
+        ],
         defaultVariant: { typeName: content.typeName, isSelfReference: true },
         isAbstract: false,
         isClosed: false,
@@ -366,12 +510,24 @@ describe("Swift inherited model fields", () => {
 
       const file = fileDecl(content);
       file.types.push(text);
-      const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set(["Content"]), file.types, "codable");
+      const source = emitSwiftFile(
+        file,
+        new SwiftExprVisitor(),
+        new Set(["Content"]),
+        file.types,
+        "codable",
+      );
 
       assert.match(source, /public enum Content: TypraModel, Codable \{/);
       assert.match(source, /public struct TextContent: TypraModel, Codable \{/);
-      assert.match(source, /public init\(from decoder: Decoder\) throws \{\s+self = try Self\.load\(try TypraCodableValue\(from: decoder\)\.anyValue\)\s+\}/);
-      assert.match(source, /public func encode\(to encoder: Encoder\) throws \{\s+try TypraCodableValue\(try save\(\)\)\.encode\(to: encoder\)\s+\}/);
+      assert.match(
+        source,
+        /public init\(from decoder: Decoder\) throws \{\s+self = try Self\.load\(try TypraCodableValue\(from: decoder\)\.anyValue\)\s+\}/,
+      );
+      assert.match(
+        source,
+        /public func encode\(to encoder: Encoder\) throws \{\s+try TypraCodableValue\(try save\(\)\)\.encode\(to: encoder\)\s+\}/,
+      );
     });
 
     it("normalizes NSNumber before Swift Bool bridging can corrupt raw numeric payloads", () => {
@@ -379,49 +535,76 @@ describe("Swift inherited model fields", () => {
       const runtime = emitSwiftRuntime("TestModels", "codable");
 
       assert.doesNotMatch(defaultRuntime, /TypraCodableValue|TypraCodingKey/);
-      assert.match(runtime, /case let value as NSNumber:\s+try encodeNumber\(value, to: &container\)\s+case let value as Bool:/);
-      assert.match(runtime, /if TypraRuntime\.isBoolNumber\(value\) \{\s+try container\.encode\(value\.boolValue\)/);
-      assert.match(runtime, /if let decimal = value as\? NSDecimalNumber \{\s+try container\.encode\(decimal\.decimalValue\)/);
-      assert.match(runtime, /case "s", "i", "l", "q":\s+try container\.encode\(value\.int64Value\)/);
-      assert.match(runtime, /default:\s+try container\.encode\(value\.doubleValue\)/);
-      assert.match(runtime, /public static func double\(_ data: Any, field: String\) throws -> Double \{\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/);
-      assert.match(runtime, /public static func int64\(_ data: Any, field: String\) throws -> Int64 \{\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/);
+      assert.match(
+        runtime,
+        /case let value as NSNumber:\s+try encodeNumber\(value, to: &container\)\s+case let value as Bool:/,
+      );
+      assert.match(
+        runtime,
+        /if TypraRuntime\.isBoolNumber\(value\) \{\s+try container\.encode\(value\.boolValue\)/,
+      );
+      assert.match(
+        runtime,
+        /if let decimal = value as\? NSDecimalNumber \{\s+try container\.encode\(decimal\.decimalValue\)/,
+      );
+      assert.match(
+        runtime,
+        /case "s", "i", "l", "q":\s+try container\.encode\(value\.int64Value\)/,
+      );
+      assert.match(
+        runtime,
+        /default:\s+try container\.encode\(value\.doubleValue\)/,
+      );
+      assert.match(
+        runtime,
+        /public static func double\(_ data: Any, field: String\) throws -> Double \{\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/,
+      );
+      assert.match(
+        runtime,
+        /public static func int64\(_ data: Any, field: String\) throws -> Int64 \{\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/,
+      );
     });
   });
 
   it("inherits named collection helpers into derived value structs", () => {
     const tool = typeDecl("Tool");
-    tool.fields = [{
-      name: "bindings",
-      typeName: { namespace: "Test", name: "Binding" },
-      category: { kind: "collection_complex", typeName: "Binding" },
-      isOptional: false,
-      defaultValue: null,
-      allowedValues: [],
-      parseAliases: {},
-      enumName: null,
-      isOpenEnum: false,
-      description: "",
-      knownAs: {},
-    }];
-    tool.load.assignments = [{
-      sourceName: "bindings",
-      fieldName: "bindings",
-      category: tool.fields[0].category,
-      isOptional: false,
-      parentTypeName: "Tool",
-      enumName: null,
-      allowedValues: [],
-      parseAliases: {},
-      defaultValue: null,
-      isOpenEnum: false,
-    }];
-    tool.collectionHelpers = [{
-      propertyName: "bindings",
-      elementTypeName: { namespace: "Test", name: "Binding" },
-      innerFields: ["input"],
-      hasNameProperty: true,
-    }];
+    tool.fields = [
+      {
+        name: "bindings",
+        typeName: { namespace: "Test", name: "Binding" },
+        category: { kind: "collection_complex", typeName: "Binding" },
+        isOptional: false,
+        defaultValue: null,
+        allowedValues: [],
+        parseAliases: {},
+        enumName: null,
+        isOpenEnum: false,
+        description: "",
+        knownAs: {},
+      },
+    ];
+    tool.load.assignments = [
+      {
+        sourceName: "bindings",
+        fieldName: "bindings",
+        category: tool.fields[0].category,
+        isOptional: false,
+        parentTypeName: "Tool",
+        enumName: null,
+        allowedValues: [],
+        parseAliases: {},
+        defaultValue: null,
+        isOpenEnum: false,
+      },
+    ];
+    tool.collectionHelpers = [
+      {
+        propertyName: "bindings",
+        elementTypeName: { namespace: "Test", name: "Binding" },
+        innerFields: ["input"],
+        hasNameProperty: true,
+      },
+    ];
 
     const functionTool = typeDecl("FunctionTool");
     functionTool.base = tool.typeName;
@@ -431,19 +614,29 @@ describe("Swift inherited model fields", () => {
     file.types.push(functionTool, binding);
 
     const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set());
-    const functionToolSource = source.slice(source.indexOf("public struct FunctionTool"));
-    assert.match(functionToolSource, /instance\.bindings = try loadBindings\(value, context: context\.at\("bindings"\)\)/);
-    assert.match(functionToolSource, /private static func loadBindings\(_ data: Any, context: LoadContext\) throws -> \[Binding\]/);
+    const functionToolSource = source.slice(
+      source.indexOf("public struct FunctionTool"),
+    );
+    assert.match(
+      functionToolSource,
+      /instance\.bindings = try loadBindings\(value, context: context\.at\("bindings"\)\)/,
+    );
+    assert.match(
+      functionToolSource,
+      /private static func loadBindings\(_ data: Any, context: LoadContext\) throws -> \[Binding\]/,
+    );
   });
 
   it("inherits named collection load and save helpers", () => {
     const tool = typeDecl("Tool");
-    tool.collectionHelpers = [{
-      propertyName: "bindings",
-      elementTypeName: { namespace: "Test", name: "Binding" },
-      innerFields: ["input"],
-      hasNameProperty: true,
-    }];
+    tool.collectionHelpers = [
+      {
+        propertyName: "bindings",
+        elementTypeName: { namespace: "Test", name: "Binding" },
+        innerFields: ["input"],
+        hasNameProperty: true,
+      },
+    ];
     const functionTool = typeDecl("FunctionTool");
     functionTool.base = tool.typeName;
 
@@ -480,13 +673,19 @@ describe("Swift typed factory expressions", () => {
     format.allowedValues = ["plain", "markdown"];
     textPart.properties = [format];
     message.properties = [role, roles, parts];
-    const visitor = new SwiftExprVisitor(TypeRegistry.fromTypeGraph([message, textPart]));
+    const visitor = new SwiftExprVisitor(
+      TypeRegistry.fromTypeGraph([message, textPart]),
+    );
 
     const source = visitor.visitExpr({
       kind: "construct",
       typeName: message.typeName,
       fields: [
-        { propertyName: "role", value: { kind: "string", value: "assistant" }, isOptional: false },
+        {
+          propertyName: "role",
+          value: { kind: "string", value: "assistant" },
+          isOptional: false,
+        },
         {
           propertyName: "roles",
           value: {
@@ -505,33 +704,41 @@ describe("Swift typed factory expressions", () => {
           value: {
             kind: "array",
             elementTypeName: { namespace: "Test", name: "ContentPart" },
-            items: [{
-              kind: "variant",
-              baseTypeName: { namespace: "Test", name: "ContentPart" },
-              discriminator: "kind",
-              discriminatorValue: "text",
-              variantTypeName: { namespace: "Test", name: "TextPart" },
-              fields: [
-                {
-                  propertyName: "value",
-                  value: { kind: "param", name: "text", paramType: "string" },
-                  isOptional: false,
-                },
-                {
-                  propertyName: "format",
-                  value: { kind: "string", value: "plain" },
-                  isOptional: false,
-                },
-              ],
-            }],
+            items: [
+              {
+                kind: "variant",
+                baseTypeName: { namespace: "Test", name: "ContentPart" },
+                discriminator: "kind",
+                discriminatorValue: "text",
+                variantTypeName: { namespace: "Test", name: "TextPart" },
+                fields: [
+                  {
+                    propertyName: "value",
+                    value: { kind: "param", name: "text", paramType: "string" },
+                    isOptional: false,
+                  },
+                  {
+                    propertyName: "format",
+                    value: { kind: "string", value: "plain" },
+                    isOptional: false,
+                  },
+                ],
+              },
+            ],
           },
         },
       ],
     });
 
     assert.match(source, /role: \.assistant/);
-    assert.match(source, /roles: \[\.assistant, \(try! Role\.parse\("custom"\)\)\]/);
-    assert.match(source, /parts: \[\.textPart\(TextPart\(kind: "text", value: text, format: \.plain\)\)\]/);
+    assert.match(
+      source,
+      /roles: \[\.assistant, \(try! Role\.parse\("custom"\)\)\]/,
+    );
+    assert.match(
+      source,
+      /parts: \[\.textPart\(TextPart\(kind: "text", value: text, format: \.plain\)\)\]/,
+    );
   });
 });
 
@@ -545,24 +752,36 @@ describe("Swift protocol type mapping", () => {
   it("uses the same mapped signatures in protocols and compile scaffolds", () => {
     const parser = typeDecl("Parser");
     parser.isProtocol = true;
-    parser.methods = [{
-      name: "parse",
-      returns: "Message[]",
-      description: "",
-      params: { data: "unknown?", context: "Record<unknown>?" },
-      optional: false,
-      sync: false,
-    }];
+    parser.methods = [
+      {
+        name: "parse",
+        returns: "Message[]",
+        description: "",
+        params: { data: "unknown?", context: "Record<unknown>?" },
+        optional: false,
+        sync: false,
+      },
+    ];
 
-    const source = emitSwiftFile(fileDecl(parser), new SwiftExprVisitor(), new Set());
-    assert.match(source, /func parse\(data: Any\?, context: \[String: Any\]\?\) async throws -> \[Message\]/);
+    const source = emitSwiftFile(
+      fileDecl(parser),
+      new SwiftExprVisitor(),
+      new Set(),
+    );
+    assert.match(
+      source,
+      /func parse\(data: Any\?, context: \[String: Any\]\?\) async throws -> \[Message\]/,
+    );
 
     const protocolNode = new TypeNode({} as Model, "");
     protocolNode.typeName = parser.typeName;
     protocolNode.isProtocol = true;
     protocolNode.methods = parser.methods;
     const scaffold = emitSwiftProtocolScaffolds([protocolNode], "PromptyModel");
-    assert.match(scaffold, /func parse\(data: Any\?, context: \[String: Any\]\?\) async throws -> \[Message\]/);
+    assert.match(
+      scaffold,
+      /func parse\(data: Any\?, context: \[String: Any\]\?\) async throws -> \[Message\]/,
+    );
   });
 });
 
@@ -599,16 +818,18 @@ describe("Swift generated tests", () => {
       node: modelInfo,
       isAbstract: false,
       package: undefined,
-      examples: [{
-        sample: {
-          inputModalities: ["text"],
-          owner: { id: "owner-1" },
-          bindings: { input: { source: "value" } },
+      examples: [
+        {
+          sample: {
+            inputModalities: ["text"],
+            owner: { id: "owner-1" },
+            bindings: { input: { source: "value" } },
+          },
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [],
         },
-        json: ["{}"],
-        yaml: ["{}"],
-        validations: [],
-      }],
+      ],
       coercions: [],
       factories: [],
       moduleName: "TestModels",
@@ -636,15 +857,33 @@ describe("Swift generated tests", () => {
       });
 
       assert.doesNotMatch(defaultOutput, /assertCodableMatches/);
-      assert.match(codableOutput, /private func assertCodableMatches<T: TypraModel & Codable>/);
-      assert.match(codableOutput, /JSONDecoder\(\)\.decode\(T\.self, from: sourceData\)/);
+      assert.match(
+        codableOutput,
+        /private func assertCodableMatches<T: TypraModel & Codable>/,
+      );
+      assert.match(
+        codableOutput,
+        /JSONDecoder\(\)\.decode\(T\.self, from: sourceData\)/,
+      );
       assert.match(codableOutput, /Codable encode/);
     });
 
-    assert.match(source, /XCTAssertEqual\(\(try XCTUnwrap\(instance\.inputModalities\)\)\.count, 1\)/);
-    assert.match(source, /XCTAssertEqual\(\(try XCTUnwrap\(instance\.owner\)\)\.id, "owner-1"\)/);
-    assert.match(source, /XCTAssertEqual\(\(try XCTUnwrap\(instance\.bindings\)\)\.count, 1\)/);
-    assert.doesNotMatch(source, /instance\.bindings\)\)\.(?:customTool|source)/);
+    assert.match(
+      source,
+      /XCTAssertEqual\(\(try XCTUnwrap\(instance\.inputModalities\)\)\.count, 1\)/,
+    );
+    assert.match(
+      source,
+      /XCTAssertEqual\(\(try XCTUnwrap\(instance\.owner\)\)\.id, "owner-1"\)/,
+    );
+    assert.match(
+      source,
+      /XCTAssertEqual\(\(try XCTUnwrap\(instance\.bindings\)\)\.count, 1\)/,
+    );
+    assert.doesNotMatch(
+      source,
+      /instance\.bindings\)\)\.(?:customTool|source)/,
+    );
   });
 
   it("uses emitted Swift enum type casing", () => {
@@ -653,7 +892,12 @@ describe("Swift generated tests", () => {
       { value: 'ApiType(rawValue: "chat")', delimiter: "" },
     );
     assert.deepEqual(
-      swiftTestOptions.renderEnumValue?.("authenticationMode", "system", "authenticationMode", false),
+      swiftTestOptions.renderEnumValue?.(
+        "authenticationMode",
+        "system",
+        "authenticationMode",
+        false,
+      ),
       { value: "AuthenticationMode.system", delimiter: "" },
     );
   });
@@ -665,10 +909,12 @@ describe("Swift generated tests", () => {
     instructions.name = "instructions";
     instructions.typeName = { namespace: "", name: "string" };
     instructions.isScalar = true;
-    instructions.samples = [{
-      sample: { instructions: "some \npersonal" },
-      description: "",
-    }];
+    instructions.samples = [
+      {
+        sample: { instructions: "some \npersonal" },
+        description: "",
+      },
+    ];
     prompt.properties = [instructions];
 
     const context = buildBaseTestContext(prompt, undefined, swiftTestOptions);
@@ -679,7 +925,9 @@ describe("Swift generated tests", () => {
 
     assert.match(context.examples[0].yaml.join("\n"), /some \\\\npersonal/);
     assert.equal(
-      source.match(/XCTAssertEqual\((?:instance|reloaded)\.instructions, "some \\npersonal"\)/g)?.length,
+      source.match(
+        /XCTAssertEqual\((?:instance|reloaded)\.instructions, "some \\npersonal"\)/g,
+      )?.length,
       4,
     );
   });
@@ -699,7 +947,10 @@ describe("Swift generated tests", () => {
     kind.defaultValue = "key";
     const authenticationMode = new PropertyNode({} as ModelProperty, "");
     authenticationMode.name = "authenticationMode";
-    authenticationMode.typeName = { namespace: "Test", name: "authenticationMode" };
+    authenticationMode.typeName = {
+      namespace: "Test",
+      name: "authenticationMode",
+    };
     authenticationMode.isScalar = true;
     authenticationMode.isOptional = true;
     authenticationMode.enumName = "authenticationMode";
@@ -719,18 +970,20 @@ describe("Swift generated tests", () => {
       node: model,
       isAbstract: false,
       package: undefined,
-      examples: [{
-        sample: {
-          connection: {
-            kind: "key",
-            authenticationMode: "system",
-            obsoleteKey: "ignored",
+      examples: [
+        {
+          sample: {
+            connection: {
+              kind: "key",
+              authenticationMode: "system",
+              obsoleteKey: "ignored",
+            },
           },
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [],
         },
-        json: ["{}"],
-        yaml: ["{}"],
-        validations: [],
-      }],
+      ],
       coercions: [],
       factories: [],
       moduleName: "TestModels",
@@ -771,19 +1024,29 @@ describe("Swift generated tests", () => {
       node: connection,
       isAbstract: true,
       package: undefined,
-      examples: [{
-        sample: { kind: "custom", endpoint: "https://example.test" },
-        json: ["{}"],
-        yaml: ["{}"],
-        validations: [{ key: "kind", value: "custom", delimiter: "\"", isOptional: false }],
-      }],
+      examples: [
+        {
+          sample: { kind: "custom", endpoint: "https://example.test" },
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [
+            { key: "kind", value: "custom", delimiter: '"', isOptional: false },
+          ],
+        },
+      ],
       coercions: [],
       factories: [],
       moduleName: "TestModels",
     });
 
-    assert.match(source, /if case \.customConnection\(let concrete\) = instance/);
-    assert.match(source, /XCTAssertEqual\(concrete\.endpoint, "https:\/\/example\.test"\)/);
+    assert.match(
+      source,
+      /if case \.customConnection\(let concrete\) = instance/,
+    );
+    assert.match(
+      source,
+      /XCTAssertEqual\(concrete\.endpoint, "https:\/\/example\.test"\)/,
+    );
     assert.doesNotMatch(source, /instance\.kind/);
   });
 
@@ -814,19 +1077,29 @@ describe("Swift generated tests", () => {
       node: connection,
       isAbstract: true,
       package: undefined,
-      examples: [{
-        sample: { kind: "vendor", endpoint: "https://vendor.example.test" },
-        json: ["{}"],
-        yaml: ["{}"],
-        validations: [{ key: "kind", value: "vendor", delimiter: "\"", isOptional: false }],
-      }],
+      examples: [
+        {
+          sample: { kind: "vendor", endpoint: "https://vendor.example.test" },
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [
+            { key: "kind", value: "vendor", delimiter: '"', isOptional: false },
+          ],
+        },
+      ],
       coercions: [],
       factories: [],
       moduleName: "TestModels",
     });
 
-    assert.match(source, /if case \.fallbackConnection\(let concrete, _\) = instance/);
-    assert.match(source, /XCTAssertEqual\(concrete\.endpoint, "https:\/\/vendor\.example\.test"\)/);
+    assert.match(
+      source,
+      /if case \.fallbackConnection\(let concrete, _\) = instance/,
+    );
+    assert.match(
+      source,
+      /XCTAssertEqual\(concrete\.endpoint, "https:\/\/vendor\.example\.test"\)/,
+    );
     assert.doesNotMatch(source, /instance\.kind|\.unknown/);
   });
 
@@ -834,13 +1107,15 @@ describe("Swift generated tests", () => {
     const property = new TypeNode({} as Model, "");
     property.typeName = { namespace: "Test", name: "Property" };
     property.discriminator = "kind";
-    property.coercions = [{
-      scalar: "string",
-      expansion: { kind: "string", default: "{value}" },
-      title: "property",
-      description: "",
-      example: "hello",
-    }];
+    property.coercions = [
+      {
+        scalar: "string",
+        expansion: { kind: "string", default: "{value}" },
+        title: "property",
+        description: "",
+        example: "hello",
+      },
+    ];
     const kind = new PropertyNode({} as ModelProperty, "");
     kind.name = "kind";
     kind.typeName = { namespace: "", name: "string" };
@@ -867,21 +1142,31 @@ describe("Swift generated tests", () => {
       isAbstract: false,
       package: undefined,
       examples: [],
-      coercions: [{
-        title: "property",
-        scalarType: "String",
-        value: "\"hello\"",
-        validations: [
-          { key: "kind", value: "string", delimiter: "\"", isOptional: false },
-          { key: "default", value: "hello", delimiter: "\"", isOptional: true },
-        ],
-      }],
+      coercions: [
+        {
+          title: "property",
+          scalarType: "String",
+          value: '"hello"',
+          validations: [
+            { key: "kind", value: "string", delimiter: '"', isOptional: false },
+            {
+              key: "default",
+              value: "hello",
+              delimiter: '"',
+              isOptional: true,
+            },
+          ],
+        },
+      ],
       factories: [],
       moduleName: "TestModels",
     });
 
     assert.match(source, /if case \.stringProperty\(let concrete\) = instance/);
-    assert.match(source, /XCTAssertEqual\(try XCTUnwrap\(concrete\.`default` as\? String\), "hello"\)/);
+    assert.match(
+      source,
+      /XCTAssertEqual\(try XCTUnwrap\(concrete\.`default` as\? String\), "hello"\)/,
+    );
     assert.doesNotMatch(source, /instance\.kind|instance\.`default`/);
   });
 
@@ -889,13 +1174,15 @@ describe("Swift generated tests", () => {
     const property = new TypeNode({} as Model, "");
     property.typeName = { namespace: "Test", name: "Property" };
     property.discriminator = "kind";
-    property.coercions = [{
-      scalar: "boolean",
-      expansion: { kind: "boolean", example: "{value}" },
-      title: "boolean property",
-      description: "",
-      example: false,
-    }];
+    property.coercions = [
+      {
+        scalar: "boolean",
+        expansion: { kind: "boolean", example: "{value}" },
+        title: "boolean property",
+        description: "",
+        example: false,
+      },
+    ];
 
     const arrayProperty = new TypeNode({} as Model, "");
     arrayProperty.typeName = { namespace: "Test", name: "ArrayProperty" };
@@ -912,15 +1199,27 @@ describe("Swift generated tests", () => {
       isAbstract: false,
       package: undefined,
       examples: [],
-      coercions: [{
-        title: "boolean property",
-        scalarType: "Bool",
-        value: "false",
-        validations: [
-          { key: "kind", value: "boolean", delimiter: "\"", isOptional: false },
-          { key: "example", value: "false", delimiter: "", isOptional: false },
-        ],
-      }],
+      coercions: [
+        {
+          title: "boolean property",
+          scalarType: "Bool",
+          value: "false",
+          validations: [
+            {
+              key: "kind",
+              value: "boolean",
+              delimiter: '"',
+              isOptional: false,
+            },
+            {
+              key: "example",
+              value: "false",
+              delimiter: "",
+              isOptional: false,
+            },
+          ],
+        },
+      ],
       factories: [],
       moduleName: "TestModels",
     });
@@ -939,13 +1238,15 @@ describe("Swift generated tests", () => {
     config.typeName = { namespace: "Test", name: "McpApprovalConfig" };
     const configType = new TypeNode({} as Model, "");
     configType.typeName = config.typeName;
-    configType.coercions = [{
-      scalar: "string",
-      expansion: { kind: "{value}" },
-      title: "config",
-      description: "",
-      example: "always",
-    }];
+    configType.coercions = [
+      {
+        scalar: "string",
+        expansion: { kind: "{value}" },
+        title: "config",
+        description: "",
+        example: "always",
+      },
+    ];
     const configKind = new PropertyNode({} as ModelProperty, "");
     configKind.name = "kind";
     configKind.typeName = { namespace: "", name: "string" };
@@ -959,17 +1260,21 @@ describe("Swift generated tests", () => {
       isAbstract: false,
       package: undefined,
       examples: [],
-      coercions: [{
-        title: "mode",
-        scalarType: "String",
-        value: "\"always\"",
-        validations: [{
-          key: "config",
-          value: "always",
-          delimiter: "\"",
-          isOptional: false,
-        }],
-      }],
+      coercions: [
+        {
+          title: "mode",
+          scalarType: "String",
+          value: '"always"',
+          validations: [
+            {
+              key: "config",
+              value: "always",
+              delimiter: '"',
+              isOptional: false,
+            },
+          ],
+        },
+      ],
       factories: [],
       moduleName: "TestModels",
     });
@@ -997,22 +1302,40 @@ describe("Swift generated tests", () => {
       isAbstract: false,
       package: undefined,
       examples: [],
-      coercions: [{
-        title: "property",
-        scalarType: "Bool",
-        value: "false",
-        validations: [
-          { key: "kind", value: "boolean", delimiter: "\"", isOptional: false },
-          { key: "example", value: "false", delimiter: "", isOptional: false },
-        ],
-      }],
+      coercions: [
+        {
+          title: "property",
+          scalarType: "Bool",
+          value: "false",
+          validations: [
+            {
+              key: "kind",
+              value: "boolean",
+              delimiter: '"',
+              isOptional: false,
+            },
+            {
+              key: "example",
+              value: "false",
+              delimiter: "",
+              isOptional: false,
+            },
+          ],
+        },
+      ],
       factories: [],
       moduleName: "TestModels",
     });
 
     assert.match(source, /if case \.unknown\(let concrete\) = instance/);
-    assert.match(source, /XCTAssertEqual\(concrete\["kind"\] as\? String, "boolean"\)/);
-    assert.match(source, /XCTAssertEqual\(concrete\["example"\] as\? Bool, false\)/);
+    assert.match(
+      source,
+      /XCTAssertEqual\(concrete\["kind"\] as\? String, "boolean"\)/,
+    );
+    assert.match(
+      source,
+      /XCTAssertEqual\(concrete\["example"\] as\? Bool, false\)/,
+    );
     assert.doesNotMatch(source, /instance\.kind|instance\.example/);
   });
 
@@ -1021,7 +1344,10 @@ describe("Swift generated tests", () => {
     connection.typeName = { namespace: "Test", name: "Connection" };
     const authenticationMode = new PropertyNode({} as ModelProperty, "");
     authenticationMode.name = "authenticationMode";
-    authenticationMode.typeName = { namespace: "Test", name: "AuthenticationMode" };
+    authenticationMode.typeName = {
+      namespace: "Test",
+      name: "AuthenticationMode",
+    };
     authenticationMode.isScalar = true;
     authenticationMode.isOptional = true;
     authenticationMode.enumName = "AuthenticationMode";
@@ -1031,28 +1357,38 @@ describe("Swift generated tests", () => {
       node: connection,
       isAbstract: false,
       package: undefined,
-      examples: [{
-        sample: { authenticationMode: "system" },
-        json: ["{}"],
-        yaml: ["{}"],
-        validations: [{
-          key: "authenticationMode",
-          value: "system",
-          delimiter: "\"",
-          isOptional: true,
-        }],
-      }],
+      examples: [
+        {
+          sample: { authenticationMode: "system" },
+          json: ["{}"],
+          yaml: ["{}"],
+          validations: [
+            {
+              key: "authenticationMode",
+              value: "system",
+              delimiter: '"',
+              isOptional: true,
+            },
+          ],
+        },
+      ],
       coercions: [],
       factories: [],
       moduleName: "TestModels",
     });
 
-    assert.match(source, /XCTAssertEqual\(\(try XCTUnwrap\(instance\.authenticationMode\)\)\.rawValue, "system"\)/);
+    assert.match(
+      source,
+      /XCTAssertEqual\(\(try XCTUnwrap\(instance\.authenticationMode\)\)\.rawValue, "system"\)/,
+    );
   });
 
   it("omits fixture-specific conformance references for consumer schemas", () => {
     const source = emitSwiftConformanceTest("PromptyModels");
-    assert.doesNotMatch(source, /FixtureRoot|FixtureContent|WireOptions|FixtureReference/);
+    assert.doesNotMatch(
+      source,
+      /FixtureRoot|FixtureContent|WireOptions|FixtureReference/,
+    );
     assert.match(source, /testIntegerValidationRejectsUnsafeValues/);
   });
 });
@@ -1070,7 +1406,10 @@ describe("Swift provider wire mapping", () => {
           category: { kind: "scalar", scalarType: "string" },
           isOptional: true,
           parentTypeName: "WireOptions",
-          wireNames: { openai: "max_completion_tokens", anthropic: "max_tokens" },
+          wireNames: {
+            openai: "max_completion_tokens",
+            anthropic: "max_tokens",
+          },
         },
         {
           fieldName: "temperature",
@@ -1087,21 +1426,38 @@ describe("Swift provider wire mapping", () => {
   it("omits a field for providers that do not map it", () => {
     // `temperature` is mapped for openai only, so an anthropic payload must not carry it.
     // Falling back to the schema name leaks the field into every unmapped provider.
-    const source = emitSwiftFile(fileDecl(wireType()), new SwiftExprVisitor(), new Set());
+    const source = emitSwiftFile(
+      fileDecl(wireType()),
+      new SwiftExprVisitor(),
+      new Set(),
+    );
 
     assert.match(source, /let wireNameTemperature: String\?/);
     assert.match(source, /default: wireNameTemperature = nil/);
-    assert.match(source, /if let wireKey = wireNameTemperature, let value = self\.temperature \{ result\[wireKey\] = value \}/);
+    assert.match(
+      source,
+      /if let wireKey = wireNameTemperature, let value = self\.temperature \{ result\[wireKey\] = value \}/,
+    );
     assert.doesNotMatch(source, /default: wireNameTemperature = "temperature"/);
   });
 
   it("still emits a field for providers that do map it", () => {
     // Counterpart guard: omission must key on the provider having no mapping, not suppress
     // provider wire mapping altogether.
-    const source = emitSwiftFile(fileDecl(wireType()), new SwiftExprVisitor(), new Set());
+    const source = emitSwiftFile(
+      fileDecl(wireType()),
+      new SwiftExprVisitor(),
+      new Set(),
+    );
 
-    assert.match(source, /case "openai": wireNameMaxOutputTokens = "max_completion_tokens"/);
-    assert.match(source, /case "anthropic": wireNameMaxOutputTokens = "max_tokens"/);
+    assert.match(
+      source,
+      /case "openai": wireNameMaxOutputTokens = "max_completion_tokens"/,
+    );
+    assert.match(
+      source,
+      /case "anthropic": wireNameMaxOutputTokens = "max_tokens"/,
+    );
     assert.match(source, /case "openai": wireNameTemperature = "temperature"/);
   });
 });

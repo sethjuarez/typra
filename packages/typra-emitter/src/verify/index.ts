@@ -1,7 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { ExportSurfaceEntry, ExportSurfaceProtocol, ExportSurfaceSnapshot, TargetExportSurface } from "../contract-surface.js";
-import { GeneratedManifest, GeneratedManifestEntry } from "../cleanup/generated-file.js";
+import {
+  ExportSurfaceEntry,
+  ExportSurfaceProtocol,
+  ExportSurfaceSnapshot,
+  TargetExportSurface,
+} from "../contract-surface.js";
+import {
+  GeneratedManifest,
+  GeneratedManifestEntry,
+} from "../cleanup/generated-file.js";
 import { HydrationBoundarySnapshot } from "../hydration-seams.js";
 import { globToRegExp } from "../path-patterns.js";
 
@@ -203,26 +211,44 @@ export function verifyTypraMetadata(options: {
 
 export function loadTypraMetadata(root: string): TypraMetadataSet {
   return {
-    exportSurface: readJson<ExportSurfaceSnapshot>(metadataFile(root, "export-surfaces.json")),
+    exportSurface: readJson<ExportSurfaceSnapshot>(
+      metadataFile(root, "export-surfaces.json"),
+    ),
     manifest: readJson<GeneratedManifest>(metadataFile(root, "manifest.json")),
     model: readOptionalJson<SchemaNode>(modelFile(root)),
-    hydration: readOptionalJson<HydrationBoundarySnapshot>(metadataFile(root, "hydration-seams.json")),
+    hydration: readOptionalJson<HydrationBoundarySnapshot>(
+      metadataFile(root, "hydration-seams.json"),
+    ),
   };
 }
 
 export function loadVerifyConfig(configPath: string): TypraVerifyConfig {
   const config = readJson<TypraVerifyConfig>(configPath);
-  if (config.protectedPaths !== undefined && !Array.isArray(config.protectedPaths)) {
-    throw new Error(`Invalid Typra verifier config: protectedPaths must be an array.`);
+  if (
+    config.protectedPaths !== undefined &&
+    !Array.isArray(config.protectedPaths)
+  ) {
+    throw new Error(
+      `Invalid Typra verifier config: protectedPaths must be an array.`,
+    );
   }
   if (config.protectedPaths?.some((entry) => typeof entry !== "string")) {
-    throw new Error(`Invalid Typra verifier config: protectedPaths entries must be strings.`);
+    throw new Error(
+      `Invalid Typra verifier config: protectedPaths entries must be strings.`,
+    );
   }
-  if (config.hydrationZones !== undefined && !Array.isArray(config.hydrationZones)) {
-    throw new Error(`Invalid Typra verifier config: hydrationZones must be an array.`);
+  if (
+    config.hydrationZones !== undefined &&
+    !Array.isArray(config.hydrationZones)
+  ) {
+    throw new Error(
+      `Invalid Typra verifier config: hydrationZones must be an array.`,
+    );
   }
   if (config.hydrationZones?.some((entry) => typeof entry !== "string")) {
-    throw new Error(`Invalid Typra verifier config: hydrationZones entries must be strings.`);
+    throw new Error(
+      `Invalid Typra verifier config: hydrationZones entries must be strings.`,
+    );
   }
   return config;
 }
@@ -236,22 +262,72 @@ export function compareTypraMetadata(
   const failures: TypraVerifyFailure[] = [];
   const moduleChanges: TargetModuleChange[] = [];
 
-  compareSnapshotIdentity(baseline.exportSurface, current.exportSurface, summary, failures, moduleChanges);
-  compareToolchain(baseline.exportSurface, current.exportSurface, summary, failures);
-  compareExports(baseline.exportSurface, current.exportSurface, summary, failures);
-  compareProtocols(baseline.exportSurface, current.exportSurface, summary, failures);
+  compareSnapshotIdentity(
+    baseline.exportSurface,
+    current.exportSurface,
+    summary,
+    failures,
+    moduleChanges,
+  );
+  compareToolchain(
+    baseline.exportSurface,
+    current.exportSurface,
+    summary,
+    failures,
+  );
+  compareExports(
+    baseline.exportSurface,
+    current.exportSurface,
+    summary,
+    failures,
+  );
+  compareProtocols(
+    baseline.exportSurface,
+    current.exportSurface,
+    summary,
+    failures,
+  );
   compareManifest(baseline.manifest, current.manifest, summary, failures);
-  compareHydrationBoundaryMetadata(baseline.hydration, current.hydration, failures);
-  compareProtectedPaths(current.manifest, baseline.hydration, current.hydration, config, summary, failures);
+  compareHydrationBoundaryMetadata(
+    baseline.hydration,
+    current.hydration,
+    failures,
+  );
+  compareProtectedPaths(
+    current.manifest,
+    baseline.hydration,
+    current.hydration,
+    config,
+    summary,
+    failures,
+  );
   compareHydrationZones(current.manifest, current.hydration, config, summary);
-  const schemaEvolution = compareSchemaEvolution(baseline.model, current.model, summary, failures);
+  const schemaEvolution = compareSchemaEvolution(
+    baseline.model,
+    current.model,
+    summary,
+    failures,
+  );
   const conformanceMap = buildConformanceMap(current.exportSurface);
-  const staleCleanupDryRun = buildStaleCleanupDryRun(baseline.manifest, current.manifest, config, baseline.hydration, current.hydration);
+  const staleCleanupDryRun = buildStaleCleanupDryRun(
+    baseline.manifest,
+    current.manifest,
+    config,
+    baseline.hydration,
+    current.hydration,
+  );
   summary.staleCleanupCandidates = staleCleanupDryRun.length;
-  const hydrationBoundaries = buildHydrationBoundaryReport(current.hydration, config);
+  const hydrationBoundaries = buildHydrationBoundaryReport(
+    current.hydration,
+    config,
+  );
 
   failures.sort(compareFailures);
-  const breakingChange = classifyBreakingChange(summary, schemaEvolution, failures);
+  const breakingChange = classifyBreakingChange(
+    summary,
+    schemaEvolution,
+    failures,
+  );
   return {
     ok: failures.every((failure) => !failure.blocking),
     breakingChange,
@@ -290,7 +366,9 @@ export function formatVerifySummary(result: TypraVerifyResult): string {
     }
   }
 
-  const blocking = result.failures.filter((failure) => failure.blocking).sort(compareFailures);
+  const blocking = result.failures
+    .filter((failure) => failure.blocking)
+    .sort(compareFailures);
   if (blocking.length > 0) {
     lines.push("blocking failures:");
     for (const failure of blocking) {
@@ -305,7 +383,10 @@ function formatNextAction(result: TypraVerifyResult): string {
   if (!result.ok) {
     return "fix blocking drift before accepting the generated baseline; if intentional, regenerate and review the metadata diff.";
   }
-  if (result.breakingChange === "minor" || result.summary.staleCleanupCandidates > 0) {
+  if (
+    result.breakingChange === "minor" ||
+    result.summary.staleCleanupCandidates > 0
+  ) {
     return "review the additive/generated drift and accept the updated baseline if expected.";
   }
   return "no baseline update needed.";
@@ -314,22 +395,37 @@ function formatNextAction(result: TypraVerifyResult): string {
 function formatAdditionalGuidance(result: TypraVerifyResult): string[] {
   const guidance: string[] = [];
   if (result.summary.protectedPathTouches > 0) {
-    guidance.push("generated files matched protected paths; treat this as hand-authored boundary drift unless the protected-path config changed intentionally.");
+    guidance.push(
+      "generated files matched protected paths; treat this as hand-authored boundary drift unless the protected-path config changed intentionally.",
+    );
   }
   if (result.summary.files.ownershipChanged > 0) {
-    guidance.push("generated ownership metadata changed; review marker/output-root changes before accepting the baseline.");
+    guidance.push(
+      "generated ownership metadata changed; review marker/output-root changes before accepting the baseline.",
+    );
   }
-  if (result.summary.toolchain.changed > 0 || result.summary.packageNamesChanged > 0) {
-    guidance.push("option or version drift is present; compare export-surfaces.json and report.json before accepting the baseline.");
+  if (
+    result.summary.toolchain.changed > 0 ||
+    result.summary.packageNamesChanged > 0
+  ) {
+    guidance.push(
+      "option or version drift is present; compare export-surfaces.json and report.json before accepting the baseline.",
+    );
   }
   if (result.summary.modules.added > 0) {
-    guidance.push("target module additions are compatible drift; inspect moduleChanges in --json output before accepting the baseline.");
+    guidance.push(
+      "target module additions are compatible drift; inspect moduleChanges in --json output before accepting the baseline.",
+    );
   }
   if (result.summary.modules.removed > 0) {
-    guidance.push("target module removals are blocking; inspect moduleChanges in --json output before accepting the baseline.");
+    guidance.push(
+      "target module removals are blocking; inspect moduleChanges in --json output before accepting the baseline.",
+    );
   }
   if (result.summary.staleCleanupCandidates > 0) {
-    guidance.push("stale cleanup candidates are available in --json output; delete only entries marked safe after review.");
+    guidance.push(
+      "stale cleanup candidates are available in --json output; delete only entries marked safe after review.",
+    );
   }
   return guidance;
 }
@@ -341,16 +437,30 @@ function compareSnapshotIdentity(
   failures: TypraVerifyFailure[],
   moduleChanges: TargetModuleChange[],
 ): void {
-  if (baseline.emitter !== current.emitter || baseline.version !== current.version) {
-    addFailure(failures, "snapshot.identity", `Snapshot identity changed from ${baseline.emitter}@${baseline.version} to ${current.emitter}@${current.version}.`);
+  if (
+    baseline.emitter !== current.emitter ||
+    baseline.version !== current.version
+  ) {
+    addFailure(
+      failures,
+      "snapshot.identity",
+      `Snapshot identity changed from ${baseline.emitter}@${baseline.version} to ${current.emitter}@${current.version}.`,
+    );
   }
   if (stableStringify(baseline.root) !== stableStringify(current.root)) {
-    addFailure(failures, "snapshot.root", `Root metadata changed from ${stableStringify(baseline.root)} to ${stableStringify(current.root)}.`);
+    addFailure(
+      failures,
+      "snapshot.root",
+      `Root metadata changed from ${stableStringify(baseline.root)} to ${stableStringify(current.root)}.`,
+    );
   }
 
   const baselineTargets = mapTargets(baseline.targets);
   const currentTargets = mapTargets(current.targets);
-  for (const target of sortedUnion([...baselineTargets.keys()], [...currentTargets.keys()])) {
+  for (const target of sortedUnion(
+    [...baselineTargets.keys()],
+    [...currentTargets.keys()],
+  )) {
     const left = baselineTargets.get(target);
     const right = currentTargets.get(target);
     if (!left || !right) {
@@ -360,11 +470,19 @@ function compareSnapshotIdentity(
     }
     if ((left.packageName ?? "") !== (right.packageName ?? "")) {
       summary.packageNamesChanged += 1;
-      addFailure(failures, "target.package", `${target} package name changed from ${left.packageName ?? "<none>"} to ${right.packageName ?? "<none>"}.`);
+      addFailure(
+        failures,
+        "target.package",
+        `${target} package name changed from ${left.packageName ?? "<none>"} to ${right.packageName ?? "<none>"}.`,
+      );
     }
     if ((left.namespace ?? "") !== (right.namespace ?? "")) {
       summary.packageNamesChanged += 1;
-      addFailure(failures, "target.namespace", `${target} namespace changed from ${left.namespace ?? "<none>"} to ${right.namespace ?? "<none>"}.`);
+      addFailure(
+        failures,
+        "target.namespace",
+        `${target} namespace changed from ${left.namespace ?? "<none>"} to ${right.namespace ?? "<none>"}.`,
+      );
     }
     const added = sortedDifference(right.modules, left.modules);
     const removed = sortedDifference(left.modules, right.modules);
@@ -376,7 +494,11 @@ function compareSnapshotIdentity(
       moduleChanges.push({ target, added, removed });
     }
     if (removed.length > 0) {
-      addFailure(failures, "target.modules.removed", `${target} modules were removed: ${removed.join(", ")}.`);
+      addFailure(
+        failures,
+        "target.modules.removed",
+        `${target} modules were removed: ${removed.join(", ")}.`,
+      );
     }
   }
 }
@@ -387,19 +509,34 @@ function compareToolchain(
   summary: TypraVerifySummary,
   failures: TypraVerifyFailure[],
 ): void {
-  const baselinePackages = new Map(baseline.toolchain.packages.map((entry) => [entry.name, entry]));
-  const currentPackages = new Map(current.toolchain.packages.map((entry) => [entry.name, entry]));
+  const baselinePackages = new Map(
+    baseline.toolchain.packages.map((entry) => [entry.name, entry]),
+  );
+  const currentPackages = new Map(
+    current.toolchain.packages.map((entry) => [entry.name, entry]),
+  );
 
-  for (const name of sortedUnion([...baselinePackages.keys()], [...currentPackages.keys()])) {
+  for (const name of sortedUnion(
+    [...baselinePackages.keys()],
+    [...currentPackages.keys()],
+  )) {
     const left = baselinePackages.get(name);
     const right = currentPackages.get(name);
     if (!left || !right || stableStringify(left) !== stableStringify(right)) {
       summary.toolchain.changed += 1;
-      addFailure(failures, "toolchain.changed", `${name} toolchain metadata changed.`);
+      addFailure(
+        failures,
+        "toolchain.changed",
+        `${name} toolchain metadata changed.`,
+      );
     }
     if (right && !right.supported) {
       summary.toolchain.unsupported += 1;
-      addFailure(failures, "toolchain.unsupported", `${name}@${right.version} is outside supported range ${right.supportedRange}.`);
+      addFailure(
+        failures,
+        "toolchain.unsupported",
+        `${name}@${right.version} is outside supported range ${right.supportedRange}.`,
+      );
     }
   }
 }
@@ -412,7 +549,10 @@ function compareExports(
 ): void {
   const baselineExports = mapExports(baseline.targets);
   const currentExports = mapExports(current.targets);
-  for (const key of sortedUnion([...baselineExports.keys()], [...currentExports.keys()])) {
+  for (const key of sortedUnion(
+    [...baselineExports.keys()],
+    [...currentExports.keys()],
+  )) {
     const left = baselineExports.get(key);
     const right = currentExports.get(key);
     if (!left && right) {
@@ -422,7 +562,11 @@ function compareExports(
       addFailure(failures, "exports.removed", `${key} was removed.`);
     } else if (left && right && exportChanged(left.entry, right.entry)) {
       summary.exports.changed += 1;
-      addFailure(failures, "exports.changed", `${key} changed from ${exportSignature(left.entry)} to ${exportSignature(right.entry)}.`);
+      addFailure(
+        failures,
+        "exports.changed",
+        `${key} changed from ${exportSignature(left.entry)} to ${exportSignature(right.entry)}.`,
+      );
     }
   }
 }
@@ -435,7 +579,10 @@ function compareProtocols(
 ): void {
   const baselineProtocols = mapProtocols(baseline.targets);
   const currentProtocols = mapProtocols(current.targets);
-  for (const key of sortedUnion([...baselineProtocols.keys()], [...currentProtocols.keys()])) {
+  for (const key of sortedUnion(
+    [...baselineProtocols.keys()],
+    [...currentProtocols.keys()],
+  )) {
     const left = baselineProtocols.get(key);
     const right = currentProtocols.get(key);
     if (!left && right) {
@@ -443,7 +590,11 @@ function compareProtocols(
     } else if (left && !right) {
       summary.protocols.removed += 1;
       addFailure(failures, "protocols.removed", `${key} was removed.`);
-    } else if (left && right && protocolSignature(left.protocol) !== protocolSignature(right.protocol)) {
+    } else if (
+      left &&
+      right &&
+      protocolSignature(left.protocol) !== protocolSignature(right.protocol)
+    ) {
       summary.protocols.changed += 1;
       addFailure(failures, "protocols.changed", `${key} signature changed.`);
     }
@@ -456,23 +607,45 @@ function compareManifest(
   summary: TypraVerifySummary,
   failures: TypraVerifyFailure[],
 ): void {
-  if (baseline.emitter !== current.emitter || baseline.version !== current.version) {
-    addFailure(failures, "manifest.identity", `Manifest identity changed from ${baseline.emitter}@${baseline.version} to ${current.emitter}@${current.version}.`);
+  if (
+    baseline.emitter !== current.emitter ||
+    baseline.version !== current.version
+  ) {
+    addFailure(
+      failures,
+      "manifest.identity",
+      `Manifest identity changed from ${baseline.emitter}@${baseline.version} to ${current.emitter}@${current.version}.`,
+    );
   }
 
-  const baselineFiles = new Map(baseline.files.map((entry) => [normalizePath(entry.path), entry]));
-  const currentFiles = new Map(current.files.map((entry) => [normalizePath(entry.path), entry]));
-  for (const filePath of sortedUnion([...baselineFiles.keys()], [...currentFiles.keys()])) {
+  const baselineFiles = new Map(
+    baseline.files.map((entry) => [normalizePath(entry.path), entry]),
+  );
+  const currentFiles = new Map(
+    current.files.map((entry) => [normalizePath(entry.path), entry]),
+  );
+  for (const filePath of sortedUnion(
+    [...baselineFiles.keys()],
+    [...currentFiles.keys()],
+  )) {
     const left = baselineFiles.get(filePath);
     const right = currentFiles.get(filePath);
     if (!left && right) {
       summary.files.added += 1;
     } else if (left && !right) {
       summary.files.deleted += 1;
-      addFailure(failures, "files.deleted", `${filePath} was deleted from generated manifest.`);
+      addFailure(
+        failures,
+        "files.deleted",
+        `${filePath} was deleted from generated manifest.`,
+      );
     } else if (left && right && manifestOwnershipChanged(left, right)) {
       summary.files.ownershipChanged += 1;
-      addFailure(failures, "files.ownership", `${filePath} generated ownership metadata changed.`);
+      addFailure(
+        failures,
+        "files.ownership",
+        `${filePath} generated ownership metadata changed.`,
+      );
     }
   }
 }
@@ -485,14 +658,22 @@ function compareProtectedPaths(
   summary: TypraVerifySummary,
   failures: TypraVerifyFailure[],
 ): void {
-  const protectedPaths = getProtectedPathPatterns(config, baselineHydration, hydration);
+  const protectedPaths = getProtectedPathPatterns(
+    config,
+    baselineHydration,
+    hydration,
+  );
   if (protectedPaths.length === 0) return;
 
   for (const entry of manifest.files) {
     const filePath = normalizePath(entry.path);
     if (protectedPaths.some((pattern) => pattern.test(filePath))) {
       summary.protectedPathTouches += 1;
-      addFailure(failures, "protected-path.touch", `${filePath} matches a protected path.`);
+      addFailure(
+        failures,
+        "protected-path.touch",
+        `${filePath} matches a protected path.`,
+      );
     }
   }
 }
@@ -507,21 +688,50 @@ function compareHydrationBoundaryMetadata(
     return;
   }
   if (baseline && !current) {
-    addFailure(failures, "hydration-boundary.changed", "Hydration boundary metadata was removed.");
+    addFailure(
+      failures,
+      "hydration-boundary.changed",
+      "Hydration boundary metadata was removed.",
+    );
     return;
   }
   if (!baseline || !current) return;
-  if (baseline.emitter !== current.emitter || baseline.version !== current.version) {
-    addFailure(failures, "hydration-boundary.changed", "Hydration boundary metadata identity changed.");
+  if (
+    baseline.emitter !== current.emitter ||
+    baseline.version !== current.version
+  ) {
+    addFailure(
+      failures,
+      "hydration-boundary.changed",
+      "Hydration boundary metadata identity changed.",
+    );
   }
-  if (stableStringify(baseline.protectedPaths) !== stableStringify(current.protectedPaths)) {
-    addFailure(failures, "hydration-boundary.protected-paths", "Hydration boundary protected paths changed.");
+  if (
+    stableStringify(baseline.protectedPaths) !==
+    stableStringify(current.protectedPaths)
+  ) {
+    addFailure(
+      failures,
+      "hydration-boundary.protected-paths",
+      "Hydration boundary protected paths changed.",
+    );
   }
-  if (stableStringify(baseline.hydrationZones) !== stableStringify(current.hydrationZones)) {
-    addFailure(failures, "hydration-boundary.zones", "Hydration zones changed.");
+  if (
+    stableStringify(baseline.hydrationZones) !==
+    stableStringify(current.hydrationZones)
+  ) {
+    addFailure(
+      failures,
+      "hydration-boundary.zones",
+      "Hydration zones changed.",
+    );
   }
   if (stableStringify(baseline.seams) !== stableStringify(current.seams)) {
-    addFailure(failures, "hydration-boundary.seams", "Hydration seams changed.");
+    addFailure(
+      failures,
+      "hydration-boundary.seams",
+      "Hydration seams changed.",
+    );
   }
 }
 
@@ -531,9 +741,10 @@ function compareHydrationZones(
   config: TypraVerifyConfig,
   summary: TypraVerifySummary,
 ): void {
-  const configuredZones = [...(config.hydrationZones ?? []), ...(hydration?.hydrationZones ?? [])].map((entry) =>
-    globToRegExp(normalizePath(entry)),
-  );
+  const configuredZones = [
+    ...(config.hydrationZones ?? []),
+    ...(hydration?.hydrationZones ?? []),
+  ].map((entry) => globToRegExp(normalizePath(entry)));
   if (configuredZones.length === 0) return;
 
   for (const entry of manifest.files) {
@@ -570,7 +781,10 @@ function compareSchemaEvolution(
   const changes: SchemaEvolutionChange[] = [];
   const baselineTypes = flattenSchemaTypes(baseline);
   const currentTypes = flattenSchemaTypes(current);
-  for (const typeName of sortedUnion([...baselineTypes.keys()], [...currentTypes.keys()])) {
+  for (const typeName of sortedUnion(
+    [...baselineTypes.keys()],
+    [...currentTypes.keys()],
+  )) {
     const left = baselineTypes.get(typeName);
     const right = currentTypes.get(typeName);
     if (!left && right) {
@@ -604,13 +818,19 @@ function compareSchemaEvolution(
         severity: "major",
         message: `${typeName} discriminator changed from ${left.discriminator ?? "<none>"} to ${right.discriminator ?? "<none>"}.`,
       });
-      addFailure(failures, "schema.discriminator", `${typeName} discriminator changed.`);
+      addFailure(
+        failures,
+        "schema.discriminator",
+        `${typeName} discriminator changed.`,
+      );
     }
 
     compareSchemaProperties(typeName, left, right, summary, failures, changes);
   }
 
-  return changes.sort((left, right) => `${left.kind}:${left.path}`.localeCompare(`${right.kind}:${right.path}`));
+  return changes.sort((left, right) =>
+    `${left.kind}:${left.path}`.localeCompare(`${right.kind}:${right.path}`),
+  );
 }
 
 function compareSchemaProperties(
@@ -623,7 +843,10 @@ function compareSchemaProperties(
 ): void {
   const baselineProperties = mapSchemaProperties(baseline);
   const currentProperties = mapSchemaProperties(current);
-  for (const propertyName of sortedUnion([...baselineProperties.keys()], [...currentProperties.keys()])) {
+  for (const propertyName of sortedUnion(
+    [...baselineProperties.keys()],
+    [...currentProperties.keys()],
+  )) {
     const left = baselineProperties.get(propertyName);
     const right = currentProperties.get(propertyName);
     const pathName = `${typeName}.${propertyName}`;
@@ -644,7 +867,11 @@ function compareSchemaProperties(
           severity: "major",
           message: `${pathName} required property was added.`,
         });
-        addFailure(failures, "schema.required-added", `${pathName} required property was added.`);
+        addFailure(
+          failures,
+          "schema.required-added",
+          `${pathName} required property was added.`,
+        );
       }
       continue;
     }
@@ -656,7 +883,11 @@ function compareSchemaProperties(
         severity: "major",
         message: `${pathName} property was removed.`,
       });
-      addFailure(failures, "schema.property-removed", `${pathName} property was removed.`);
+      addFailure(
+        failures,
+        "schema.property-removed",
+        `${pathName} property was removed.`,
+      );
       continue;
     }
     if (!left || !right) continue;
@@ -669,9 +900,16 @@ function compareSchemaProperties(
         severity: "major",
         message: `${pathName} requiredness changed.`,
       });
-      addFailure(failures, "schema.requiredness", `${pathName} requiredness changed.`);
+      addFailure(
+        failures,
+        "schema.requiredness",
+        `${pathName} requiredness changed.`,
+      );
     }
-    if (stableStringify(propertyTypeSignature(left)) !== stableStringify(propertyTypeSignature(right))) {
+    if (
+      stableStringify(propertyTypeSignature(left)) !==
+      stableStringify(propertyTypeSignature(right))
+    ) {
       summary.schema.propertyTypesChanged += 1;
       changes.push({
         kind: "property-type-changed",
@@ -679,9 +917,16 @@ function compareSchemaProperties(
         severity: "major",
         message: `${pathName} type shape changed.`,
       });
-      addFailure(failures, "schema.property-type", `${pathName} type shape changed.`);
+      addFailure(
+        failures,
+        "schema.property-type",
+        `${pathName} type shape changed.`,
+      );
     }
-    if (stableStringify(normalizeKnownAs(left.knownAs)) !== stableStringify(normalizeKnownAs(right.knownAs))) {
+    if (
+      stableStringify(normalizeKnownAs(left.knownAs)) !==
+      stableStringify(normalizeKnownAs(right.knownAs))
+    ) {
       summary.schema.wireNamesChanged += 1;
       changes.push({
         kind: "property-wire-name-changed",
@@ -689,9 +934,16 @@ function compareSchemaProperties(
         severity: "major",
         message: `${pathName} wire-name mappings changed.`,
       });
-      addFailure(failures, "schema.wire-name", `${pathName} wire-name mappings changed.`);
+      addFailure(
+        failures,
+        "schema.wire-name",
+        `${pathName} wire-name mappings changed.`,
+      );
     }
-    if (stableStringify(enumSignature(left)) !== stableStringify(enumSignature(right))) {
+    if (
+      stableStringify(enumSignature(left)) !==
+      stableStringify(enumSignature(right))
+    ) {
       summary.schema.enumValuesChanged += 1;
       changes.push({
         kind: "property-enum-values-changed",
@@ -704,7 +956,9 @@ function compareSchemaProperties(
   }
 }
 
-function buildConformanceMap(snapshot: ExportSurfaceSnapshot): ConformanceMapEntry[] {
+function buildConformanceMap(
+  snapshot: ExportSurfaceSnapshot,
+): ConformanceMapEntry[] {
   const contracts = new Map<string, ConformanceMapEntry>();
   for (const target of snapshot.targets) {
     for (const entry of target.exports) {
@@ -731,9 +985,15 @@ function buildConformanceMap(snapshot: ExportSurfaceSnapshot): ConformanceMapEnt
   return Array.from(contracts.values())
     .map((entry) => ({
       ...entry,
-      targets: entry.targets.sort((left, right) => left.target.localeCompare(right.target)),
+      targets: entry.targets.sort((left, right) =>
+        left.target.localeCompare(right.target),
+      ),
     }))
-    .sort((left, right) => `${left.protocol}:${left.contract}`.localeCompare(`${right.protocol}:${right.contract}`));
+    .sort((left, right) =>
+      `${left.protocol}:${left.contract}`.localeCompare(
+        `${right.protocol}:${right.contract}`,
+      ),
+    );
 }
 
 function buildStaleCleanupDryRun(
@@ -743,10 +1003,19 @@ function buildStaleCleanupDryRun(
   baselineHydration?: HydrationBoundarySnapshot,
   hydration?: HydrationBoundarySnapshot,
 ): StaleCleanupCandidate[] {
-  const currentFiles = new Set(current.files.map((entry) => normalizePath(entry.path)));
-  const protectedPaths = getProtectedPathPatterns(config, baselineHydration, hydration);
-  const hydrationZones = [...(config.hydrationZones ?? []), ...(baselineHydration?.hydrationZones ?? []), ...(hydration?.hydrationZones ?? [])]
-    .map((entry) => globToRegExp(normalizePath(entry)));
+  const currentFiles = new Set(
+    current.files.map((entry) => normalizePath(entry.path)),
+  );
+  const protectedPaths = getProtectedPathPatterns(
+    config,
+    baselineHydration,
+    hydration,
+  );
+  const hydrationZones = [
+    ...(config.hydrationZones ?? []),
+    ...(baselineHydration?.hydrationZones ?? []),
+    ...(hydration?.hydrationZones ?? []),
+  ].map((entry) => globToRegExp(normalizePath(entry)));
 
   return baseline.files
     .filter((entry) => !currentFiles.has(normalizePath(entry.path)))
@@ -754,12 +1023,20 @@ function buildStaleCleanupDryRun(
       const filePath = normalizePath(entry.path);
       const reasons = [
         "present in prior generated manifest",
-        entry.marker ? "prior entry was marked generated" : "prior entry was not marked generated",
+        entry.marker
+          ? "prior entry was marked generated"
+          : "prior entry was not marked generated",
         `scoped to output root ${normalizePath(entry.outputRoot)}`,
       ];
-      const protectedMatch = protectedPaths.some((pattern) => pattern.test(filePath));
-      const hydrationZoneMatch = hydrationZones.some((pattern) => pattern.test(filePath));
-      reasons.push(protectedMatch ? "blocked by protected path" : "not protected");
+      const protectedMatch = protectedPaths.some((pattern) =>
+        pattern.test(filePath),
+      );
+      const hydrationZoneMatch = hydrationZones.some((pattern) =>
+        pattern.test(filePath),
+      );
+      reasons.push(
+        protectedMatch ? "blocked by protected path" : "not protected",
+      );
       if (hydrationZoneMatch) reasons.push("inside hydration zone");
       return {
         path: filePath,
@@ -775,10 +1052,18 @@ function buildHydrationBoundaryReport(
   config: TypraVerifyConfig,
 ): HydrationBoundaryReport {
   return {
-    protectedPaths: uniqueSorted([...(config.protectedPaths ?? []), ...(hydration?.protectedPaths ?? [])]),
-    hydrationZones: uniqueSorted([...(config.hydrationZones ?? []), ...(hydration?.hydrationZones ?? [])]),
+    protectedPaths: uniqueSorted([
+      ...(config.protectedPaths ?? []),
+      ...(hydration?.protectedPaths ?? []),
+    ]),
+    hydrationZones: uniqueSorted([
+      ...(config.hydrationZones ?? []),
+      ...(hydration?.hydrationZones ?? []),
+    ]),
     seams: [...(hydration?.seams ?? [])].sort((left, right) =>
-      `${left.target}:${left.group}:${left.contract}:${left.symbol}`.localeCompare(`${right.target}:${right.group}:${right.contract}:${right.symbol}`),
+      `${left.target}:${left.group}:${left.contract}:${left.symbol}`.localeCompare(
+        `${right.target}:${right.group}:${right.contract}:${right.symbol}`,
+      ),
     ),
   };
 }
@@ -788,8 +1073,11 @@ function getProtectedPathPatterns(
   baselineHydration?: HydrationBoundarySnapshot,
   hydration?: HydrationBoundarySnapshot,
 ): RegExp[] {
-  return [...(config.protectedPaths ?? []), ...(baselineHydration?.protectedPaths ?? []), ...(hydration?.protectedPaths ?? [])]
-    .map((entry) => globToRegExp(normalizePath(entry)));
+  return [
+    ...(config.protectedPaths ?? []),
+    ...(baselineHydration?.protectedPaths ?? []),
+    ...(hydration?.protectedPaths ?? []),
+  ].map((entry) => globToRegExp(normalizePath(entry)));
 }
 
 function classifyBreakingChange(
@@ -797,7 +1085,10 @@ function classifyBreakingChange(
   schemaEvolution: SchemaEvolutionChange[],
   failures: TypraVerifyFailure[],
 ): "patch" | "minor" | "major" {
-  if (failures.some((failure) => failure.blocking) || schemaEvolution.some((change) => change.severity === "major")) {
+  if (
+    failures.some((failure) => failure.blocking) ||
+    schemaEvolution.some((change) => change.severity === "major")
+  ) {
     return "major";
   }
   if (
@@ -841,32 +1132,51 @@ function readOptionalJson<T>(filePath: string): T | undefined {
   return JSON.parse(readFileSync(filePath, "utf8")) as T;
 }
 
-function mapTargets(targets: TargetExportSurface[]): Map<string, TargetExportSurface> {
+function mapTargets(
+  targets: TargetExportSurface[],
+): Map<string, TargetExportSurface> {
   return new Map(targets.map((target) => [target.target, target]));
 }
 
-function mapExports(targets: TargetExportSurface[]): Map<string, ComparableExport> {
+function mapExports(
+  targets: TargetExportSurface[],
+): Map<string, ComparableExport> {
   const entries = new Map<string, ComparableExport>();
   for (const target of targets) {
     for (const entry of target.exports) {
-      entries.set(`${target.target}:${entry.group}:${entry.name}`, { target: target.target, entry });
+      entries.set(`${target.target}:${entry.group}:${entry.name}`, {
+        target: target.target,
+        entry,
+      });
     }
   }
   return entries;
 }
 
-function mapProtocols(targets: TargetExportSurface[]): Map<string, ComparableProtocol> {
+function mapProtocols(
+  targets: TargetExportSurface[],
+): Map<string, ComparableProtocol> {
   const entries = new Map<string, ComparableProtocol>();
   for (const target of targets) {
     for (const protocol of target.protocols) {
-      entries.set(`${target.target}:${protocol.group}:${protocol.name}`, { target: target.target, protocol });
+      entries.set(`${target.target}:${protocol.group}:${protocol.name}`, {
+        target: target.target,
+        protocol,
+      });
     }
   }
   return entries;
 }
 
-function exportChanged(left: ExportSurfaceEntry, right: ExportSurfaceEntry): boolean {
-  return left.kind !== right.kind || left.source !== right.source || left.protocol !== right.protocol;
+function exportChanged(
+  left: ExportSurfaceEntry,
+  right: ExportSurfaceEntry,
+): boolean {
+  return (
+    left.kind !== right.kind ||
+    left.source !== right.source ||
+    left.protocol !== right.protocol
+  );
 }
 
 function exportSignature(entry: ExportSurfaceEntry): string {
@@ -885,11 +1195,21 @@ function protocolSignature(protocol: ExportSurfaceProtocol): string {
   });
 }
 
-function manifestOwnershipChanged(left: GeneratedManifestEntry, right: GeneratedManifestEntry): boolean {
-  return left.marker !== right.marker || normalizePath(left.outputRoot) !== normalizePath(right.outputRoot);
+function manifestOwnershipChanged(
+  left: GeneratedManifestEntry,
+  right: GeneratedManifestEntry,
+): boolean {
+  return (
+    left.marker !== right.marker ||
+    normalizePath(left.outputRoot) !== normalizePath(right.outputRoot)
+  );
 }
 
-function addFailure(failures: TypraVerifyFailure[], code: string, message: string): void {
+function addFailure(
+  failures: TypraVerifyFailure[],
+  code: string,
+  message: string,
+): void {
   failures.push({ code, message, blocking: true });
 }
 
@@ -898,7 +1218,9 @@ function cloneSummary(): TypraVerifySummary {
 }
 
 function sortedUnion(left: string[], right: string[]): string[] {
-  return Array.from(new Set([...left, ...right])).sort((a, b) => a.localeCompare(b));
+  return Array.from(new Set([...left, ...right])).sort((a, b) =>
+    a.localeCompare(b),
+  );
 }
 
 function sortedDifference(left: string[], right: string[]): string[] {
@@ -908,7 +1230,10 @@ function sortedDifference(left: string[], right: string[]): string[] {
     .sort((a, b) => a.localeCompare(b));
 }
 
-function compareFailures(left: TypraVerifyFailure, right: TypraVerifyFailure): number {
+function compareFailures(
+  left: TypraVerifyFailure,
+  right: TypraVerifyFailure,
+): number {
   const byCode = left.code.localeCompare(right.code);
   if (byCode !== 0) return byCode;
   return left.message.localeCompare(right.message);
@@ -940,16 +1265,26 @@ function schemaTypeKey(node: SchemaNode): string {
 }
 
 function mapSchemaProperties(node: SchemaNode): Map<string, SchemaProperty> {
-  return new Map((node.properties ?? []).filter((property) => !!property.name).map((property) => [property.name!, property]));
+  return new Map(
+    (node.properties ?? [])
+      .filter((property) => !!property.name)
+      .map((property) => [property.name!, property]),
+  );
 }
 
-function normalizeKnownAs(knownAs: SchemaProperty["knownAs"]): Array<{ provider: string; name: string }> {
+function normalizeKnownAs(
+  knownAs: SchemaProperty["knownAs"],
+): Array<{ provider: string; name: string }> {
   return (knownAs ?? [])
     .map((entry) => ({
       provider: entry.provider ?? "",
       name: entry.name ?? "",
     }))
-    .sort((left, right) => `${left.provider}:${left.name}`.localeCompare(`${right.provider}:${right.name}`));
+    .sort((left, right) =>
+      `${left.provider}:${left.name}`.localeCompare(
+        `${right.provider}:${right.name}`,
+      ),
+    );
 }
 
 function propertyTypeSignature(property: SchemaProperty): {
@@ -971,16 +1306,24 @@ function propertyTypeSignature(property: SchemaProperty): {
   };
 }
 
-function enumSignature(property: SchemaProperty): { allowedValues: string[]; enumName: string; isOpenEnum: boolean } {
+function enumSignature(property: SchemaProperty): {
+  allowedValues: string[];
+  enumName: string;
+  isOpenEnum: boolean;
+} {
   return {
-    allowedValues: [...(property.allowedValues ?? [])].sort((left, right) => left.localeCompare(right)),
+    allowedValues: [...(property.allowedValues ?? [])].sort((left, right) =>
+      left.localeCompare(right),
+    ),
     enumName: property.enumName ?? "",
     isOpenEnum: property.isOpenEnum ?? false,
   };
 }
 
 function uniqueSorted(values: string[]): string[] {
-  return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
+  return Array.from(new Set(values)).sort((left, right) =>
+    left.localeCompare(right),
+  );
 }
 
 function stableStringify(value: unknown): string {

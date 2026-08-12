@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
-import { generate, SUPPORTED_TARGET_LANGUAGES, TargetLanguage } from "./generate.js";
+import {
+  generate,
+  SUPPORTED_TARGET_LANGUAGES,
+  TargetLanguage,
+} from "./generate.js";
 import { parseArgs } from "util";
 
 const HELP = `
@@ -70,31 +74,39 @@ async function main() {
   // Output is required
   const output = values.output || positionals[0];
   if (!output) {
-    console.error("Error: Output directory is required. Use -o <dir> or --output <dir>\n");
+    console.error(
+      "Error: Output directory is required. Use -o <dir> or --output <dir>\n",
+    );
     console.log(HELP);
     process.exit(1);
   }
 
   // Parse targets
   const targetsString = values.targets || "python,csharp,typescript,go";
-  const targets = targetsString.split(",").map(t => t.trim().toLowerCase()) as TargetLanguage[];
+  const targets = targetsString
+    .split(",")
+    .map((t) => t.trim().toLowerCase()) as TargetLanguage[];
 
   // Validate targets
   const validTargets: readonly string[] = SUPPORTED_TARGET_LANGUAGES;
   for (const target of targets) {
     if (!validTargets.includes(target)) {
-      console.error(`Error: Invalid target "${target}". Valid targets: ${validTargets.join(", ")}`);
+      console.error(
+        `Error: Invalid target "${target}". Valid targets: ${validTargets.join(", ")}`,
+      );
       process.exit(1);
     }
   }
 
   // Parse omit list
-  const omit = values.omit ? values.omit.split(",").map(m => m.trim()) : [];
+  const omit = values.omit ? values.omit.split(",").map((m) => m.trim()) : [];
 
   console.log(`\n🚀 Typra Generator\n`);
   console.log(`  Output:      ${output}`);
   console.log(`  Targets:     ${targets.join(", ")}`);
-  console.log(`  Root Object: ${values["root-object"] || "Typra.Fixtures.FixtureRoot"}`);
+  console.log(
+    `  Root Object: ${values["root-object"] || "Typra.Fixtures.FixtureRoot"}`,
+  );
   if (omit.length > 0) {
     console.log(`  Omitting:    ${omit.join(", ")}`);
   }
@@ -113,17 +125,19 @@ async function main() {
   });
 
   if (result.success) {
-    console.log(`✅ Successfully generated code for: ${result.targets.join(", ")}`);
+    console.log(
+      `✅ Successfully generated code for: ${result.targets.join(", ")}`,
+    );
     console.log(`   Output directory: ${result.outputDir}\n`);
     process.exit(0);
   } else {
     console.error(`❌ Generation failed:`);
-    result.errors?.forEach(e => console.error(`   - ${e}`));
+    result.errors?.forEach((e) => console.error(`   - ${e}`));
     process.exit(1);
   }
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error("Fatal error:", error);
   process.exit(1);
 });

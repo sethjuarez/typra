@@ -1,4 +1,9 @@
-import { EmitContext, Program, emitFile, resolvePath } from "@typespec/compiler";
+import {
+  EmitContext,
+  Program,
+  emitFile,
+  resolvePath,
+} from "@typespec/compiler";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, relative, resolve } from "path";
 import { TypraEmitterOptions } from "../lib.js";
@@ -20,9 +25,21 @@ export interface GeneratedManifest {
 export interface SkippedGeneratedFileEntry {
   path: string;
   reason: "empty" | "not-regenerated";
-  action: "none" | "removed-marker-owned" | "preserved-unmarked" | "preserved-editable-seam";
-  ownership: "not-present" | "marker-owned" | "unmarked-existing" | "editable-seam-owned";
-  status: "skipped-empty" | "removed-stale-marker-owned" | "preserved-unmarked" | "preserved-editable-seam";
+  action:
+    | "none"
+    | "removed-marker-owned"
+    | "preserved-unmarked"
+    | "preserved-editable-seam";
+  ownership:
+    | "not-present"
+    | "marker-owned"
+    | "unmarked-existing"
+    | "editable-seam-owned";
+  status:
+    | "skipped-empty"
+    | "removed-stale-marker-owned"
+    | "preserved-unmarked"
+    | "preserved-editable-seam";
   nextAction: string;
 }
 
@@ -33,7 +50,8 @@ export interface SkippedGeneratedFileEntry {
  */
 export const EDITABLE_SEAM_MARKER = "<typra-editable-seam>";
 
-const EDITABLE_SEAM_PATTERN = /^\uFEFF?[ \t]*(?:\/\/|#|<!--)[ \t]*<typra-editable-seam>/m;
+const EDITABLE_SEAM_PATTERN =
+  /^\uFEFF?[ \t]*(?:\/\/|#|<!--)[ \t]*<typra-editable-seam>/m;
 
 export function hasEditableSeamMarker(content: string): boolean {
   return EDITABLE_SEAM_PATTERN.test(content);
@@ -107,8 +125,14 @@ export interface GeneratedOutputReport {
   };
 }
 
-const generatedFilesByProgram = new WeakMap<Program, Map<string, GeneratedManifestEntry>>();
-const skippedFilesByProgram = new WeakMap<Program, Map<string, SkippedGeneratedFileEntry>>();
+const generatedFilesByProgram = new WeakMap<
+  Program,
+  Map<string, GeneratedManifestEntry>
+>();
+const skippedFilesByProgram = new WeakMap<
+  Program,
+  Map<string, SkippedGeneratedFileEntry>
+>();
 const warningsByProgram = new WeakMap<Program, Set<string>>();
 const DETERMINISTIC_GENERATED_AT = "1970-01-01T00:00:00.000Z";
 
@@ -119,7 +143,9 @@ export async function emitGeneratedFile(
   options: { marker?: boolean; outputRoot?: string; allowEmpty?: boolean } = {},
 ): Promise<void> {
   const marker = options.marker ?? shouldMark(filePath);
-  const normalizedContent = normalizeGeneratedContent(content, { allowEmpty: options.allowEmpty });
+  const normalizedContent = normalizeGeneratedContent(content, {
+    allowEmpty: options.allowEmpty,
+  });
   if (!normalizedContent && !options.allowEmpty) {
     const result = removeSkippedGeneratedFile(filePath);
     recordSkippedFile(context.program, filePath, result.action);
@@ -129,7 +155,9 @@ export async function emitGeneratedFile(
     return;
   }
 
-  const finalContent = marker ? addMarker(filePath, normalizedContent) : normalizedContent;
+  const finalContent = marker
+    ? addMarker(filePath, normalizedContent)
+    : normalizedContent;
   recordGeneratedFile(context.program, filePath, marker, options.outputRoot);
 
   await emitFile(context.program, {
@@ -138,8 +166,14 @@ export async function emitGeneratedFile(
   });
 }
 
-export function manifestPath(context: EmitContext<TypraEmitterOptions>): string {
-  return resolvePath(context.emitterOutputDir, ".typra-generated", "manifest.json");
+export function manifestPath(
+  context: EmitContext<TypraEmitterOptions>,
+): string {
+  return resolvePath(
+    context.emitterOutputDir,
+    ".typra-generated",
+    "manifest.json",
+  );
 }
 
 /**
@@ -158,10 +192,12 @@ export function manifestPath(context: EmitContext<TypraEmitterOptions>): string 
  *
  * Must run before the new manifest is written, since it reads the previous one.
  */
-export function pruneStaleGeneratedFiles(context: EmitContext<TypraEmitterOptions>): void {
+export function pruneStaleGeneratedFiles(
+  context: EmitContext<TypraEmitterOptions>,
+): void {
   pruneStaleGeneratedFilesAgainst(
     context,
-    new Set(buildGeneratedManifest(context).files.map(entry => entry.path)),
+    new Set(buildGeneratedManifest(context).files.map((entry) => entry.path)),
   );
 }
 
@@ -187,7 +223,12 @@ export function pruneStaleGeneratedFilesAgainst(
     const existingContent = readFileSync(absolutePath, "utf8");
 
     if (hasEditableSeamMarker(existingContent)) {
-      recordSkippedFile(context.program, absolutePath, "preserved-editable-seam", "not-regenerated");
+      recordSkippedFile(
+        context.program,
+        absolutePath,
+        "preserved-editable-seam",
+        "not-regenerated",
+      );
       continue;
     }
 
@@ -196,20 +237,34 @@ export function pruneStaleGeneratedFilesAgainst(
       const warning = `Warning: stale generated file is no longer produced but was preserved because it is unmarked: ${entry.path}`;
       console.warn(warning);
       recordWarning(context.program, warning);
-      recordSkippedFile(context.program, absolutePath, "preserved-unmarked", "not-regenerated");
+      recordSkippedFile(
+        context.program,
+        absolutePath,
+        "preserved-unmarked",
+        "not-regenerated",
+      );
       continue;
     }
 
     unlinkSync(absolutePath);
-    recordSkippedFile(context.program, absolutePath, "removed-marker-owned", "not-regenerated");
+    recordSkippedFile(
+      context.program,
+      absolutePath,
+      "removed-marker-owned",
+      "not-regenerated",
+    );
   }
 }
 
-function readPreviousManifest(context: EmitContext<TypraEmitterOptions>): GeneratedManifest | undefined {
+function readPreviousManifest(
+  context: EmitContext<TypraEmitterOptions>,
+): GeneratedManifest | undefined {
   const previousPath = manifestPath(context);
   if (!existsSync(previousPath)) return undefined;
   try {
-    const parsed = JSON.parse(readFileSync(previousPath, "utf8")) as GeneratedManifest;
+    const parsed = JSON.parse(
+      readFileSync(previousPath, "utf8"),
+    ) as GeneratedManifest;
     return Array.isArray(parsed?.files) ? parsed : undefined;
   } catch {
     // A manifest we cannot parse tells us nothing about ownership, so delete nothing.
@@ -217,7 +272,9 @@ function readPreviousManifest(context: EmitContext<TypraEmitterOptions>): Genera
   }
 }
 
-export async function emitGeneratedManifest(context: EmitContext<TypraEmitterOptions>): Promise<GeneratedManifest> {
+export async function emitGeneratedManifest(
+  context: EmitContext<TypraEmitterOptions>,
+): Promise<GeneratedManifest> {
   const manifest = buildGeneratedManifest(context);
   await emitFile(context.program, {
     path: manifestPath(context),
@@ -232,17 +289,25 @@ export async function emitGeneratedOutputReport(
 ): Promise<void> {
   const report = buildGeneratedOutputReport(context, manifest);
   await emitFile(context.program, {
-    path: resolvePath(context.emitterOutputDir, ".typra-generated", "report.json"),
+    path: resolvePath(
+      context.emitterOutputDir,
+      ".typra-generated",
+      "report.json",
+    ),
     content: `${JSON.stringify(report, null, 2)}\n`,
   });
 }
 
-export function buildGeneratedManifest(context: EmitContext<TypraEmitterOptions>): GeneratedManifest {
+export function buildGeneratedManifest(
+  context: EmitContext<TypraEmitterOptions>,
+): GeneratedManifest {
   const entries = getGeneratedFileEntries(context.program);
   const manifest: GeneratedManifest = {
     emitter: "typra-emitter",
     version: 1,
-    generatedAt: context.options["deterministic-output"] ? DETERMINISTIC_GENERATED_AT : new Date().toISOString(),
+    generatedAt: context.options["deterministic-output"]
+      ? DETERMINISTIC_GENERATED_AT
+      : new Date().toISOString(),
     files: entries,
   };
 
@@ -264,9 +329,17 @@ export function buildGeneratedOutputReport(
   const preservedEditableSeamFiles = skippedFiles
     .filter((entry) => entry.action === "preserved-editable-seam")
     .map((entry) => entry.path);
-  const protectedPathPatterns = [...(context.options["protected-paths"] ?? [])].sort((left, right) => left.localeCompare(right));
-  const protectedPathTouches = findProtectedPathTouches(manifest.files, protectedPathPatterns);
-  const cleanupSuggestions = buildCleanupSuggestions(staleMarkerOwnedRemovals, preservedUnmarkedSkippedFiles);
+  const protectedPathPatterns = [
+    ...(context.options["protected-paths"] ?? []),
+  ].sort((left, right) => left.localeCompare(right));
+  const protectedPathTouches = findProtectedPathTouches(
+    manifest.files,
+    protectedPathPatterns,
+  );
+  const cleanupSuggestions = buildCleanupSuggestions(
+    staleMarkerOwnedRemovals,
+    preservedUnmarkedSkippedFiles,
+  );
   return {
     emitter: "typra-emitter",
     version: 1,
@@ -284,21 +357,45 @@ export function buildGeneratedOutputReport(
     generation: {
       deterministicOutput: context.options["deterministic-output"] === true,
       rootObject: context.options["root-object"],
-      ...(context.options["root-namespace"] && { rootNamespace: context.options["root-namespace"] }),
-      ...(context.options["root-alias"] && { rootAlias: context.options["root-alias"] }),
-      emitTargets: (context.options["emit-targets"] ?? []).map((target) => ({
-        type: target.type,
-        ...(target["output-dir"] && { outputDir: normalizePath(target["output-dir"]) }),
-        ...(target["test-dir"] && { testDir: normalizePath(target["test-dir"]) }),
-        ...(target["package-name"] && { packageName: target["package-name"] }),
-        ...(target.namespace && { namespace: target.namespace }),
-        ...(target.format !== undefined && { format: target.format }),
-        ...(target["enum-parsing"] && { enumParsing: target["enum-parsing"] }),
-        ...(target["protocol-scaffolds"] && { protocolScaffolds: target["protocol-scaffolds"] }),
-        ...(target["native-serialization"] && { nativeSerialization: target["native-serialization"] }),
-      })).sort((left, right) => `${left.type}:${left.outputDir ?? ""}`.localeCompare(`${right.type}:${right.outputDir ?? ""}`)),
+      ...(context.options["root-namespace"] && {
+        rootNamespace: context.options["root-namespace"],
+      }),
+      ...(context.options["root-alias"] && {
+        rootAlias: context.options["root-alias"],
+      }),
+      emitTargets: (context.options["emit-targets"] ?? [])
+        .map((target) => ({
+          type: target.type,
+          ...(target["output-dir"] && {
+            outputDir: normalizePath(target["output-dir"]),
+          }),
+          ...(target["test-dir"] && {
+            testDir: normalizePath(target["test-dir"]),
+          }),
+          ...(target["package-name"] && {
+            packageName: target["package-name"],
+          }),
+          ...(target.namespace && { namespace: target.namespace }),
+          ...(target.format !== undefined && { format: target.format }),
+          ...(target["enum-parsing"] && {
+            enumParsing: target["enum-parsing"],
+          }),
+          ...(target["protocol-scaffolds"] && {
+            protocolScaffolds: target["protocol-scaffolds"],
+          }),
+          ...(target["native-serialization"] && {
+            nativeSerialization: target["native-serialization"],
+          }),
+        }))
+        .sort((left, right) =>
+          `${left.type}:${left.outputDir ?? ""}`.localeCompare(
+            `${right.type}:${right.outputDir ?? ""}`,
+          ),
+        ),
       protectedPaths: protectedPathPatterns,
-      hydrationZones: [...(context.options["hydration-zones"] ?? [])].sort((left, right) => left.localeCompare(right)),
+      hydrationZones: [...(context.options["hydration-zones"] ?? [])].sort(
+        (left, right) => left.localeCompare(right),
+      ),
     },
     emittedFiles: manifest.files,
     skippedFiles,
@@ -317,21 +414,25 @@ export function buildGeneratedOutputReport(
       status: "requires-verifier-baseline",
       configuredPatterns: protectedPathPatterns,
       matchedFiles: protectedPathTouches,
-      guidance: protectedPathTouches.length === 0
-        ? "No emitted files matched configured protected paths in this generation."
-        : "Generated output matched configured protected paths; run typra-verify against the committed baseline before accepting these changes.",
+      guidance:
+        protectedPathTouches.length === 0
+          ? "No emitted files matched configured protected paths in this generation."
+          : "Generated output matched configured protected paths; run typra-verify against the committed baseline before accepting these changes.",
     },
     formatter: {
       status: "not-recorded",
       note: "Target formatters run in language drivers; per-file formatter status is not recorded in generated metadata yet.",
     },
     cleanup: {
-      status: cleanupSuggestions.length === 0 ? "safe-noop" : "review-recommended",
+      status:
+        cleanupSuggestions.length === 0 ? "safe-noop" : "review-recommended",
       suggestions: cleanupSuggestions,
     },
     driftGuidance: {
-      updateBaselineWhen: "Generated runtime output and metadata drift are expected and reviewed.",
-      fixGenerationWhen: "Verifier reports blocking failures, protected-path touches are unexpected, or preserved unmarked skipped files should remain hand-authored.",
+      updateBaselineWhen:
+        "Generated runtime output and metadata drift are expected and reviewed.",
+      fixGenerationWhen:
+        "Verifier reports blocking failures, protected-path touches are unexpected, or preserved unmarked skipped files should remain hand-authored.",
       metadataToCompare: [
         ".typra-generated/manifest.json",
         ".typra-generated/export-surfaces.json",
@@ -358,7 +459,12 @@ export function buildGeneratedOutputReport(
   };
 }
 
-function recordGeneratedFile(program: Program, filePath: string, marker: boolean, outputRoot?: string): void {
+function recordGeneratedFile(
+  program: Program,
+  filePath: string,
+  marker: boolean,
+  outputRoot?: string,
+): void {
   let entries = generatedFilesByProgram.get(program);
   if (!entries) {
     entries = new Map<string, GeneratedManifestEntry>();
@@ -400,18 +506,21 @@ function recordWarning(program: Program, warning: string): void {
 }
 
 function getGeneratedFileEntries(program: Program): GeneratedManifestEntry[] {
-  return [...(generatedFilesByProgram.get(program)?.values() ?? [])]
-    .sort((left, right) => left.path.localeCompare(right.path));
+  return [...(generatedFilesByProgram.get(program)?.values() ?? [])].sort(
+    (left, right) => left.path.localeCompare(right.path),
+  );
 }
 
 function getSkippedFileEntries(program: Program): SkippedGeneratedFileEntry[] {
-  return [...(skippedFilesByProgram.get(program)?.values() ?? [])]
-    .sort((left, right) => left.path.localeCompare(right.path));
+  return [...(skippedFilesByProgram.get(program)?.values() ?? [])].sort(
+    (left, right) => left.path.localeCompare(right.path),
+  );
 }
 
 function getWarnings(program: Program): string[] {
-  return [...(warningsByProgram.get(program)?.values() ?? [])]
-    .sort((left, right) => left.localeCompare(right));
+  return [...(warningsByProgram.get(program)?.values() ?? [])].sort(
+    (left, right) => left.localeCompare(right),
+  );
 }
 
 function shouldMark(filePath: string): boolean {
@@ -429,7 +538,10 @@ function addMarker(filePath: string, content: string): string {
   return content.startsWith(marker) ? content : `${marker}\n${content}`;
 }
 
-function addMarkdownMarkerAfterFrontmatter(content: string, marker: string): string {
+function addMarkdownMarkerAfterFrontmatter(
+  content: string,
+  marker: string,
+): string {
   const closingDelimiter = "\n---\n";
   const closingIndex = content.indexOf(closingDelimiter, 4);
   if (closingIndex < 0) {
@@ -439,14 +551,20 @@ function addMarkdownMarkerAfterFrontmatter(content: string, marker: string): str
   const markerIndex = closingIndex + closingDelimiter.length;
   const beforeMarker = content.slice(0, markerIndex);
   const afterMarker = content.slice(markerIndex);
-  return afterMarker.startsWith(marker) ? content : `${beforeMarker}${marker}\n${afterMarker}`;
+  return afterMarker.startsWith(marker)
+    ? content
+    : `${beforeMarker}${marker}\n${afterMarker}`;
 }
 
 function markerFor(filePath: string): string {
   if (filePath.endsWith(".md")) {
     return "<!-- <auto-generated by typra-emitter> -->";
   }
-  if (filePath.endsWith(".py") || filePath.endsWith(".yaml") || filePath.endsWith(".yml")) {
+  if (
+    filePath.endsWith(".py") ||
+    filePath.endsWith(".yaml") ||
+    filePath.endsWith(".yml")
+  ) {
     return "# <auto-generated by typra-emitter>";
   }
   return "// <auto-generated by typra-emitter>";
@@ -456,9 +574,18 @@ function normalizePath(filePath: string): string {
   return relative(process.cwd(), resolve(filePath)).replace(/\\/g, "/");
 }
 
-function normalizeGeneratedContent(content: string, options: { allowEmpty?: boolean } = {}): string {
-  const normalizedLines = content.replace(/\r\n?/g, "\n").split("\n").map(line => line.trimEnd());
-  while (normalizedLines.length > 0 && normalizedLines[normalizedLines.length - 1] === "") {
+function normalizeGeneratedContent(
+  content: string,
+  options: { allowEmpty?: boolean } = {},
+): string {
+  const normalizedLines = content
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.trimEnd());
+  while (
+    normalizedLines.length > 0 &&
+    normalizedLines[normalizedLines.length - 1] === ""
+  ) {
     normalizedLines.pop();
   }
 
@@ -469,7 +596,10 @@ function normalizeGeneratedContent(content: string, options: { allowEmpty?: bool
   return `${normalizedLines.join("\n")}\n`;
 }
 
-function removeSkippedGeneratedFile(filePath: string): { action: SkippedGeneratedFileEntry["action"]; warning?: string } {
+function removeSkippedGeneratedFile(filePath: string): {
+  action: SkippedGeneratedFileEntry["action"];
+  warning?: string;
+} {
   const absolutePath = resolve(filePath);
   if (!existsSync(absolutePath)) {
     return { action: "none" };
@@ -501,36 +631,45 @@ function skippedFileGuidance(
     return {
       ownership: "marker-owned",
       status: "removed-stale-marker-owned",
-      nextAction: reason === "not-regenerated"
-        ? "Review the deletion; this file was generated by a previous run but is no longer produced, so its source type was renamed or removed."
-        : "Review the deletion; accept the baseline when this empty generated artifact is expected to disappear.",
+      nextAction:
+        reason === "not-regenerated"
+          ? "Review the deletion; this file was generated by a previous run but is no longer produced, so its source type was renamed or removed."
+          : "Review the deletion; accept the baseline when this empty generated artifact is expected to disappear.",
     };
   }
   if (action === "preserved-editable-seam") {
     return {
       ownership: "editable-seam-owned",
       status: "preserved-editable-seam",
-      nextAction: "No action needed; this file carries the Typra editable-seam marker and is owned by the consumer.",
+      nextAction:
+        "No action needed; this file carries the Typra editable-seam marker and is owned by the consumer.",
     };
   }
   if (action === "preserved-unmarked") {
     return {
       ownership: "unmarked-existing",
       status: "preserved-unmarked",
-      nextAction: reason === "not-regenerated"
-        ? "Review the file manually; Typra no longer generates it but will not delete a file it does not own."
-        : "Review the file manually; Typra skipped empty output but preserved the unmarked existing file.",
+      nextAction:
+        reason === "not-regenerated"
+          ? "Review the file manually; Typra no longer generates it but will not delete a file it does not own."
+          : "Review the file manually; Typra skipped empty output but preserved the unmarked existing file.",
     };
   }
   return {
     ownership: "not-present",
     status: "skipped-empty",
-    nextAction: "No action needed unless this empty artifact should be emitted with allowEmpty.",
+    nextAction:
+      "No action needed unless this empty artifact should be emitted with allowEmpty.",
   };
 }
 
-function findProtectedPathTouches(files: GeneratedManifestEntry[], patterns: string[]): string[] {
-  const matchers = patterns.map((pattern) => globToRegExp(normalizePath(pattern)));
+function findProtectedPathTouches(
+  files: GeneratedManifestEntry[],
+  patterns: string[],
+): string[] {
+  const matchers = patterns.map((pattern) =>
+    globToRegExp(normalizePath(pattern)),
+  );
   if (matchers.length === 0) {
     return [];
   }
@@ -540,13 +679,20 @@ function findProtectedPathTouches(files: GeneratedManifestEntry[], patterns: str
     .sort((left, right) => left.localeCompare(right));
 }
 
-function buildCleanupSuggestions(staleMarkerOwnedRemovals: string[], preservedUnmarkedSkippedFiles: string[]): string[] {
+function buildCleanupSuggestions(
+  staleMarkerOwnedRemovals: string[],
+  preservedUnmarkedSkippedFiles: string[],
+): string[] {
   const suggestions: string[] = [];
   if (staleMarkerOwnedRemovals.length > 0) {
-    suggestions.push("Review removed marker-owned files and accept the generated baseline if the removal is expected.");
+    suggestions.push(
+      "Review removed marker-owned files and accept the generated baseline if the removal is expected.",
+    );
   }
   if (preservedUnmarkedSkippedFiles.length > 0) {
-    suggestions.push("Inspect preserved unmarked files before accepting drift; Typra will not delete files it does not own.");
+    suggestions.push(
+      "Inspect preserved unmarked files before accepting drift; Typra will not delete files it does not own.",
+    );
   }
   return suggestions;
 }

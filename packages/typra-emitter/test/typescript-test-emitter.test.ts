@@ -3,7 +3,10 @@ import { describe, it } from "node:test";
 
 import { TypeNode } from "../src/ir/ast.js";
 import { emitTypeScriptTest } from "../src/languages/typescript/test-emitter.js";
-import { buildBaseTestContext, typescriptTestOptions } from "../src/testing/test-context.js";
+import {
+  buildBaseTestContext,
+  typescriptTestOptions,
+} from "../src/testing/test-context.js";
 
 function emit(node: TypeNode): string {
   const context = buildBaseTestContext(node, "prompty", typescriptTestOptions);
@@ -25,12 +28,14 @@ describe("TypeScript test emitter", () => {
   it("loads the built example rather than an empty payload", () => {
     const node = {
       typeName: { namespace: "prompty", name: "UsageChunk" },
-      properties: [{
-        name: "totalTokens",
-        type: { name: "integer", coercions: [] },
-        isScalar: true,
-        samples: [{ sample: { totalTokens: 42 }, description: "" }],
-      }],
+      properties: [
+        {
+          name: "totalTokens",
+          type: { name: "integer", coercions: [] },
+          isScalar: true,
+          samples: [{ sample: { totalTokens: 42 }, description: "" }],
+        },
+      ],
       factories: [],
     } as unknown as TypeNode;
 
@@ -51,12 +56,14 @@ describe("TypeScript test emitter", () => {
   it("emits no dictionary test when the type has no example to load", () => {
     const node = {
       typeName: { namespace: "prompty", name: "UsageChunk" },
-      properties: [{
-        name: "totalTokens",
-        type: { name: "integer", coercions: [] },
-        isScalar: true,
-        samples: [],
-      }],
+      properties: [
+        {
+          name: "totalTokens",
+          type: { name: "integer", coercions: [] },
+          isScalar: true,
+          samples: [],
+        },
+      ],
       factories: [],
     } as unknown as TypeNode;
 
@@ -78,12 +85,14 @@ describe("TypeScript test emitter", () => {
     const node = {
       typeName: { namespace: "prompty", name: "ContentPart" },
       isAbstract: true,
-      properties: [{
-        name: "kind",
-        type: { name: "string", coercions: [] },
-        isScalar: true,
-        samples: [],
-      }],
+      properties: [
+        {
+          name: "kind",
+          type: { name: "string", coercions: [] },
+          isScalar: true,
+          samples: [],
+        },
+      ],
       factories: [],
     } as unknown as TypeNode;
 

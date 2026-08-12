@@ -1,4 +1,10 @@
-import { EmitContext, resolvePath, Namespace, Model, NoTarget } from "@typespec/compiler";
+import {
+  EmitContext,
+  resolvePath,
+  Namespace,
+  Model,
+  NoTarget,
+} from "@typespec/compiler";
 import { resolveModel, TypeNode, enumerateTypes } from "./ir/ast.js";
 import { TypraEmitterOptions, EmitTarget } from "./lib.js";
 import { generateMarkdown } from "./languages/markdown/driver.js";
@@ -9,10 +15,24 @@ import { generateGo } from "./languages/go/driver.js";
 import { generateJava } from "./languages/java/driver.js";
 import { generateRust } from "./languages/rust/driver.js";
 import { generateSwift } from "./languages/swift/driver.js";
-import { emitGeneratedFile, emitGeneratedManifest, emitGeneratedOutputReport, pruneStaleGeneratedFiles } from "./cleanup/generated-file.js";
-import { buildExportSurfaceSnapshot, emitExportSurfaceSnapshot } from "./contract-surface.js";
-import { reportTypeSpecCompatibility, shouldBlockUnsupportedTypeSpecToolchain } from "./compatibility.js";
-import { buildHydrationBoundarySnapshot, emitHydrationBoundarySnapshot } from "./hydration-seams.js";
+import {
+  emitGeneratedFile,
+  emitGeneratedManifest,
+  emitGeneratedOutputReport,
+  pruneStaleGeneratedFiles,
+} from "./cleanup/generated-file.js";
+import {
+  buildExportSurfaceSnapshot,
+  emitExportSurfaceSnapshot,
+} from "./contract-surface.js";
+import {
+  reportTypeSpecCompatibility,
+  shouldBlockUnsupportedTypeSpecToolchain,
+} from "./compatibility.js";
+import {
+  buildHydrationBoundarySnapshot,
+  emitHydrationBoundarySnapshot,
+} from "./hydration-seams.js";
 import { validateNativeSerializationTargets } from "./native-serialization.js";
 
 // Generator options passed to each generator
@@ -25,13 +45,18 @@ export interface GeneratorOptions {
  * Filter nodes based on omit-models option.
  * Matches against model name (e.g., "AgentManifest") or fully qualified name (e.g., "Prompty.AgentManifest")
  */
-export function filterNodes(nodes: TypeNode[], options?: GeneratorOptions): TypeNode[] {
+export function filterNodes(
+  nodes: TypeNode[],
+  options?: GeneratorOptions,
+): TypeNode[] {
   const omitModels = options?.omitModels || [];
 
   // Include additional root models and their type trees
   const additionalModels = options?.additionalModels || [];
   if (additionalModels.length > 0) {
-    const existingNames = new Set(nodes.map(n => `${n.typeName.namespace}.${n.typeName.name}`));
+    const existingNames = new Set(
+      nodes.map((n) => `${n.typeName.namespace}.${n.typeName.name}`),
+    );
     const visited = new Set(existingNames);
     for (const additionalModel of additionalModels) {
       for (const subNode of enumerateTypes(additionalModel, new Set())) {
@@ -40,14 +65,13 @@ export function filterNodes(nodes: TypeNode[], options?: GeneratorOptions): Type
           nodes.push(subNode);
           visited.add(fullName);
         }
-
       }
     }
   }
 
   if (omitModels.length === 0) return nodes;
 
-  return nodes.filter(node => {
+  return nodes.filter((node) => {
     const name = node.typeName.name;
     const fullName = `${node.typeName.namespace}.${name}`;
     return !omitModels.includes(name) && !omitModels.includes(fullName);
@@ -60,7 +84,9 @@ export function inferRootNamespace(rootObject: string): string {
 }
 
 function inferRootAlias(rootNamespace: string): string {
-  return rootNamespace.split(".").filter(Boolean).at(-1) || rootNamespace || "Typra";
+  return (
+    rootNamespace.split(".").filter(Boolean).at(-1) || rootNamespace || "Typra"
+  );
 }
 
 function isUninstantiatedTemplate(model: Model): boolean {
@@ -72,7 +98,10 @@ function isUninstantiatedTemplate(model: Model): boolean {
   );
 }
 
-function collectNamespaceModels(namespace: Namespace, models: Model[] = []): Model[] {
+function collectNamespaceModels(
+  namespace: Namespace,
+  models: Model[] = [],
+): Model[] {
   for (const [, model] of namespace.models) {
     models.push(model);
   }
@@ -89,7 +118,7 @@ type GeneratorFn = (
   context: EmitContext<TypraEmitterOptions>,
   model: TypeNode,
   target: EmitTarget,
-  options?: GeneratorOptions
+  options?: GeneratorOptions,
 ) => Promise<void>;
 
 // Registry of available code generators.
@@ -113,7 +142,6 @@ function getGenerators(): Record<string, GeneratorFn> {
   };
 }
 
-
 export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   const toolchain = reportTypeSpecCompatibility(context);
   if (shouldBlockUnsupportedTypeSpecToolchain(context.options, toolchain)) {
@@ -123,20 +151,19 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   const options = {
     emitterOutputDir: context.emitterOutputDir,
     ...context.options,
-  }
-  if (!validateNativeSerializationOptions(context, options["emit-targets"] || [])) {
+  };
+  if (
+    !validateNativeSerializationOptions(context, options["emit-targets"] || [])
+  ) {
     return;
   }
-
 
   // resolving top level model
   // this is the "Model" entry point for the emitter
   const rootObject = options["root-object"];
   const m = context.program.resolveTypeReference(rootObject);
   if (!m[0] || m[0].kind !== "Model") {
-    throw new Error(
-      `${rootObject} model not found or is not a model type.`
-    );
+    throw new Error(`${rootObject} model not found or is not a model type.`);
   }
 
   function validateNativeSerializationOptions(
@@ -155,15 +182,22 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     return errors.length === 0;
   }
 
-  const rootNamespace = options["root-namespace"] || inferRootNamespace(rootObject);
+  const rootNamespace =
+    options["root-namespace"] || inferRootNamespace(rootObject);
   const rootAlias = options["root-alias"] || inferRootAlias(rootNamespace);
 
-  const model = resolveModel(context.program, m[0], new Set(), rootNamespace, rootAlias);
+  const model = resolveModel(
+    context.program,
+    m[0],
+    new Set(),
+    rootNamespace,
+    rootAlias,
+  );
   if (options["root-alias"]) {
     model.typeName = {
       namespace: model.typeName.namespace,
-      name: options["root-alias"]
-    }
+      name: options["root-alias"],
+    };
   }
 
   // Discover additional models not reachable from the root.
@@ -203,9 +237,11 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
       }
 
       const additionalNode = resolveModel(
-        context.program, nsModel, new Set(),
+        context.program,
+        nsModel,
+        new Set(),
         rootNamespace,
-        rootAlias
+        rootAlias,
       );
       additionalModels.push(additionalNode);
       visited.add(fullName);
@@ -218,13 +254,17 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     if (visited.has(rootName)) continue;
     const ref = context.program.resolveTypeReference(rootName);
     if (!ref[0] || ref[0].kind !== "Model") {
-      console.warn(`Warning: additional-root '${rootName}' not found or is not a model type. Skipping.`);
+      console.warn(
+        `Warning: additional-root '${rootName}' not found or is not a model type. Skipping.`,
+      );
       continue;
     }
     const additionalNode = resolveModel(
-      context.program, ref[0], new Set(),
+      context.program,
+      ref[0],
+      new Set(),
       rootNamespace,
-      rootAlias
+      rootAlias,
     );
     additionalModels.push(additionalNode);
     visited.add(rootName);
@@ -257,7 +297,14 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     { marker: false },
   );
 
-  const exportSurfaceSnapshot = buildExportSurfaceSnapshot(rootObject, rootNamespace, rootAlias, targets, exportSurfaceNodes, toolchain);
+  const exportSurfaceSnapshot = buildExportSurfaceSnapshot(
+    rootObject,
+    rootNamespace,
+    rootAlias,
+    targets,
+    exportSurfaceNodes,
+    toolchain,
+  );
   await emitExportSurfaceSnapshot(context, exportSurfaceSnapshot);
 
   await emitHydrationBoundarySnapshot(

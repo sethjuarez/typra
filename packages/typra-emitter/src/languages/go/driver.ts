@@ -2,46 +2,51 @@ import { EmitContext, resolvePath } from "@typespec/compiler";
 import { execFileSync } from "child_process";
 import { resolve } from "path";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
-import {
-  BaseTestContext,
-  enumerateTypes,
-  TypeNode,
-} from "../../ir/ast.js";
+import { BaseTestContext, enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 
-import { buildBaseTestContext, goTestOptions } from "../../testing/test-context.js";
+import {
+  buildBaseTestContext,
+  goTestOptions,
+} from "../../testing/test-context.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { GoExprVisitor } from "./visitor.js";
-import { lowerFile, lowerType, collectPolymorphicTypeNames } from "../../ir/lower.js";
+import {
+  lowerFile,
+  lowerType,
+  collectPolymorphicTypeNames,
+} from "../../ir/lower.js";
 import { emitGoFileContent } from "./emitter.js";
 import { emitGoContext } from "./scaffolding.js";
 import { emitGoTest } from "./test-emitter.js";
 import { buildGoFieldNames } from "./identifiers.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
-import { collectProtocolNodes, emitGoProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
-
+import {
+  collectProtocolNodes,
+  emitGoProtocolScaffolds,
+  shouldEmitCompileOnlyProtocolScaffolds,
+} from "../../protocol-scaffolds.js";
 
 /**
  * Type mapping from TypeSpec scalar types to Go types.
  */
 export const goTypeMapper: Record<string, string> = {
-  "string": "string",
-  "number": "float64",
-  "array": "[]",
-  "object": "map[string]interface{}",
-  "boolean": "bool",
-  "int64": "int64",
-  "int32": "int32",
-  "float64": "float64",
-  "float32": "float32",
-  "integer": "int",
-  "float": "float64",
-  "numeric": "float64",
-  "any": "interface{}",
-  "dictionary": "map[string]interface{}",
+  string: "string",
+  number: "float64",
+  array: "[]",
+  object: "map[string]interface{}",
+  boolean: "bool",
+  int64: "int64",
+  int32: "int32",
+  float64: "float64",
+  float32: "float32",
+  integer: "int",
+  float: "float64",
+  numeric: "float64",
+  any: "interface{}",
+  dictionary: "map[string]interface{}",
 };
-
 
 /**
  * Main entry point for Go code generation.
@@ -50,7 +55,7 @@ export const generateGo = async (
   context: EmitContext<TypraEmitterOptions>,
   node: TypeNode,
   emitTarget: EmitTarget,
-  options?: GeneratorOptions
+  options?: GeneratorOptions,
 ): Promise<void> => {
   const allTypes = Array.from(enumerateTypes(node));
   const nodes = filterNodes(allTypes, options);
@@ -59,7 +64,9 @@ export const generateGo = async (
   const registry = TypeRegistry.fromTypeGraph(allTypes);
   const visitor = new GoExprVisitor(registry);
 
-  const packageName = emitTarget["package-name"] || goPackageNameFromNamespace(node.typeName.namespace);
+  const packageName =
+    emitTarget["package-name"] ||
+    goPackageNameFromNamespace(node.typeName.namespace);
 
   // Collect all polymorphic type names across all nodes
   const polymorphicTypeNames = new Set<string>();
@@ -73,11 +80,21 @@ export const generateGo = async (
       scalarCoercibleTypeNames.add(n.typeName.name);
     }
   }
-  const declarationUniverse = nodes.map(n => lowerType(n, registry, polymorphicTypeNames));
+  const declarationUniverse = nodes.map((n) =>
+    lowerType(n, registry, polymorphicTypeNames),
+  );
 
   // Emit context file (LoadContext/SaveContext utilities)
-  const contextContent = emitGoContext({ header: "Typra Context", packageName });
-  await emitGoFile(context, 'context.go', contextContent, emitTarget["output-dir"]);
+  const contextContent = emitGoContext({
+    header: "Typra Context",
+    packageName,
+  });
+  await emitGoFile(
+    context,
+    "context.go",
+    contextContent,
+    emitTarget["output-dir"],
+  );
 
   // Emit each base type and its children as a single file (Go stays flat — no subfolders)
   for (const n of nodes) {
@@ -95,25 +112,56 @@ export const generateGo = async (
         scalarCoercibleTypeNames,
         declarationUniverse,
       );
-      const fileName = toSnakeCase(n.typeName.name) + '.go';
-      await emitGoFile(context, fileName, fileContent, emitTarget["output-dir"], emitTarget["output-dir"]);
+      const fileName = toSnakeCase(n.typeName.name) + ".go";
+      await emitGoFile(
+        context,
+        fileName,
+        fileContent,
+        emitTarget["output-dir"],
+        emitTarget["output-dir"],
+      );
     }
 
     // Emit test file for each type (skip protocols — they have no data to test)
     if (emitTarget["test-dir"] && !n.isProtocol) {
       const importPath = emitTarget["import-path"] || packageName;
-      const fieldNames = buildGoFieldNames(collectInheritedPropertyNames(n, registry));
-      const testContext = { ...buildTestContext(n, packageName, registry), importPath, fieldNames };
+      const fieldNames = buildGoFieldNames(
+        collectInheritedPropertyNames(n, registry),
+      );
+      const testContext = {
+        ...buildTestContext(n, packageName, registry),
+        importPath,
+        fieldNames,
+      };
       const testContent = emitGoTest(testContext);
-      const testFileName = toSnakeCase(n.typeName.name) + '_test.go';
-      await emitGoFile(context, testFileName, testContent, emitTarget["test-dir"], emitTarget["test-dir"]);
+      const testFileName = toSnakeCase(n.typeName.name) + "_test.go";
+      await emitGoFile(
+        context,
+        testFileName,
+        testContent,
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
     }
   }
 
-  if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
+  if (
+    emitTarget["test-dir"] &&
+    shouldEmitCompileOnlyProtocolScaffolds(emitTarget)
+  ) {
     const importPath = emitTarget["import-path"] || packageName;
-    const scaffoldContent = emitGoProtocolScaffolds(collectProtocolNodes(nodes), packageName, importPath);
-    await emitGoFile(context, "protocol_scaffolds_test.go", scaffoldContent, emitTarget["test-dir"], emitTarget["test-dir"]);
+    const scaffoldContent = emitGoProtocolScaffolds(
+      collectProtocolNodes(nodes),
+      packageName,
+      importPath,
+    );
+    await emitGoFile(
+      context,
+      "protocol_scaffolds_test.go",
+      scaffoldContent,
+      emitTarget["test-dir"],
+      emitTarget["test-dir"],
+    );
   }
 
   // Format emitted files if format option is enabled (default: true)
@@ -139,18 +187,20 @@ function formatGoFiles(outputDir: string, testDir?: string): void {
     // Run gofmt — use execFileSync to avoid shell injection
     try {
       execFileSync("gofmt", ["-w", dir], {
-        stdio: 'pipe',
-        encoding: 'utf-8'
+        stdio: "pipe",
+        encoding: "utf-8",
       });
     } catch (error) {
-      console.warn(`Warning: gofmt formatting failed for ${dir}. You may need to install Go.`);
+      console.warn(
+        `Warning: gofmt formatting failed for ${dir}. You may need to install Go.`,
+      );
     }
 
     // Run goimports if available
     try {
       execFileSync("goimports", ["-w", dir], {
-        stdio: 'pipe',
-        encoding: 'utf-8'
+        stdio: "pipe",
+        encoding: "utf-8",
       });
     } catch (error) {
       // goimports is optional, don't warn if not available
@@ -161,11 +211,20 @@ function formatGoFiles(outputDir: string, testDir?: string): void {
 /**
  * Build context for rendering a test file.
  */
-function buildTestContext(node: TypeNode, packageName: string, registry: TypeRegistry): BaseTestContext {
-  return buildBaseTestContext(node, packageName, goTestOptions, name => registry.get(name));
+function buildTestContext(
+  node: TypeNode,
+  packageName: string,
+  registry: TypeRegistry,
+): BaseTestContext {
+  return buildBaseTestContext(node, packageName, goTestOptions, (name) =>
+    registry.get(name),
+  );
 }
 
-function collectInheritedPropertyNames(node: TypeNode, registry: TypeRegistry): string[] {
+function collectInheritedPropertyNames(
+  node: TypeNode,
+  registry: TypeRegistry,
+): string[] {
   const chain: TypeNode[] = [];
   const visited = new Set<string>();
   let current: TypeNode | undefined = node;
@@ -205,5 +264,7 @@ async function emitGoFile(
   outputDir = outputDir || `${context.emitterOutputDir}/go`;
   const filePath = resolvePath(outputDir, filename);
 
-  await emitGeneratedFile(context, filePath, content, { outputRoot: outputRoot || outputDir });
+  await emitGeneratedFile(context, filePath, content, {
+    outputRoot: outputRoot || outputDir,
+  });
 }

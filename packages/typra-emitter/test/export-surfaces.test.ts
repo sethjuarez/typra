@@ -55,7 +55,10 @@ function makeType(
 describe("root naming", () => {
   it("infers the default root namespace from root-object", () => {
     assert.equal(inferRootNamespace("Prompty.Prompty"), "Prompty");
-    assert.equal(inferRootNamespace("Typra.Fixtures.FixtureRoot"), "Typra.Fixtures");
+    assert.equal(
+      inferRootNamespace("Typra.Fixtures.FixtureRoot"),
+      "Typra.Fixtures",
+    );
   });
 
   it("derives Go package names from the emitted namespace and allows simple overrides", () => {
@@ -67,7 +70,10 @@ describe("root naming", () => {
 describe("export surface scaffolding", () => {
   const textPart = makeType("TextPart", "conversation");
   const audioPart = makeType("AudioPart", "conversation");
-  const contentPart = makeType("ContentPart", "conversation", [textPart, audioPart]);
+  const contentPart = makeType("ContentPart", "conversation", [
+    textPart,
+    audioPart,
+  ]);
   const checkpoint = makeType("Checkpoint", "events");
   const hostToolRequest = makeType("HostToolRequest", "events");
   const eventSink = makeType("EventSink", "pipeline", [], true, [
@@ -93,24 +99,51 @@ describe("export surface scaffolding", () => {
       nonFatal: false,
     },
   ]);
-  const baseTypes = [contentPart, checkpoint, hostToolRequest, eventSink, checkpointStore];
+  const baseTypes = [
+    contentPart,
+    checkpoint,
+    hostToolRequest,
+    eventSink,
+    checkpointStore,
+  ];
   const allTypes = [...baseTypes, textPart, audioPart];
 
   it("keeps TypeScript root barrels broad across groups and protocols", () => {
     const index = emitTypeScriptIndex(baseTypes, allTypes);
 
-    assert.match(index, /export \{ Checkpoint \} from "\.\/events\/checkpoint";/);
-    assert.match(index, /export \{ HostToolRequest \} from "\.\/events\/host-tool-request";/);
-    assert.match(index, /export type \{ EventSink \} from "\.\/pipeline\/event-sink";/);
-    assert.match(index, /export type \{ CheckpointStore \} from "\.\/pipeline\/checkpoint-store";/);
-    assert.match(index, /export \{ ContentPart, TextPart, AudioPart \} from "\.\/conversation\/content-part";/);
+    assert.match(
+      index,
+      /export \{ Checkpoint \} from "\.\/events\/checkpoint";/,
+    );
+    assert.match(
+      index,
+      /export \{ HostToolRequest \} from "\.\/events\/host-tool-request";/,
+    );
+    assert.match(
+      index,
+      /export type \{ EventSink \} from "\.\/pipeline\/event-sink";/,
+    );
+    assert.match(
+      index,
+      /export type \{ CheckpointStore \} from "\.\/pipeline\/checkpoint-store";/,
+    );
+    assert.match(
+      index,
+      /export \{ ContentPart, TextPart, AudioPart \} from "\.\/conversation\/content-part";/,
+    );
   });
 
   it("keeps Python package __init__ broad across groups and child types", () => {
     const init = emitPythonInit(baseTypes, allTypes);
 
-    assert.match(init, /from \.events import \(\n    Checkpoint,\n    HostToolRequest,/);
-    assert.match(init, /from \.conversation import \(\n    ContentPart,\n    TextPart,\n    AudioPart,/);
+    assert.match(
+      init,
+      /from \.events import \(\n    Checkpoint,\n    HostToolRequest,/,
+    );
+    assert.match(
+      init,
+      /from \.conversation import \(\n    ContentPart,\n    TextPart,\n    AudioPart,/,
+    );
     assert.match(init, /"AudioPart",/);
     assert.match(init, /"CheckpointStore",/);
   });
@@ -122,7 +155,10 @@ describe("export surface scaffolding", () => {
     assert.match(rootMod, /pub mod events;\npub use events::\*;/);
     assert.match(rootMod, /pub mod pipeline;\npub use pipeline::\*;/);
     assert.match(eventsMod, /pub mod checkpoint;\npub use checkpoint::\*;/);
-    assert.match(eventsMod, /pub mod host_tool_request;\npub use host_tool_request::\*;/);
+    assert.match(
+      eventsMod,
+      /pub mod host_tool_request;\npub use host_tool_request::\*;/,
+    );
   });
 
   it("does not treat protocol void returns as importable model types", () => {
@@ -135,7 +171,11 @@ describe("export surface scaffolding", () => {
   it("emits Python protocol method stubs without no-effect statements", () => {
     const registry = TypeRegistry.fromTypeGraph(baseTypes);
     const file = lowerFile(eventSink, registry);
-    const source = emitPythonFile(file, new PythonExprVisitor(registry), "pipeline");
+    const source = emitPythonFile(
+      file,
+      new PythonExprVisitor(registry),
+      "pipeline",
+    );
 
     assert.match(source, /from typing import Any, Protocol, runtime_checkable/);
     assert.match(
@@ -147,35 +187,59 @@ describe("export surface scaffolding", () => {
   });
 
   it("prunes unused Python typing imports after rendering protocol-only files", () => {
-    const checkpointStoreWithSave = makeType("CheckpointStore", "pipeline", [], true, [
-      {
-        name: "save",
-        returns: "void",
-        description: "Save a checkpoint.",
-        params: { checkpoint: "Checkpoint" },
-        optional: false,
-        sync: false,
-        runtimeCancellable: false,
-        atomic: false,
-        nonFatal: false,
-      },
+    const checkpointStoreWithSave = makeType(
+      "CheckpointStore",
+      "pipeline",
+      [],
+      true,
+      [
+        {
+          name: "save",
+          returns: "void",
+          description: "Save a checkpoint.",
+          params: { checkpoint: "Checkpoint" },
+          optional: false,
+          sync: false,
+          runtimeCancellable: false,
+          atomic: false,
+          nonFatal: false,
+        },
+      ],
+    );
+    const registry = TypeRegistry.fromTypeGraph([
+      checkpoint,
+      checkpointStoreWithSave,
     ]);
-    const registry = TypeRegistry.fromTypeGraph([checkpoint, checkpointStoreWithSave]);
     const file = lowerFile(checkpointStoreWithSave, registry);
-    const source = emitPythonFile(file, new PythonExprVisitor(registry), "pipeline");
+    const source = emitPythonFile(
+      file,
+      new PythonExprVisitor(registry),
+      "pipeline",
+    );
 
     assert.match(source, /from typing import Protocol, runtime_checkable/);
     assert.doesNotMatch(source, /from typing import .*Any/);
     assert.match(source, /from \.\.events\._Checkpoint import Checkpoint/);
     assert.match(source, /def save\(self, checkpoint: Checkpoint\) -> None:/);
-    assert.match(source, /async def save_async\(self, checkpoint: Checkpoint\) -> None:/);
+    assert.match(
+      source,
+      /async def save_async\(self, checkpoint: Checkpoint\) -> None:/,
+    );
   });
 
   it("builds deterministic target export surface snapshots", () => {
     const toolchain = buildToolchainMetadata([
       { name: "@typra/emitter", version: "0.2.5", supportedRange: "0.2.5" },
-      { name: "@typespec/json-schema", version: "1.10.0", supportedRange: "1.10.0" },
-      { name: "@typespec/compiler", version: "1.10.0", supportedRange: "1.10.0" },
+      {
+        name: "@typespec/json-schema",
+        version: "1.10.0",
+        supportedRange: "1.10.0",
+      },
+      {
+        name: "@typespec/compiler",
+        version: "1.10.0",
+        supportedRange: "1.10.0",
+      },
     ]);
     const snapshot = buildExportSurfaceSnapshot(
       "Prompty.Prompty",
@@ -185,25 +249,46 @@ describe("export surface scaffolding", () => {
         { type: "TypeScript", "output-dir": "generated/typescript" },
         { type: "Python", "output-dir": "generated/python" },
         { type: "Rust", "output-dir": "generated/rust" },
-        { type: "Go", "output-dir": "generated/go", "package-name": "promptyruntime" },
-        { type: "Swift", "output-dir": "generated/swift", "package-name": "CustomSwiftRuntime" },
+        {
+          type: "Go",
+          "output-dir": "generated/go",
+          "package-name": "promptyruntime",
+        },
+        {
+          type: "Swift",
+          "output-dir": "generated/swift",
+          "package-name": "CustomSwiftRuntime",
+        },
       ],
       allTypes,
       toolchain,
     );
 
-    const targets = new Map(snapshot.targets.map((target) => [target.target, target]));
+    const targets = new Map(
+      snapshot.targets.map((target) => [target.target, target]),
+    );
 
-    assert.deepEqual(snapshot.toolchain.packages.map((entry) => entry.name), [
-      "@typespec/compiler",
-      "@typespec/json-schema",
-      "@typra/emitter",
-    ]);
-    assert.deepEqual(snapshot.toolchain.packages.map((entry) => entry.version), ["1.10.0", "1.10.0", "0.2.5"]);
+    assert.deepEqual(
+      snapshot.toolchain.packages.map((entry) => entry.name),
+      ["@typespec/compiler", "@typespec/json-schema", "@typra/emitter"],
+    );
+    assert.deepEqual(
+      snapshot.toolchain.packages.map((entry) => entry.version),
+      ["1.10.0", "1.10.0", "0.2.5"],
+    );
     assert.deepEqual(targets.get("go")?.packageName, "promptyruntime");
     assert.deepEqual(targets.get("swift")?.packageName, "CustomSwiftRuntime");
-    assert.equal(targets.get("swift")?.exports.find((entry) => entry.name === "Checkpoint")?.source, "Sources/CustomSwiftRuntime/events/checkpoint.swift");
-    assert.equal(targets.get("swift")?.protocols.find((entry) => entry.name === "EventSink")?.source, "Sources/CustomSwiftRuntime/pipeline/event_sink.swift");
+    assert.equal(
+      targets.get("swift")?.exports.find((entry) => entry.name === "Checkpoint")
+        ?.source,
+      "Sources/CustomSwiftRuntime/events/checkpoint.swift",
+    );
+    assert.equal(
+      targets
+        .get("swift")
+        ?.protocols.find((entry) => entry.name === "EventSink")?.source,
+      "Sources/CustomSwiftRuntime/pipeline/event_sink.swift",
+    );
     assert.deepEqual(targets.get("typescript")?.rootExports, [
       "AudioPart",
       "Checkpoint",
@@ -213,19 +298,28 @@ describe("export surface scaffolding", () => {
       "HostToolRequest",
       "TextPart",
     ]);
-    assert.deepEqual(targets.get("python")?.groups.find((group) => group.name === "pipeline")?.exports, [
-      "CheckpointStore",
-      "EventSink",
+    assert.deepEqual(
+      targets.get("python")?.groups.find((group) => group.name === "pipeline")
+        ?.exports,
+      ["CheckpointStore", "EventSink"],
+    );
+    assert.deepEqual(
+      targets
+        .get("typescript")
+        ?.groups.find((group) => group.name === "pipeline")?.modules,
+      ["checkpoint-store", "event-sink"],
+    );
+    assert.deepEqual(
+      targets.get("python")?.groups.find((group) => group.name === "pipeline")
+        ?.modules,
+      ["_CheckpointStore", "_EventSink"],
+    );
+    assert.deepEqual(targets.get("rust")?.modules, [
+      "context",
+      "conversation",
+      "events",
+      "pipeline",
     ]);
-    assert.deepEqual(targets.get("typescript")?.groups.find((group) => group.name === "pipeline")?.modules, [
-      "checkpoint-store",
-      "event-sink",
-    ]);
-    assert.deepEqual(targets.get("python")?.groups.find((group) => group.name === "pipeline")?.modules, [
-      "_CheckpointStore",
-      "_EventSink",
-    ]);
-    assert.deepEqual(targets.get("rust")?.modules, ["context", "conversation", "events", "pipeline"]);
     assert.deepEqual(targets.get("typescript")?.protocols, [
       {
         name: "CheckpointStore",
@@ -267,8 +361,17 @@ describe("export surface scaffolding", () => {
   });
 
   it("keeps protocol scaffold generation explicit and compile-only", () => {
-    assert.equal(shouldEmitCompileOnlyProtocolScaffolds({ type: "TypeScript" }), false);
-    assert.equal(shouldEmitCompileOnlyProtocolScaffolds({ type: "TypeScript", "protocol-scaffolds": "compile-only" }), true);
+    assert.equal(
+      shouldEmitCompileOnlyProtocolScaffolds({ type: "TypeScript" }),
+      false,
+    );
+    assert.equal(
+      shouldEmitCompileOnlyProtocolScaffolds({
+        type: "TypeScript",
+        "protocol-scaffolds": "compile-only",
+      }),
+      true,
+    );
 
     const protocols = collectProtocolNodes(baseTypes);
     const typeScriptProbe = makeType("TypeScriptProbe", "pipeline", [], true, [
@@ -276,7 +379,12 @@ describe("export surface scaffolding", () => {
         name: "measure",
         returns: "integer",
         description: "Measure a value.",
-        params: { count: "integer", at: "plainDate", payload: "Record<unknown>", bytes: "bytes" },
+        params: {
+          count: "integer",
+          at: "plainDate",
+          payload: "Record<unknown>",
+          bytes: "bytes",
+        },
         optional: false,
         sync: true,
       },
@@ -307,16 +415,22 @@ describe("export surface scaffolding", () => {
         sync: true,
       },
     ]);
-    const optionalOnlyGoProbe = makeType("OptionalOnlyGoProbe", "pipeline", [], true, [
-      {
-        name: "maybeCount",
-        returns: "integer",
-        description: "Optionally return a count.",
-        params: {},
-        optional: true,
-        sync: true,
-      },
-    ]);
+    const optionalOnlyGoProbe = makeType(
+      "OptionalOnlyGoProbe",
+      "pipeline",
+      [],
+      true,
+      [
+        {
+          name: "maybeCount",
+          returns: "integer",
+          description: "Optionally return a count.",
+          params: {},
+          optional: true,
+          sync: true,
+        },
+      ],
+    );
     const rustProbe = makeType("RustProbe", "pipeline", [], true, [
       {
         name: "observe",
@@ -337,58 +451,140 @@ describe("export surface scaffolding", () => {
         sync: false,
       },
     ]);
-    const typeScript = emitTypeScriptProtocolScaffolds([...protocols, typeScriptProbe], "../index");
+    const typeScript = emitTypeScriptProtocolScaffolds(
+      [...protocols, typeScriptProbe],
+      "../index",
+    );
     assert.match(typeScript, /describe\("protocol scaffolds", \(\) => \{/);
-    assert.match(typeScript, /it\("compiles compile-only protocol implementations", \(\) => \{/);
+    assert.match(
+      typeScript,
+      /it\("compiles compile-only protocol implementations", \(\) => \{/,
+    );
     assert.match(typeScript, /class CompileOnlyEventSink implements EventSink/);
-    assert.match(typeScript, /throw new Error\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
-    assert.match(typeScript, /measure\(count: number, at: Date, payload: Record<string, unknown>, bytes: Uint8Array\): number/);
+    assert.match(
+      typeScript,
+      /throw new Error\("EventSink\.emit is a compile-only protocol scaffold\."\)/,
+    );
+    assert.match(
+      typeScript,
+      /measure\(count: number, at: Date, payload: Record<string, unknown>, bytes: Uint8Array\): number/,
+    );
     assert.doesNotMatch(typeScript, /calls|recorded|recording/i);
 
     const python = emitPythonProtocolScaffolds(protocols, "fixtures");
     assert.match(python, /from __future__ import annotations/);
     assert.match(python, /class CompileOnlyEventSink\(EventSink\):/);
     assert.match(python, /del event/);
-    assert.match(python, /raise NotImplementedError\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
-    assert.match(python, /class CompileOnlyCheckpointStore\(CheckpointStore\):/);
+    assert.match(
+      python,
+      /raise NotImplementedError\("EventSink\.emit is a compile-only protocol scaffold\."\)/,
+    );
+    assert.match(
+      python,
+      /class CompileOnlyCheckpointStore\(CheckpointStore\):/,
+    );
     assert.match(python, /def save\(self, checkpoint: Checkpoint\) -> None:/);
-    assert.match(python, /async def save_async\(self, checkpoint: Checkpoint\) -> None:/);
+    assert.match(
+      python,
+      /async def save_async\(self, checkpoint: Checkpoint\) -> None:/,
+    );
 
-    const go = emitGoProtocolScaffolds([...protocols, goProbe], "fixtures", "github.com/acme/fixtures");
+    const go = emitGoProtocolScaffolds(
+      [...protocols, goProbe],
+      "fixtures",
+      "github.com/acme/fixtures",
+    );
     assert.match(go, /typra "github\.com\/acme\/fixtures"/);
-    assert.match(go, /var _ typra\.EventSink = \(\*compileOnlyEventSink\)\(nil\)/);
+    assert.match(
+      go,
+      /var _ typra\.EventSink = \(\*compileOnlyEventSink\)\(nil\)/,
+    );
     assert.match(go, /return errors\.New\("compile-only protocol scaffold"\)/);
-    assert.match(go, /Measure\(count int, payload map\[string\]interface\{\}\) \(int, error\)/);
-    assert.match(go, /MaybeCount\(\) int \{\n\tpanic\("compile-only protocol scaffold"\)/);
-    assert.match(go, /Status\(\) \(typra\.Status, error\) \{\n\treturn \*new\(typra\.Status\), errors\.New\("compile-only protocol scaffold"\)/);
+    assert.match(
+      go,
+      /Measure\(count int, payload map\[string\]interface\{\}\) \(int, error\)/,
+    );
+    assert.match(
+      go,
+      /MaybeCount\(\) int \{\n\tpanic\("compile-only protocol scaffold"\)/,
+    );
+    assert.match(
+      go,
+      /Status\(\) \(typra\.Status, error\) \{\n\treturn \*new\(typra\.Status\), errors\.New\("compile-only protocol scaffold"\)/,
+    );
 
-    const optionalOnlyGo = emitGoProtocolScaffolds([optionalOnlyGoProbe], "fixtures", "github.com/acme/fixtures");
+    const optionalOnlyGo = emitGoProtocolScaffolds(
+      [optionalOnlyGoProbe],
+      "fixtures",
+      "github.com/acme/fixtures",
+    );
     assert.doesNotMatch(optionalOnlyGo, /"errors"/);
-    assert.match(optionalOnlyGo, /MaybeCount\(\) int \{\n\tpanic\("compile-only protocol scaffold"\)/);
+    assert.match(
+      optionalOnlyGo,
+      /MaybeCount\(\) int \{\n\tpanic\("compile-only protocol scaffold"\)/,
+    );
 
     const java = emitJavaProtocolScaffolds(protocols, "typra.fixtures");
-    assert.match(java?.source ?? "", /final class ProtocolScaffoldsGeneratedTest/);
-    assert.match(java?.source ?? "", /throw new UnsupportedOperationException\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
+    assert.match(
+      java?.source ?? "",
+      /final class ProtocolScaffoldsGeneratedTest/,
+    );
+    assert.match(
+      java?.source ?? "",
+      /throw new UnsupportedOperationException\("EventSink\.emit is a compile-only protocol scaffold\."\)/,
+    );
 
-    const csharp = emitCSharpProtocolScaffolds([...protocols, csharpProbe], "Typra.Fixtures");
-    assert.match(csharp ?? "", /internal sealed class CompileOnlyEventSink : IEventSink/);
+    const csharp = emitCSharpProtocolScaffolds(
+      [...protocols, csharpProbe],
+      "Typra.Fixtures",
+    );
+    assert.match(
+      csharp ?? "",
+      /internal sealed class CompileOnlyEventSink : IEventSink/,
+    );
     assert.match(csharp ?? "", /public void Emit\(object @event\)/);
-    assert.match(csharp ?? "", /internal sealed class CompileOnlyCSharpProbe[\s\S]*Dictionary<string, object\?> payload/);
-    assert.match(csharp ?? "", /throw new NotSupportedException\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
-    assert.match(csharp ?? "", /Task.FromException\(new NotSupportedException\("CSharpProbe\.save is a compile-only protocol scaffold\."\)\)/);
+    assert.match(
+      csharp ?? "",
+      /internal sealed class CompileOnlyCSharpProbe[\s\S]*Dictionary<string, object\?> payload/,
+    );
+    assert.match(
+      csharp ?? "",
+      /throw new NotSupportedException\("EventSink\.emit is a compile-only protocol scaffold\."\)/,
+    );
+    assert.match(
+      csharp ?? "",
+      /Task.FromException\(new NotSupportedException\("CSharpProbe\.save is a compile-only protocol scaffold\."\)\)/,
+    );
 
-    const rust = emitRustProtocolScaffolds([...protocols, rustProbe], "fixtures::model");
+    const rust = emitRustProtocolScaffolds(
+      [...protocols, rustProbe],
+      "fixtures::model",
+    );
     assert.match(rust, /impl EventSink for CompileOnlyEventSink/);
-    assert.match(rust, /panic!\("EventSink\.emit is a compile-only protocol scaffold\."\)/);
-    assert.match(rust, /async fn observe\(&self, item: &serde_json::Value, items: &Vec<serde_json::Value>\) -> Result<\(\), Box<dyn std::error::Error \+ Send \+ Sync>>/);
+    assert.match(
+      rust,
+      /panic!\("EventSink\.emit is a compile-only protocol scaffold\."\)/,
+    );
+    assert.match(
+      rust,
+      /async fn observe\(&self, item: &serde_json::Value, items: &Vec<serde_json::Value>\) -> Result<\(\), Box<dyn std::error::Error \+ Send \+ Sync>>/,
+    );
   });
 });
 
 describe("TypeSpec compatibility guard", () => {
   it("accepts the validated TypeSpec toolchain versions", () => {
     const toolchain = buildToolchainMetadata([
-      { name: "@typespec/compiler", version: "1.10.0", supportedRange: "1.10.0" },
-      { name: "@typespec/json-schema", version: "1.10.0", supportedRange: "1.10.0" },
+      {
+        name: "@typespec/compiler",
+        version: "1.10.0",
+        supportedRange: "1.10.0",
+      },
+      {
+        name: "@typespec/json-schema",
+        version: "1.10.0",
+        supportedRange: "1.10.0",
+      },
       { name: "@typra/emitter", version: "0.2.5", supportedRange: "0.2.5" },
     ]);
 
@@ -398,25 +594,43 @@ describe("TypeSpec compatibility guard", () => {
   it("resolves the installed validated TypeSpec toolchain versions", () => {
     const toolchain = getToolchainMetadata();
 
-    assert.deepEqual(toolchain.packages.map((entry) => entry.name), [
-      "@typespec/compiler",
-      "@typespec/json-schema",
-      "@typra/emitter",
-    ]);
-    assert.equal(toolchain.packages.find((entry) => entry.name === "@typespec/compiler")?.version, "1.10.0");
-    assert.equal(toolchain.packages.find((entry) => entry.name === "@typespec/json-schema")?.version, "1.10.0");
+    assert.deepEqual(
+      toolchain.packages.map((entry) => entry.name),
+      ["@typespec/compiler", "@typespec/json-schema", "@typra/emitter"],
+    );
+    assert.equal(
+      toolchain.packages.find((entry) => entry.name === "@typespec/compiler")
+        ?.version,
+      "1.10.0",
+    );
+    assert.equal(
+      toolchain.packages.find((entry) => entry.name === "@typespec/json-schema")
+        ?.version,
+      "1.10.0",
+    );
     assert.equal(getUnsupportedTypeSpecPackages(toolchain).length, 0);
   });
 
   it("formats a clear diagnostic for unvalidated TypeSpec toolchain versions", () => {
     const toolchain = buildToolchainMetadata([
-      { name: "@typespec/compiler", version: "1.13.0", supportedRange: "1.10.0" },
-      { name: "@typespec/json-schema", version: "1.13.0", supportedRange: "1.10.0" },
+      {
+        name: "@typespec/compiler",
+        version: "1.13.0",
+        supportedRange: "1.10.0",
+      },
+      {
+        name: "@typespec/json-schema",
+        version: "1.13.0",
+        supportedRange: "1.10.0",
+      },
       { name: "@typra/emitter", version: "0.2.5", supportedRange: "0.2.5" },
     ]);
     const unsupported = getUnsupportedTypeSpecPackages(toolchain);
 
-    assert.deepEqual(unsupported.map((entry) => entry.name), ["@typespec/compiler", "@typespec/json-schema"]);
+    assert.deepEqual(
+      unsupported.map((entry) => entry.name),
+      ["@typespec/compiler", "@typespec/json-schema"],
+    );
     assert.match(
       formatUnsupportedTypeSpecVersionMessage(unsupported, false),
       /validated with @typespec\/compiler@1\.10\.0, @typespec\/json-schema@1\.10\.0; found @typespec\/compiler@1\.13\.0, @typespec\/json-schema@1\.13\.0/,
@@ -428,24 +642,46 @@ describe("TypeSpec compatibility guard", () => {
     const context = {
       options: {},
       program: {
-        reportDiagnostic: (diagnostic: { severity: string; message: string }) => diagnostics.push(diagnostic),
+        reportDiagnostic: (diagnostic: { severity: string; message: string }) =>
+          diagnostics.push(diagnostic),
       },
     };
 
     reportToolchainCompatibility(
       context,
       buildToolchainMetadata([
-        { name: "@typespec/compiler", version: "1.13.0", supportedRange: "1.10.0" },
-        { name: "@typespec/json-schema", version: "1.10.0", supportedRange: "1.10.0" },
+        {
+          name: "@typespec/compiler",
+          version: "1.13.0",
+          supportedRange: "1.10.0",
+        },
+        {
+          name: "@typespec/json-schema",
+          version: "1.10.0",
+          supportedRange: "1.10.0",
+        },
       ]),
     );
 
     assert.equal(diagnostics.length, 1);
     assert.equal(diagnostics[0].severity, "error");
-    assert.match(diagnostics[0].message, /Pin the TypeSpec toolchain to the supported versions/);
-    assert.equal(shouldBlockUnsupportedTypeSpecToolchain(context.options, buildToolchainMetadata([
-      { name: "@typespec/compiler", version: "1.13.0", supportedRange: "1.10.0" },
-    ])), true);
+    assert.match(
+      diagnostics[0].message,
+      /Pin the TypeSpec toolchain to the supported versions/,
+    );
+    assert.equal(
+      shouldBlockUnsupportedTypeSpecToolchain(
+        context.options,
+        buildToolchainMetadata([
+          {
+            name: "@typespec/compiler",
+            version: "1.13.0",
+            supportedRange: "1.10.0",
+          },
+        ]),
+      ),
+      true,
+    );
   });
 
   it("can downgrade unvalidated TypeSpec versions to warnings by explicit option", () => {
@@ -453,20 +689,40 @@ describe("TypeSpec compatibility guard", () => {
     const context = {
       options: { "allow-unsupported-typespec-version": true },
       program: {
-        reportDiagnostic: (diagnostic: { severity: string; message: string }) => diagnostics.push(diagnostic),
+        reportDiagnostic: (diagnostic: { severity: string; message: string }) =>
+          diagnostics.push(diagnostic),
       },
     };
 
     reportToolchainCompatibility(
       context,
-      buildToolchainMetadata([{ name: "@typespec/compiler", version: "1.13.0", supportedRange: "1.10.0" }]),
+      buildToolchainMetadata([
+        {
+          name: "@typespec/compiler",
+          version: "1.13.0",
+          supportedRange: "1.10.0",
+        },
+      ]),
     );
 
     assert.equal(diagnostics.length, 1);
     assert.equal(diagnostics[0].severity, "warning");
-    assert.match(diagnostics[0].message, /allow-unsupported-typespec-version is enabled/);
-    assert.equal(shouldBlockUnsupportedTypeSpecToolchain(context.options, buildToolchainMetadata([
-      { name: "@typespec/compiler", version: "1.13.0", supportedRange: "1.10.0" },
-    ])), false);
+    assert.match(
+      diagnostics[0].message,
+      /allow-unsupported-typespec-version is enabled/,
+    );
+    assert.equal(
+      shouldBlockUnsupportedTypeSpecToolchain(
+        context.options,
+        buildToolchainMetadata([
+          {
+            name: "@typespec/compiler",
+            version: "1.13.0",
+            supportedRange: "1.10.0",
+          },
+        ]),
+      ),
+      false,
+    );
   });
 });
