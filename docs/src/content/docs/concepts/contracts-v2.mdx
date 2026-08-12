@@ -1,0 +1,178 @@
+---
+title: Typra v2 contracts
+description: Contract vocabulary and migration rules for Typra's principle-led v2 roadmap.
+draft: false
+---
+
+Typra v2 keeps TypeSpec as the durable source of truth and treats generated runtime code as a projection that must prove equivalent behavior across languages.
+
+The immediate priority was callable and vector conformance informed by Prompty's real consumer needs. HTTP transport projection now builds on that foundation rather than driving the contract shape.
+
+Prompty is compatibility evidence, not the authority for Typra's design. Typra should satisfy Prompty's durable needs where they align with this contract model, and should push Prompty toward better patterns when current Prompty behavior conflicts with TypeSpec-native contracts, portable vectors, or clean generated/handwritten boundaries. Discovering a better way to build Prompty with Typra v2 is a successful roadmap outcome, even when it requires a deliberate Prompty migration.
+
+## Contract vocabulary
+
+| Intent | Source of truth | Typra role |
+| --- | --- | --- |
+| Data shape | TypeSpec `model`, `scalar`, `union` | Generate load/save/runtime model surfaces and conformance evidence. |
+| Data examples | Typra `@sample` | Generate examples and data conformance tests. |
+| Callable behavior | TypeSpec `interface` + `op` | Lower to callable IR and generate interface/protocol/trait-style surfaces. |
+| Legacy callable compatibility | Typra `@protocol` + `@method` | Preserve current generated surfaces while lowering into the same callable IR as `interface`/`op`. |
+| Cross-runtime behavior cases | Typra `@vector` | Describe behavior that a callable conformance oracle can execute or simulate. |
+| Transport shape | TypeSpec HTTP decorators | Layer transport IR on top of callable IR; do not replace TypeSpec HTTP vocabulary. |
+| Runtime-specific outputs | Typra output contributors | Add optional projections without duplicating the core emitter pipeline. |
+| Handwritten boundaries | Hydration seams | Keep generated signatures stable while runtime behavior remains hand-authored. |
+| Namespace identity | TypeSpec namespaces | Preserve semantic ownership while each target projects package/module names idiomatically. |
+
+## Migration rules
+
+1. Keep data contracts on TypeSpec-native `model`, `scalar`, and `union` declarations. Existing load/save behavior, provider wire mappings, named collections, discriminators, coercions, factories, and parse aliases remain compatibility-critical.
+2. Prefer TypeSpec `interface` and `op` for new callable contracts once callable IR support exists.
+3. Treat `@protocol` and `@method` as legacy callable compatibility surfaces. They remain supported during migration and must lower to the same callable IR as equivalent `interface`/`op` declarations.
+4. Keep `@sample`, `@coerce`, `@entryShorthand`, `@knownAs`, `@defaultFor`, `@factory`, and `@parseAlias` as Typra model/runtime projection decorators because they describe behavior TypeSpec does not directly model for Typra's current runtimes.
+5. Add `@vector` only for behavior the callable oracle can observe: inputs, successful results, errors/status, supported effect observations, vector metadata, and target runtime metadata.
+6. Do not introduce Typra-specific HTTP decorators for concepts TypeSpec HTTP already owns. HTTP projection consumes TypeSpec HTTP metadata after callable/vector conformance is proven.
+7. Preserve nested TypeSpec namespaces in the shared IR and structural generated output. Target package, module, and import paths are projections of that semantic identity, not replacements for it.
+
+## Namespace projection
+
+`root-namespace` identifies the semantic contract root and `root-alias` can rename
+root-owned generated type names. Nested TypeSpec namespaces under that root remain
+visible to model, callable, vector, transport, export-surface, and cleanup
+metadata so generated code can explain where a contract came from.
+
+Target renderers use a shared namespace projection model to derive runtime names
+and physical layout. Structural namespace output is the default: TypeScript and
+Python emit nested modules/packages, C# and Swift emit nested folders, and Rust
+emits nested module trees. Java remains package-based and Go remains flat because
+Go has one package per directory. Per-target `namespace`, `package-name`,
+`import-path`, and `namespace-output: flat` options override runtime ergonomics
+without changing the TypeSpec source of truth.
+
+## TypeSpec-native contract example
+
+```typespec
+import "@typra/emitter";
+import "@typespec/http";
+
+using TypeSpec.Http;
+
+namespace Typra.Example;
+
+model PromptRequest {
+  @sample(#{ template: "Hello {{name}}" })
+  template: string;
+
+  @sample(#{ variables: #{ name: "Typra" } })
+  variables: Record<unknown>;
+}
+
+model PromptResult {
+  instructions: string;
+}
+
+const RenderVectors = #[
+  #{
+    name: "basic-render",
+    stage: "render",
+    portability: "portable",
+    input: #{ request: #{ template: "Hello {{name}}", variables: #{ name: "Typra" } } },
+    expected: #{ instructions: "Hello Typra" }
+  }
+];
+
+interface Renderer {
+  @vector(RenderVectors)
+  render(request: PromptRequest): PromptResult;
+}
+
+@route("/render")
+interface RenderApi {
+  @post
+  render(@body request: PromptRequest): PromptResult;
+}
+```
+
+This is the preferred v2 shape: models remain the data contract, `interface` / `op` owns callable seams, `@vector` supplies behavior evidence, and TypeSpec HTTP decorators optionally describe transport. Generated targets should keep handwritten runtime logic behind these seams while Typra verifies that observed behavior matches the durable TypeSpec contract.
+
+## Callable IR
+
+Typra v2 uses a language-neutral callable-contract IR between TypeSpec and target emitters. The IR records the contract name, operation names, parameter and return types, documentation, grouping, sync/async behavior, runtime cancellation, atomic/non-fatal metadata, source metadata, and the generated/handwritten hydration seam.
+
+Legacy `@protocol` / `@method` declarations and TypeSpec-native `interface` / `op` declarations both lower into this IR before target rendering. That gives Typra one place to compare legacy and native contracts before generating language-specific protocol, trait, interface, adapter, or vector surfaces. Migration tests should prove that equivalent legacy and native declarations produce the same callable IR, export surface, hydration seam, and generated protocol file before a legacy decorator is retired.
+
+Today, equivalence applies to the shared TypeSpec-native operation shape: name, documentation, parameters, return type, generated boundary, export surface, and hydration seam. Legacy-only `@method` flags such as `optional`, `sync`, `runtimeCancellable`, `atomic`, and `nonFatal` remain compatibility metadata until Typra defines a principled native vocabulary for those effects.
+
+## Behavior vectors
+
+`@vector` attaches operation-level behavior expectations to TypeSpec-native `op` declarations. A vector can be authored inline or referenced through a TypeSpec constant vector set, and each entry must provide `input` plus exactly one of `expected` or `expectedError`.
+
+Typra lowers vectors into language-neutral callable vector IR with optional metadata such as `stage`, `provider`, `targetApi`, `portability`, and `normalization`. Invalid vector shapes produce diagnostics instead of being silently skipped, so vector coverage can become a reliable callable conformance oracle input.
+
+## Callable conformance oracle
+
+The callable oracle compares normalized transcripts, not target-specific implementation details. Runtime execution or simulation lowers into:
+
+- `vectorId`, using `Contract.operation:name` or `Contract.operation:unnamed`,
+- `target`, such as `typescript`, `python`, or a future runtime identifier,
+- `input`, after any supported canonical load/save normalization,
+- `result` for successful expectations or `error` for expected error observations,
+- optional `effects` and metadata when Typra defines observable side-effect semantics.
+
+The oracle succeeds when the observed transcript matches the expected transcript derived from the vector. Failures must include the vector id, target runtime, expected transcript, observed transcript, and the mismatched path so drift is actionable across languages. Current generated TypeScript and Python vector conformance tests exercise the transcript shape and round-trip model-typed inputs/outputs through generated `load().save()` surfaces; handwritten callable invocation can plug into the same transcript once runtime adapters exist.
+
+## Structural CodeModel
+
+Typra v2 adds a structural CodeModel between semantic IR and target renderers. The CodeModel records generated surfaces as data before syntax is emitted, so target-specific code can stay focused on language rendering instead of rediscovering import sets, test cases, callable seams, or transport layouts independently.
+
+The first pilot is vector conformance generation. Typra derives one shared vector conformance CodeModel from callable vector snapshots, including JSON constants, model imports, and model-typed load/save roundtrip cases. The TypeScript and Python renderers then consume that same structure to emit target syntax. This keeps the pilot narrow while establishing the pattern future callable adapters and transport projections should follow: semantic IR first, structural CodeModel second, thin target renderer last.
+
+## Output contributors
+
+Typra v2 routes optional generated surfaces through internal output contributor requests identified by target, kind, and provider. Core model generation is represented as a `models:typra` contributor, and existing `native-serialization` options normalize into `native-serialization:<provider>` requests for compatibility.
+
+Target configuration can also carry explicit `outputs` requests for projections. Python supports the first transport contributor with `kind: server` and `provider: fastapi`; unsupported target/kind/provider combinations fail with clear diagnostics instead of falling back silently. Public third-party plugin loading remains deferred; the registry is an internal seam so native serialization, callable adapters, and future server/client projections do not grow new one-off top-level options.
+
+## Prompty-informed compatibility baseline
+
+Prompty depends on Typra as an agent drift prevention layer, not primarily as an HTTP generator. The v2 guardrail therefore starts with consumer evidence from Prompty, but the preserved contract is Typra's principle-led interpretation of that evidence:
+
+- load/save round trips for generated model surfaces,
+- `@coerce` scalar shorthands and `@entryShorthand` name-keyed collection entries,
+- explicit named collections such as `Record<T> | Named<T>[]`,
+- discriminated polymorphism,
+- provider wire mappings through `@knownAs` and `@defaultFor`,
+- generated `@factory` helpers,
+- `@protocol` and `@method` callable signatures and hydration seams,
+- existing load/render/parse vector categories.
+
+Prompty also shows where Typra should be opinionated: callable seams should move to TypeSpec-native `interface`/`op`, vectors should become executable conformance evidence rather than ad hoc tests, and host-sensitive behavior such as `${env}` / `${file}` expansion should remain a hydration seam instead of becoming generic schema defaults. Compatibility shims can protect existing users while Typra points Prompty at a better contract shape.
+
+The compatibility baseline is intentionally transport-neutral. FastAPI and future HTTP projections build on this evidence rather than becoming the first proof of the v2 architecture.
+
+## Prompty-style projection slice
+
+The first consumer-style v2 projection is a non-HTTP Prompty-shaped callable/vector slice. It models runtime seams such as `Renderer.render`, `Parser.parse`, `Processor.process`, and `Harness.verify` as TypeSpec-native interfaces and operations, uses typed request/response models, records hydration zones for handwritten runtime behavior, and emits protocol scaffolds plus vector conformance tests.
+
+This slice proves the architecture against local callable behavior before transport projection: vectors carry render/parse/process/replay metadata, generated tests compare oracle-style transcripts, and output contributors validate optional surfaces such as native serialization without introducing server/client generation first. HTTP projection only starts after this callable/vector path is stable.
+
+## Transport IR
+
+HTTP transport projection consumes TypeSpec HTTP decorators; Typra does not define competing route, verb, parameter, or response decorators. The transport IR layers official `@typespec/http` metadata on top of callable IR by linking each routed operation back to its TypeSpec-native callable contract.
+
+The IR records the HTTP verb, path, URI template, path/query/header/cookie/body bindings, response status codes, response body type, and response content types. This keeps transport projection downstream of the callable/oracle architecture: target renderers can generate routers or controllers, but model parsing and serialization still route through Typra's canonical `load()` / `save()` semantics.
+
+Python's initial FastAPI contributor emits route factories and transport vector tests for configured `outputs`:
+
+```yaml
+emit-targets:
+  - type: Python
+    output-dir: "generated/python/typra/example"
+    test-dir: "generated/python-tests"
+    import-path: "typra.example"
+    outputs:
+      - kind: server
+        provider: fastapi
+```
+
+The generated FastAPI surface is an adapter seam, not a runtime implementation. Handwritten handlers implement the callable behavior; generated routes bind path/query/header/cookie/body values, call model `load()` for request bodies, call the handler, and return model `save()` payloads. Generated transport vector tests use FastAPI's `TestClient` to prove the route projection delivers vector inputs to the handler and preserves expected wire output.

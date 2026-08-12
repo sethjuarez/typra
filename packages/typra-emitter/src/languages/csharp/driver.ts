@@ -20,6 +20,11 @@ import { emitCSharpTest } from "./test-emitter.js";
 import { toPascalCase } from "../../ir/visitor.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import {
+  applyNamespaceGroups,
+  projectNamespace,
+  restoreNamespaceGroups,
+} from "../../ir/namespace.js";
+import {
   collectProtocolNodes,
   emitCSharpProtocolScaffolds,
   shouldEmitCompileOnlyProtocolScaffolds,
@@ -46,6 +51,12 @@ export const generateCsharp = async (
   options?: GeneratorOptions,
 ) => {
   const allTypes = Array.from(enumerateTypes(node));
+  const namespaceGroupSnapshots = applyNamespaceGroups(allTypes, {
+    target: "csharp",
+    semanticRoot: options?.rootNamespace,
+    emitTarget,
+    namespaceOutput: options?.namespaceOutput,
+  });
   const nodes = filterNodes(allTypes, options);
 
   cleanupGeneratedCSharpFiles(emitTarget["output-dir"]);
@@ -55,9 +66,12 @@ export const generateCsharp = async (
   const registry = TypeRegistry.fromTypeGraph(allTypes);
   const visitor = new CSharpExprVisitor(registry);
 
-  // Determine namespace: use explicit override from config, or fall back to TypeSpec namespace
-  const originalNamespace = node.typeName.namespace;
-  const csharpNamespace = emitTarget.namespace ?? originalNamespace;
+  const csharpNamespace = projectNamespace({
+    target: "csharp",
+    sourceNamespace: node.typeName.namespace,
+    semanticRoot: options?.rootNamespace,
+    emitTarget,
+  }).targetNamespace!;
 
   // Emit context classes (LoadContext, SaveContext)
   const contextCode = emitCSharpContext(csharpNamespace);
@@ -201,6 +215,7 @@ export const generateCsharp = async (
 
     formatCSharpFiles(outputDir, testDir);
   }
+  restoreNamespaceGroups(namespaceGroupSnapshots);
 };
 
 // --- Test-rendering helpers ---

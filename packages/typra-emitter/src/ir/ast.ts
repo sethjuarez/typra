@@ -81,8 +81,7 @@ const getModelType = (
   let namespace = model.namespace
     ? getNamespaceFullName(model.namespace)
     : rootNamespace || "";
-  if (rootNamespace.includes(".")) namespace = rootNamespace;
-  else {
+  if (!rootNamespace.includes(".")) {
     const parts = namespace.split(".");
     parts[0] = rootNamespace;
     namespace = parts.join(".");

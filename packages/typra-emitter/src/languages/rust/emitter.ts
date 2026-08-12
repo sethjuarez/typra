@@ -351,8 +351,7 @@ export function emitRustFile(
   lines.push("");
   if (hasNonProtocol) {
     // Context is always at the model root.
-    // From inside a group subfolder, we need to go up two levels: group → model root.
-    const contextPath = group ? "super::super::context" : "super::context";
+    const contextPath = relativeRustModulePath(group, "", "context");
     lines.push(`use ${contextPath}::{LoadContext, SaveContext};`);
   }
   if (hasRuntimeCancellation) {
@@ -398,10 +397,14 @@ export function emitRustFile(
       modPath = `super::${toSnakeCase(imp.module)}`;
     } else if (imp.group) {
       // Different non-empty group: go up to model root, then into the group
-      modPath = `super::super::${imp.group}::${toSnakeCase(imp.module)}`;
+      modPath = relativeRustModulePath(
+        group,
+        imp.group,
+        toSnakeCase(imp.module),
+      );
     } else {
       // Root-level module accessed from inside a group subfolder
-      modPath = `super::super::${toSnakeCase(imp.module)}`;
+      modPath = relativeRustModulePath(group, "", toSnakeCase(imp.module));
     }
 
     if (processedNames.length === 1) {
@@ -409,6 +412,7 @@ export function emitRustFile(
     } else {
       lines.push(`use ${modPath}::{${names}};`);
     }
+
   }
 
   lines.push("");
@@ -1394,6 +1398,22 @@ function emitCoercionBranch(
     ),
   );
   lines.push("        }");
+}
+
+function relativeRustModulePath(
+  fromGroup: string,
+  toGroup: string,
+  moduleName: string,
+): string {
+  if (fromGroup === toGroup) {
+    return `super::${moduleName}`;
+  }
+  const depth = fromGroup ? fromGroup.split("/").filter(Boolean).length : 0;
+  const prefix = Array.from({ length: depth + 1 }, () => "super").join("::");
+  const target = toGroup
+    ? `${toGroup.split("/").filter(Boolean).join("::")}::${moduleName}`
+    : moduleName;
+  return `${prefix}::${target}`;
 }
 
 /**

@@ -54,6 +54,7 @@ export default defineConfig({
             { label: "Overview", link: "/" },
             { label: "Quickstart", link: "/quickstart/" },
             { label: "Mental model", link: "/concepts/" },
+            { label: "Typra v2 contracts", link: "/concepts/contracts-v2/" },
             { label: "Simple example", link: "/concepts/simple-example/" },
             { label: "End-to-end usage", link: "/concepts/end-to-end/" },
             { label: "Generated output", link: "/concepts/generated-output/" },

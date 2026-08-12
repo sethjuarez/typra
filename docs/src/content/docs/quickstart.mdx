@@ -89,7 +89,7 @@ npx tsp compile ./path/to/main.tsp --config ./tspconfig.yaml
 
 Typra writes each requested target under its `output-dir`, writes generated tests when `test-dir` is set, and writes generated metadata under the configured emitter output root.
 
-Scope note: `root-object` anchors generation, while `root-namespace` helps Typra resolve and include namespace-level models. If you need a tighter surface, review emitted metadata and use `omit-models` deliberately.
+Scope note: `root-object` anchors generation, while `root-namespace` is the semantic contract root. Typra preserves nested namespaces under that root in generated metadata and structural target folders by default, while `namespace`, `package-name`, `import-path`, and `namespace-output: flat` control runtime packaging ergonomics. If you need a tighter surface, review emitted metadata and use `omit-models` deliberately.
 
 For a fuller walkthrough that includes the generated review step, see [End-to-end usage](/concepts/end-to-end/).
 

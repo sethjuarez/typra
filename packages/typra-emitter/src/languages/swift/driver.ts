@@ -15,6 +15,11 @@ import {
   shouldEmitCompileOnlyProtocolScaffolds,
 } from "../../protocol-scaffolds.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
+import {
+  applyNamespaceGroups,
+  projectNamespace,
+  restoreNamespaceGroups,
+} from "../../ir/namespace.js";
 import { emitSwiftFile } from "./emitter.js";
 import { SwiftExprVisitor } from "./visitor.js";
 import { emitSwiftConformanceTest, emitSwiftTests } from "./test-emitter.js";
@@ -22,7 +27,6 @@ import {
   emitSwiftPackage,
   emitSwiftProtocolScaffolds,
   emitSwiftRuntime,
-  swiftModuleName,
 } from "./scaffolding.js";
 import { swiftFileName } from "./identifiers.js";
 import { SWIFT_TYPE_MAP } from "./types.js";
@@ -38,12 +42,21 @@ export const generateSwift = async (
   options?: GeneratorOptions,
 ): Promise<void> => {
   const allTypes = Array.from(enumerateTypes(node));
+  const namespaceGroupSnapshots = applyNamespaceGroups(allTypes, {
+    target: "swift",
+    semanticRoot: options?.rootNamespace,
+    emitTarget,
+    namespaceOutput: options?.namespaceOutput,
+  });
   const nodes = filterNodes(allTypes, options);
   const registry = TypeRegistry.fromTypeGraph(allTypes);
   const visitor = new SwiftExprVisitor(registry);
-  const moduleName = swiftModuleName(
-    emitTarget["package-name"] || node.typeName.namespace,
-  );
+  const moduleName = projectNamespace({
+    target: "swift",
+    sourceNamespace: node.typeName.namespace,
+    semanticRoot: options?.rootNamespace,
+    emitTarget,
+  }).moduleName!;
   const nativeSerialization = swiftNativeSerialization(emitTarget);
 
   const polymorphicTypeNames = new Set<string>();
@@ -156,6 +169,7 @@ export const generateSwift = async (
     const resolvedOutput = resolve(process.cwd(), outputDir);
     formatSwiftFiles(resolvedOutput);
   }
+  restoreNamespaceGroups(namespaceGroupSnapshots);
 };
 
 function swiftNativeSerialization(

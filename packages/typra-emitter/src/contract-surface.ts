@@ -1,12 +1,17 @@
 import { EmitContext, emitFile, resolvePath } from "@typespec/compiler";
 import { EmitTarget, TypraEmitterOptions } from "./lib.js";
 import { TypeNode } from "./ir/ast.js";
+import {
+  CallableContract,
+  lowerLegacyCallableContracts,
+} from "./ir/callable.js";
 import { toKebabCase, toSnakeCase } from "./ir/utilities.js";
 import { getToolchainMetadata, ToolchainMetadata } from "./compatibility.js";
 import {
   swiftFileName,
   swiftModuleName,
 } from "./languages/swift/identifiers.js";
+import { projectNamespace } from "./ir/namespace.js";
 
 export interface ExportSurfaceMethod {
   name: string;
@@ -73,6 +78,7 @@ export function buildExportSurfaceSnapshot(
   nodes: TypeNode[],
   toolchain: ToolchainMetadata = getToolchainMetadata(),
 ): ExportSurfaceSnapshot {
+  const callableContracts = lowerLegacyCallableContracts(nodes);
   return {
     emitter: "typra-emitter",
     version: 1,
@@ -83,7 +89,9 @@ export function buildExportSurfaceSnapshot(
       alias: rootAlias,
     },
     targets: targets
-      .map((target) => buildTargetSurface(rootNamespace, target, nodes))
+      .map((target) =>
+        buildTargetSurface(rootNamespace, target, nodes, callableContracts),
+      )
       .sort((left, right) => left.target.localeCompare(right.target)),
   };
 }
@@ -106,6 +114,7 @@ function buildTargetSurface(
   rootNamespace: string,
   target: EmitTarget,
   nodes: TypeNode[],
+  callableContracts: CallableContract[],
 ): TargetExportSurface {
   const targetName = normalizeTarget(target.type);
   const moduleName = targetModuleName(rootNamespace, targetName, target);
@@ -113,27 +122,40 @@ function buildTargetSurface(
   const groups = buildGroups(targetName, baseTypes);
   const exports = buildExports(targetName, baseTypes, moduleName);
   const rootExports = uniqueSorted(exports.map((entry) => entry.name));
-  const protocols = nodes
-    .filter((node) => node.isProtocol)
-    .sort(compareNodes)
-    .map((node) => ({
-      name: node.typeName.name,
-      group: node.group || "",
-      symbol: node.typeName.name,
-      source: sourceFor(targetName, node, node.group || "", moduleName),
-      methods: node.methods
-        .map((method) => ({
-          name: method.name,
-          returns: method.returns,
-          params: sortRecord(method.params),
-          optional: method.optional,
-          sync: method.sync,
-          runtimeCancellable: method.runtimeCancellable ?? false,
-          atomic: method.atomic ?? false,
-          nonFatal: method.nonFatal ?? false,
-        }))
-        .sort((left, right) => left.name.localeCompare(right.name)),
-    }));
+  const protocolNodes = new Map(
+    nodes
+      .filter((node) => node.isProtocol)
+      .map((node) => [qualifiedProtocolKey(node.typeName), node]),
+  );
+  const protocols = callableContracts.map((contract) => {
+    const node = protocolNodes.get(
+      qualifiedProtocolKey({
+        namespace: contract.source.namespace,
+        name: contract.source.symbol,
+      }),
+    );
+    if (!node) {
+      throw new Error(
+        `Callable contract '${contract.source.namespace}.${contract.source.symbol}' does not have a matching protocol node.`,
+      );
+    }
+    return {
+      name: contract.name,
+      group: contract.group,
+      symbol: contract.source.symbol,
+      source: sourceFor(targetName, node, contract.group, moduleName),
+      methods: contract.operations.map((operation) => ({
+        name: operation.name,
+        returns: operation.returns,
+        params: sortRecord(operation.params),
+        optional: operation.optional,
+        sync: operation.sync,
+        runtimeCancellable: operation.runtimeCancellable,
+        atomic: operation.atomic,
+        nonFatal: operation.nonFatal,
+      })),
+    };
+  });
 
   return {
     target: targetName,
@@ -228,38 +250,67 @@ function targetMetadata(
 ): Pick<TargetExportSurface, "packageName" | "namespace"> {
   if (targetName === "go") {
     return {
-      packageName:
-        target["package-name"] || goPackageNameFromNamespace(rootNamespace),
+      packageName: projectNamespace({
+        target: "go",
+        sourceNamespace: rootNamespace,
+        semanticRoot: rootNamespace,
+        emitTarget: target,
+      }).packageName,
     };
   }
 
   if (targetName === "csharp") {
     return {
-      namespace: target.namespace || rootNamespace,
+      namespace: projectNamespace({
+        target: "csharp",
+        sourceNamespace: rootNamespace,
+        semanticRoot: rootNamespace,
+        emitTarget: target,
+      }).targetNamespace,
     };
   }
 
   if (targetName === "java") {
     return {
-      packageName: target["package-name"] || rootNamespace.toLowerCase(),
+      packageName: projectNamespace({
+        target: "java",
+        sourceNamespace: rootNamespace,
+        semanticRoot: rootNamespace,
+        emitTarget: target,
+      }).packageName,
     };
   }
 
   if (targetName === "typescript") {
     return {
-      namespace: target.namespace || rootNamespace.replace(/\.Core$/, ""),
+      namespace: projectNamespace({
+        target: "typescript",
+        sourceNamespace: rootNamespace,
+        semanticRoot: rootNamespace,
+        emitTarget: target,
+      }).targetNamespace,
     };
   }
 
   if (targetName === "python") {
     return {
-      packageName: rootNamespace.toLowerCase(),
+      packageName: projectNamespace({
+        target: "python",
+        sourceNamespace: rootNamespace,
+        semanticRoot: rootNamespace,
+        emitTarget: target,
+      }).packageName,
     };
   }
 
   if (targetName === "swift") {
     return {
-      packageName: swiftModuleName(target["package-name"] || rootNamespace),
+      packageName: projectNamespace({
+        target: "swift",
+        sourceNamespace: rootNamespace,
+        semanticRoot: rootNamespace,
+        emitTarget: target,
+      }).moduleName,
     };
   }
 
@@ -272,7 +323,12 @@ function targetModuleName(
   target: EmitTarget,
 ): string | undefined {
   if (targetName === "swift") {
-    return swiftModuleName(target["package-name"] || rootNamespace);
+    return projectNamespace({
+      target: "swift",
+      sourceNamespace: rootNamespace,
+      semanticRoot: rootNamespace,
+      emitTarget: target,
+    }).moduleName;
   }
 
   return undefined;
@@ -337,16 +393,16 @@ function normalizeTarget(target: string): string {
   return target.toLowerCase().trim();
 }
 
-function goPackageNameFromNamespace(namespace: string): string {
-  return namespace.toLowerCase().replace(/\./g, "");
-}
-
 function compareNodes(left: TypeNode, right: TypeNode): number {
   const leftGroup = left.group || "";
   const rightGroup = right.group || "";
   const byGroup = leftGroup.localeCompare(rightGroup);
   if (byGroup !== 0) return byGroup;
   return left.typeName.name.localeCompare(right.typeName.name);
+}
+
+function qualifiedProtocolKey(typeName: { namespace: string; name: string }) {
+  return `${typeName.namespace}.${typeName.name}`;
 }
 
 function uniqueSorted(values: string[]): string[] {

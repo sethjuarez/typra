@@ -4,10 +4,13 @@ description: A compact TypeSpec contract and the Typra outputs it produces.
 draft: false
 ---
 
-Start with a TypeSpec model that represents the runtime shape you want every target to agree on.
+Start with TypeSpec models that represent the runtime shape you want every target to agree on. Use Typra samples as evidence for generated examples and conformance tests; samples are not runtime defaults.
 
 ```typespec
 import "@typra/emitter";
+import "@typespec/http";
+
+using TypeSpec.Http;
 
 namespace Todo.Contracts;
 
@@ -17,8 +20,12 @@ model TodoList {
 }
 
 model TodoItem {
+  @sample(#{ id: "todo-1" })
   id: string;
+
+  @sample(#{ title: "Write the contract" })
   title: string;
+
   state: TodoState;
 }
 
@@ -26,6 +33,43 @@ union TodoState {
   open: "open";
   done: "done";
   archived: "archived";
+}
+```
+
+Add callable contracts with TypeSpec-native `interface` and `op` declarations. Attach `@vector` cases when behavior should be verified across generated runtimes.
+
+```typespec
+model RenderRequest {
+  item: TodoItem;
+}
+
+model RenderResult {
+  text: string;
+}
+
+const RenderVectors = #[
+  #{
+    name: "open-item",
+    stage: "render",
+    input: #{ request: #{ item: #{ id: "todo-1", title: "Write the contract", state: "open" } } },
+    expected: #{ text: "- [ ] Write the contract" }
+  }
+];
+
+interface TodoRenderer {
+  @vector(RenderVectors)
+  render(request: RenderRequest): RenderResult;
+}
+```
+
+When you need transport projection, layer official TypeSpec HTTP decorators on the callable operation. Typra consumes that HTTP metadata; it does not invent a parallel routing vocabulary.
+
+```typespec
+@route("/todos")
+interface TodoApi {
+  @get
+  @route("/{id}")
+  read(@path id: string): TodoItem;
 }
 ```
 
@@ -46,9 +90,12 @@ options:
         test-dir: "generated/typescript/tests"
         import-path: "../index"
       - type: Python
-        output-dir: "generated/python"
+        output-dir: "generated/python/todo_contracts"
         test-dir: "generated/python/tests"
         import-path: "todo_contracts"
+        outputs:
+          - kind: server
+            provider: fastapi
       - type: Markdown
         output-dir: "generated/markdown"
 ```
@@ -59,12 +106,14 @@ Compile with TypeSpec:
 npx tsp compile ./main.tsp --config ./tspconfig.yaml
 ```
 
-Typra emits target code, generated tests when `test-dir` is set, Markdown reference output when requested, and metadata that can be compared in CI.
+Typra emits target code, generated tests when `test-dir` is set, Markdown reference output when requested, optional contributor outputs such as FastAPI route scaffolds, and metadata that can be compared in CI.
 
 ```text
 generated\
   typescript\
   python\
+    todo_contracts\
+      fastapi_routes.py
   markdown\
   json-ast\model.json
   .typra-generated\manifest.json

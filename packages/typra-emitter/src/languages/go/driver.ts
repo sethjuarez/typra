@@ -22,6 +22,7 @@ import { emitGoContext } from "./scaffolding.js";
 import { emitGoTest } from "./test-emitter.js";
 import { buildGoFieldNames } from "./identifiers.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
+import { projectNamespace } from "../../ir/namespace.js";
 import {
   collectProtocolNodes,
   emitGoProtocolScaffolds,
@@ -64,9 +65,13 @@ export const generateGo = async (
   const registry = TypeRegistry.fromTypeGraph(allTypes);
   const visitor = new GoExprVisitor(registry);
 
-  const packageName =
-    emitTarget["package-name"] ||
-    goPackageNameFromNamespace(node.typeName.namespace);
+  const namespaceProjection = projectNamespace({
+    target: "go",
+    sourceNamespace: node.typeName.namespace,
+    semanticRoot: options?.rootNamespace,
+    emitTarget,
+  });
+  const packageName = namespaceProjection.packageName!;
 
   // Collect all polymorphic type names across all nodes
   const polymorphicTypeNames = new Set<string>();
@@ -245,10 +250,6 @@ function collectInheritedPropertyNames(
     }
   }
   return names;
-}
-
-export function goPackageNameFromNamespace(namespace: string): string {
-  return namespace.toLowerCase().replace(/\./g, "");
 }
 
 /**

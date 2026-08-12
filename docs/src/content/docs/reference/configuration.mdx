@@ -20,10 +20,21 @@ options:
         output-dir: "generated/typescript"
         test-dir: "generated/typescript/tests"
         import-path: "../index"
+        outputs:
+          - kind: models
+          - kind: native-serialization
+            provider: zod
       - type: Java
         output-dir: "generated/java"
         test-dir: "generated/java/tests"
         package-name: "typra.fixtures"
+      - type: Python
+        output-dir: "generated/python/typra/fixtures"
+        test-dir: "generated/python/tests"
+        import-path: "typra.fixtures"
+        outputs:
+          - kind: server
+            provider: fastapi
 ```
 
 ## Emitter options
@@ -32,11 +43,48 @@ options:
 | --- | --- |
 | Root selection | `root-object`, `root-namespace`, `root-alias`, `additional-roots`, `omit-models` |
 | Review and safety | `deterministic-output`, `protected-paths`, `hydration-zones`, `allow-unsupported-typespec-version` |
-| Output shape | `emit-targets` |
+| Output shape | `emit-targets`, `namespace-output` |
 
 `root-object` is the required anchor for generation. Use a fully qualified model name.
 
+`root-namespace` is the semantic contract root. When set, Typra resolves models,
+callables, vectors, and transports from that TypeSpec namespace and preserves
+nested namespaces under it in the shared IR. `root-alias` is a naming override
+for generated root-owned type names; it does not replace target package options.
+
 `schema-output-dir` is accepted but reserved for future manifest-based cleanup of omitted models. It does not change generated output today.
+
+## Namespace projection
+
+Typra separates TypeSpec contract identity from target packaging:
+
+| Concept | Example | Purpose |
+| --- | --- | --- |
+| Semantic root | `root-namespace: "Typra.Prompty"` | TypeSpec namespace Typra treats as the durable contract root. |
+| Semantic alias | `root-alias: "Prompty"` | Optional generated type-name alias for the semantic root name. |
+| Target namespace/package | `namespace`, `package-name`, `import-path` | Runtime packaging and import ergonomics for a specific target. |
+
+Nested TypeSpec namespaces below `root-namespace` remain part of the lowered
+model/callable/transport identity. Target renderers then project the semantic namespace through runtime-specific
+rules. `namespace-output` defaults to `structural`, which means targets with
+module/folder support place nested namespaces in nested output folders. Set
+`namespace-output: flat` globally or on a target to keep the legacy flat
+generated file layout while preserving semantic namespace metadata.
+
+| Target | Default projection |
+| --- | --- |
+| TypeScript | Uses the TypeSpec namespace as target metadata, trimming a trailing `.Core`; nested namespaces emit nested ESM folders and generated tests default to `../src/index`. |
+| Python | Lowercase dotted package/import path, overrideable with `package-name` or `import-path`; nested namespaces emit nested packages. |
+| C# | Preserves the TypeSpec namespace unless `namespace` is configured; nested namespaces emit nested folders. |
+| Java | Lowercase dotted package, sanitized for Java package syntax; `package-name` wins over `namespace`. |
+| Go | Flat lowercase package name because Go has one package per directory; `package-name` or `import-path` can override ergonomics. |
+| Rust | Root crate import path defaults to `crate`; nested namespaces emit nested Rust modules. |
+| Swift | Root namespace becomes a PascalCase module name, overrideable with `package-name`; nested namespaces emit nested source folders. |
+
+The rule of thumb is: TypeSpec namespaces express contract ownership, while
+target options express runtime packaging. Prefer target overrides when a
+language ecosystem needs a different package name, not when changing the
+contract identity.
 
 ## Target options
 
@@ -47,12 +95,14 @@ Each `emit-targets` entry has a required `type` and can set target-specific opti
 | `output-dir` | Generated source output. |
 | `test-dir` | Generated target tests. |
 | `format` | Boolean toggle (default `true`). Runs the target formatter on emitted files when a formatter is available. |
+| `namespace-output` | `"structural"` or `"flat"`. Defaults to structural and can override the global emitter setting per target. |
 | `import-path` | Import path used by generated tests or target modules. |
 | `package-name` | Go, Java, and Swift package or module naming. |
 | `namespace` | C# namespace, and the Java package when `package-name` is unset. |
 | `alias` | Target aliasing when supported by the emitter. |
 | `enum-parsing` | Rust enum parsing mode. |
 | `protocol-scaffolds` | Compile-only protocol scaffold generation. |
+| `outputs` | Internal output contributor requests identified by `kind` and optional `provider`. Existing target generation remains compatible with top-level options. |
 | `native-serialization` | Opt-in native interop surface. TypeScript supports `"none"` or `"zod"`; `"standard-schema"` is reserved and fails fast. Python supports `"none"` or `"pydantic"`, Java supports `"none"` or `"jackson"`, Rust supports `"none"` or `"serde"`, and Swift supports `"none"` or `"codable"`. Rust preserves its legacy cfg-gated serde surface when omitted; set `"none"` to opt out. |
 | `cancellation-token-path` | Full runtime-native cancellation token symbol path for generated `runtimeCancellable` method parameters. Rust uses `::` paths; Python uses dotted module paths. |
 
@@ -63,3 +113,5 @@ Native serialization is additional interop, not a replacement for Typra's genera
 Native serialization mode support is validated per target. Unsupported
 combinations emit a TypeSpec diagnostic instead of silently falling back to
 plain generated output.
+
+`outputs` is the v2 projection seam for optional surfaces. It validates internal contributor requests and deduplicates compatibility options such as `native-serialization`. Python also supports `kind: server` / `provider: fastapi`, which emits FastAPI route factories plus generated transport vector tests from TypeSpec HTTP metadata. Unsupported target/kind/provider combinations fail with clear diagnostics instead of silently falling back.

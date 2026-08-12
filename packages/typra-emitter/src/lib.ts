@@ -4,6 +4,8 @@ export interface EmitTarget {
   type: string;
   "output-dir"?: string;
   "test-dir"?: string;
+  "namespace-output"?: "structural" | "flat";
+  outputs?: EmitTargetOutput[];
   alias?: { [key: string]: any };
   format?: boolean;
   namespace?: string;
@@ -21,11 +23,16 @@ export interface EmitTarget {
     | "standard-schema"
     | "codable";
 }
+export interface EmitTargetOutput {
+  kind: string;
+  provider?: string;
+}
 export interface TypraEmitterOptions {
   "root-object": string;
   "emit-targets"?: EmitTarget[];
   "root-namespace"?: string;
   "root-alias"?: string;
+  "namespace-output"?: "structural" | "flat";
   "omit-models"?: string[];
   "schema-output-dir"?: string;
   "additional-roots"?: string[];
@@ -73,6 +80,39 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
           "test-dir": {
             type: "string",
             nullable: true,
+          },
+          "namespace-output": {
+            type: "string",
+            enum: ["structural", "flat"],
+            nullable: true,
+            default: "structural",
+            description:
+              "Controls namespace-derived folder/module layout. Defaults to structural; set flat for compatibility with older flat output.",
+          },
+          outputs: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                kind: {
+                  type: "string",
+                  nullable: false,
+                  description:
+                    "Output contributor kind, such as models, native-serialization, server, or client.",
+                },
+                provider: {
+                  type: "string",
+                  nullable: true,
+                  description:
+                    "Output contributor provider, such as typra, pydantic, zod, or a future transport provider.",
+                },
+              },
+              required: ["kind"],
+            },
+            nullable: true,
+            description:
+              "Internal output contributor requests for optional generated surfaces. Existing target generation remains compatible with top-level options.",
           },
           alias: {
             type: "object",
@@ -160,6 +200,14 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
       nullable: true,
       description: "Alias for the root object",
     },
+    "namespace-output": {
+      type: "string",
+      enum: ["structural", "flat"],
+      nullable: true,
+      default: "structural",
+      description:
+        "Default namespace-derived folder/module layout for targets. Targets can override this value.",
+    },
     "omit-models": {
       type: "array",
       items: { type: "string" },
@@ -224,6 +272,7 @@ export const $lib = createTypeSpecLibrary({
     knownAs: { description: "Wire field name mappings per target system" },
     defaultFor: { description: "Per-target required default values" },
     protocols: { description: "Pipeline interface markers" },
+    vectors: { description: "Operation-level callable behavior vectors" },
     parseAliases: { description: "Parse-only aliases for named string unions" },
     entryShorthands: {
       description:

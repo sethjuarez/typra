@@ -437,6 +437,7 @@ export function buildGeneratedOutputReport(
         ".typra-generated/manifest.json",
         ".typra-generated/export-surfaces.json",
         ".typra-generated/hydration-seams.json",
+        ".typra-generated/vectors.json",
         ".typra-generated/report.json",
         "json-ast/model.json",
       ],
@@ -562,6 +563,7 @@ function markerFor(filePath: string): string {
   }
   if (
     filePath.endsWith(".py") ||
+    filePath.endsWith(".txt") ||
     filePath.endsWith(".yaml") ||
     filePath.endsWith(".yml")
   ) {

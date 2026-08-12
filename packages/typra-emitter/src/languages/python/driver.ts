@@ -4,6 +4,16 @@ import { existsSync } from "fs";
 import { dirname, resolve } from "path";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import {
+  buildVectorConformanceCodeModel,
+  VectorConformanceCodeModel,
+} from "../../ir/code-model.js";
+import { normalizeOutputRequests } from "../../output-contributors.js";
+import type {
+  TransportBinding,
+  TransportContract,
+  TransportOperation,
+} from "../../ir/transport.js";
+import {
   enumerateTypes,
   PropertyNode,
   TypeNode,
@@ -23,6 +33,7 @@ import { ExprVisitor, renderObjectLiteral } from "../../ir/visitor.js";
 import { PythonExprVisitor } from "./visitor.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { toSnakeCase } from "../../ir/utilities.js";
+import { scalarRuntimeKind } from "../../ir/scalar-kinds.js";
 import {
   buildBaseTestContext,
   pythonTestOptions,
@@ -36,6 +47,11 @@ import {
 } from "./scaffolding.js";
 import { emitPythonTest, emitPythonTestContext } from "./test-emitter.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
+import {
+  applyNamespaceGroups,
+  projectNamespace,
+  restoreNamespaceGroups,
+} from "../../ir/namespace.js";
 import {
   collectProtocolNodes,
   emitPythonProtocolScaffolds,
@@ -79,18 +95,28 @@ export const generatePython = async (
   options?: GeneratorOptions,
 ): Promise<void> => {
   const allTypes = Array.from(enumerateTypes(node));
+  const namespaceGroupSnapshots = applyNamespaceGroups(allTypes, {
+    target: "python",
+    semanticRoot: options?.rootNamespace,
+    emitTarget,
+    namespaceOutput: options?.namespaceOutput,
+  });
   const nodes = filterNodes(allTypes, options);
 
   // Build the expression IR infrastructure
   const registry = TypeRegistry.fromTypeGraph(allTypes);
   const visitor = new PythonExprVisitor(registry);
 
-  // Determine package name from root node namespace (e.g., "Typra" -> "typra")
-  const packageName = node.typeName.namespace.toLowerCase();
-
-  // Import path for test files — defaults to packageName, can be overridden via import-path config
-  const importPath = emitTarget["import-path"] || packageName;
+  const namespaceProjection = projectNamespace({
+    target: "python",
+    sourceNamespace: node.typeName.namespace,
+    semanticRoot: options?.rootNamespace,
+    emitTarget,
+  });
+  const packageName = namespaceProjection.packageName!;
+  const importPath = namespaceProjection.importPath!;
   const nativeSerialization = pythonNativeSerialization(emitTarget);
+  const modelTypes = collectLoadSaveTypeNames(nodes);
 
   // Emit py.typed marker for PEP 561 compliance
   await emitPythonFile(
@@ -155,6 +181,17 @@ export const generatePython = async (
     }
   }
 
+  for (const parentGroup of collectParentGroups(groupMap.keys())) {
+    await emitPythonFile(
+      context,
+      "__init__.py",
+      "",
+      `${emitTarget["output-dir"]}/${parentGroup}`,
+      emitTarget["output-dir"],
+      { allowEmpty: true },
+    );
+  }
+
   // Render each base type and its children as a single file, into group subfolder
   for (const n of nodes) {
     // Skip child types - they're rendered with their parent
@@ -214,6 +251,50 @@ export const generatePython = async (
     );
   }
 
+  if (
+    emitTarget["test-dir"] &&
+    (options?.callableVectors?.vectors.length ?? 0) > 0
+  ) {
+    await emitPythonFile(
+      context,
+      "test_vector_conformance.py",
+      emitPythonVectorConformanceTest(
+        options!.callableVectors!,
+        importPath,
+        nodes,
+      ),
+      emitTarget["test-dir"],
+      emitTarget["test-dir"],
+    );
+  }
+
+  if (shouldEmitFastApi(emitTarget)) {
+    const transportContracts = options?.transportContracts ?? [];
+    if (transportContracts.length > 0) {
+      await emitPythonFile(
+        context,
+        "fastapi_routes.py",
+        emitFastApiRoutes(transportContracts, modelTypes),
+        emitTarget["output-dir"],
+      );
+      await emitPythonFile(
+        context,
+        "requirements-fastapi.txt",
+        "fastapi\n",
+        emitTarget["output-dir"],
+      );
+      if (emitTarget["test-dir"]) {
+        await emitPythonFile(
+          context,
+          "test_fastapi_transport.py",
+          emitFastApiVectorTests(transportContracts, importPath, modelTypes),
+          emitTarget["test-dir"],
+          emitTarget["test-dir"],
+        );
+      }
+    }
+  }
+
   // Emit group-level __init__.py for each group
   for (const [group, groupNodes] of groupMap) {
     if (!group) continue; // Root-level types (if any) are covered by the root __init__.py
@@ -239,7 +320,402 @@ export const generatePython = async (
 
     formatPythonFiles(outputDir, testDir);
   }
+  restoreNamespaceGroups(namespaceGroupSnapshots);
 };
+
+function collectParentGroups(groups: Iterable<string>): string[] {
+  const parents = new Set<string>();
+  for (const group of groups) {
+    const parts = group.split("/").filter(Boolean);
+    for (let i = 1; i < parts.length; i++) {
+      parents.add(parts.slice(0, i).join("/"));
+    }
+  }
+  return Array.from(parents).sort();
+}
+
+function emitPythonVectorConformanceTest(
+  vectors: NonNullable<GeneratorOptions["callableVectors"]>,
+  importPath: string,
+  nodes: TypeNode[],
+): string {
+  const model = buildVectorConformanceCodeModel(vectors, {
+    loadSaveTypes: collectLoadSaveTypeNames(nodes),
+  });
+  const payload = JSON.stringify(model.vectors, null, 2);
+  return [
+    "# Copyright (c) Microsoft. All rights reserved.",
+    "# WARNING: This is an auto-generated file. DO NOT EDIT THIS FILE DIRECTLY.",
+    "",
+    "import json",
+    ...(model.modelImports.length > 0
+      ? [`from ${importPath} import ${model.modelImports.join(", ")}`]
+      : []),
+    "",
+    "VECTORS = json.loads(",
+    `    ${JSON.stringify(payload)}`,
+    ")",
+    "",
+    "",
+    "def test_callable_vector_payloads_roundtrip():",
+    "    for index, entry in enumerate(VECTORS):",
+    "        vector_id = f\"{entry['contract']}.{entry['operation']}:{entry['vector'].get('name', 'unnamed')}\"",
+    "        vector = entry['vector']",
+    '        expected_transcript = {"vectorId": vector_id, "target": "python", "input": vector["input"]}',
+    '        observed_transcript = {"vectorId": vector_id, "target": "python", "input": json.loads(json.dumps(vector["input"]))}',
+    "        metadata = vector_metadata(vector)",
+    "        if metadata:",
+    '            expected_transcript["metadata"] = metadata',
+    '            observed_transcript["metadata"] = json.loads(json.dumps(metadata))',
+    "        if 'expected' in vector:",
+    '            expected_transcript["result"] = vector["expected"]',
+    '            observed_transcript["result"] = json.loads(json.dumps(vector["expected"]))',
+    "        if 'expectedError' in vector:",
+    '            expected_transcript["error"] = vector["expectedError"]',
+    '            observed_transcript["error"] = json.loads(json.dumps(vector["expectedError"]))',
+    '        assert observed_transcript == expected_transcript, json.dumps({"vectorId": vector_id, "target": "python", "expectedTranscript": expected_transcript, "observedTranscript": observed_transcript}, indent=2)',
+    "        assert_vector_model_roundtrips(index, entry)",
+    "",
+    "",
+    "def vector_metadata(vector):",
+    "    metadata = {",
+    '        "stage": vector.get("stage"),',
+    '        "provider": vector.get("provider"),',
+    '        "targetApi": vector.get("targetApi"),',
+    '        "portability": vector.get("portability"),',
+    '        "normalization": vector.get("normalization"),',
+    "    }",
+    "    return {key: value for key, value in metadata.items() if value is not None}",
+    "",
+    "",
+    ...emitPythonVectorRoundTripHelpers(model),
+    "",
+  ].join("\n");
+}
+
+function collectLoadSaveTypeNames(nodes: TypeNode[]): Set<string> {
+  return new Set(
+    nodes.filter((node) => !node.isProtocol).map((node) => node.typeName.name),
+  );
+}
+
+function shouldEmitFastApi(target: EmitTarget): boolean {
+  return normalizeOutputRequests(target).some(
+    (request) =>
+      request.target === "python" &&
+      request.kind === "server" &&
+      request.provider === "fastapi",
+  );
+}
+
+function emitFastApiRoutes(
+  contracts: TransportContract[],
+  modelTypes: ReadonlySet<string>,
+): string {
+  const modelImports = collectFastApiModelImports(contracts, modelTypes);
+  return [
+    "# Copyright (c) Microsoft. All rights reserved.",
+    "# WARNING: This is an auto-generated file. DO NOT EDIT THIS FILE DIRECTLY.",
+    "",
+    "from __future__ import annotations",
+    "",
+    "from typing import Protocol",
+    "from fastapi import APIRouter, Body, Cookie, Header, Path, Query",
+    ...(modelImports.length > 0 ? [`from . import ${modelImports.join(", ")}`] : []),
+    "",
+    ...contracts.flatMap((contract) => emitFastApiContract(contract, modelTypes)),
+    "",
+  ].join("\n");
+}
+
+function collectFastApiModelImports(
+  contracts: TransportContract[],
+  modelTypes: ReadonlySet<string>,
+): string[] {
+  const imports = new Set<string>();
+  for (const contract of contracts) {
+    for (const operation of contract.operations) {
+      for (const binding of operation.bindings) {
+        if (isPythonModelType(binding.type, modelTypes)) imports.add(binding.type);
+      }
+      for (const response of operation.responses) {
+        if (response.body && isPythonModelType(response.body, modelTypes)) {
+          imports.add(response.body);
+        }
+      }
+    }
+  }
+  return Array.from(imports).sort();
+}
+
+function emitFastApiContract(
+  contract: TransportContract,
+  modelTypes: ReadonlySet<string>,
+): string[] {
+  const handlerName = `${contract.name}Handler`;
+  const routerFactory = `create_${toSnakeCase(contract.name)}_router`;
+  return [
+    `class ${handlerName}(Protocol):`,
+    ...contract.operations.flatMap((operation) => [
+      `    async def ${operation.operation}(self, ${handlerSignature(operation)}):`,
+      "        ...",
+      "",
+    ]),
+    "",
+    `def ${routerFactory}(handler: ${handlerName}) -> APIRouter:`,
+    "    router = APIRouter()",
+    ...contract.operations.flatMap((operation) =>
+      emitFastApiOperation(operation, handlerName, modelTypes),
+    ),
+    "    return router",
+    "",
+  ];
+}
+
+function handlerSignature(operation: TransportOperation): string {
+  return operation.bindings
+    .map((binding) => `${toSnakeCase(binding.name)}: ${pythonType(binding.type, binding.optional)}`)
+    .join(", ");
+}
+
+function emitFastApiOperation(
+  operation: TransportOperation,
+  _handlerName: string,
+  modelTypes: ReadonlySet<string>,
+): string[] {
+  const routeArgs = [`"${operation.path}"`];
+  const statusCode = firstStatusCode(operation);
+  if (statusCode) routeArgs.push(`status_code=${statusCode}`);
+  const signature = operation.bindings
+    .map(fastApiParameter)
+    .filter(Boolean)
+    .join(", ");
+  const bodyBinding = operation.bindings.find((binding) => binding.kind === "body");
+  const handlerArgs = operation.bindings
+    .map((binding) => `${toSnakeCase(binding.name)}=${toSnakeCase(binding.name)}`)
+    .join(", ");
+
+  const lines = [
+    "",
+    `    @router.${operation.verb}(${routeArgs.join(", ")})`,
+    `    async def ${operation.operation}(${signature}):`,
+  ];
+  if (bodyBinding && isPythonModelType(bodyBinding.type, modelTypes)) {
+    const name = toSnakeCase(bodyBinding.name);
+    lines.push(`        ${name} = ${bodyBinding.type}.load(${name})`);
+  }
+  lines.push(`        result = await handler.${operation.operation}(${handlerArgs})`);
+  if (operation.responses.some((response) => response.body && isPythonModelType(response.body, modelTypes))) {
+    lines.push("        return result.save()");
+  } else {
+    lines.push("        return result");
+  }
+  return lines;
+}
+
+function fastApiParameter(binding: TransportBinding): string {
+  const name = toSnakeCase(binding.name);
+  const type = pythonType(binding.type, binding.optional);
+  switch (binding.kind) {
+    case "path":
+      return `${name}: ${type} = Path(..., alias=${JSON.stringify(binding.wireName)})`;
+    case "query":
+      return `${name}: ${type} = Query(default=${binding.optional ? "None" : "..."}, alias=${JSON.stringify(binding.wireName)})`;
+    case "header":
+      return `${name}: ${type} = Header(default=${binding.optional ? "None" : "..."}, alias=${JSON.stringify(binding.wireName)})`;
+    case "cookie":
+      return `${name}: ${type} = Cookie(default=${binding.optional ? "None" : "..."}, alias=${JSON.stringify(binding.wireName)})`;
+    case "body":
+      return `${name}: dict = Body(...)`;
+  }
+}
+
+function emitFastApiVectorTests(
+  contracts: TransportContract[],
+  importPath: string,
+  modelTypes: ReadonlySet<string>,
+): string {
+  const operations = contracts.flatMap((contract) => contract.operations);
+  const vectorEntries = operations.flatMap((operation) =>
+    (operation.callable.vectors ?? []).map((vector) => ({
+      contract: operation.contract,
+      operation: operation.operation,
+      verb: operation.verb,
+      path: operation.path,
+      bindings: operation.bindings.map((binding) => ({
+        ...binding,
+        pythonName: toSnakeCase(binding.name),
+      })),
+      responseType: operation.responses.find((response) => response.body)?.body,
+      vector,
+    })),
+  );
+  const responseTypes = [
+    ...new Set(
+      vectorEntries
+        .map((entry) => entry.responseType)
+        .filter((type): type is string => typeof type === "string" && isPythonModelType(type, modelTypes)),
+    ),
+  ].sort();
+  const routerFactories = contracts.map((contract) => ({
+    contract: contract.name,
+    name: `create_${toSnakeCase(contract.name)}_router`,
+  }));
+  return [
+    "# Copyright (c) Microsoft. All rights reserved.",
+    "# WARNING: This is an auto-generated file. DO NOT EDIT THIS FILE DIRECTLY.",
+    "",
+    "import json",
+    "from fastapi import FastAPI",
+    "from fastapi.testclient import TestClient",
+    responseTypes.length > 0
+      ? `from ${importPath} import ${responseTypes.join(", ")}`
+      : "",
+    `from ${importPath}.fastapi_routes import ${routerFactories.map((factory) => factory.name).join(", ")}`,
+    "",
+    `TRANSPORT_VECTORS = json.loads(${JSON.stringify(JSON.stringify(vectorEntries, null, 2))})`,
+    `MODEL_TYPES = {${responseTypes.map((type) => `${JSON.stringify(type)}: ${type}`).join(", ")}}`,
+    `ROUTER_FACTORIES = {${routerFactories.map((factory) => `${JSON.stringify(factory.contract)}: ${factory.name}`).join(", ")}}`,
+    "",
+    "",
+    "class _VectorHandler:",
+    "    def __init__(self, entry):",
+    "        self.entry = entry",
+    "        self.calls = {}",
+    "",
+    ...operations.flatMap((operation) => [
+      `    async def ${operation.operation}(self, **_kwargs):`,
+      `        self.calls[${JSON.stringify(operation.operation)}] = _kwargs`,
+      "        expected = self.entry[\"vector\"].get(\"expected\")",
+      "        response_type = self.entry.get(\"responseType\")",
+      "        if response_type in MODEL_TYPES:",
+      "            return MODEL_TYPES[response_type].load(expected)",
+      "        return expected",
+      "",
+    ]),
+    "",
+    "def _path_for(entry):",
+    "    path = entry[\"path\"]",
+    "    inputs = entry[\"vector\"][\"input\"]",
+    "    for binding in entry[\"bindings\"]:",
+    "        if binding[\"kind\"] == \"path\":",
+    "            key = binding[\"wireName\"]",
+    "            value = inputs.get(key, inputs.get(binding[\"name\"]))",
+    "            path = path.replace(\"{\" + key + \"}\", str(value))",
+    "    return path",
+    "",
+    "",
+    "def _request_kwargs(entry):",
+    "    inputs = entry[\"vector\"][\"input\"]",
+    "    params = {}",
+    "    headers = {}",
+    "    cookies = {}",
+    "    json_body = None",
+    "    for binding in entry[\"bindings\"]:",
+    "        key = binding[\"wireName\"]",
+    "        value = inputs.get(key, inputs.get(binding[\"name\"]))",
+    "        if value is None:",
+    "            continue",
+    "        if binding[\"kind\"] == \"query\":",
+    "            params[key] = value",
+    "        elif binding[\"kind\"] == \"header\":",
+    "            headers[key] = str(value)",
+    "        elif binding[\"kind\"] == \"cookie\":",
+    "            cookies[key] = str(value)",
+    "        elif binding[\"kind\"] == \"body\":",
+    "            json_body = value",
+    "    kwargs = {}",
+    "    if params:",
+    "        kwargs[\"params\"] = params",
+    "    if headers:",
+    "        kwargs[\"headers\"] = headers",
+    "    if cookies:",
+    "        kwargs[\"cookies\"] = cookies",
+    "    if json_body is not None:",
+    "        kwargs[\"json\"] = json_body",
+    "    return kwargs",
+    "",
+    "",
+    "def _saved(value):",
+    "    return value.save() if hasattr(value, \"save\") else value",
+    "",
+    "",
+    "def _assert_handler_received(entry, handler):",
+    "    received = handler.calls[entry[\"operation\"]]",
+    "    inputs = entry[\"vector\"][\"input\"]",
+    "    for binding in entry[\"bindings\"]:",
+    "        key = binding[\"wireName\"]",
+    "        expected = inputs.get(key, inputs.get(binding[\"name\"]))",
+    "        if expected is None:",
+    "            continue",
+    "        assert _saved(received[binding[\"pythonName\"]]) == expected",
+    "",
+    "",
+    "def test_fastapi_transport_vectors_execute_routes():",
+    "    assert TRANSPORT_VECTORS",
+    "    for entry in TRANSPORT_VECTORS:",
+    "        app = FastAPI()",
+    "        handler = _VectorHandler(entry)",
+    "        app.include_router(ROUTER_FACTORIES[entry[\"contract\"]](handler))",
+    "        client = TestClient(app)",
+    "        response = getattr(client, entry[\"verb\"])(_path_for(entry), **_request_kwargs(entry))",
+    "        assert response.status_code < 400, response.text",
+    "        _assert_handler_received(entry, handler)",
+    "        assert response.json() == entry[\"vector\"].get(\"expected\")",
+    "",
+  ].join("\n");
+}
+
+function firstStatusCode(operation: TransportOperation): number | undefined {
+  for (const response of operation.responses) {
+    const code = response.statusCodes[0];
+    if (code && /^\d+$/.test(code)) return Number(code);
+  }
+  return undefined;
+}
+
+function pythonType(type: string, optional = false): string {
+  const runtimeKind = scalarRuntimeKind(type);
+  const resolved =
+    runtimeKind === "string"
+      ? "str"
+      : runtimeKind === "boolean"
+        ? "bool"
+        : runtimeKind === "integral"
+          ? "int"
+          : runtimeKind === "fractional"
+            ? "float"
+            : type;
+  return optional ? `${resolved} | None` : resolved;
+}
+
+function isPythonModelType(type: string, modelTypes: ReadonlySet<string>): boolean {
+  return modelTypes.has(type);
+}
+
+function emitPythonVectorRoundTripHelpers(
+  model: VectorConformanceCodeModel,
+): string[] {
+  const lines = ["def assert_vector_model_roundtrips(index, entry):"];
+  for (const testCase of model.cases) {
+    lines.push(`    if index == ${testCase.index}:`);
+    const bodyStart = lines.length;
+    for (const { paramName, typeName } of testCase.paramRoundTrips) {
+      lines.push(`        if ${JSON.stringify(paramName)} in entry["vector"]["input"]:`)
+      lines.push(`            value = entry["vector"]["input"][${JSON.stringify(paramName)}]`);
+      lines.push(`            assert ${typeName}.load(value).save() == value`);
+    }
+    if (testCase.expectedRoundTrip) {
+      lines.push('        if "expected" in entry["vector"]:');
+      lines.push('            value = entry["vector"]["expected"]');
+      lines.push(`            assert ${testCase.expectedRoundTrip}.load(value).save() == value`);
+    }
+    if (lines.length === bodyStart) {
+      lines.push("        pass");
+    }
+  }
+  return lines;
+}
 
 function pythonNativeSerialization(
   emitTarget: EmitTarget,

@@ -1,11 +1,33 @@
 ---
 title: Roadmap
-description: Best-in-class roadmap for Typra emitter confidence and runtime generation.
+description: Typra v2 roadmap for principle-led contract projection, consumer compatibility, and conformance evidence.
 draft: false
 ---
 
-Typra is in a strong shipped state. The active roadmap now extends shipped
-validation and native-interop coverage into broader generated-shape confidence.
+Typra v2 moves Typra toward an agent drift prevention layer: TypeSpec is the
+durable source of truth, and Typra projects equivalent runtime behavior across
+languages with executable evidence.
+
+The current priority is callable and vector conformance informed by Prompty's
+consumer needs, not HTTP transport projection. Prompty is evidence for what must
+work; Typra's principles decide what should become the durable contract model.
+If this reveals a better way to build Prompty with Typra v2, that is a valid
+success path, not a regression.
+
+## Contract projection roadmap
+
+1. Define the [Typra v2 contract vocabulary and migration rules](/concepts/contracts-v2/).
+2. Preserve a Prompty-informed compatibility baseline for load/save, coercion shorthands,
+   named collections, discriminators, provider wire mappings, factories,
+   methods, protocols, and existing load/render/parse vector categories.
+3. Move callable contracts toward TypeSpec-native `interface` and `op`.
+4. Lower legacy `@protocol` and `@method` declarations into the same callable IR
+   as TypeSpec-native callables.
+5. Add `@vector` for callable behavior backed by a callable conformance oracle.
+6. Add shared structural CodeModel and target renderers to reduce per-language
+   emitter duplication.
+7. Defer HTTP transport projection until callable/vector
+   conformance is proven.
 
 ## Executable conformance specification
 

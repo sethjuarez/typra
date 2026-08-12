@@ -109,6 +109,9 @@ function typeofCheck(scalarType: string): string | null {
 }
 
 function paramType(typeStr: string): string {
+  if (typeStr.endsWith("[]")) {
+    return `${paramType(typeStr.slice(0, -2))}[]`;
+  }
   return TYPE_MAP[typeStr] || typeStr;
 }
 
@@ -116,6 +119,9 @@ function returnType(typeStr: string): string {
   if (typeStr.endsWith("?")) {
     const inner = typeStr.slice(0, -1);
     return `${returnType(inner)} | null`;
+  }
+  if (typeStr.endsWith("[]")) {
+    return `${returnType(typeStr.slice(0, -2))}[]`;
   }
   if (typeStr === "Record<unknown>") return "Record<string, unknown>";
   if (typeStr === "void") return "void";
@@ -156,7 +162,7 @@ export function emitTypeScriptFile(
   const hasNonProtocol = decl.types.some((t) => !t.isProtocol);
   if (hasNonProtocol) {
     // Context file is always at the model root — go up one level when inside a group subfolder
-    const contextPath = group ? "../context" : "./context";
+    const contextPath = relativeModulePath(group, "", "context");
     lines.push(`import { LoadContext, SaveContext } from "${contextPath}";`);
   }
   if (emitZod && hasNonProtocol) {
@@ -171,11 +177,13 @@ export function emitTypeScriptFile(
     } else if (imp.group) {
       // Different non-empty group: go up to model root, then into the group subfolder
       lines.push(
-        `import { ${imp.names.join(", ")} } from "../${imp.group}/${kebab}";`,
+        `import { ${imp.names.join(", ")} } from "${relativeModulePath(group, imp.group, kebab)}";`,
       );
     } else {
       // Root-level module: go up one level from group subfolder
-      lines.push(`import { ${imp.names.join(", ")} } from "../${kebab}";`);
+      lines.push(
+        `import { ${imp.names.join(", ")} } from "${relativeModulePath(group, "", kebab)}";`,
+      );
     }
   }
   lines.push("");
@@ -189,6 +197,7 @@ export function emitTypeScriptFile(
     } else {
       lines.push(`export type ${enumDef.name} = ${values};`);
     }
+
   }
   if (decl.enums.length > 0) {
     lines.push("");
@@ -207,6 +216,19 @@ export function emitTypeScriptFile(
   }
 
   return lines.join("\n") + "\n";
+}
+
+function relativeModulePath(
+  fromGroup: string,
+  toGroup: string,
+  moduleName: string,
+): string {
+  if (fromGroup === toGroup) {
+    return `./${moduleName}`;
+  }
+  const depth = fromGroup ? fromGroup.split("/").filter(Boolean).length : 0;
+  const prefix = depth > 0 ? "../".repeat(depth) : "./";
+  return `${prefix}${toGroup ? `${toGroup}/` : ""}${moduleName}`;
 }
 
 function hasParseAliases(enumDef: {

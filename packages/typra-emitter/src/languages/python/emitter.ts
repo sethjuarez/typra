@@ -190,9 +190,8 @@ export function emitPythonFile(
 
   // Context import — go up one level when inside a group subfolder
   if (hasNonProtocol) {
-    const ctxPrefix = group ? ".." : ".";
     localImports.push(
-      `from ${ctxPrefix}_context import LoadContext, SaveContext`,
+      `from ${relativePythonImport(group, "", "_context")} import LoadContext, SaveContext`,
     );
   }
 
@@ -204,17 +203,35 @@ export function emitPythonFile(
     } else if (imp.group) {
       // Different non-empty group: go up to model root, then into the group subfolder
       localImports.push(
-        `from ..${imp.group}._${imp.module} import ${imp.names.join(", ")}`,
+        `from ${relativePythonImport(group, imp.group, `_${imp.module}`)} import ${imp.names.join(", ")}`,
       );
     } else {
       // Imported module is at model root (no group): go up one level
-      localImports.push(`from .._${imp.module} import ${imp.names.join(", ")}`);
+      localImports.push(
+        `from ${relativePythonImport(group, "", `_${imp.module}`)} import ${imp.names.join(", ")}`,
+      );
     }
   }
   localImports.sort();
 
   for (const line of stdlibImports) {
     lines.push(line);
+  }
+
+  function relativePythonImport(
+    fromGroup: string,
+    toGroup: string,
+    moduleName: string,
+  ): string {
+    if (fromGroup === toGroup) {
+      return `.${moduleName}`;
+    }
+    const depth = fromGroup ? fromGroup.split("/").filter(Boolean).length : 0;
+    const prefix = ".".repeat(depth + 1);
+    const target = toGroup
+      ? `${toGroup.split("/").filter(Boolean).join(".")}.${moduleName}`
+      : moduleName;
+    return `${prefix}${target}`;
   }
   lines.push("");
   for (const line of localImports) {

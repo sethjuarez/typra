@@ -243,7 +243,7 @@ export function emitPythonInit(
     } else {
       // Group subfolder — import from the group's __init__.py (which re-exports all group types)
       lines.push("");
-      lines.push(`from .${group} import (`);
+      lines.push(`from .${group.replace(/\//g, ".")} import (`);
       for (const type of groupTypes) {
         const allNames = [
           type.typeName.name,

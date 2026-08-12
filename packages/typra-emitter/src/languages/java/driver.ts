@@ -8,6 +8,7 @@ import { enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { collectPolymorphicTypeNames, lowerFile } from "../../ir/lower.js";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
+import { projectNamespace } from "../../ir/namespace.js";
 import {
   buildBaseTestContext,
   TestContextOptions,
@@ -83,11 +84,12 @@ export const generateJava = async (
   const nodes = filterNodes(allTypes, options);
   const registry = TypeRegistry.fromTypeGraph(allTypes);
   const visitor = new JavaExprVisitor(registry);
-  const packageName = javaPackageName(
-    emitTarget.namespace ??
-      emitTarget["package-name"] ??
-      node.typeName.namespace,
-  );
+  const packageName = projectNamespace({
+    target: "java",
+    sourceNamespace: node.typeName.namespace,
+    semanticRoot: options?.rootNamespace,
+    emitTarget,
+  }).packageName!;
   const polymorphicTypeNames = collectPolymorphicTypeNames(node, registry);
   const fileDecls = nodes.map((n) =>
     lowerFile(n, registry, polymorphicTypeNames),
@@ -256,15 +258,6 @@ export const generateJava = async (
 
 function javaNativeSerialization(emitTarget: EmitTarget): "none" | "jackson" {
   return emitTarget["native-serialization"] === "jackson" ? "jackson" : "none";
-}
-
-export function javaPackageName(namespace: string): string {
-  return (
-    namespace
-      .toLowerCase()
-      .replace(/[^a-z0-9.]+/g, ".")
-      .replace(/^\.+|\.+$/g, "") || "typra"
-  );
 }
 
 async function emitJavaFile(

@@ -5,9 +5,10 @@ import { Model } from "@typespec/compiler";
 import { inferRootNamespace } from "../src/emitter.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { TypeNode } from "../src/ir/ast.js";
+import { lowerLegacyCallableContracts } from "../src/ir/callable.js";
 import { buildExportSurfaceSnapshot } from "../src/contract-surface.js";
 import { lowerFile } from "../src/ir/lower.js";
-import { goPackageNameFromNamespace } from "../src/languages/go/driver.js";
+import { goPackageNameFromNamespace } from "../src/ir/namespace.js";
 import { emitPythonFile } from "../src/languages/python/emitter.js";
 import { emitPythonInit } from "../src/languages/python/scaffolding.js";
 import { PythonExprVisitor } from "../src/languages/python/visitor.js";
@@ -358,6 +359,51 @@ describe("export surface scaffolding", () => {
         ],
       },
     ]);
+  });
+
+  it("drives legacy protocol export surfaces from callable-contract IR", () => {
+    const snapshot = buildExportSurfaceSnapshot(
+      "Prompty.Prompty",
+      "Prompty",
+      "Prompty",
+      [{ type: "TypeScript" }],
+      allTypes,
+    );
+    const callableContracts = lowerLegacyCallableContracts(allTypes);
+    const protocols = snapshot.targets[0].protocols;
+
+    assert.deepEqual(
+      protocols.map((protocol) => ({
+        name: protocol.name,
+        group: protocol.group,
+        symbol: protocol.symbol,
+        methods: protocol.methods.map((method) => ({
+          name: method.name,
+          returns: method.returns,
+          params: method.params,
+          optional: method.optional,
+          sync: method.sync,
+          runtimeCancellable: method.runtimeCancellable,
+          atomic: method.atomic,
+          nonFatal: method.nonFatal,
+        })),
+      })),
+      callableContracts.map((contract) => ({
+        name: contract.name,
+        group: contract.group,
+        symbol: contract.source.symbol,
+        methods: contract.operations.map((operation) => ({
+          name: operation.name,
+          returns: operation.returns,
+          params: operation.params,
+          optional: operation.optional,
+          sync: operation.sync,
+          runtimeCancellable: operation.runtimeCancellable,
+          atomic: operation.atomic,
+          nonFatal: operation.nonFatal,
+        })),
+      })),
+    );
   });
 
   it("keeps protocol scaffold generation explicit and compile-only", () => {

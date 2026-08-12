@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -14,11 +15,57 @@ import { tmpdir } from "node:os";
 
 import { generate, SUPPORTED_TARGET_LANGUAGES } from "../src/generate.js";
 import { validateNativeSerializationTargets } from "../src/native-serialization.js";
+import {
+  findContributor,
+  normalizeOutputRequests,
+} from "../src/output-contributors.js";
 
 const require = createRequire(import.meta.url);
 
 function yamlString(value: string): string {
   return JSON.stringify(value);
+}
+
+function assertGeneratedTypeScriptTestsTypeCheck(output: string): void {
+  const globals = path.join(output, "generated", "typescript-tests", "globals.d.ts");
+  const tsconfig = path.join(output, "generated", "tsconfig.tests.json");
+  const tsc = require.resolve("typescript/bin/tsc");
+  writeFileSync(
+    globals,
+    [
+      "declare function describe(name: string, fn: () => void): void;",
+      "declare function it(name: string, fn: () => void | Promise<void>): void;",
+      "declare function expect(value: unknown): { toEqual(expected: unknown): void };",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    tsconfig,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: "ES2022",
+          module: "ESNext",
+          moduleResolution: "Bundler",
+          strict: true,
+          noEmit: true,
+          skipLibCheck: true,
+        },
+        include: [
+          "typescript/**/*.ts",
+          "typescript-tests/vector-conformance.test.ts",
+          "typescript-tests/globals.d.ts",
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+  execFileSync(process.execPath, [tsc, "--project", tsconfig], {
+    cwd: path.join(output, "generated"),
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 }
 
 describe("generate", () => {
@@ -76,6 +123,38 @@ describe("generate", () => {
 
   it("validates native serialization compatibility centrally for every target", () => {
     assert.deepEqual(
+      normalizeOutputRequests({
+        type: "Python",
+        "native-serialization": "pydantic",
+        outputs: [
+          { kind: "models" },
+          { kind: "native-serialization", provider: "pydantic" },
+        ],
+      }),
+      [
+        {
+          target: "python",
+          kind: "models",
+          provider: "typra",
+          source: "core",
+        },
+        {
+          target: "python",
+          kind: "native-serialization",
+          provider: "pydantic",
+          source: "native-serialization",
+        },
+      ],
+    );
+    assert.equal(
+      findContributor({
+        target: "Python",
+        kind: "native-serialization",
+        provider: "pydantic",
+      })?.provider,
+      "pydantic",
+    );
+    assert.deepEqual(
       validateNativeSerializationTargets([
         { type: "TypeScript", "native-serialization": "zod" },
         { type: "typescript", "native-serialization": "standard-schema" },
@@ -93,12 +172,14 @@ describe("generate", () => {
         { type: "python", "native-serialization": "standard-schema" },
         { type: "java", "native-serialization": "zod" },
         { type: "swift", "native-serialization": "standard-schema" },
+        { type: "typescript", outputs: [{ kind: "server", provider: "fastapi" }] },
       ]),
       [
         'Target "typescript" does not support native-serialization "pydantic". Supported values: "none", "zod", "standard-schema".',
         'Target "python" does not support native-serialization "standard-schema". Supported values: "none", "pydantic".',
         'Target "java" does not support native-serialization "zod". Supported values: "none", "jackson".',
         'Target "swift" does not support native-serialization "standard-schema". Supported values: "none", "codable".',
+        'Target "typescript" does not support output contributor "server:fastapi".',
       ],
     );
   });
@@ -165,6 +246,11 @@ describe("generate", () => {
           "    emit-targets:",
           "      - type: TypeScript",
           `        output-dir: ${yamlString(path.join(output, "generated", "typescript"))}`,
+          `        test-dir: ${yamlString(path.join(output, "generated", "typescript-tests"))}`,
+          "        format: false",
+          "      - type: Python",
+          `        output-dir: ${yamlString(path.join(output, "generated", "python"))}`,
+          `        test-dir: ${yamlString(path.join(output, "generated", "python-tests"))}`,
           "        format: false",
           "",
         ].join("\n"),
@@ -198,6 +284,751 @@ describe("generate", () => {
           assert.match(output, /Property 'owners' has an unsupported default/);
           return true;
         },
+      );
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("emits TypeSpec-native interface/op callables through protocol target renderers", () => {
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-native-callable-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      writeFileSync(
+        source,
+        [
+          'import "@typra/emitter";',
+          "",
+          "namespace Typra.CallableProbe;",
+          "",
+          "model Root {",
+          "  id: string;",
+          "}",
+          "",
+          "model RenderRequest {",
+          "  prompt: string;",
+          "  flag?: boolean;",
+          "}",
+          "",
+          "model RenderContext {",
+          "  traceId?: string;",
+          "}",
+          "",
+          "model RenderResult {",
+          "  output: string;",
+          "}",
+          "",
+          "const RenderVectors = #[",
+          '  #{ name: "basic", input: #{ request: #{ prompt: "hi", flag: true } }, expected: #{ output: "hi" } }',
+          "];",
+          "",
+          "@doc(\"Callable Renderer\")",
+          "interface Renderer {",
+          "  @doc(\"Render a prompt.\")",
+          "  @vector(RenderVectors)",
+          "  render(request: RenderRequest, context: RenderContext): RenderResult;",
+          "  @vector(#{ input: #{ scores: #[1, 2] }, expected: #[1, 2] })",
+          "  summarize(scores: int32[]): int32[];",
+          "}",
+          "",
+          "interface Cache<T> {",
+          "  get(): T;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.CallableProbe.Root"',
+          '    root-namespace: "Typra.CallableProbe"',
+          "    emit-targets:",
+          "      - type: TypeScript",
+          `        output-dir: ${yamlString(path.join(output, "generated", "typescript"))}`,
+          `        test-dir: ${yamlString(path.join(output, "generated", "typescript-tests"))}`,
+          "        format: false",
+          "      - type: Python",
+          `        output-dir: ${yamlString(path.join(output, "generated", "python"))}`,
+          `        test-dir: ${yamlString(path.join(output, "generated", "python-tests"))}`,
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      const renderer = readFileSync(
+        path.join(output, "generated", "typescript", "renderer.ts"),
+        "utf8",
+      );
+      assert.match(renderer, /export interface Renderer/);
+      assert.match(
+        renderer,
+        /render\(request: RenderRequest, context: RenderContext\): Promise<RenderResult>;/,
+      );
+      assert.match(
+        renderer,
+        /summarize\(scores: number\[\]\): Promise<number\[\]>;/,
+      );
+      const vectors = JSON.parse(
+        readFileSync(
+          path.join(output, "generated", ".typra-generated", "vectors.json"),
+          "utf8",
+        ),
+      );
+      assert.deepEqual(vectors.vectors, [
+        {
+          contract: "Renderer",
+          operation: "render",
+          params: { request: "RenderRequest", context: "RenderContext" },
+          returns: "RenderResult",
+          vector: {
+            name: "basic",
+            stage: "callable",
+            operation: "render",
+            input: { request: { prompt: "hi", flag: true } },
+            expected: { output: "hi" },
+          },
+        },
+        {
+          contract: "Renderer",
+          operation: "summarize",
+          params: { scores: "int32[]" },
+          returns: "int32[]",
+          vector: {
+            stage: "callable",
+            operation: "summarize",
+            input: { scores: [1, 2] },
+            expected: [1, 2],
+          },
+        },
+      ]);
+      const tsVectorTest = readFileSync(
+        path.join(
+          output,
+          "generated",
+          "typescript-tests",
+          "vector-conformance.test.ts",
+        ),
+        "utf8",
+      );
+      assert.match(tsVectorTest, /callable vector conformance/);
+      assert.match(tsVectorTest, /"contract": "Renderer"/);
+      assert.match(tsVectorTest, /"operation": "render"/);
+      const pyVectorTest = readFileSync(
+        path.join(
+          output,
+          "generated",
+          "python-tests",
+          "test_vector_conformance.py",
+        ),
+        "utf8",
+      );
+      assert.match(pyVectorTest, /test_callable_vector_payloads_roundtrip/);
+      assert.match(pyVectorTest, /from typra\.callableprobe import .*RenderRequest/);
+      assert.match(pyVectorTest, /if index == 0:[\s\S]*RenderRequest\.load/);
+      assert.match(pyVectorTest, /if index == 1:[\s\S]*pass/);
+      assert.equal(
+        existsSync(path.join(output, "generated", "typescript", "cache.ts")),
+        false,
+      );
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps legacy @protocol/@method and TypeSpec interface/op projections equivalent", () => {
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-callable-equiv-"));
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    const commonModels = [
+      "model Root {",
+      "  id: string;",
+      "}",
+      "",
+      "model RenderRequest {",
+      "  prompt: string;",
+      "}",
+      "",
+      "model RenderContext {",
+      "  traceId?: string;",
+      "}",
+      "",
+      "model RenderResult {",
+      "  output: string;",
+      "}",
+      "",
+    ];
+
+    const compileVariant = (
+      variant: string,
+      callableLines: string[],
+    ): {
+      generated: string;
+      renderer: string;
+      surface: Record<string, unknown>;
+      hydration: Record<string, unknown>;
+    } => {
+      const variantRoot = path.join(output, variant);
+      const source = path.join(variantRoot, "main.tsp");
+      const config = path.join(variantRoot, "tspconfig.yaml");
+      const generated = path.join(variantRoot, "generated");
+      mkdirSync(variantRoot, { recursive: true });
+      writeFileSync(
+        source,
+        [
+          'import "@typra/emitter";',
+          "",
+          "namespace Typra.CallableEquivalence;",
+          "",
+          ...commonModels,
+          ...callableLines,
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(generated)}`,
+          '    root-object: "Typra.CallableEquivalence.Root"',
+          '    root-namespace: "Typra.CallableEquivalence"',
+          "    emit-targets:",
+          "      - type: TypeScript",
+          `        output-dir: ${yamlString(path.join(generated, "typescript"))}`,
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      return {
+        generated,
+        renderer: readFileSync(
+          path.join(generated, "typescript", "renderer.ts"),
+          "utf8",
+        ),
+        surface: JSON.parse(
+          readFileSync(
+            path.join(generated, ".typra-generated", "export-surfaces.json"),
+            "utf8",
+          ),
+        ),
+        hydration: JSON.parse(
+          readFileSync(
+            path.join(generated, ".typra-generated", "hydration-seams.json"),
+            "utf8",
+          ),
+        ),
+      };
+    };
+
+    const normalizeSurface = (
+      snapshot: Record<string, unknown>,
+    ): Record<string, unknown> => ({
+      ...snapshot,
+      targets: (snapshot.targets as Array<Record<string, unknown>>).map(
+        (target) => ({
+          ...target,
+          outputRoot: "<generated>/typescript",
+        }),
+      ),
+    });
+
+    try {
+      const legacy = compileVariant("legacy", [
+        '@doc("Callable Renderer")',
+        "model Renderer {}",
+        "@@protocol(Renderer);",
+        '@@method(Renderer, "render", "RenderResult", "Render a prompt.", #{ request: "RenderRequest", context: "RenderContext" }, false, false);',
+      ]);
+      const native = compileVariant("native", [
+        '@doc("Callable Renderer")',
+        "interface Renderer {",
+        '  @doc("Render a prompt.")',
+        "  render(request: RenderRequest, context: RenderContext): RenderResult;",
+        "}",
+      ]);
+
+      assert.equal(native.renderer, legacy.renderer);
+      assert.deepEqual(
+        normalizeSurface(native.surface),
+        normalizeSurface(legacy.surface),
+      );
+      assert.deepEqual(native.hydration, legacy.hydration);
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("emits a Prompty-style callable/vector projection without HTTP transport", () => {
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-prompty-slice-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      writeFileSync(
+        source,
+        [
+          'import "@typra/emitter";',
+          "",
+          "namespace Typra.PromptySlice;",
+          "",
+          "model Root {",
+          "  name: string;",
+          "}",
+          "",
+          "model RenderRequest {",
+          "  template: string;",
+          "  variables?: Record<unknown>;",
+          "}",
+          "",
+          "model RenderResult {",
+          "  instructions: string;",
+          "}",
+          "",
+          "model ParseRequest {",
+          "  content: string;",
+          "}",
+          "",
+          "model ParseResult {",
+          "  messages: string[];",
+          "}",
+          "",
+          "model ProcessRequest {",
+          "  text: string;",
+          "}",
+          "",
+          "model ProcessResult {",
+          "  value: string;",
+          "}",
+          "",
+          "const RenderVectors = #[",
+          '  #{ name: "frontmatter-body", stage: "render", provider: "prompty", targetApi: "local", portability: "portable", normalization: #{ trailingNewline: "trim" }, input: #{ request: #{ template: "Hello {{name}}", variables: #{ name: "Typra" } } }, expected: #{ instructions: "Hello Typra" } }',
+          "];",
+          "",
+          "interface Renderer {",
+          "  @vector(RenderVectors)",
+          "  render(request: RenderRequest): RenderResult;",
+          "}",
+          "",
+          "interface Parser {",
+          '  @vector(#{ name: "markdown-body", stage: "parse", input: #{ request: #{ content: "---\\nname: demo\\n---\\nHello" } }, expected: #{ messages: #["Hello"] } })',
+          "  parse(request: ParseRequest): ParseResult;",
+          "}",
+          "",
+          "interface Processor {",
+          '  @vector(#{ name: "extract-text", stage: "process", input: #{ request: #{ text: "hello" } }, expected: #{ value: "hello" } })',
+          "  process(request: ProcessRequest): ProcessResult;",
+          "}",
+          "",
+          "interface Harness {",
+          '  @vector(#{ name: "replay-mismatch", stage: "replay", input: #{ request: #{ text: "" } }, expectedError: #{ code: "replay-drift" } })',
+          "  verify(request: ProcessRequest): ProcessResult;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.PromptySlice.Root"',
+          '    root-namespace: "Typra.PromptySlice"',
+          "    hydration-zones:",
+          '      - "runtime/prompty"',
+          "    emit-targets:",
+          "      - type: TypeScript",
+          `        output-dir: ${yamlString(path.join(output, "generated", "typescript"))}`,
+          `        test-dir: ${yamlString(path.join(output, "generated", "typescript-tests"))}`,
+          '        import-path: "../typescript/index"',
+          '        native-serialization: "zod"',
+          "        outputs:",
+          "          - kind: models",
+          "          - kind: native-serialization",
+          "            provider: zod",
+          '        protocol-scaffolds: "compile-only"',
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      const renderer = readFileSync(
+        path.join(output, "generated", "typescript", "renderer.ts"),
+        "utf8",
+      );
+      assert.match(renderer, /export interface Renderer/);
+      assert.match(renderer, /render\(request: RenderRequest\): Promise<RenderResult>;/);
+      assert.equal(
+        existsSync(path.join(output, "generated", "typescript", "http.ts")),
+        false,
+      );
+
+      const vectorTest = readFileSync(
+        path.join(
+          output,
+          "generated",
+          "typescript-tests",
+          "vector-conformance.test.ts",
+        ),
+        "utf8",
+      );
+      assert.match(vectorTest, /"contract": "Renderer"/);
+      assert.match(vectorTest, /"stage": "render"/);
+      assert.match(vectorTest, /"provider": "prompty"/);
+      assert.match(vectorTest, /"targetApi": "local"/);
+      assert.match(vectorTest, /"normalization": \{\s+"trailingNewline": "trim"/);
+      assert.match(vectorTest, /"contract": "Harness"/);
+      assert.match(vectorTest, /"expectedError": \{\s+"code": "replay-drift"/);
+      assert.match(vectorTest, /RenderRequest\.load\(value\)\.save\(\)/);
+
+      const scaffold = readFileSync(
+        path.join(
+          output,
+          "generated",
+          "typescript-tests",
+          "protocol-scaffolds.test.ts",
+        ),
+        "utf8",
+      );
+      assert.match(scaffold, /class CompileOnlyRenderer implements Renderer/);
+      assert.match(scaffold, /class CompileOnlyHarness implements Harness/);
+      assertGeneratedTypeScriptTestsTypeCheck(output);
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("emits a Python FastAPI transport projection from TypeSpec HTTP decorators", () => {
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-fastapi-slice-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      writeFileSync(
+        source,
+        [
+          'import "@typra/emitter";',
+          'import "@typespec/http";',
+          "using TypeSpec.Http;",
+          "",
+          "namespace Typra.FastApiSlice;",
+          "",
+          "model Root {",
+          "  name: string;",
+          "}",
+          "",
+          "model Pet {",
+          "  name: string;",
+          "}",
+          "",
+          "model UpdatePetRequest {",
+          "  name: string;",
+          "}",
+          "",
+          "const ReadVectors = #[",
+          '  #{ name: "read-pet", stage: "transport", input: #{ petId: "p1", includeDetails: true }, expected: #{ name: "Rover" } }',
+          "];",
+          "const UpdateVectors = #[",
+          '  #{ name: "update-pet", stage: "transport", input: #{ petId: "p1", contentVersion: "v1", request: #{ name: "Fido" } }, expected: #{ name: "Fido" } }',
+          "];",
+          "",
+          "@route(\"/pets\")",
+          "interface Pets {",
+          "  @get",
+          "  @route(\"/{petId}\")",
+          "  @vector(ReadVectors)",
+          "  read(@path petId: string, @query includeDetails?: boolean): Pet;",
+          "",
+          "  @post",
+          "  @route(\"/{petId}\")",
+          "  @vector(UpdateVectors)",
+          "  update(@path petId: string, @header contentVersion: string, @body request: UpdatePetRequest): Pet;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.FastApiSlice.Root"',
+          '    root-namespace: "Typra.FastApiSlice"',
+          "    emit-targets:",
+          "      - type: Python",
+          `        output-dir: ${yamlString(path.join(output, "generated", "python"))}`,
+          `        test-dir: ${yamlString(path.join(output, "generated", "python-tests"))}`,
+          '        import-path: "typra.fastapislice"',
+          "        outputs:",
+          "          - kind: server",
+          "            provider: fastapi",
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      const routes = readFileSync(
+        path.join(output, "generated", "python", "fastapi_routes.py"),
+        "utf8",
+      );
+      assert.match(routes, /from fastapi import APIRouter, Body, Cookie, Header, Path, Query/);
+      assert.match(routes, /class PetsHandler\(Protocol\):/);
+      assert.match(routes, /async def read\(self, pet_id: str, include_details: bool \| None\):/);
+      assert.match(routes, /@router\.get\("\/pets\/\{petId\}", status_code=200\)/);
+      assert.match(routes, /pet_id: str = Path\(\.\.\., alias="petId"\)/);
+      assert.match(routes, /include_details: bool \| None = Query\(default=None, alias="includeDetails"\)/);
+      assert.match(routes, /content_version: str = Header\(default=\.\.\., alias="content-version"\)/);
+      assert.match(routes, /request = UpdatePetRequest\.load\(request\)/);
+      assert.match(routes, /return result\.save\(\)/);
+
+      assert.equal(
+        readFileSync(
+          path.join(output, "generated", "python", "requirements-fastapi.txt"),
+          "utf8",
+        ),
+        "# <auto-generated by typra-emitter>\nfastapi\n",
+      );
+
+      const transportTest = readFileSync(
+        path.join(output, "generated", "python-tests", "test_fastapi_transport.py"),
+        "utf8",
+      );
+      assert.match(transportTest, /TRANSPORT_VECTORS = json\.loads/);
+      assert.match(transportTest, /from fastapi.testclient import TestClient/);
+      assert.match(transportTest, /def test_fastapi_transport_vectors_execute_routes/);
+      assert.match(transportTest, /_assert_handler_received\(entry, handler\)/);
+      assert.match(transportTest, /\\"stage\\": \\"transport\\"/);
+      assert.match(transportTest, /\\"verb\\": \\"get\\"/);
+      assert.match(transportTest, /\\"verb\\": \\"post\\"/);
+      assert.match(transportTest, /\\"path\\": \\"\/pets\/\{petId\}\\"/);
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves nested namespaces under a dotted root namespace", () => {
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-namespace-projection-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      writeFileSync(
+        source,
+        [
+          'import "@typra/emitter";',
+          "",
+          "namespace Typra.NamespaceProbe;",
+          "",
+          "model Root {",
+          "  child: Runtime.Child;",
+          "  tool: Runtime.Tools.Tool;",
+          "}",
+          "",
+          "model Owner {",
+          "  name: string;",
+          "}",
+          "",
+          "namespace Runtime {",
+          "  model Child {",
+          "    value: string;",
+          "  }",
+          "",
+          "  namespace Tools {",
+          "    model Tool {",
+          "      owner: Owner;",
+          "    }",
+          "  }",
+          "",
+          "  interface Renderer {",
+          "    render(child: Child): Child;",
+          "  }",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.NamespaceProbe.Root"',
+          '    root-namespace: "Typra.NamespaceProbe"',
+          "    emit-targets:",
+          "      - type: TypeScript",
+          `        output-dir: ${yamlString(path.join(output, "generated", "typescript"))}`,
+          "        format: false",
+          "      - type: Python",
+          `        output-dir: ${yamlString(path.join(output, "generated", "python"))}`,
+          "        format: false",
+          "      - type: Rust",
+          `        output-dir: ${yamlString(path.join(output, "generated", "rust"))}`,
+          "        format: false",
+          "      - type: TypeScript",
+          `        output-dir: ${yamlString(path.join(output, "generated", "typescript-flat"))}`,
+          "        namespace-output: flat",
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      const ast = JSON.parse(
+        readFileSync(path.join(output, "generated", "json-ast", "model.json"), "utf8"),
+      );
+      assert.equal(ast.properties[0].typeName.namespace, "Typra.NamespaceProbe.Runtime");
+      assert.equal(ast.properties[0].typeName.name, "Child");
+      assert.equal(ast.properties[0].type.properties[0].name, "value");
+      assert.equal(ast.properties[1].typeName.namespace, "Typra.NamespaceProbe.Runtime.Tools");
+      assert.equal(ast.properties[1].typeName.name, "Tool");
+
+      const tsRoot = readFileSync(
+        path.join(output, "generated", "typescript", "root.ts"),
+        "utf8",
+      );
+      assert.match(tsRoot, /from "\.\/runtime\/tools\/tool"/);
+      assert.ok(
+        existsSync(path.join(output, "generated", "typescript", "runtime", "child.ts")),
+      );
+      assert.ok(
+        existsSync(
+          path.join(output, "generated", "typescript", "runtime", "tools", "tool.ts"),
+        ),
+      );
+      const tsNestedTool = readFileSync(
+        path.join(output, "generated", "typescript", "runtime", "tools", "tool.ts"),
+        "utf8",
+      );
+      assert.match(tsNestedTool, /from "\.\.\/\.\.\/owner"/);
+      assert.ok(
+        existsSync(path.join(output, "generated", "typescript-flat", "tool.ts")),
+      );
+      assert.ok(
+        !existsSync(
+          path.join(output, "generated", "typescript-flat", "runtime", "tools", "tool.ts"),
+        ),
+      );
+
+      const pythonRootInit = readFileSync(
+        path.join(output, "generated", "python", "__init__.py"),
+        "utf8",
+      );
+      assert.match(pythonRootInit, /from \.runtime\.tools import \(/);
+      assert.ok(
+        existsSync(path.join(output, "generated", "python", "runtime", "__init__.py")),
+      );
+      assert.ok(
+        existsSync(path.join(output, "generated", "python", "runtime", "_Child.py")),
+      );
+      assert.ok(
+        existsSync(
+          path.join(output, "generated", "python", "runtime", "tools", "_Tool.py"),
+        ),
+      );
+      const pythonNestedTool = readFileSync(
+        path.join(output, "generated", "python", "runtime", "tools", "_Tool.py"),
+        "utf8",
+      );
+      assert.match(pythonNestedTool, /from \.\.\._Owner import Owner/);
+
+      const rustRootMod = readFileSync(
+        path.join(output, "generated", "rust", "mod.rs"),
+        "utf8",
+      );
+      assert.match(rustRootMod, /pub mod runtime;/);
+      const rustRuntimeMod = readFileSync(
+        path.join(output, "generated", "rust", "runtime", "mod.rs"),
+        "utf8",
+      );
+      assert.match(rustRuntimeMod, /pub mod child;/);
+      assert.match(rustRuntimeMod, /pub mod tools;/);
+      assert.ok(
+        existsSync(path.join(output, "generated", "rust", "runtime", "tools", "mod.rs")),
+      );
+      const rustNestedTool = readFileSync(
+        path.join(output, "generated", "rust", "runtime", "tools", "tool.rs"),
+        "utf8",
+      );
+      assert.match(rustNestedTool, /use super::super::super::owner::Owner;/);
+
+      const exportSurfaces = JSON.parse(
+        readFileSync(
+          path.join(output, "generated", ".typra-generated", "export-surfaces.json"),
+          "utf8",
+        ),
+      );
+      assert.equal(exportSurfaces.root.namespace, "Typra.NamespaceProbe");
+      assert.equal(
+        exportSurfaces.targets.find((target: { target: string }) => target.target === "typescript")
+          .namespace,
+        "Typra.NamespaceProbe",
+      );
+      assert.equal(
+        exportSurfaces.targets.find((target: { target: string }) => target.target === "python")
+          .packageName,
+        "typra.namespaceprobe",
+      );
+      const tsTarget = exportSurfaces.targets.find(
+        (target: { target: string }) => target.target === "typescript",
+      );
+      assert.equal(
+        tsTarget.exports.filter((entry: { name: string }) => entry.name === "Child").length,
+        1,
       );
     } finally {
       rmSync(output, { recursive: true, force: true });

@@ -4,6 +4,7 @@ import {
   Namespace,
   Model,
   NoTarget,
+  getNamespaceFullName,
 } from "@typespec/compiler";
 import { resolveModel, TypeNode, enumerateTypes } from "./ir/ast.js";
 import { TypraEmitterOptions, EmitTarget } from "./lib.js";
@@ -34,11 +35,28 @@ import {
   emitHydrationBoundarySnapshot,
 } from "./hydration-seams.js";
 import { validateNativeSerializationTargets } from "./native-serialization.js";
+import {
+  callableContractToProtocolNode,
+  lowerTypeSpecCallableContracts,
+} from "./ir/callable.js";
+import type { CallableContract } from "./ir/callable.js";
+import {
+  buildCallableVectorSnapshot,
+  emitCallableVectorSnapshot,
+} from "./ir/vector.js";
+import type { CallableVectorSnapshot } from "./ir/vector.js";
+import { lowerTypeSpecTransportContracts } from "./ir/transport.js";
+import type { TransportContract } from "./ir/transport.js";
 
 // Generator options passed to each generator
 export interface GeneratorOptions {
+  rootNamespace?: string;
+  rootAlias?: string;
+  namespaceOutput?: "structural" | "flat";
   omitModels?: string[];
   additionalModels?: TypeNode[];
+  callableVectors?: CallableVectorSnapshot;
+  transportContracts?: TransportContract[];
 }
 
 /**
@@ -185,6 +203,7 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   const rootNamespace =
     options["root-namespace"] || inferRootNamespace(rootObject);
   const rootAlias = options["root-alias"] || inferRootAlias(rootNamespace);
+  const namespaceOutput = options["namespace-output"] ?? "structural";
 
   const model = resolveModel(
     context.program,
@@ -204,6 +223,8 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   // If root-namespace is specified, resolve all models in that namespace
   // so new types are automatically emitted without manual additional-roots.
   const additionalModels: TypeNode[] = [];
+  const typeSpecCallableContracts: CallableContract[] = [];
+  const transportContracts: TransportContract[] = [];
   const visited = new Set<string>();
 
   // Collect names already in the main model tree to avoid duplicates
@@ -228,7 +249,10 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   if (nsRef[0] && nsRef[0].kind === "Namespace") {
     const ns = nsRef[0] as Namespace;
     for (const nsModel of collectNamespaceModels(ns)) {
-      const fullName = `${rootNamespace}.${nsModel.name}`;
+      const namespace = nsModel.namespace
+        ? getNamespaceFullName(nsModel.namespace)
+        : rootNamespace;
+      const fullName = `${namespace}.${nsModel.name}`;
       if (visited.has(fullName)) continue;
 
       // Skip uninstantiated template declarations (e.g., Named<T>, Id<T>)
@@ -244,6 +268,31 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
         rootAlias,
       );
       additionalModels.push(additionalNode);
+      visited.add(fullName);
+    }
+
+    const callableContracts = lowerTypeSpecCallableContracts(
+      context.program,
+      ns,
+      rootNamespace,
+      rootAlias,
+    );
+    typeSpecCallableContracts.push(...callableContracts);
+    transportContracts.push(
+      ...lowerTypeSpecTransportContracts(
+        context.program,
+        ns,
+        rootNamespace,
+        rootAlias,
+      ),
+    );
+
+    for (const contract of callableContracts) {
+      const callableNode = callableContractToProtocolNode(contract);
+      const fullName = `${callableNode.typeName.namespace}.${callableNode.typeName.name}`;
+      if (visited.has(fullName)) continue;
+
+      additionalModels.push(callableNode);
       visited.add(fullName);
     }
   }
@@ -271,9 +320,17 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   }
 
   const targets = options["emit-targets"] || [];
+  const callableVectorSnapshot = buildCallableVectorSnapshot(
+    typeSpecCallableContracts,
+  );
   const generatorOptions: GeneratorOptions = {
+    rootNamespace,
+    rootAlias,
+    namespaceOutput,
     omitModels: options["omit-models"] || [],
     additionalModels: additionalModels,
+    callableVectors: callableVectorSnapshot,
+    transportContracts,
   };
   const exportSurfaceNodes = filterNodes(Array.from(enumerateTypes(model)), {
     omitModels: generatorOptions.omitModels,
@@ -310,6 +367,10 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   await emitHydrationBoundarySnapshot(
     context,
     buildHydrationBoundarySnapshot(exportSurfaceSnapshot, options),
+  );
+  await emitCallableVectorSnapshot(
+    context,
+    callableVectorSnapshot,
   );
 
   // Reads the previous manifest, so it must run before the new one replaces it.

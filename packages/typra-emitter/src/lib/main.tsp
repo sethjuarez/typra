@@ -74,6 +74,28 @@ extern dec method(
 );
 
 /**
+ * Attaches callable behavior expectations to a TypeSpec operation.
+ *
+ * A vector must provide `input` and exactly one of `expected` or `expectedError`.
+ * Large vector sets can be authored as TypeSpec constants and referenced from the
+ * operation, keeping TypeSpec as the source of truth while avoiding bulky
+ * contract files.
+ *
+ * @example
+ * ```typespec
+ * const RenderVectors = #[
+ *   #{ name: "basic", input: #{ prompt: "hi" }, expected: #{ output: "hi" } }
+ * ];
+ *
+ * interface Renderer {
+ *   @vector(RenderVectors)
+ *   render(request: RenderRequest): RenderResult;
+ * }
+ * ```
+ */
+extern dec vector(target: Operation, vector: valueof unknown);
+
+/**
  * Maps a property's wire name for a specific provider. Used in provider
  * wire.tsp files via augment syntax (`@@`) to declare how core property names
  * map to provider-specific API parameter names.

@@ -5,12 +5,14 @@ import {
   Type,
   ModelProperty,
   ObjectValue,
+  Operation,
   serializeValueAsJson,
   StringValue,
   Union,
 } from "@typespec/compiler";
 import { StateKeys } from "./lib.js";
 import { Coercion } from "./ir/ast.js";
+import type { VectorEntry } from "./ir/vector.js";
 
 export const appendStateValue = <T>(
   context: DecoratorContext,
@@ -326,6 +328,83 @@ export function $method(
   };
 
   appendStateValue<MethodEntry>(context, StateKeys.methods, target, entry);
+}
+
+export function $vector(
+  context: DecoratorContext,
+  target: Operation,
+  vector: object,
+) {
+  const raw = deserializeValue(vector);
+  const entries = Array.isArray(raw) ? raw : [raw];
+  const valid: VectorEntry[] = [];
+
+  for (const [index, entry] of entries.entries()) {
+    if (!isRecord(entry)) {
+      reportVectorDiagnostic(
+        context,
+        target,
+        `Vector entry ${index} must be an object.`,
+      );
+      continue;
+    }
+
+    if (!Object.hasOwn(entry, "input")) {
+      reportVectorDiagnostic(
+        context,
+        target,
+        `Vector entry ${index} must provide an input field.`,
+      );
+      continue;
+    }
+
+    const hasExpected = Object.hasOwn(entry, "expected");
+    const hasExpectedError = Object.hasOwn(entry, "expectedError");
+    if (hasExpected === hasExpectedError) {
+      reportVectorDiagnostic(
+        context,
+        target,
+        `Vector entry ${index} must provide exactly one of expected or expectedError.`,
+      );
+      continue;
+    }
+
+    if (
+      Object.hasOwn(entry, "operation") &&
+      entry.operation !== undefined &&
+      entry.operation !== target.name
+    ) {
+      reportVectorDiagnostic(
+        context,
+        target,
+        `Vector entry ${index} operation must match the decorated operation '${target.name}'.`,
+      );
+      continue;
+    }
+
+    valid.push(entry as unknown as VectorEntry);
+  }
+
+  if (valid.length > 0) {
+    appendStateValue<VectorEntry>(context, StateKeys.vectors, target, valid);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function reportVectorDiagnostic(
+  context: DecoratorContext,
+  target: Operation,
+  message: string,
+): void {
+  context.program.reportDiagnostic({
+    code: "typra-emitter-vector-shape",
+    message,
+    severity: "error",
+    target,
+  });
 }
 
 // ============================================================================

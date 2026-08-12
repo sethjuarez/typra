@@ -1,0 +1,194 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import {
+  DecoratorContext,
+  Interface,
+  Operation,
+  Program,
+  Type,
+} from "@typespec/compiler";
+
+import { $vector } from "../src/decorators.js";
+import { lowerTypeSpecCallableContract } from "../src/ir/callable.js";
+import { lowerOperationVectors } from "../src/ir/vector.js";
+
+function type(name: string): Type {
+  return {
+    kind: "Model",
+    name,
+  } as unknown as Type;
+}
+
+function operation(): Operation {
+  return {
+    kind: "Operation",
+    name: "render",
+    parameters: {
+      kind: "Model",
+      name: "",
+      properties: new Map([["request", { type: type("RenderRequest") }]]),
+    },
+    returnType: type("RenderResult"),
+  } as unknown as Operation;
+}
+
+function interfaceFor(op: Operation): Interface {
+  return {
+    kind: "Interface",
+    name: "Renderer",
+    namespace: {
+      name: "Runtime",
+      namespaces: new Map(),
+      interfaces: new Map(),
+      models: new Map(),
+      namespace: {
+        name: "Typra",
+      },
+    },
+    operations: new Map([[op.name, op]]),
+  } as unknown as Interface;
+}
+
+function testContext(): {
+  context: DecoratorContext;
+  program: Program;
+  diagnostics: Array<{ code: string; message: string }>;
+} {
+  const state = new Map<symbol, Map<unknown, unknown>>();
+  const diagnostics: Array<{ code: string; message: string }> = [];
+  const program = {
+    stateMap: (key: symbol) => {
+      if (!state.has(key)) state.set(key, new Map());
+      return state.get(key)!;
+    },
+    reportDiagnostic: (diagnostic: { code: string; message: string }) => {
+      diagnostics.push(diagnostic);
+    },
+  } as unknown as Program;
+
+  return {
+    context: { program } as unknown as DecoratorContext,
+    program,
+    diagnostics,
+  };
+}
+
+describe("@vector callable behavior contracts", () => {
+  it("captures inline success and expected-error vectors in operation vector IR", () => {
+    const { context, program, diagnostics } = testContext();
+    const op = operation();
+
+    $vector(context, op, {
+      name: "basic",
+      input: { request: { prompt: "hi" } },
+      expected: { output: "hi" },
+      provider: "openai",
+      targetApi: "chat",
+      portability: "portable",
+      normalization: { trailingNewline: "trim" },
+    });
+    $vector(context, op, {
+      name: "bad-template",
+      input: { request: { prompt: "" } },
+      expectedError: { code: "empty-template" },
+    });
+
+    assert.deepEqual(diagnostics, []);
+    assert.deepEqual(lowerOperationVectors(program, op), [
+      {
+        name: "basic",
+        stage: "callable",
+        operation: "render",
+        input: { request: { prompt: "hi" } },
+        expected: { output: "hi" },
+        provider: "openai",
+        targetApi: "chat",
+        portability: "portable",
+        normalization: { trailingNewline: "trim" },
+      },
+      {
+        name: "bad-template",
+        stage: "callable",
+        operation: "render",
+        input: { request: { prompt: "" } },
+        expectedError: { code: "empty-template" },
+      },
+    ]);
+  });
+
+  it("captures named vector-set style arrays without changing operation ownership", () => {
+    const { context, program } = testContext();
+    const op = operation();
+
+    $vector(context, op, [
+      { name: "one", input: { request: { prompt: "one" } }, expected: {} },
+      { name: "two", input: { request: { prompt: "two" } }, expected: {} },
+    ]);
+
+    assert.deepEqual(
+      lowerOperationVectors(program, op).map((vector) => ({
+        name: vector.name,
+        operation: vector.operation,
+        stage: vector.stage,
+      })),
+      [
+        { name: "one", operation: "render", stage: "callable" },
+        { name: "two", operation: "render", stage: "callable" },
+      ],
+    );
+  });
+
+  it("reports invalid vector shapes instead of silently skipping them", () => {
+    const { context, program, diagnostics } = testContext();
+    const op = operation();
+
+    $vector(context, op, [
+      "not-an-object",
+      { expected: {} },
+      { input: {}, expected: {}, expectedError: {} },
+      { input: {} },
+      { operation: "parse", input: {}, expected: {} },
+    ] as any);
+
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      [
+        "typra-emitter-vector-shape",
+        "typra-emitter-vector-shape",
+        "typra-emitter-vector-shape",
+        "typra-emitter-vector-shape",
+        "typra-emitter-vector-shape",
+      ],
+    );
+    assert.deepEqual(lowerOperationVectors(program, op), []);
+  });
+
+  it("includes captured vectors on TypeSpec-native callable operations", () => {
+    const { context, program } = testContext();
+    const op = operation();
+    const iface = interfaceFor(op);
+
+    $vector(context, op, {
+      name: "basic",
+      input: { request: { prompt: "hi" } },
+      expected: { output: "hi" },
+    });
+
+    const contract = lowerTypeSpecCallableContract(
+      program,
+      iface,
+      "Typra.Runtime",
+      "Runtime",
+    );
+
+    assert.deepEqual(contract.operations[0].vectors, [
+      {
+        name: "basic",
+        stage: "callable",
+        operation: "render",
+        input: { request: { prompt: "hi" } },
+        expected: { output: "hi" },
+      },
+    ]);
+  });
+});
