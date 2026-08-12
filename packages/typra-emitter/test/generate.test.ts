@@ -155,6 +155,22 @@ describe("generate", () => {
       })?.provider,
       "fetch",
     );
+    assert.equal(
+      findContributor({
+        target: "Python",
+        kind: "server",
+        provider: "starlette",
+      })?.provider,
+      "starlette",
+    );
+    assert.equal(
+      findContributor({
+        target: "Python",
+        kind: "consumer",
+        provider: "httpx",
+      })?.provider,
+      "httpx",
+    );
     assert.deepEqual(
       validateNativeSerializationTargets([
         { type: "TypeScript", "native-serialization": "zod" },
@@ -765,24 +781,73 @@ describe("generate", () => {
           "  name: string;",
           "}",
           "",
+          "model ErrorBody {",
+          "  message: string;",
+          "}",
+          "",
+          "model DecoratedData {",
+          "  @header traceId: string;",
+          "  value: string;",
+          "}",
+          "",
+          "model PetNotFound {",
+          "  @statusCode statusCode: 404;",
+          "  @body body: ErrorBody;",
+          "}",
+          "",
+          "model CreatedPet {",
+          "  @statusCode statusCode: 201;",
+          "  @body body: Pet;",
+          "}",
+          "",
+          "model GenericStatusEnvelope {",
+          "  @statusCode statusCode: int32;",
+          "  @body body: ErrorBody;",
+          "}",
+          "",
           "const ReadVectors = #[",
-          '  #{ name: "read-pet", stage: "transport", input: #{ petId: "p1", includeDetails: true }, expected: #{ name: "Rover" } }',
+          '  #{ name: "read-pet", stage: "transport", input: #{ petId: "p1", includeDetails: true, sessionId: "s1" }, expected: #{ name: "Rover" } }',
           "];",
           "const UpdateVectors = #[",
           '  #{ name: "update-pet", stage: "transport", input: #{ petId: "p1", contentVersion: "v1", request: #{ name: "Fido" } }, expected: #{ name: "Fido" } }',
           "];",
+          "const CreateVectors = #[",
+          '  #{ name: "create-pet", stage: "transport", input: #{ request: #{ name: "Spot" } }, expected: #{ name: "Spot" } }',
+          "];",
+          "const NameVectors = #[",
+          '  #{ name: "pet-name", stage: "transport", input: #{ petId: "p1" }, expected: "Rover" }',
+          "];",
+          "const EchoVectors = #[",
+          '  #{ name: "echo-name", stage: "transport", input: #{ value: "Rover" }, expected: "Rover" }',
+          "];",
           "",
           "@route(\"/pets\")",
+          "@useAuth(BearerAuth)",
           "interface Pets {",
           "  @get",
           "  @route(\"/{petId}\")",
           "  @vector(ReadVectors)",
-          "  read(@path petId: string, @query includeDetails?: boolean): Pet;",
+          "  read(@path petId: string, @query includeDetails?: boolean, @cookie sessionId: string): Pet | PetNotFound;",
           "",
           "  @post",
           "  @route(\"/{petId}\")",
           "  @vector(UpdateVectors)",
           "  update(@path petId: string, @header contentVersion: string, @body request: UpdatePetRequest): Pet;",
+          "",
+          "  @post",
+          "  @route(\"/\")",
+          "  @vector(CreateVectors)",
+          "  create(@body request: UpdatePetRequest): CreatedPet;",
+          "",
+          "  @get",
+          "  @route(\"/names/{pet-id}\")",
+          "  @vector(NameVectors)",
+          "  getName(@path(\"pet-id\") petId: string): string | PetNotFound;",
+          "",
+          "  @post",
+          "  @route(\"/echo\")",
+          "  @vector(EchoVectors)",
+          "  echo(@body value: string): string;",
           "}",
           "",
         ].join("\n"),
@@ -805,6 +870,10 @@ describe("generate", () => {
           "        outputs:",
           "          - kind: server",
           "            provider: fastapi",
+          "          - kind: server",
+          "            provider: starlette",
+          "          - kind: consumer",
+          "            provider: httpx",
           "        format: false",
           "      - type: TypeScript",
           `        output-dir: ${yamlString(path.join(output, "generated", "typescript"))}`,
@@ -828,15 +897,26 @@ describe("generate", () => {
         path.join(output, "generated", "python", "fastapi_routes.py"),
         "utf8",
       );
+      assert.match(routes, /from typing import Any, Protocol/);
       assert.match(routes, /from fastapi import APIRouter, Body, Cookie, Header, Path, Query/);
+      assert.match(routes, /AUTH_REQUIREMENTS = json\.loads/);
+      assert.match(routes, /\\"Pets\.read\\": \{/);
+      assert.match(routes, /\\"scheme\\": \\"Bearer\\"/);
+      assert.doesNotMatch(routes, /Authorization/);
       assert.match(routes, /class PetsHandler\(Protocol\):/);
-      assert.match(routes, /async def read\(self, pet_id: str, include_details: bool \| None\):/);
-      assert.match(routes, /@router\.get\("\/pets\/\{petId\}", status_code=200\)/);
-      assert.match(routes, /pet_id: str = Path\(\.\.\., alias="petId"\)/);
+      assert.match(routes, /async def read\(self, session_id: str, pet_id: str, include_details: bool \| None\):/);
+      assert.match(routes, /@router\.get\("\/pets\/\{pet_id\}", status_code=200\)/);
+      assert.match(routes, /@router\.get\("\/pets\/names\/\{pet_id\}", status_code=200\)/);
+      assert.match(routes, /@router\.post\("\/pets\/", status_code=201\)/);
+      assert.match(routes, /pet_id: str = Path\(\.\.\.\)/);
+      assert.doesNotMatch(routes, /Path\(\.\.\., alias="pet-id"\)/);
       assert.match(routes, /include_details: bool \| None = Query\(default=None, alias="includeDetails"\)/);
+      assert.match(routes, /session_id: str = Cookie\(default=\.\.\., alias="session_id"\)/);
       assert.match(routes, /content_version: str = Header\(default=\.\.\., alias="content-version"\)/);
       assert.match(routes, /request = UpdatePetRequest\.load\(request\)/);
-      assert.match(routes, /return result\.save\(\)/);
+      assert.match(routes, /value: Any = Body\(\.\.\.\)/);
+      assert.match(routes, /return result\.save\(\) if hasattr\(result, "save"\) else result/);
+      assert.match(routes, /async def getName\(pet_id: str = Path\(\.\.\.\)\):\n        result = await handler\.getName\(pet_id=pet_id\)\n        return result\.save\(\) if hasattr\(result, "save"\) else result/);
 
       assert.equal(
         readFileSync(
@@ -845,6 +925,46 @@ describe("generate", () => {
         ),
         "# <auto-generated by typra-emitter>\nfastapi\n",
       );
+      assert.equal(
+        readFileSync(
+          path.join(output, "generated", "python", "requirements-starlette.txt"),
+          "utf8",
+        ),
+        "# <auto-generated by typra-emitter>\nstarlette\n",
+      );
+      const pythonProtocol = readFileSync(
+        path.join(output, "generated", "python", "_Pets.py"),
+        "utf8",
+      );
+      assert.match(pythonProtocol, /def get_name\(self, pet_id: str\) -> str \| PetNotFound:/);
+
+      const starletteRoutes = readFileSync(
+        path.join(output, "generated", "python", "starlette_routes.py"),
+        "utf8",
+      );
+      assert.match(starletteRoutes, /from starlette\.exceptions import HTTPException/);
+      assert.match(starletteRoutes, /def _required\(value, binding_name\):/);
+      assert.match(starletteRoutes, /from starlette\.routing import Route/);
+      assert.match(starletteRoutes, /AUTH_REQUIREMENTS = json\.loads/);
+      assert.doesNotMatch(starletteRoutes, /Authorization/);
+      assert.match(starletteRoutes, /Route\("\/pets\/\{pet_id\}", read, methods=\["GET"\]\)/);
+      assert.match(starletteRoutes, /Route\("\/pets\/names\/\{pet_id\}", getName, methods=\["GET"\]\)/);
+      assert.match(starletteRoutes, /pet_id = _coerce\(_request\.path_params\.get\("pet_id"\), "string"\)/);
+      assert.match(starletteRoutes, /session_id = _coerce\(_required\(session_id_raw, "session_id"\), "string"\)/);
+      assert.match(starletteRoutes, /content_version = _coerce\(_required\(content_version_raw, "content-version"\), "string"\)/);
+      assert.match(starletteRoutes, /include_details = _coerce\(include_details_raw, "boolean"\)/);
+      assert.match(starletteRoutes, /result = result\.save\(\) if hasattr\(result, "save"\) else result/);
+
+      const httpxClient = readFileSync(
+        path.join(output, "generated", "python", "httpx_client.py"),
+        "utf8",
+      );
+      assert.match(httpxClient, /class PetsClient:/);
+      assert.match(httpxClient, /TypraHttpxResponseError/);
+      assert.match(httpxClient, /"cookies": cookies/);
+      assert.match(httpxClient, /"auth": json\.loads/);
+      assert.doesNotMatch(httpxClient, /Authorization/);
+      assert.match(httpxClient, /return Pet\.load\(response\.get\("body"\)\)/);
 
       const transportTest = readFileSync(
         path.join(output, "generated", "python-tests", "test_fastapi_transport.py"),
@@ -858,22 +978,66 @@ describe("generate", () => {
       assert.match(transportTest, /\\"verb\\": \\"get\\"/);
       assert.match(transportTest, /\\"verb\\": \\"post\\"/);
       assert.match(transportTest, /\\"path\\": \\"\/pets\/\{petId\}\\"/);
+      const starletteTest = readFileSync(
+        path.join(output, "generated", "python-tests", "test_starlette_transport.py"),
+        "utf8",
+      );
+      assert.match(starletteTest, /test_starlette_transport_vectors_execute_routes/);
+      assert.match(starletteTest, /Starlette\(routes=ROUTER_FACTORIES/);
+      const httpxTest = readFileSync(
+        path.join(output, "generated", "python-tests", "test_httpx_transport.py"),
+        "utf8",
+      );
+      assert.match(httpxTest, /test_httpx_transport_vectors_execute_clients/);
+      assert.match(httpxTest, /test_httpx_transport_errors_preserve_body/);
+      assert.match(httpxTest, /import asyncio/);
+      assert.match(httpxTest, /asyncio\.run\(_run_httpx_transport_vectors_execute_clients\(\)\)/);
+      assert.match(httpxTest, /\\"successStatus\\": 201/);
+      const pythonVectorConformance = readFileSync(
+        path.join(output, "generated", "python-tests", "test_vector_conformance.py"),
+        "utf8",
+      );
+      assert.match(pythonVectorConformance, /assert Pet\.load\(value\)\.save\(\) == value/);
+      assert.doesNotMatch(pythonVectorConformance, /assert CreatedPet\.load\(value\)\.save\(\) == value/);
 
       const tsClient = readFileSync(
         path.join(output, "generated", "typescript", "transport-client.ts"),
         "utf8",
       );
+      const decoratedData = readFileSync(
+        path.join(output, "generated", "typescript", "decorated-data.ts"),
+        "utf8",
+      );
+      assert.match(decoratedData, /traceId: string/);
+      assert.match(decoratedData, /value: string/);
+      const genericStatusEnvelope = readFileSync(
+        path.join(output, "generated", "typescript", "generic-status-envelope.ts"),
+        "utf8",
+      );
+      assert.doesNotMatch(genericStatusEnvelope, /statusCode/);
+      assert.match(genericStatusEnvelope, /body!: ErrorBody/);
       assert.match(tsClient, /export class PetsClient/);
       assert.match(tsClient, /export type TypraFetchTransport/);
-      assert.match(tsClient, /async read\(input: \{ petId: string; includeDetails\?: boolean \}\): Promise<Pet>/);
+      assert.match(tsClient, /cookies\?: Record<string, string>/);
+      assert.match(tsClient, /auth\?: TypraAuthRequirement/);
+      assert.match(tsClient, /export interface TypraAuthRequirement/);
+      assert.match(tsClient, /auth: \{\n\s+\"options\": \[/);
+      assert.match(tsClient, /"scheme": "Bearer"/);
+      assert.doesNotMatch(tsClient, /Authorization/);
+      assert.match(tsClient, /export class TypraFetchResponseError extends Error/);
+      assert.match(tsClient, /async read\(input: \{ sessionId: string; petId: string; includeDetails\?: boolean \}\): Promise<Pet>/);
       assert.match(tsClient, /let path = "\/pets\/\{petId\}";/);
       assert.match(tsClient, /path = path\.replace\(pathParameterPattern\("petId"\), encodeURIComponent/);
       assert.match(tsClient, /query\.set\("includeDetails", value\)/);
+      assert.match(tsClient, /cookies\["session_id"\] = value/);
       assert.match(tsClient, /headers\["content-version"\] = value/);
       assert.match(tsClient, /headers\["Content-Type"\] \?\?= "application\/json"/);
       assert.match(tsClient, /const body = serializeBody\(input\.request\)/);
       assert.match(tsClient, /if \(!isSuccessStatus\(response\.status\)\)/);
+      assert.match(tsClient, /if \(matchesStatusCode\(response\.status, "200"\)\)/);
+      assert.match(tsClient, /if \(matchesStatusCode\(response\.status, "201"\)\)/);
       assert.match(tsClient, /return Pet\.load\(response\.body as Record<string, unknown>\)/);
+      assert.doesNotMatch(tsClient, /ErrorBody\.load/);
       const tsConsumerTest = readFileSync(
         path.join(output, "generated", "typescript-tests", "transport-client.test.ts"),
         "utf8",
@@ -882,10 +1046,95 @@ describe("generate", () => {
       assert.match(tsConsumerTest, /const client = new PetsClient/);
       assert.match(tsConsumerTest, /captured = request/);
       assert.match(tsConsumerTest, /url": "https:\/\/example\.test\/pets\/p1\?includeDetails=true"/);
+      assert.match(tsConsumerTest, /"cookies": \{\n\s+"session_id": "s1"/);
+      assert.match(tsConsumerTest, /"auth": \{\n\s+"options": \[/);
       assert.match(tsConsumerTest, /"body": undefined/);
       assert.match(tsConsumerTest, /"body": \{\n\s+"name": "Fido"/);
+      assert.match(tsConsumerTest, /status: 201/);
+      assert.match(tsConsumerTest, /non-success-response/);
+      assert.match(tsConsumerTest, /TypraFetchResponseError/);
       assert.match(tsConsumerTest, /expect\(observed\)\.toEqual/);
       assertGeneratedTypeScriptTestsTypeCheck(output);
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("skips Python transport conformance tests when HTTP operations have no transport vectors", () => {
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-http-no-vectors-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      writeFileSync(
+        source,
+        [
+          'import "@typra/emitter";',
+          'import "@typespec/http";',
+          "using TypeSpec.Http;",
+          "",
+          "namespace Typra.NoVectorTransport;",
+          "model Root { name: string; }",
+          "model Pet { name: string; }",
+          "@route(\"/pets\")",
+          "interface Pets {",
+          "  @get",
+          "  @route(\"/{petId}\")",
+          "  read(@path petId: string): Pet;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.NoVectorTransport.Root"',
+          '    root-namespace: "Typra.NoVectorTransport"',
+          "    emit-targets:",
+          "      - type: Python",
+          `        output-dir: ${yamlString(path.join(output, "generated", "python"))}`,
+          `        test-dir: ${yamlString(path.join(output, "generated", "python-tests"))}`,
+          '        import-path: "typra.novectortransport"',
+          "        outputs:",
+          "          - kind: server",
+          "            provider: fastapi",
+          "          - kind: server",
+          "            provider: starlette",
+          "          - kind: consumer",
+          "            provider: httpx",
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(process.execPath, [tspCli, "compile", source, "--config", config], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      assert.equal(existsSync(path.join(output, "generated", "python", "fastapi_routes.py")), true);
+      assert.equal(existsSync(path.join(output, "generated", "python", "starlette_routes.py")), true);
+      assert.equal(existsSync(path.join(output, "generated", "python", "httpx_client.py")), true);
+      assert.equal(
+        existsSync(path.join(output, "generated", "python-tests", "test_fastapi_transport.py")),
+        false,
+      );
+      assert.equal(
+        existsSync(path.join(output, "generated", "python-tests", "test_starlette_transport.py")),
+        false,
+      );
+      assert.equal(
+        existsSync(path.join(output, "generated", "python-tests", "test_httpx_transport.py")),
+        false,
+      );
     } finally {
       rmSync(output, { recursive: true, force: true });
     }

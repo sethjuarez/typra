@@ -319,6 +319,7 @@ function emitTypeScriptVectorConformanceTest(
 ): string {
   const model = buildVectorConformanceCodeModel(vectors, {
     loadSaveTypes: collectLoadSaveTypeNames(nodes),
+    typeNodes: nodes,
   });
   const payload = JSON.stringify(model.vectors, null, 2);
   return [

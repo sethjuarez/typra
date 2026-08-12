@@ -709,6 +709,12 @@ function extractMethodTypeRefs(method: MethodStubDecl): string[] {
   const refs: string[] = [];
 
   const extract = (typeStr: string) => {
+    for (const option of typeStr.split("|").map((part) => part.trim())) {
+      extractSingle(option);
+    }
+  };
+
+  const extractSingle = (typeStr: string) => {
     // Strip nullable suffix and array suffix: "string?" → "string", "Message[]" → "Message"
     const base = typeStr.replace(/\?$/, "").replace(/\[\]$/, "");
     // Skip scalars, Record<>, and generic types

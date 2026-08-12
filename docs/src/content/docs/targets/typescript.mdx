@@ -53,9 +53,10 @@ Review generated tests for the exact helper names emitted by your selected contr
 `outputs: [{ kind: consumer, provider: fetch }]` emits a `transport-client.ts`
 module with contract-specific clients such as `PetsClient` or `RendererClient`.
 The client accepts a `baseUrl` and an injected `TypraFetchTransport`, builds
-paths/query strings/headers from TypeSpec HTTP metadata, serializes request
-bodies with generated `save()` methods when available, checks success statuses,
-and hydrates model responses through generated `load()` methods.
+paths/query strings/headers/cookies from TypeSpec HTTP metadata, serializes
+request bodies with generated `save()` methods when available, forwards
+contract auth requirements as metadata, checks declared success statuses, and
+hydrates only status-matched model responses through generated `load()` methods.
 
 ```typescript
 import { PetsClient } from "./generated/typescript/transport-client";
@@ -63,9 +64,13 @@ import { PetsClient } from "./generated/typescript/transport-client";
 const client = new PetsClient({
   baseUrl: "https://api.example.test",
   transport: async (request) => {
+    const headers = { ...request.headers };
+    if (request.auth) {
+      headers.Authorization = await buildHostAuthorizationHeader(request.auth);
+    }
     const response = await fetch(request.url, {
       method: request.method,
-      headers: request.headers,
+      headers,
       body: request.body === undefined ? undefined : JSON.stringify(request.body),
     });
     return {
@@ -76,5 +81,9 @@ const client = new PetsClient({
 });
 ```
 
-The generated client is a contract projection, not a full SDK runtime. Auth,
-retries, tracing, streaming, and host policy stay in the injected transport.
+The generated client is a contract projection, not a full SDK runtime. Typra
+does not synthesize `Authorization` headers or manage credentials. Auth, cookie
+persistence, retries, tracing, streaming, and host policy stay in the injected
+transport. A response whose status does not match one of the operation's
+declared success statuses is reported through `TypraFetchResponseError` with the
+original status/body, even when the status is another 2xx.

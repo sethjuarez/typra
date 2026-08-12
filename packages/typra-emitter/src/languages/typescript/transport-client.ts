@@ -3,6 +3,10 @@ import type {
   TransportContract,
   TransportOperation,
 } from "../../ir/transport.js";
+import {
+  successOrFallbackBodyResponses,
+  transportBindingsByKind,
+} from "../../ir/transport.js";
 import type { TypeNode } from "../../ir/ast.js";
 import type { CallableVector } from "../../ir/vector.js";
 
@@ -26,7 +30,37 @@ export function emitTypeScriptFetchClient(
   lines.push("  method: string;");
   lines.push("  url: string;");
   lines.push("  headers?: Record<string, string>;");
+  lines.push("  cookies?: Record<string, string>;");
+  lines.push("  auth?: TypraAuthRequirement;");
   lines.push("  body?: unknown;");
+  lines.push("}");
+  lines.push("");
+  lines.push("export interface TypraAuthRequirement {");
+  lines.push("  options: TypraAuthOption[];");
+  lines.push("}");
+  lines.push("");
+  lines.push("export interface TypraAuthOption {");
+  lines.push("  schemes: TypraAuthScheme[];");
+  lines.push("}");
+  lines.push("");
+  lines.push("export interface TypraAuthScheme {");
+  lines.push("  id: string;");
+  lines.push("  type: string;");
+  lines.push("  description?: string;");
+  lines.push("  scheme?: string;");
+  lines.push('  in?: "header" | "query" | "cookie";');
+  lines.push("  name?: string;");
+  lines.push("  scopes?: string[];");
+  lines.push("  flows?: TypraOAuth2Flow[];");
+  lines.push("  openIdConnectUrl?: string;");
+  lines.push("}");
+  lines.push("");
+  lines.push("export interface TypraOAuth2Flow {");
+  lines.push("  type: string;");
+  lines.push("  authorizationUrl?: string;");
+  lines.push("  tokenUrl?: string;");
+  lines.push("  refreshUrl?: string;");
+  lines.push("  scopes: string[];");
   lines.push("}");
   lines.push("");
   lines.push("export interface TypraFetchResponse {");
@@ -82,6 +116,26 @@ export function emitTypeScriptFetchClient(
   lines.push("  return status >= 200 && status < 300;");
   lines.push("}");
   lines.push("");
+  lines.push("function matchesStatusCode(status: number, code: string): boolean {");
+  lines.push('  if (code === "*") return true;');
+  lines.push('  if (/^\\d+$/.test(code)) return Number(code) === status;');
+  lines.push('  const range = /^(\\d+)-(\\d+)$/.exec(code);');
+  lines.push("  if (!range) return false;");
+  lines.push("  return status >= Number(range[1]) && status <= Number(range[2]);");
+  lines.push("}");
+  lines.push("");
+  lines.push("export class TypraFetchResponseError extends Error {");
+  lines.push("  readonly status: number;");
+  lines.push("  readonly body: unknown;");
+  lines.push("");
+  lines.push("  constructor(response: TypraFetchResponse) {");
+  lines.push("    super(`Unexpected response status ${response.status}`);");
+  lines.push('    this.name = "TypraFetchResponseError";');
+  lines.push("    this.status = response.status;");
+  lines.push("    this.body = response.body;");
+  lines.push("  }");
+  lines.push("}");
+  lines.push("");
   for (const contract of contracts) {
     emitContractClient(contract, modelTypes, lines);
   }
@@ -122,14 +176,14 @@ function emitOperationClient(
     `  async ${toCamelCase(operation.operation)}(input: ${inputType}): Promise<${resultType}> {`,
   );
   lines.push(`    let path = ${JSON.stringify(routePathTemplate(operation))};`);
-  for (const binding of operation.bindings.filter((b) => b.kind === "path")) {
+  for (const binding of transportBindingsByKind(operation, "path")) {
     const property = propertyAccess(binding.name);
     lines.push(
       `    path = path.replace(pathParameterPattern(${JSON.stringify(binding.wireName)}), encodeURIComponent(serializeValue(input${property}) ?? ""));`,
     );
   }
   lines.push("    const query = new URLSearchParams();");
-  for (const binding of operation.bindings.filter((b) => b.kind === "query")) {
+  for (const binding of transportBindingsByKind(operation, "query")) {
     const property = propertyAccess(binding.name);
     lines.push(`    {`);
     lines.push(`      const value = serializeValue(input${property});`);
@@ -141,12 +195,22 @@ function emitOperationClient(
   lines.push("    const queryText = query.toString();");
   lines.push("    if (queryText) path = `${path}?${queryText}`;");
   lines.push("    const headers: Record<string, string> = {};");
-  for (const binding of operation.bindings.filter((b) => b.kind === "header")) {
+  for (const binding of transportBindingsByKind(operation, "header")) {
     const property = propertyAccess(binding.name);
     lines.push(`    {`);
     lines.push(`      const value = serializeValue(input${property});`);
     lines.push(
       `      if (value !== undefined) headers[${JSON.stringify(binding.wireName)}] = value;`,
+    );
+    lines.push(`    }`);
+  }
+  lines.push("    const cookies: Record<string, string> = {};");
+  for (const binding of transportBindingsByKind(operation, "cookie")) {
+    const property = propertyAccess(binding.name);
+    lines.push(`    {`);
+    lines.push(`      const value = serializeValue(input${property});`);
+    lines.push(
+      `      if (value !== undefined) cookies[${JSON.stringify(binding.wireName)}] = value;`,
     );
     lines.push(`    }`);
   }
@@ -162,6 +226,10 @@ function emitOperationClient(
   lines.push(`      method: ${JSON.stringify(operation.verb.toUpperCase())},`);
   lines.push("      url: joinUrl(this.baseUrl, path),");
   lines.push("      headers,");
+  lines.push("      cookies,");
+  lines.push(
+    `      auth: ${operation.auth ? renderTypeScriptLiteral(operation.auth, 6) : "undefined"},`,
+  );
   lines.push("      body,");
   lines.push("    });");
   emitResponseReturn(operation, modelTypes, lines);
@@ -181,9 +249,25 @@ function operationResultType(
   operation: TransportOperation,
   modelTypes: Set<string>,
 ): string {
-  const response = successBodyResponse(operation);
-  if (!response?.body || response.body === "void") return "void";
-  return typeScriptType(response.body, modelTypes);
+  const responseTypes = Array.from(
+    new Set(
+      successOrFallbackBodyResponses(operation).map((response) =>
+        typeScriptType(response.body!, modelTypes),
+      ),
+    ),
+  );
+  const hasExplicitSuccess = operation.responses.some(
+    (response) => response.kind === "success",
+  );
+  const hasVoidSuccess = operation.responses.some(
+    (response) =>
+      (response.kind === "success" ||
+        (!hasExplicitSuccess && response.kind === "unknown")) &&
+      (!response.body || response.body === "void"),
+  );
+  if (hasVoidSuccess) responseTypes.push("void");
+  if (responseTypes.length === 0) return "void";
+  return responseTypes.join(" | ");
 }
 
 function collectClientModelImports(
@@ -196,8 +280,13 @@ function collectClientModelImports(
       for (const binding of operation.bindings) {
         if (modelTypes.has(binding.type)) imports.add(binding.type);
       }
+      const responseBodies = successOrFallbackBodyResponses(operation);
       for (const response of operation.responses) {
-        if (response.body && modelTypes.has(response.body)) {
+        if (
+          responseBodies.includes(response) &&
+          response.body &&
+          modelTypes.has(response.body)
+        ) {
           imports.add(response.body);
         }
       }
@@ -234,41 +323,32 @@ function emitResponseReturn(
   lines: string[],
 ): void {
   lines.push("    if (!isSuccessStatus(response.status)) {");
-  lines.push(
-    "      throw new Error(`Unexpected response status ${response.status}`);",
-  );
+  lines.push("      throw new TypraFetchResponseError(response);");
   lines.push("    }");
-  const response = successBodyResponse(operation);
-  if (!response?.body || response.body === "void") {
-    lines.push("    return undefined;");
-    return;
-  }
-  if (modelTypes.has(response.body)) {
-    lines.push(
-      `    return ${response.body}.load(response.body as Record<string, unknown>);`,
-    );
-    return;
-  }
-  lines.push(`    return response.body as ${typeScriptType(response.body, modelTypes)};`);
-}
-
-function successBodyResponse(operation: TransportOperation) {
-  return operation.responses.find(
-    (candidate) => candidate.body && candidate.statusCodes.some(isSuccessCode),
+  const successResponses = operation.responses.filter(
+    (response) => response.kind === "success",
   );
-}
-
-function isSuccessCode(statusCode: string): boolean {
-  if (statusCode === "*") return false;
-  if (/^\d+$/.test(statusCode)) {
-    const status = Number(statusCode);
-    return status >= 200 && status < 300;
+  const fallbackResponses =
+    successResponses.length === 0
+      ? operation.responses.filter((response) => response.kind === "unknown")
+      : [];
+  for (const response of [...successResponses, ...fallbackResponses]) {
+    const statusCheck = response.statusCodes
+      .map((statusCode) => `matchesStatusCode(response.status, ${JSON.stringify(statusCode)})`)
+      .join(" || ");
+    lines.push(`    if (${statusCheck}) {`);
+    if (!response.body || response.body === "void") {
+      lines.push("      return undefined;");
+    } else if (modelTypes.has(response.body)) {
+      lines.push(
+        `      return ${response.body}.load(response.body as Record<string, unknown>);`,
+      );
+    } else {
+      lines.push(`      return response.body as ${typeScriptType(response.body, modelTypes)};`);
+    }
+    lines.push("    }");
   }
-  const range = /^(\d+)-(\d+)$/.exec(statusCode);
-  if (!range) return false;
-  const start = Number(range[1]);
-  const end = Number(range[2]);
-  return start < 300 && end >= 200;
+  lines.push("    throw new TypraFetchResponseError(response);");
 }
 
 function propertyAccess(name: string): string {
@@ -310,11 +390,17 @@ export function emitTypeScriptFetchClientConformanceTest(
   );
   lines.push("");
   lines.push(
-    `import { ${clientNames.join(", ")}, TypraFetchRequest } from "${clientImportPath}";`,
+    `import { ${[...clientNames, "TypraFetchRequest", "TypraFetchResponseError"].join(", ")} } from "${clientImportPath}";`,
   );
   if (modelImports.length > 0) {
     lines.push(`import { ${modelImports.join(", ")} } from "${modelImportPath}";`);
   }
+  lines.push("");
+  lines.push("function saved(value: unknown): unknown {");
+  lines.push("  return typeof value === \"object\" && value !== null && \"save\" in value && typeof value.save === \"function\"");
+  lines.push("    ? value.save()");
+  lines.push("    : value;");
+  lines.push("}");
   lines.push("");
   lines.push('describe("transport fetch consumer conformance", () => {');
   for (const entry of vectors) {
@@ -328,27 +414,64 @@ export function emitTypeScriptFetchClientConformanceTest(
       modelTypes,
     );
     const expectedRequest = expectedRequestShape(entry.operation, input);
+    const expectedBody = expectedBodyExpression(entry.operation, input, modelTypes);
+    const successStatus =
+      firstConcreteStatusCode(
+        entry.operation.responses.find((response) => response.kind === "success")?.statusCodes ?? [],
+      ) ?? 200;
     lines.push(`  it(${JSON.stringify(testName)}, async () => {`);
     lines.push("    let captured: TypraFetchRequest | undefined;");
+    lines.push(
+      `    const expectedRequest: TypraFetchRequest = ${renderTypeScriptLiteral(expectedRequest, 4)};`,
+    );
+    if (expectedBody) {
+      lines.push(`    expectedRequest.body = ${expectedBody};`);
+    }
     lines.push(`    const client = new ${clientName}({`);
     lines.push('      baseUrl: "https://example.test",');
     lines.push("      transport: async (request) => {");
     lines.push("        captured = request;");
     lines.push("        return {");
-    lines.push("          status: 200,");
+    lines.push(`          status: ${successStatus},`);
     lines.push(`          body: ${JSON.stringify(entry.vector.expected ?? null)},`);
     lines.push("        };");
     lines.push("      },");
     lines.push("    });");
     lines.push(`    const result = await client.${methodName}(${typedInput});`);
-    lines.push("    expect(captured).toEqual(");
-    lines.push(indent(renderTypeScriptLiteral(expectedRequest, 6), 6));
-    lines.push("    );");
-    lines.push(
-      "    const observed = typeof result === \"object\" && result !== null && \"save\" in result && typeof result.save === \"function\" ? result.save() : result;",
-    );
+    lines.push("    expect(captured).toEqual(expectedRequest);");
+    lines.push("    const observed = saved(result);");
     lines.push(`    expect(observed).toEqual(${JSON.stringify(entry.vector.expected ?? undefined)});`);
     lines.push("  });");
+    const errorResponse = entry.operation.responses.find(
+      (response) => response.kind === "error",
+    );
+    if (errorResponse) {
+      const errorStatus = firstConcreteStatusCode(errorResponse.statusCodes) ?? 400;
+      const errorBody = { error: "not-success" };
+      lines.push("");
+      lines.push(`  it(${JSON.stringify(`${testName}:non-success-response`)}, async () => {`);
+      lines.push(`    const client = new ${clientName}({`);
+      lines.push('      baseUrl: "https://example.test",');
+      lines.push("      transport: async () => ({");
+      lines.push(`        status: ${errorStatus},`);
+      lines.push(`        body: ${JSON.stringify(errorBody)},`);
+      lines.push("      }),");
+      lines.push("    });");
+      lines.push("    let error: unknown;");
+      lines.push("    try {");
+      lines.push(`      await client.${methodName}(${typedInput});`);
+      lines.push("    } catch (caught) {");
+      lines.push("      error = caught;");
+      lines.push("    }");
+      lines.push("    expect(error instanceof TypraFetchResponseError).toEqual(true);");
+      lines.push("    expect((error as TypraFetchResponseError).status).toEqual(" + errorStatus + ");");
+      lines.push(
+        "    expect((error as TypraFetchResponseError).body).toEqual(" +
+          JSON.stringify(errorBody) +
+          ");",
+      );
+      lines.push("  });");
+    }
   }
   lines.push("});");
   lines.push("");
@@ -409,17 +532,19 @@ function expectedRequestShape(
   method: string;
   url: string;
   headers: Record<string, string>;
+  cookies: Record<string, string>;
+  auth?: unknown;
   body?: unknown;
 } {
   let path = routePathTemplate(operation);
-  for (const binding of operation.bindings.filter((b) => b.kind === "path")) {
+  for (const binding of transportBindingsByKind(operation, "path")) {
     path = path.replace(
       new RegExp(`\\{[+#./;?&]?${escapeRegExpForEmitter(binding.wireName)}(?:\\*|:\\d+)?\\}`, "g"),
       encodeURIComponent(String(input[binding.name] ?? "")),
     );
   }
   const query = new URLSearchParams();
-  for (const binding of operation.bindings.filter((b) => b.kind === "query")) {
+  for (const binding of transportBindingsByKind(operation, "query")) {
     const value = input[binding.name];
     if (value !== undefined && value !== null) {
       query.set(binding.wireName, String(value));
@@ -429,10 +554,17 @@ function expectedRequestShape(
   if (queryText) path = `${path}?${queryText}`;
 
   const headers: Record<string, string> = {};
-  for (const binding of operation.bindings.filter((b) => b.kind === "header")) {
+  for (const binding of transportBindingsByKind(operation, "header")) {
     const value = input[binding.name];
     if (value !== undefined && value !== null) {
       headers[binding.wireName] = String(value);
+    }
+  }
+  const cookies: Record<string, string> = {};
+  for (const binding of transportBindingsByKind(operation, "cookie")) {
+    const value = input[binding.name];
+    if (value !== undefined && value !== null) {
+      cookies[binding.wireName] = String(value);
     }
   }
 
@@ -440,11 +572,15 @@ function expectedRequestShape(
     method: string;
     url: string;
     headers: Record<string, string>;
+    cookies: Record<string, string>;
+    auth?: unknown;
     body?: unknown;
   } = {
     method: operation.verb.toUpperCase(),
     url: `https://example.test${path}`,
     headers,
+    cookies,
+    auth: operation.auth,
     body: undefined,
   };
   const body = operation.bindings.find((binding) => binding.kind === "body");
@@ -453,6 +589,16 @@ function expectedRequestShape(
     request.body = input[body.name];
   }
   return request;
+}
+
+function expectedBodyExpression(
+  operation: TransportOperation,
+  input: Record<string, unknown>,
+  modelTypes: Set<string>,
+): string | undefined {
+  const body = operation.bindings.find((binding) => binding.kind === "body");
+  if (!body || !modelTypes.has(body.type)) return undefined;
+  return `${body.type}.load(${JSON.stringify(input[body.name])}).save()`;
 }
 
 function vectorObject(value: unknown): Record<string, unknown> {
@@ -465,11 +611,13 @@ function escapeRegExpForEmitter(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function indent(value: string, spaces: number): string {
-  return value
-    .split("\n")
-    .map((line) => `${" ".repeat(spaces)}${line}`)
-    .join("\n");
+function firstConcreteStatusCode(statusCodes: readonly string[]): number | undefined {
+  for (const statusCode of statusCodes) {
+    if (/^\d+$/.test(statusCode)) return Number(statusCode);
+    const range = /^(\d+)-\d+$/.exec(statusCode);
+    if (range) return Number(range[1]);
+  }
+  return undefined;
 }
 
 function renderTypeScriptLiteral(value: unknown, indentSize = 0): string {
