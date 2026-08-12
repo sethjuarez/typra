@@ -6,6 +6,15 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.6.0](https://github.com/sethjuarez/typra/compare/v0.5.0...v0.6.0) (2026-08-12)
+
+
+### Features
+
+* add typescript fetch consumer projection ([8344c29](https://github.com/sethjuarez/typra/commit/8344c29279eef6985086dccf8173e92e31945801))
+* add typra v2 contract projection foundations ([6765980](https://github.com/sethjuarez/typra/commit/6765980e1bba85a4e8d216a9af59f870a3fcff59))
+* complete transport roadmap slice ([#196](https://github.com/sethjuarez/typra/issues/196)) ([01c279f](https://github.com/sethjuarez/typra/commit/01c279fb10b1d03520ad4394377ed6bab4e49327))
+
 ## [0.5.0](https://github.com/sethjuarez/typra/compare/v0.4.31...v0.5.0) (2026-08-09)
 
 ### Features
