@@ -54,6 +54,7 @@ function assertGeneratedTypeScriptTestsTypeCheck(output: string): void {
         include: [
           "typescript/**/*.ts",
           "typescript-tests/vector-conformance.test.ts",
+          "typescript-tests/transport-client.test.ts",
           "typescript-tests/globals.d.ts",
         ],
       },
@@ -148,11 +149,11 @@ describe("generate", () => {
     );
     assert.equal(
       findContributor({
-        target: "Python",
-        kind: "native-serialization",
-        provider: "pydantic",
+        target: "TypeScript",
+        kind: "consumer",
+        provider: "fetch",
       })?.provider,
-      "pydantic",
+      "fetch",
     );
     assert.deepEqual(
       validateNativeSerializationTargets([
@@ -173,6 +174,7 @@ describe("generate", () => {
         { type: "java", "native-serialization": "zod" },
         { type: "swift", "native-serialization": "standard-schema" },
         { type: "typescript", outputs: [{ kind: "server", provider: "fastapi" }] },
+        { type: "python", outputs: [{ kind: "consumer", provider: "fetch" }] },
       ]),
       [
         'Target "typescript" does not support native-serialization "pydantic". Supported values: "none", "zod", "standard-schema".',
@@ -180,6 +182,7 @@ describe("generate", () => {
         'Target "java" does not support native-serialization "zod". Supported values: "none", "jackson".',
         'Target "swift" does not support native-serialization "standard-schema". Supported values: "none", "codable".',
         'Target "typescript" does not support output contributor "server:fastapi".',
+        'Target "python" does not support output contributor "consumer:fetch".',
       ],
     );
   });
@@ -803,6 +806,14 @@ describe("generate", () => {
           "          - kind: server",
           "            provider: fastapi",
           "        format: false",
+          "      - type: TypeScript",
+          `        output-dir: ${yamlString(path.join(output, "generated", "typescript"))}`,
+          `        test-dir: ${yamlString(path.join(output, "generated", "typescript-tests"))}`,
+          '        import-path: "../typescript/index"',
+          "        outputs:",
+          "          - kind: consumer",
+          "            provider: fetch",
+          "        format: false",
           "",
         ].join("\n"),
       );
@@ -847,6 +858,34 @@ describe("generate", () => {
       assert.match(transportTest, /\\"verb\\": \\"get\\"/);
       assert.match(transportTest, /\\"verb\\": \\"post\\"/);
       assert.match(transportTest, /\\"path\\": \\"\/pets\/\{petId\}\\"/);
+
+      const tsClient = readFileSync(
+        path.join(output, "generated", "typescript", "transport-client.ts"),
+        "utf8",
+      );
+      assert.match(tsClient, /export class PetsClient/);
+      assert.match(tsClient, /export type TypraFetchTransport/);
+      assert.match(tsClient, /async read\(input: \{ petId: string; includeDetails\?: boolean \}\): Promise<Pet>/);
+      assert.match(tsClient, /let path = "\/pets\/\{petId\}";/);
+      assert.match(tsClient, /path = path\.replace\(pathParameterPattern\("petId"\), encodeURIComponent/);
+      assert.match(tsClient, /query\.set\("includeDetails", value\)/);
+      assert.match(tsClient, /headers\["content-version"\] = value/);
+      assert.match(tsClient, /headers\["Content-Type"\] \?\?= "application\/json"/);
+      assert.match(tsClient, /const body = serializeBody\(input\.request\)/);
+      assert.match(tsClient, /if \(!isSuccessStatus\(response\.status\)\)/);
+      assert.match(tsClient, /return Pet\.load\(response\.body as Record<string, unknown>\)/);
+      const tsConsumerTest = readFileSync(
+        path.join(output, "generated", "typescript-tests", "transport-client.test.ts"),
+        "utf8",
+      );
+      assert.match(tsConsumerTest, /transport fetch consumer conformance/);
+      assert.match(tsConsumerTest, /const client = new PetsClient/);
+      assert.match(tsConsumerTest, /captured = request/);
+      assert.match(tsConsumerTest, /url": "https:\/\/example\.test\/pets\/p1\?includeDetails=true"/);
+      assert.match(tsConsumerTest, /"body": undefined/);
+      assert.match(tsConsumerTest, /"body": \{\n\s+"name": "Fido"/);
+      assert.match(tsConsumerTest, /expect\(observed\)\.toEqual/);
+      assertGeneratedTypeScriptTestsTypeCheck(output);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }

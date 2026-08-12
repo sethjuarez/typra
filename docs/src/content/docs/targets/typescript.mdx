@@ -14,6 +14,9 @@ emit-targets:
     import-path: "../index"
     protocol-scaffolds: "compile-only"
     native-serialization: "zod"
+    outputs:
+      - kind: consumer
+        provider: fetch
 ```
 
 | Option | Why it matters |
@@ -23,8 +26,9 @@ emit-targets:
 | `import-path` | Import path used by generated tests. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
 | `native-serialization` | Defaults to `"none"`. Set to `"zod"` to emit class-attached Zod validators. `"standard-schema"` is reserved and fails fast. |
+| `outputs` | Optional generated surfaces. `kind: consumer` / `provider: fetch` emits contract-specific HTTP clients backed by an injected transport. |
 
-Generated TypeScript surfaces include model classes, runtime helpers, JSON/YAML helpers, tests, protocol scaffold tests, and optional Zod validation artifacts.
+Generated TypeScript surfaces include model classes, runtime helpers, JSON/YAML helpers, tests, protocol scaffold tests, optional Zod validation artifacts, and optional fetch consumer clients.
 
 `native-serialization: "zod"` emits `schema`, `wireSchema`, and
 `wireObjectSchemaWithoutName` validators on generated classes. `schema.parse()`
@@ -43,3 +47,34 @@ const saved = root.toJson();
 ```
 
 Review generated tests for the exact helper names emitted by your selected contract and target options.
+
+## Fetch consumer projection
+
+`outputs: [{ kind: consumer, provider: fetch }]` emits a `transport-client.ts`
+module with contract-specific clients such as `PetsClient` or `RendererClient`.
+The client accepts a `baseUrl` and an injected `TypraFetchTransport`, builds
+paths/query strings/headers from TypeSpec HTTP metadata, serializes request
+bodies with generated `save()` methods when available, checks success statuses,
+and hydrates model responses through generated `load()` methods.
+
+```typescript
+import { PetsClient } from "./generated/typescript/transport-client";
+
+const client = new PetsClient({
+  baseUrl: "https://api.example.test",
+  transport: async (request) => {
+    const response = await fetch(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: request.body === undefined ? undefined : JSON.stringify(request.body),
+    });
+    return {
+      status: response.status,
+      body: await response.json(),
+    };
+  },
+});
+```
+
+The generated client is a contract projection, not a full SDK runtime. Auth,
+retries, tracing, streaming, and host policy stay in the injected transport.

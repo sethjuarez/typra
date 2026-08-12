@@ -50,6 +50,11 @@ const CONTRIBUTOR_REGISTRY: OutputContributor[] = [
   nativeSerialization("rust", "serde"),
   nativeSerialization("swift", "codable"),
   {
+    target: "typescript",
+    kind: "consumer",
+    provider: "fetch",
+  },
+  {
     target: "python",
     kind: "server",
     provider: "fastapi",

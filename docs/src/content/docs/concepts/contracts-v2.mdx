@@ -173,6 +173,15 @@ emit-targets:
     outputs:
       - kind: server
         provider: fastapi
+  - type: TypeScript
+    output-dir: "generated/typescript"
+    test-dir: "generated/typescript-tests"
+    import-path: "../typescript/index"
+    outputs:
+      - kind: consumer
+        provider: fetch
 ```
 
 The generated FastAPI surface is an adapter seam, not a runtime implementation. Handwritten handlers implement the callable behavior; generated routes bind path/query/header/cookie/body values, call model `load()` for request bodies, call the handler, and return model `save()` payloads. Generated transport vector tests use FastAPI's `TestClient` to prove the route projection delivers vector inputs to the handler and preserves expected wire output.
+
+TypeScript's fetch consumer is the complementary projection. It emits contract-specific clients such as `PetsClient` or `RendererClient` backed by an injected fetch-like transport. Generated methods build URI-template paths, serialize path/query/header/body bindings, call the injected transport, check success statuses, and hydrate model responses through generated `load()` methods. The generated consumer vector tests prove a TypeScript frontend-style runtime can consume the same contract that a Python FastAPI backend exposes, without making Typra own retries, auth, observability, or full SDK policy.

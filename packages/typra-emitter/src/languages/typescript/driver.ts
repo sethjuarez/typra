@@ -31,11 +31,18 @@ import {
   buildVectorConformanceCodeModel,
   VectorConformanceCodeModel,
 } from "../../ir/code-model.js";
+import type { TransportContract } from "../../ir/transport.js";
 import {
   collectProtocolNodes,
   emitTypeScriptProtocolScaffolds,
   shouldEmitCompileOnlyProtocolScaffolds,
 } from "../../protocol-scaffolds.js";
+import { normalizeOutputRequests } from "../../output-contributors.js";
+import {
+  collectTransportModelTypes,
+  emitTypeScriptFetchClient,
+  emitTypeScriptFetchClientConformanceTest,
+} from "./transport-client.js";
 
 /**
  * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the
@@ -88,6 +95,7 @@ export const generateTypeScript = async (
     emitTarget,
   });
   const tsNamespace = namespaceProjection.targetNamespace!;
+  const modelTypes = collectTransportModelTypes(nodes);
 
   // Emit context classes (LoadContext, SaveContext)
   const contextCode = emitTypeScriptContext();
@@ -209,6 +217,34 @@ export const generateTypeScript = async (
         emitTarget["test-dir"],
       );
     }
+
+    const transportContracts = options?.transportContracts ?? [];
+    if (shouldEmitFetchConsumer(emitTarget) && hasTransportVectors(transportContracts)) {
+      await emitTypeScriptFile(
+        context,
+        "transport-client.test.ts",
+        emitTypeScriptFetchClientConformanceTest(
+          transportContracts,
+          modelTypes,
+          clientImportPath(importPath),
+          importPath,
+        ),
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
+    }
+  }
+
+  if (shouldEmitFetchConsumer(emitTarget)) {
+    const transportContracts = options?.transportContracts ?? [];
+    if (transportContracts.length > 0) {
+      await emitTypeScriptFile(
+        context,
+        "transport-client.ts",
+        emitTypeScriptFetchClient(transportContracts, modelTypes),
+        emitTarget["output-dir"],
+      );
+    }
   }
 
   // Emit root index.ts file — re-exports from group sub-indexes
@@ -250,6 +286,31 @@ export const generateTypeScript = async (
   }
   restoreNamespaceGroups(namespaceGroupSnapshots);
 };
+
+function shouldEmitFetchConsumer(target: EmitTarget): boolean {
+  return normalizeOutputRequests(target).some(
+    (request) =>
+      request.target === "typescript" &&
+      request.kind === "consumer" &&
+      request.provider === "fetch",
+  );
+}
+
+function hasTransportVectors(contracts: TransportContract[]): boolean {
+  return contracts.some((contract) =>
+    contract.operations.some((operation) =>
+      (operation.callable.vectors ?? []).some(
+        (vector) => vector.stage === "transport",
+      ),
+    ),
+  );
+}
+
+function clientImportPath(modelImportPath: string): string {
+  return modelImportPath.endsWith("/index")
+    ? `${modelImportPath.slice(0, -"/index".length)}/transport-client`
+    : `${modelImportPath}/transport-client`;
+}
 
 function emitTypeScriptVectorConformanceTest(
   vectors: NonNullable<GeneratorOptions["callableVectors"]>,
