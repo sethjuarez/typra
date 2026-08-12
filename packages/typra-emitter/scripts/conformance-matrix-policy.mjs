@@ -80,11 +80,20 @@ export function validateConformanceMatrix(matrix) {
     };
   }
 
+  if (matrix.version !== 1) {
+    failures.push("Conformance matrix has an unexpected version.");
+  }
   failures.push(...compareConformanceMatrixTargets(matrix.targets).failures);
 
+  if (!Array.isArray(matrix.cases) || matrix.cases.length === 0) {
+    failures.push("Conformance matrix must declare at least one case.");
+  }
   if (!Array.isArray(matrix.rules)) {
     failures.push("Conformance matrix rules must be an array.");
     return { ok: false, failures };
+  }
+  if (matrix.rules.length === 0) {
+    failures.push("Conformance matrix must declare at least one semantic rule.");
   }
 
   const seenRuleIds = new Set();
