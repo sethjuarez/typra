@@ -6,7 +6,12 @@
  * in `languages/<lang>/visitor.ts`.
  */
 
-import { Expr, Construct, VariantConstruct, TypeRegistry } from "./expansion.js";
+import {
+  Expr,
+  Construct,
+  VariantConstruct,
+  TypeRegistry,
+} from "./expansion.js";
 
 // ============================================================================
 // Visitor interface
@@ -34,7 +39,7 @@ export function renderObjectLiteral(
   visitor: ExprVisitor,
   format: "js" | "py" = "js",
 ): string {
-  const fields = expr.fields.map(f => {
+  const fields = expr.fields.map((f) => {
     const val = visitor.visitExpr(f.value);
     switch (format) {
       case "js":

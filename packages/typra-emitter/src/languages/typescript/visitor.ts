@@ -2,7 +2,13 @@
  * TypeScript expression visitor — Expr IR → TypeScript source fragments.
  */
 
-import { Expr, Construct, VariantConstruct, ArrayLiteral, TypeRegistry } from "../../ir/expansion.js";
+import {
+  Expr,
+  Construct,
+  VariantConstruct,
+  ArrayLiteral,
+  TypeRegistry,
+} from "../../ir/expansion.js";
 import { ExprVisitor, assertNever } from "../../ir/visitor.js";
 
 export class TypeScriptExprVisitor implements ExprVisitor {
@@ -31,7 +37,7 @@ export class TypeScriptExprVisitor implements ExprVisitor {
       case "array":
         return this.visitArray(expr);
       case "dict":
-        return `{ ${expr.entries.map(e => `${e.key}: ${this.visitExpr(e.value)}`).join(", ")} }`;
+        return `{ ${expr.entries.map((e) => `${e.key}: ${this.visitExpr(e.value)}`).join(", ")} }`;
       case "field_read":
         return `${expr.objectName}.${expr.fieldName}`;
       default:
@@ -44,9 +50,9 @@ export class TypeScriptExprVisitor implements ExprVisitor {
     if (expr.fields.length === 0) {
       return `new ${typeName}({})`;
     }
-    const fields = expr.fields.map(f =>
-      `${f.propertyName}: ${this.visitExpr(f.value)}`
-    ).join(", ");
+    const fields = expr.fields
+      .map((f) => `${f.propertyName}: ${this.visitExpr(f.value)}`)
+      .join(", ");
     return `new ${typeName}({ ${fields} })`;
   }
 
@@ -56,9 +62,9 @@ export class TypeScriptExprVisitor implements ExprVisitor {
     if (expr.fields.length === 0) {
       return `new ${variantName}({})`;
     }
-    const fields = expr.fields.map(f =>
-      `${f.propertyName}: ${this.visitExpr(f.value)}`
-    ).join(", ");
+    const fields = expr.fields
+      .map((f) => `${f.propertyName}: ${this.visitExpr(f.value)}`)
+      .join(", ");
     return `new ${variantName}({ ${fields} })`;
   }
 
@@ -66,7 +72,7 @@ export class TypeScriptExprVisitor implements ExprVisitor {
     if (expr.items.length === 0) {
       return "[]";
     }
-    const items = expr.items.map(i => this.visitExpr(i)).join(", ");
+    const items = expr.items.map((i) => this.visitExpr(i)).join(", ");
     return `[${items}]`;
   }
 

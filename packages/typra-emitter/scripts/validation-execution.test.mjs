@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { compareExpectedExecution, TOOLCHAIN_UNAVAILABLE } from "./validation-execution.mjs";
+import {
+  compareExpectedExecution,
+  TOOLCHAIN_UNAVAILABLE,
+} from "./validation-execution.mjs";
 
 describe("fixture validation execution plan", () => {
   it("accepts an exact declared/executed match", () => {
@@ -24,7 +27,10 @@ describe("fixture validation execution plan", () => {
       executed: ["typescript", "python"],
     });
 
-    assert.match(result.failures.join("\n"), /did not execute declared targets\/stages/);
+    assert.match(
+      result.failures.join("\n"),
+      /did not execute declared targets\/stages/,
+    );
     assert.match(result.failures.join("\n"), /swift/);
   });
 
@@ -51,7 +57,10 @@ describe("fixture validation execution plan", () => {
       skipped: [{ id: "python", reason: TOOLCHAIN_UNAVAILABLE }],
     });
 
-    assert.match(result.failures.join("\n"), /skipped targets\/stages without an allowed toolchain-unavailable declaration/);
+    assert.match(
+      result.failures.join("\n"),
+      /skipped targets\/stages without an allowed toolchain-unavailable declaration/,
+    );
     assert.match(result.failures.join("\n"), /python/);
   });
 
@@ -63,9 +72,14 @@ describe("fixture validation execution plan", () => {
       executed: ["typescript", "python", "go"],
     });
 
-    assert.match(result.failures.join("\n"), /implementations that are not declared/);
-    assert.match(result.failures.join("\n"), /executed targets\/stages that are not declared/);
+    assert.match(
+      result.failures.join("\n"),
+      /implementations that are not declared/,
+    );
+    assert.match(
+      result.failures.join("\n"),
+      /executed targets\/stages that are not declared/,
+    );
     assert.match(result.failures.join("\n"), /go/);
   });
 });
-

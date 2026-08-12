@@ -69,12 +69,13 @@ export function lowerFile(
   registry: TypeRegistry,
   polymorphicTypeNames?: Set<string>,
 ): FileDecl {
-  const polyNames = polymorphicTypeNames ?? collectPolymorphicTypeNames(node, registry);
+  const polyNames =
+    polymorphicTypeNames ?? collectPolymorphicTypeNames(node, registry);
 
   // Lower all types in this file (parent + children)
   const types: TypeDecl[] = [
     lowerType(node, registry, polyNames),
-    ...node.childTypes.map(ct => lowerType(ct, registry, polyNames)),
+    ...node.childTypes.map((ct) => lowerType(ct, registry, polyNames)),
   ];
 
   // Resolve file-level imports
@@ -87,7 +88,8 @@ export function lowerFile(
     typeName: node.typeName,
     types,
     imports,
-    containsAbstract: node.isAbstract || node.childTypes.some(c => c.isAbstract),
+    containsAbstract:
+      node.isAbstract || node.childTypes.some((c) => c.isAbstract),
     enums,
     group: node.group,
   };
@@ -130,7 +132,9 @@ export function lowerType(
   registry: TypeRegistry,
   polymorphicTypeNames: Set<string>,
 ): TypeDecl {
-  const fields = node.properties.map(p => lowerField(p, polymorphicTypeNames));
+  const fields = node.properties.map((p) =>
+    lowerField(p, polymorphicTypeNames),
+  );
   const collectionHelpers = lowerCollectionHelpers(node, registry);
   const polymorphicDispatch = lowerPolymorphicDispatch(node);
   const factories = lowerFactories(node, registry);
@@ -256,10 +260,9 @@ function lowerLoad(
 ): LoadDecl {
   // Determine if this type has a discriminator with child variants
   const hasDiscriminatorWithChildren =
-    node.discriminator != null &&
-    (node.childTypes?.length ?? 0) > 0;
+    node.discriminator != null && (node.childTypes?.length ?? 0) > 0;
 
-  const coercions: CoercionDecl[] = (node.coercions || []).map(c => {
+  const coercions: CoercionDecl[] = (node.coercions || []).map((c) => {
     // Build structured assignments from the expansion dict
     const assignments: CoercionAssignment[] = Object.entries(c.expansion).map(
       ([key, value]) => ({
@@ -271,8 +274,9 @@ function lowerLoad(
 
     // Determine if this coercion needs runtime dispatch:
     // only when the discriminator field is set dynamically AND child types exist
-    const setsDiscriminator = node.discriminator != null &&
-      assignments.some(a => a.fieldName === node.discriminator && a.isInput);
+    const setsDiscriminator =
+      node.discriminator != null &&
+      assignments.some((a) => a.fieldName === node.discriminator && a.isInput);
     const needsDispatch = setsDiscriminator && hasDiscriminatorWithChildren;
 
     return {
@@ -283,7 +287,7 @@ function lowerLoad(
   });
 
   // Per-property load assignments
-  const assignments: LoadAssignment[] = fields.map(f => ({
+  const assignments: LoadAssignment[] = fields.map((f) => ({
     sourceName: f.name,
     fieldName: f.name,
     category: f.category,
@@ -312,11 +316,8 @@ function lowerLoad(
 /**
  * Lower the save/serialization method specification.
  */
-function lowerSave(
-  node: TypeNode,
-  fields: FieldDecl[],
-): SaveDecl {
-  const assignments: SaveAssignment[] = fields.map(f => ({
+function lowerSave(node: TypeNode, fields: FieldDecl[]): SaveDecl {
+  const assignments: SaveAssignment[] = fields.map((f) => ({
     targetName: f.name,
     fieldName: f.name,
     category: f.category,
@@ -353,7 +354,9 @@ function lowerPolymorphicDispatch(
     typeName: (t.instance as TypeNode).typeName,
   }));
 
-  const discriminatorProperty = node.properties.find(property => property.name === node.discriminator);
+  const discriminatorProperty = node.properties.find(
+    (property) => property.name === node.discriminator,
+  );
 
   // A wildcard subtype declared in the schema owns unknown discriminator values, and that
   // declaration is what makes the discriminator open — the emitter never infers it.
@@ -362,12 +365,15 @@ function lowerPolymorphicDispatch(
   // is then non-empty and the dispatch would otherwise look closed, so backends that
   // validate closed-ness before dispatching (Rust) would reject unknown values and leave
   // the declared wildcard arm unreachable.
-  const hasDeclaredWildcard = polyTypes.default !== undefined
-    && polyTypes.default !== null
-    && (polyTypes.default.instance as TypeNode).typeName.name !== node.typeName.name;
-  const isClosed = !hasDeclaredWildcard
-    && (discriminatorProperty?.allowedValues.length ?? 0) > 0
-    && discriminatorProperty?.isOpenEnum !== true;
+  const hasDeclaredWildcard =
+    polyTypes.default !== undefined &&
+    polyTypes.default !== null &&
+    (polyTypes.default.instance as TypeNode).typeName.name !==
+      node.typeName.name;
+  const isClosed =
+    !hasDeclaredWildcard &&
+    (discriminatorProperty?.allowedValues.length ?? 0) > 0 &&
+    discriminatorProperty?.isOpenEnum !== true;
 
   // A non-abstract base is itself instantiable, so discriminator values that its own declared
   // union permits but that no subtype claims (e.g. `kind: "string"` on a concrete `Property`
@@ -375,9 +381,12 @@ function lowerPolymorphicDispatch(
   // This only applies when such unclaimed values actually exist: when every permitted value is
   // claimed by a subtype the dispatch is genuinely closed and the base needs no fallback arm.
   // Closedness still bounds which values are legal; it must not strip the base's self-reference.
-  const claimedValues = new Set(variants.map(variant => variant.value));
-  const absorbsUnclaimedValues = !node.isAbstract
-    && (discriminatorProperty?.allowedValues ?? []).some(value => !claimedValues.has(value));
+  const claimedValues = new Set(variants.map((variant) => variant.value));
+  const absorbsUnclaimedValues =
+    !node.isAbstract &&
+    (discriminatorProperty?.allowedValues ?? []).some(
+      (value) => !claimedValues.has(value),
+    );
 
   let defaultVariant: PolymorphicDefault | null = null;
   if (polyTypes.default) {
@@ -411,10 +420,13 @@ function lowerPolymorphicDispatch(
  * These are properties like `tools: Tool[]` or `parts: ContentPart[]`
  * that need dedicated load/save helper methods for dict↔array conversion.
  */
-function lowerCollectionHelpers(node: TypeNode, registry: TypeRegistry): CollectionHelperDecl[] {
+function lowerCollectionHelpers(
+  node: TypeNode,
+  registry: TypeRegistry,
+): CollectionHelperDecl[] {
   return node.properties
-    .filter(p => p.isCollection && !p.isScalar && !p.isDict)
-    .map(p => {
+    .filter((p) => p.isCollection && !p.isScalar && !p.isDict)
+    .map((p) => {
       // A collection property's `p.type` is UNSET when the same element type was already
       // resolved via an earlier sibling property (cycle-prevention in resolveModel). Recover
       // it for shorthand field metadata, but do not infer keyed wire semantics from a regular
@@ -427,8 +439,13 @@ function lowerCollectionHelpers(node: TypeNode, registry: TypeRegistry): Collect
       return {
         propertyName: p.name,
         elementTypeName: p.typeName,
-        innerFields: elementType?.properties.filter(t => t.name !== "name").map(t => t.name) || [],
-        coercionProperty: elementType ? findCoercionProperty(elementType) : null,
+        innerFields:
+          elementType?.properties
+            .filter((t) => t.name !== "name")
+            .map((t) => t.name) || [],
+        coercionProperty: elementType
+          ? findCoercionProperty(elementType)
+          : null,
         entryShorthand: elementType ? lowerEntryShorthand(elementType) : null,
         hasNameProperty,
       };
@@ -447,15 +464,17 @@ function lowerEntryShorthand(node: TypeNode): EntryShorthandDecl | null {
   const valueField = node.entryShorthand;
   if (!valueField) return null;
 
-  const cases: EntryShorthandCase[] = (node.coercions || []).map(coercion => ({
-    scalarType: coercion.scalar,
-    assignments: Object.entries(coercion.expansion)
-      .filter(([, value]) => value !== "{value}")
-      .map(([fieldName, value]) => ({
-        fieldName,
-        literalValue: value as string | number | boolean | null,
-      })),
-  }));
+  const cases: EntryShorthandCase[] = (node.coercions || []).map(
+    (coercion) => ({
+      scalarType: coercion.scalar,
+      assignments: Object.entries(coercion.expansion)
+        .filter(([, value]) => value !== "{value}")
+        .map(([fieldName, value]) => ({
+          fieldName,
+          literalValue: value as string | number | boolean | null,
+        })),
+    }),
+  );
 
   return { valueField, cases };
 }
@@ -469,13 +488,10 @@ function lowerEntryShorthand(node: TypeNode): EntryShorthandDecl | null {
  * but stores it as a typed Expr (not pre-rendered string).
  * Emitters will visit the Expr with their own visitor for language-specific output.
  */
-function lowerFactories(
-  node: TypeNode,
-  registry: TypeRegistry,
-): FactoryDecl[] {
+function lowerFactories(node: TypeNode, registry: TypeRegistry): FactoryDecl[] {
   if (!node.factories || node.factories.length === 0) return [];
 
-  return node.factories.map(f => {
+  return node.factories.map((f) => {
     const expr = resolveFactoryExpr(f.sets, f.params, node, registry);
 
     return {
@@ -491,7 +507,7 @@ function lowerFactories(
 // ============================================================================
 
 function lowerMethods(node: TypeNode): MethodStubDecl[] {
-  return (node.methods || []).map(m => ({
+  return (node.methods || []).map((m) => ({
     name: m.name,
     returns: m.returns,
     description: m.description,
@@ -580,7 +596,11 @@ function collectEnums(types: TypeDecl[]): EnumDef[] {
     for (const field of type.fields) {
       // Skip discriminator fields — they use the polymorphic Kind enum instead
       if (discriminatorFields.has(field.name)) continue;
-      if (field.enumName && field.allowedValues.length > 0 && !seen.has(field.enumName)) {
+      if (
+        field.enumName &&
+        field.allowedValues.length > 0 &&
+        !seen.has(field.enumName)
+      ) {
         seen.set(field.enumName, {
           name: field.enumName,
           values: field.allowedValues,
@@ -609,7 +629,7 @@ function resolveImports(
   // Types defined in this file (excluded from imports)
   const definedInFile = new Set([
     rootNode.typeName.name,
-    ...rootNode.childTypes.map(c => c.typeName.name),
+    ...rootNode.childTypes.map((c) => c.typeName.name),
   ]);
   const importMap = new Map<string, Set<string>>();
 
@@ -626,7 +646,10 @@ function resolveImports(
   for (const type of types) {
     for (const field of type.fields) {
       // Only import non-scalar, non-dict types
-      if (field.category.kind === "complex" || field.category.kind === "collection_complex") {
+      if (
+        field.category.kind === "complex" ||
+        field.category.kind === "collection_complex"
+      ) {
         addImport(field.typeName.name);
       } else if (
         field.category.kind === "dict" &&

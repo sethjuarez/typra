@@ -1,8 +1,23 @@
-import { type DecoratorContext, type Model, Program, Type, ModelProperty, ObjectValue, serializeValueAsJson, StringValue, Union } from "@typespec/compiler";
+import {
+  type DecoratorContext,
+  type Model,
+  Program,
+  Type,
+  ModelProperty,
+  ObjectValue,
+  serializeValueAsJson,
+  StringValue,
+  Union,
+} from "@typespec/compiler";
 import { StateKeys } from "./lib.js";
 import { Coercion } from "./ir/ast.js";
 
-export const appendStateValue = <T>(context: DecoratorContext, key: symbol, target: Type, value: T | T[]) => {
+export const appendStateValue = <T>(
+  context: DecoratorContext,
+  key: symbol,
+  target: Type,
+  value: T | T[],
+) => {
   const state = context.program.stateMap(key).get(target) || [];
   if (Array.isArray(value)) {
     const newState = [...state, ...value];
@@ -13,15 +28,28 @@ export const appendStateValue = <T>(context: DecoratorContext, key: symbol, targ
   }
 };
 
-export const getStateValue = <T>(program: Program, key: symbol, target: Type): T[] => {
+export const getStateValue = <T>(
+  program: Program,
+  key: symbol,
+  target: Type,
+): T[] => {
   return program.stateMap(key).get(target) || [];
 };
 
-export const setStateScalar = <T>(context: DecoratorContext, key: symbol, target: Type, value: T) => {
+export const setStateScalar = <T>(
+  context: DecoratorContext,
+  key: symbol,
+  target: Type,
+  value: T,
+) => {
   context.program.stateMap(key).set(target, value);
 };
 
-export const getStateScalar = <T>(program: Program, key: symbol, target: Type): T | undefined => {
+export const getStateScalar = <T>(
+  program: Program,
+  key: symbol,
+  target: Type,
+): T | undefined => {
   const value = program.stateMap(key).get(target);
   return value ? value : undefined;
 };
@@ -37,15 +65,29 @@ export interface SampleEntry {
   description?: string;
 }
 
-export function $sample(context: DecoratorContext, target: ModelProperty, sample: ObjectValue | object, options?: SampleOptions) {
+export function $sample(
+  context: DecoratorContext,
+  target: ModelProperty,
+  sample: ObjectValue | object,
+  options?: SampleOptions,
+) {
   // With valueof unknown, TypeSpec passes a plain JavaScript object
   // With unknown (no valueof), TypeSpec passes an ObjectValue with a type property
   let s: object;
 
-  if (sample && typeof sample === 'object' && 'type' in sample && (sample as ObjectValue).type) {
+  if (
+    sample &&
+    typeof sample === "object" &&
+    "type" in sample &&
+    (sample as ObjectValue).type
+  ) {
     // Old-style ObjectValue with type property
     const sampleValue = sample as ObjectValue;
-    const serialized = serializeValueAsJson(context.program, sampleValue, sampleValue.type);
+    const serialized = serializeValueAsJson(
+      context.program,
+      sampleValue,
+      sampleValue.type,
+    );
     if (!serialized) {
       context.program.reportDiagnostic({
         code: "typra-emitter-sample-serialization",
@@ -74,7 +116,7 @@ export function $sample(context: DecoratorContext, target: ModelProperty, sample
     sample: s,
     title: options?.title ?? "",
     description: options?.description ?? "",
-  }
+  };
   appendStateValue<SampleEntry>(context, StateKeys.samples, target, entry);
 }
 
@@ -82,7 +124,15 @@ export function $abstract(context: DecoratorContext, target: Model) {
   setStateScalar(context, StateKeys.abstracts, target, true);
 }
 
-export function $coerce(context: DecoratorContext, target: Model, scalar: Type, expansion: ObjectValue | object, title?: string, description?: string, example?: string) {
+export function $coerce(
+  context: DecoratorContext,
+  target: Model,
+  scalar: Type,
+  expansion: ObjectValue | object,
+  title?: string,
+  description?: string,
+  example?: string,
+) {
   if (scalar.kind !== "Scalar") {
     context.program.reportDiagnostic({
       code: "typra-emitter-coerce-scalar-type",
@@ -95,8 +145,17 @@ export function $coerce(context: DecoratorContext, target: Model, scalar: Type, 
 
   // Handle both ObjectValue (old style) and plain object (valueof unknown)
   let exp: object;
-  if (expansion && typeof expansion === 'object' && 'type' in expansion && (expansion as ObjectValue).type) {
-    const serialized = serializeValueAsJson(context.program, expansion as ObjectValue, (expansion as ObjectValue).type);
+  if (
+    expansion &&
+    typeof expansion === "object" &&
+    "type" in expansion &&
+    (expansion as ObjectValue).type
+  ) {
+    const serialized = serializeValueAsJson(
+      context.program,
+      expansion as ObjectValue,
+      (expansion as ObjectValue).type,
+    );
     if (!serialized) {
       context.program.reportDiagnostic({
         code: "typra-emitter-coerce-serialization",
@@ -112,9 +171,20 @@ export function $coerce(context: DecoratorContext, target: Model, scalar: Type, 
   }
 
   // Handle string parameters that come as plain strings from valueof
-  const titleValue = typeof title === 'object' && title !== null && 'value' in title ? (title as StringValue).value : title as string | undefined;
-  const descValue = typeof description === 'object' && description !== null && 'value' in description ? (description as StringValue).value : description as string | undefined;
-  const exampleValue = typeof example === 'object' && example !== null && 'value' in example ? (example as StringValue).value : example as string | undefined;
+  const titleValue =
+    typeof title === "object" && title !== null && "value" in title
+      ? (title as StringValue).value
+      : (title as string | undefined);
+  const descValue =
+    typeof description === "object" &&
+    description !== null &&
+    "value" in description
+      ? (description as StringValue).value
+      : (description as string | undefined);
+  const exampleValue =
+    typeof example === "object" && example !== null && "value" in example
+      ? (example as StringValue).value
+      : (example as string | undefined);
 
   const entry: Coercion = {
     scalar: scalar.name,
@@ -122,7 +192,7 @@ export function $coerce(context: DecoratorContext, target: Model, scalar: Type, 
     example: exampleValue,
     title: titleValue ?? "",
     description: descValue ?? "",
-  }
+  };
   appendStateValue<Coercion>(context, StateKeys.coercions, target, entry);
 }
 
@@ -164,19 +234,35 @@ export interface MethodEntry extends MethodOptions {
 }
 
 function deserializeValue(value: unknown): any {
-  if (value && typeof value === 'object' && 'type' in value && (value as ObjectValue).type) {
+  if (
+    value &&
+    typeof value === "object" &&
+    "type" in value &&
+    (value as ObjectValue).type
+  ) {
     // ObjectValue from TypeSpec — shouldn't happen with valueof but handle defensively
     return value;
   }
   return value;
 }
 
-export function $factory(context: DecoratorContext, target: Model, name: string, sets: object, params?: object) {
+export function $factory(
+  context: DecoratorContext,
+  target: Model,
+  name: string,
+  sets: object,
+  params?: object,
+) {
   // Handle string values from valueof
-  const nameValue = typeof name === 'object' && name !== null && 'value' in name ? (name as StringValue).value : name as string;
+  const nameValue =
+    typeof name === "object" && name !== null && "value" in name
+      ? (name as StringValue).value
+      : (name as string);
 
   const setsValue = deserializeValue(sets) as Record<string, any>;
-  const paramsValue = params ? deserializeValue(params) as Record<string, string> : {};
+  const paramsValue = params
+    ? (deserializeValue(params) as Record<string, string>)
+    : {};
 
   const entry: FactoryEntry = {
     name: nameValue,
@@ -198,13 +284,34 @@ export function $method(
   sync?: boolean,
   options?: object,
 ) {
-  const nameValue = typeof name === 'object' && name !== null && 'value' in name ? (name as StringValue).value : name as string;
-  const returnsValue = typeof returns === 'object' && returns !== null && 'value' in returns ? (returns as StringValue).value : returns as string;
-  const descValue = typeof description === 'object' && description !== null && 'value' in description ? (description as StringValue).value : description as string | undefined;
-  const paramsValue = params ? deserializeValue(params) as Record<string, string> : {};
-  const optionalValue = typeof optional === 'object' && optional !== null && 'value' in optional ? (optional as { value: boolean }).value : optional ?? false;
-  const syncValue = typeof sync === 'object' && sync !== null && 'value' in sync ? (sync as { value: boolean }).value : sync ?? false;
-  const optionsValue = options ? deserializeValue(options) as MethodOptions : {};
+  const nameValue =
+    typeof name === "object" && name !== null && "value" in name
+      ? (name as StringValue).value
+      : (name as string);
+  const returnsValue =
+    typeof returns === "object" && returns !== null && "value" in returns
+      ? (returns as StringValue).value
+      : (returns as string);
+  const descValue =
+    typeof description === "object" &&
+    description !== null &&
+    "value" in description
+      ? (description as StringValue).value
+      : (description as string | undefined);
+  const paramsValue = params
+    ? (deserializeValue(params) as Record<string, string>)
+    : {};
+  const optionalValue =
+    typeof optional === "object" && optional !== null && "value" in optional
+      ? (optional as { value: boolean }).value
+      : (optional ?? false);
+  const syncValue =
+    typeof sync === "object" && sync !== null && "value" in sync
+      ? (sync as { value: boolean }).value
+      : (sync ?? false);
+  const optionsValue = options
+    ? (deserializeValue(options) as MethodOptions)
+    : {};
 
   const entry: MethodEntry = {
     name: nameValue,
@@ -232,9 +339,20 @@ export interface KnownAsEntry {
   name: string;
 }
 
-export function $knownAs(context: DecoratorContext, target: ModelProperty, provider: string, name: string) {
-  const providerValue = typeof provider === 'object' && provider !== null && 'value' in provider ? (provider as StringValue).value : provider as string;
-  const nameValue = typeof name === 'object' && name !== null && 'value' in name ? (name as StringValue).value : name as string;
+export function $knownAs(
+  context: DecoratorContext,
+  target: ModelProperty,
+  provider: string,
+  name: string,
+) {
+  const providerValue =
+    typeof provider === "object" && provider !== null && "value" in provider
+      ? (provider as StringValue).value
+      : (provider as string);
+  const nameValue =
+    typeof name === "object" && name !== null && "value" in name
+      ? (name as StringValue).value
+      : (name as string);
 
   const entry: KnownAsEntry = { provider: providerValue, name: nameValue };
   appendStateValue<KnownAsEntry>(context, StateKeys.knownAs, target, entry);
@@ -248,18 +366,36 @@ export interface ParseAliasEntry {
 }
 
 function readStringValue(value: unknown): string {
-  return typeof value === 'object' && value !== null && 'value' in value ? (value as StringValue).value : value as string;
+  return typeof value === "object" && value !== null && "value" in value
+    ? (value as StringValue).value
+    : (value as string);
 }
 
-function readStringArray(context: DecoratorContext, target: Type, value: ObjectValue | object | string[]): string[] | undefined {
+function readStringArray(
+  context: DecoratorContext,
+  target: Type,
+  value: ObjectValue | object | string[],
+): string[] | undefined {
   let deserialized: unknown;
-  if (value && typeof value === 'object' && 'type' in value && (value as ObjectValue).type) {
-    deserialized = serializeValueAsJson(context.program, value as ObjectValue, (value as ObjectValue).type);
+  if (
+    value &&
+    typeof value === "object" &&
+    "type" in value &&
+    (value as ObjectValue).type
+  ) {
+    deserialized = serializeValueAsJson(
+      context.program,
+      value as ObjectValue,
+      (value as ObjectValue).type,
+    );
   } else {
     deserialized = value;
   }
 
-  if (!Array.isArray(deserialized) || !deserialized.every(item => typeof item === "string")) {
+  if (
+    !Array.isArray(deserialized) ||
+    !deserialized.every((item) => typeof item === "string")
+  ) {
     context.program.reportDiagnostic({
       code: "typra-emitter-parse-aliases",
       message: `parseAlias aliases must be an array of strings.`,
@@ -272,13 +408,20 @@ function readStringArray(context: DecoratorContext, target: Type, value: ObjectV
   return deserialized;
 }
 
-export function $parseAlias(context: DecoratorContext, target: Union, canonical: string, aliases: ObjectValue | object | string[]) {
+export function $parseAlias(
+  context: DecoratorContext,
+  target: Union,
+  canonical: string,
+  aliases: ObjectValue | object | string[],
+) {
   const canonicalValue = readStringValue(canonical);
   const aliasValues = readStringArray(context, target as Type, aliases);
   if (!aliasValues) return;
 
   const variants = Array.from(target.variants).map(([, v]) => v.type);
-  const allowedValues = new Set(variants.filter(v => v.kind === "String").map(v => v.value));
+  const allowedValues = new Set(
+    variants.filter((v) => v.kind === "String").map((v) => v.value),
+  );
   if (!allowedValues.has(canonicalValue)) {
     context.program.reportDiagnostic({
       code: "typra-emitter-parse-alias-canonical",
@@ -289,7 +432,11 @@ export function $parseAlias(context: DecoratorContext, target: Union, canonical:
     return;
   }
 
-  const existing = getStateValue<ParseAliasEntry>(context.program, StateKeys.parseAliases, target as Type);
+  const existing = getStateValue<ParseAliasEntry>(
+    context.program,
+    StateKeys.parseAliases,
+    target as Type,
+  );
   const seen = new Map<string, string>();
   for (const entry of existing) {
     for (const alias of entry.aliases) {
@@ -300,10 +447,14 @@ export function $parseAlias(context: DecoratorContext, target: Union, canonical:
     const existingCanonical = seen.get(alias);
     if (existingCanonical) {
       context.program.reportDiagnostic({
-        code: existingCanonical === canonicalValue ? "typra-emitter-parse-alias-duplicate" : "typra-emitter-parse-alias-conflict",
-        message: existingCanonical === canonicalValue
-          ? `parseAlias alias '${alias}' is already declared for canonical value '${canonicalValue}'.`
-          : `parseAlias alias '${alias}' already maps to canonical value '${existingCanonical}'.`,
+        code:
+          existingCanonical === canonicalValue
+            ? "typra-emitter-parse-alias-duplicate"
+            : "typra-emitter-parse-alias-conflict",
+        message:
+          existingCanonical === canonicalValue
+            ? `parseAlias alias '${alias}' is already declared for canonical value '${canonicalValue}'.`
+            : `parseAlias alias '${alias}' already maps to canonical value '${existingCanonical}'.`,
         severity: "error",
         target,
       });
@@ -321,10 +472,15 @@ export function $parseAlias(context: DecoratorContext, target: Union, canonical:
     seen.set(alias, canonicalValue);
   }
 
-  appendStateValue<ParseAliasEntry>(context, StateKeys.parseAliases, target as Type, {
-    canonical: canonicalValue,
-    aliases: aliasValues,
-  });
+  appendStateValue<ParseAliasEntry>(
+    context,
+    StateKeys.parseAliases,
+    target as Type,
+    {
+      canonical: canonicalValue,
+      aliases: aliasValues,
+    },
+  );
 }
 
 export interface DefaultForEntry {
@@ -334,12 +490,29 @@ export interface DefaultForEntry {
   defaultValue: any;
 }
 
-export function $defaultFor(context: DecoratorContext, target: ModelProperty, provider: string, defaultValue: ObjectValue | object | string | number | boolean) {
-  const providerValue = typeof provider === 'object' && provider !== null && 'value' in provider ? (provider as StringValue).value : provider as string;
+export function $defaultFor(
+  context: DecoratorContext,
+  target: ModelProperty,
+  provider: string,
+  defaultValue: ObjectValue | object | string | number | boolean,
+) {
+  const providerValue =
+    typeof provider === "object" && provider !== null && "value" in provider
+      ? (provider as StringValue).value
+      : (provider as string);
 
   let val: any;
-  if (defaultValue && typeof defaultValue === 'object' && 'type' in defaultValue && (defaultValue as ObjectValue).type) {
-    const serialized = serializeValueAsJson(context.program, defaultValue as ObjectValue, (defaultValue as ObjectValue).type);
+  if (
+    defaultValue &&
+    typeof defaultValue === "object" &&
+    "type" in defaultValue &&
+    (defaultValue as ObjectValue).type
+  ) {
+    const serialized = serializeValueAsJson(
+      context.program,
+      defaultValue as ObjectValue,
+      (defaultValue as ObjectValue).type,
+    );
     if (!serialized) {
       context.program.reportDiagnostic({
         code: "typra-emitter-defaultfor-serialization",
@@ -355,7 +528,12 @@ export function $defaultFor(context: DecoratorContext, target: ModelProperty, pr
   }
 
   const entry: DefaultForEntry = { provider: providerValue, defaultValue: val };
-  appendStateValue<DefaultForEntry>(context, StateKeys.defaultFor, target, entry);
+  appendStateValue<DefaultForEntry>(
+    context,
+    StateKeys.defaultFor,
+    target,
+    entry,
+  );
 }
 
 // ============================================================================
@@ -377,10 +555,15 @@ export function $protocol(context: DecoratorContext, target: Model) {
  * directly and a bare scalar reaching it as a named collection entry are
  * different contexts and may legitimately populate different fields.
  */
-export function $entryShorthand(context: DecoratorContext, target: Model, field: string | StringValue) {
-  const fieldName = typeof field === "object" && field !== null && "value" in field
-    ? (field as StringValue).value
-    : (field as string);
+export function $entryShorthand(
+  context: DecoratorContext,
+  target: Model,
+  field: string | StringValue,
+) {
+  const fieldName =
+    typeof field === "object" && field !== null && "value" in field
+      ? (field as StringValue).value
+      : (field as string);
 
   if (!fieldName || !target.properties.has(fieldName)) {
     context.program.reportDiagnostic({

@@ -3,7 +3,10 @@ import { EmitTarget, TypraEmitterOptions } from "./lib.js";
 import { TypeNode } from "./ir/ast.js";
 import { toKebabCase, toSnakeCase } from "./ir/utilities.js";
 import { getToolchainMetadata, ToolchainMetadata } from "./compatibility.js";
-import { swiftFileName, swiftModuleName } from "./languages/swift/identifiers.js";
+import {
+  swiftFileName,
+  swiftModuleName,
+} from "./languages/swift/identifiers.js";
 
 export interface ExportSurfaceMethod {
   name: string;
@@ -90,12 +93,20 @@ export async function emitExportSurfaceSnapshot(
   snapshot: ExportSurfaceSnapshot,
 ): Promise<void> {
   await emitFile(context.program, {
-    path: resolvePath(context.emitterOutputDir, ".typra-generated", "export-surfaces.json"),
+    path: resolvePath(
+      context.emitterOutputDir,
+      ".typra-generated",
+      "export-surfaces.json",
+    ),
     content: `${JSON.stringify(snapshot, null, 2)}\n`,
   });
 }
 
-function buildTargetSurface(rootNamespace: string, target: EmitTarget, nodes: TypeNode[]): TargetExportSurface {
+function buildTargetSurface(
+  rootNamespace: string,
+  target: EmitTarget,
+  nodes: TypeNode[],
+): TargetExportSurface {
   const targetName = normalizeTarget(target.type);
   const moduleName = targetModuleName(rootNamespace, targetName, target);
   const baseTypes = nodes.filter((node) => !node.base).sort(compareNodes);
@@ -136,12 +147,18 @@ function buildTargetSurface(rootNamespace: string, target: EmitTarget, nodes: Ty
   };
 }
 
-function buildExports(targetName: string, baseTypes: TypeNode[], targetModule?: string): ExportSurfaceEntry[] {
+function buildExports(
+  targetName: string,
+  baseTypes: TypeNode[],
+  targetModule?: string,
+): ExportSurfaceEntry[] {
   return baseTypes
     .flatMap((node) => {
       const group = node.group || "";
       const source = sourceFor(targetName, node, group, targetModule);
-      const kind: ExportSurfaceEntry["kind"] = node.isProtocol ? "type" : "value";
+      const kind: ExportSurfaceEntry["kind"] = node.isProtocol
+        ? "type"
+        : "value";
       return [node, ...node.childTypes].map((exportedNode) => ({
         name: exportedNode.typeName.name,
         kind,
@@ -157,7 +174,10 @@ function buildExports(targetName: string, baseTypes: TypeNode[], targetModule?: 
     });
 }
 
-function buildGroups(targetName: string, baseTypes: TypeNode[]): ExportSurfaceGroup[] {
+function buildGroups(
+  targetName: string,
+  baseTypes: TypeNode[],
+): ExportSurfaceGroup[] {
   const groupMap = new Map<string, TypeNode[]>();
   for (const node of baseTypes) {
     const group = node.group || "";
@@ -169,24 +189,47 @@ function buildGroups(targetName: string, baseTypes: TypeNode[]): ExportSurfaceGr
   return Array.from(groupMap.entries())
     .map(([name, groupNodes]) => ({
       name,
-      exports: uniqueSorted(groupNodes.flatMap((node) => [node.typeName.name, ...node.childTypes.map((child) => child.typeName.name)])),
-      modules: uniqueSorted(groupNodes.map((node) => groupModuleName(targetName, node))),
+      exports: uniqueSorted(
+        groupNodes.flatMap((node) => [
+          node.typeName.name,
+          ...node.childTypes.map((child) => child.typeName.name),
+        ]),
+      ),
+      modules: uniqueSorted(
+        groupNodes.map((node) => groupModuleName(targetName, node)),
+      ),
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function buildModules(targetName: string, baseTypes: TypeNode[], targetModule?: string): string[] {
+function buildModules(
+  targetName: string,
+  baseTypes: TypeNode[],
+  targetModule?: string,
+): string[] {
   if (targetName === "rust") {
-    return uniqueSorted(["context", ...baseTypes.map((node) => node.group || moduleName(node))]);
+    return uniqueSorted([
+      "context",
+      ...baseTypes.map((node) => node.group || moduleName(node)),
+    ]);
   }
 
-  return uniqueSorted(baseTypes.map((node) => sourceFor(targetName, node, node.group || "", targetModule)));
+  return uniqueSorted(
+    baseTypes.map((node) =>
+      sourceFor(targetName, node, node.group || "", targetModule),
+    ),
+  );
 }
 
-function targetMetadata(rootNamespace: string, targetName: string, target: EmitTarget): Pick<TargetExportSurface, "packageName" | "namespace"> {
+function targetMetadata(
+  rootNamespace: string,
+  targetName: string,
+  target: EmitTarget,
+): Pick<TargetExportSurface, "packageName" | "namespace"> {
   if (targetName === "go") {
     return {
-      packageName: target["package-name"] || goPackageNameFromNamespace(rootNamespace),
+      packageName:
+        target["package-name"] || goPackageNameFromNamespace(rootNamespace),
     };
   }
 
@@ -223,7 +266,11 @@ function targetMetadata(rootNamespace: string, targetName: string, target: EmitT
   return {};
 }
 
-function targetModuleName(rootNamespace: string, targetName: string, target: EmitTarget): string | undefined {
+function targetModuleName(
+  rootNamespace: string,
+  targetName: string,
+  target: EmitTarget,
+): string | undefined {
   if (targetName === "swift") {
     return swiftModuleName(target["package-name"] || rootNamespace);
   }
@@ -231,11 +278,18 @@ function targetModuleName(rootNamespace: string, targetName: string, target: Emi
   return undefined;
 }
 
-function sourceFor(targetName: string, node: TypeNode, group: string, targetModule?: string): string {
+function sourceFor(
+  targetName: string,
+  node: TypeNode,
+  group: string,
+  targetModule?: string,
+): string {
   const name = node.typeName.name;
   switch (targetName) {
     case "typescript":
-      return group ? `./${group}/${toKebabCase(name)}` : `./${toKebabCase(name)}`;
+      return group
+        ? `./${group}/${toKebabCase(name)}`
+        : `./${toKebabCase(name)}`;
     case "python":
       return group ? `.${group}` : `._${name}`;
     case "rust":
@@ -246,11 +300,13 @@ function sourceFor(targetName: string, node: TypeNode, group: string, targetModu
       return group ? `${group}/${name}.cs` : `${name}.cs`;
     case "java":
       return `${name}.java`;
-    case "swift":
-      {
-        const swiftModule = targetModule || swiftModuleName(node.typeName.namespace);
-        return group ? `Sources/${swiftModule}/${group}/${swiftFileName(name)}` : `Sources/${swiftModule}/${swiftFileName(name)}`;
-      }
+    case "swift": {
+      const swiftModule =
+        targetModule || swiftModuleName(node.typeName.namespace);
+      return group
+        ? `Sources/${swiftModule}/${group}/${swiftFileName(name)}`
+        : `Sources/${swiftModule}/${swiftFileName(name)}`;
+    }
     default:
       return name;
   }
@@ -298,5 +354,7 @@ function uniqueSorted(values: string[]): string[] {
 }
 
 function sortRecord(record: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(Object.entries(record).sort(([left], [right]) => left.localeCompare(right)));
+  return Object.fromEntries(
+    Object.entries(record).sort(([left], [right]) => left.localeCompare(right)),
+  );
 }

@@ -82,7 +82,13 @@ const CONVERT_MAP: Record<string, string> = {
   double: "Double",
 };
 
-const NON_NULLABLE_VALUE_TYPES = new Set(["bool", "int", "long", "float", "double"]);
+const NON_NULLABLE_VALUE_TYPES = new Set([
+  "bool",
+  "int",
+  "long",
+  "float",
+  "double",
+]);
 
 /**
  * True when a TypeSpec scalar maps to C#'s 32-bit `float` (System.Single).
@@ -97,10 +103,12 @@ export function isCSharpSinglePrecision(scalarType: string): boolean {
 }
 
 function csharpString(value: string): string {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function renderCSharpAliasSwitchArms(parseAliases: Record<string, string[]>): string {
+function renderCSharpAliasSwitchArms(
+  parseAliases: Record<string, string[]>,
+): string {
   const arms: string[] = [];
   for (const [canonical, aliases] of Object.entries(parseAliases)) {
     for (const alias of aliases) {
@@ -126,9 +134,8 @@ export function emitCSharpClass(
 ): string {
   const lines: string[] = [];
   const inheritedType = flattenInheritance([type], allTypes)[0];
-  const loadType = inheritedType === type
-    ? type
-    : { ...type, load: inheritedType.load };
+  const loadType =
+    inheritedType === type ? type : { ...type, load: inheritedType.load };
 
   // Protocol types → emit as interface
   if (type.isProtocol) {
@@ -227,11 +234,15 @@ export function emitCSharpEnum(enumDef: EnumDef, namespace: string): string {
   lines.push("        return value switch");
   lines.push("        {");
   for (const value of enumDef.values) {
-    lines.push(`            ${csharpString(value)} => ${csEnumName}.${toPascalCase(value)},`);
+    lines.push(
+      `            ${csharpString(value)} => ${csEnumName}.${toPascalCase(value)},`,
+    );
   }
   for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
     for (const alias of aliases) {
-      lines.push(`            ${csharpString(alias)} => ${csEnumName}.${toPascalCase(canonical)},`);
+      lines.push(
+        `            ${csharpString(alias)} => ${csEnumName}.${toPascalCase(canonical)},`,
+      );
     }
   }
   lines.push(`            _ => Enum.Parse<${csEnumName}>(value, true),`);
@@ -243,7 +254,9 @@ export function emitCSharpEnum(enumDef: EnumDef, namespace: string): string {
   lines.push("        return value switch");
   lines.push("        {");
   for (const value of enumDef.values) {
-    lines.push(`            ${csEnumName}.${toPascalCase(value)} => ${csharpString(value)},`);
+    lines.push(
+      `            ${csEnumName}.${toPascalCase(value)} => ${csharpString(value)},`,
+    );
   }
   lines.push("            _ => value.ToString().ToLowerInvariant(),");
   lines.push("        };");
@@ -265,7 +278,8 @@ function protocolCSharpType(typeStr: string): string {
     const inner = typeStr.slice(0, -2);
     return `List<${protocolCSharpType(inner)}>`;
   }
-  if (typeStr === "Record<unknown>" || typeStr === "dictionary") return "Dictionary<string, object?>";
+  if (typeStr === "Record<unknown>" || typeStr === "dictionary")
+    return "Dictionary<string, object?>";
   if (typeStr === "unknown" || typeStr === "any") return "object";
   if (typeStr === "void") return "void";
   // Handle nullable types (e.g., "string?")
@@ -281,15 +295,26 @@ function renderProtocolParameters(
   runtimeCancellable: boolean | undefined,
 ): string {
   return Object.entries(params)
-    .map(([name, typeName]) => `${protocolCSharpType(typeName)} ${csharpIdentifier(name)}`)
-    .concat(runtimeCancellable ? ["CancellationToken cancellationToken = default"] : [])
+    .map(
+      ([name, typeName]) =>
+        `${protocolCSharpType(typeName)} ${csharpIdentifier(name)}`,
+    )
+    .concat(
+      runtimeCancellable
+        ? ["CancellationToken cancellationToken = default"]
+        : [],
+    )
     .join(", ");
 }
 
 /**
  * Emit a C# interface for a protocol type.
  */
-function emitCSharpInterface(type: TypeDecl, namespace: string, lines: string[]): string {
+function emitCSharpInterface(
+  type: TypeDecl,
+  namespace: string,
+  lines: string[],
+): string {
   const name = type.typeName.name;
 
   // Header (simplified — no YAML/JSON imports needed for interfaces)
@@ -315,16 +340,21 @@ function emitCSharpInterface(type: TypeDecl, namespace: string, lines: string[])
     if (method.description) {
       emitXmlDocComment(method.description, "        ", lines);
     }
-    const params = renderProtocolParameters(method.params, method.runtimeCancellable);
+    const params = renderProtocolParameters(
+      method.params,
+      method.runtimeCancellable,
+    );
     const ret = protocolCSharpType(method.returns);
 
     if (method.sync) {
       // Synchronous method
       if (method.optional) {
         // Return type already includes nullability — provide default body
-        lines.push(ret === "void"
-          ? `        void ${toPascalCase(method.name)}(${params}) { }`
-          : `        ${ret} ${toPascalCase(method.name)}(${params}) => default!;`);
+        lines.push(
+          ret === "void"
+            ? `        void ${toPascalCase(method.name)}(${params}) { }`
+            : `        ${ret} ${toPascalCase(method.name)}(${params}) => default!;`,
+        );
       } else {
         lines.push(`        ${ret} ${toPascalCase(method.name)}(${params});`);
       }
@@ -332,14 +362,20 @@ function emitCSharpInterface(type: TypeDecl, namespace: string, lines: string[])
       // Async method
       if (method.optional) {
         if (ret === "void") {
-          lines.push(`        Task ${toPascalCase(method.name)}Async(${params}) => Task.CompletedTask;`);
+          lines.push(
+            `        Task ${toPascalCase(method.name)}Async(${params}) => Task.CompletedTask;`,
+          );
         } else {
-          lines.push(`        Task<${ret}> ${toPascalCase(method.name)}Async(${params}) => Task.FromResult<${ret}>(default!);`);
+          lines.push(
+            `        Task<${ret}> ${toPascalCase(method.name)}Async(${params}) => Task.FromResult<${ret}>(default!);`,
+          );
         }
       } else {
-        lines.push(ret === "void"
-          ? `        Task ${toPascalCase(method.name)}Async(${params});`
-          : `        Task<${ret}> ${toPascalCase(method.name)}Async(${params});`);
+        lines.push(
+          ret === "void"
+            ? `        Task ${toPascalCase(method.name)}Async(${params});`
+            : `        Task<${ret}> ${toPascalCase(method.name)}Async(${params});`,
+        );
       }
     }
   }
@@ -373,10 +409,17 @@ function emitHeader(lines: string[], namespace: string): void {
 // XML doc comment
 // ============================================================================
 
-function emitXmlDocComment(description: string, indent: string, lines: string[]): void {
+function emitXmlDocComment(
+  description: string,
+  indent: string,
+  lines: string[],
+): void {
   lines.push(`${indent}/// <summary>`);
   // Split multi-line descriptions into separate /// lines
-  const descLines = description.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  const descLines = description
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
   for (let i = 0; i < descLines.length; i++) {
     lines.push(`${indent}/// ${descLines[i]}`);
     // Add empty /// line between paragraphs (if multiple lines and not the last)
@@ -397,7 +440,9 @@ function emitClassDeclaration(type: TypeDecl, lines: string[]): void {
   if (type.base) bases.push(type.base.name);
   if (type.methods.length > 0) bases.push(`I${type.typeName.name}Helpers`);
   const baseSuffix = bases.length > 0 ? ` : ${bases.join(", ")}` : "";
-  lines.push(`public ${abstract_}partial class ${type.typeName.name}${baseSuffix}`);
+  lines.push(
+    `public ${abstract_}partial class ${type.typeName.name}${baseSuffix}`,
+  );
   lines.push("{");
 }
 
@@ -422,7 +467,9 @@ function emitShorthandProperty(type: TypeDecl, lines: string[]): void {
 function emitConstructor(type: TypeDecl, lines: string[]): void {
   const access = type.isAbstract ? "protected" : "public";
   lines.push("    /// <summary>");
-  lines.push(`    /// Initializes a new instance of <see cref="${type.typeName.name}"/>.`);
+  lines.push(
+    `    /// Initializes a new instance of <see cref="${type.typeName.name}"/>.`,
+  );
   lines.push("    /// </summary>");
   lines.push("#pragma warning disable CS8618");
   lines.push(`    ${access} ${type.typeName.name}()`);
@@ -436,7 +483,12 @@ function emitConstructor(type: TypeDecl, lines: string[]): void {
 // Properties
 // ============================================================================
 
-function emitProperties(type: TypeDecl, allTypes: TypeDecl[], findType: (name: string) => TypeDecl | undefined, lines: string[]): void {
+function emitProperties(
+  type: TypeDecl,
+  allTypes: TypeDecl[],
+  findType: (name: string) => TypeDecl | undefined,
+  lines: string[],
+): void {
   for (const field of type.fields) {
     const modifier = getPropertyModifier(field, type, allTypes, findType);
     const csType = getCSharpType(
@@ -449,7 +501,9 @@ function emitProperties(type: TypeDecl, allTypes: TypeDecl[], findType: (name: s
     const default_ = getPropertyDefault(field);
 
     emitXmlDocComment(field.description || propName, "    ", lines);
-    lines.push(`    public ${modifier}${csType} ${propName} { get; set; }${default_}`);
+    lines.push(
+      `    public ${modifier}${csType} ${propName} { get; set; }${default_}`,
+    );
     lines.push("");
   }
   if (absorbsUnknownValues(type.polymorphicDispatch)) {
@@ -461,9 +515,13 @@ function emitProperties(type: TypeDecl, allTypes: TypeDecl[], findType: (name: s
     lines.push("    {");
     lines.push("        if (value is IDictionary<string, object?> dictionary)");
     lines.push("        {");
-    lines.push("            return dictionary.ToDictionary(item => item.Key, item => CloneRawValue(item.Value));");
+    lines.push(
+      "            return dictionary.ToDictionary(item => item.Key, item => CloneRawValue(item.Value));",
+    );
     lines.push("        }");
-    lines.push("        if (value is System.Collections.IEnumerable items && value is not string)");
+    lines.push(
+      "        if (value is System.Collections.IEnumerable items && value is not string)",
+    );
     lines.push("        {");
     lines.push("            var result = new List<object?>();");
     lines.push("            foreach (var item in items)");
@@ -487,9 +545,10 @@ function getPropertyModifier(
 ): string {
   // Check if any child type has a field with same name → virtual
   if (type.polymorphicDispatch || type.isAbstract) {
-    const childHasSameField = allTypes.some(t =>
-      t.base?.name === type.typeName.name &&
-      t.fields.some(f => f.name === field.name)
+    const childHasSameField = allTypes.some(
+      (t) =>
+        t.base?.name === type.typeName.name &&
+        t.fields.some((f) => f.name === field.name),
     );
     if (childHasSameField) return "virtual ";
   }
@@ -497,7 +556,7 @@ function getPropertyModifier(
   // Check if parent has same field → override
   if (type.base) {
     const parent = findType(type.base.name);
-    if (parent?.fields.some(f => f.name === field.name)) {
+    if (parent?.fields.some((f) => f.name === field.name)) {
       return "override ";
     }
   }
@@ -505,7 +564,12 @@ function getPropertyModifier(
   return "";
 }
 
-function getCSharpType(category: PropertyCategory, isOptional: boolean, enumName?: string | null, isOpenEnum?: boolean): string {
+function getCSharpType(
+  category: PropertyCategory,
+  isOptional: boolean,
+  enumName?: string | null,
+  isOpenEnum?: boolean,
+): string {
   // Named enum field — use the PascalCase enum type name (except open enums which stay as string)
   if (enumName && !isOpenEnum) {
     const csName = toPascalCase(enumName);
@@ -545,9 +609,10 @@ function getPropertyDefault(field: FieldDecl): string {
   // Enum fields use EnumName.MemberName syntax (skip open enums — they use string)
   if (field.enumName && !field.isOpenEnum && field.allowedValues.length > 0) {
     const csEnumName = toPascalCase(field.enumName);
-    const dv = typeof field.defaultValue === "string" && field.defaultValue !== "*"
-      ? field.defaultValue
-      : field.allowedValues[0];
+    const dv =
+      typeof field.defaultValue === "string" && field.defaultValue !== "*"
+        ? field.defaultValue
+        : field.allowedValues[0];
     const memberName = toPascalCase(dv);
     return ` = ${csEnumName}.${memberName};`;
   }
@@ -569,7 +634,9 @@ function getPropertyDefault(field: FieldDecl): string {
         return " = string.Empty;";
       }
       if (csType === "bool") {
-        return field.defaultValue != null ? ` = ${field.defaultValue};` : " = false;";
+        return field.defaultValue != null
+          ? ` = ${field.defaultValue};`
+          : " = false;";
       }
       if (csType === "object") {
         return " = new object();";
@@ -585,7 +652,9 @@ function getPropertyDefault(field: FieldDecl): string {
   }
 }
 
-function getCSharpDictionaryValueType(category: Extract<PropertyCategory, { kind: "dict" }>): string {
+function getCSharpDictionaryValueType(
+  category: Extract<PropertyCategory, { kind: "dict" }>,
+): string {
   if (!category.valueType || category.valueType === "unknown") return "object?";
   return CSHARP_TYPE_MAP[category.valueType] || category.valueType;
 }
@@ -635,10 +704,16 @@ function emitLoadMethod(
   lines.push("    /// <summary>");
   lines.push(`    /// Load a ${typeName} instance from a dictionary.`);
   lines.push("    /// </summary>");
-  lines.push('    /// <param name="data">The dictionary containing the data.</param>');
-  lines.push('    /// <param name="context">Optional context with pre/post processing callbacks.</param>');
+  lines.push(
+    '    /// <param name="data">The dictionary containing the data.</param>',
+  );
+  lines.push(
+    '    /// <param name="context">Optional context with pre/post processing callbacks.</param>',
+  );
   lines.push(`    /// <returns>The loaded ${typeName} instance.</returns>`);
-  lines.push(`    public ${new_}static ${typeName} Load(Dictionary<string, object?> data, LoadContext? context = null)`);
+  lines.push(
+    `    public ${new_}static ${typeName} Load(Dictionary<string, object?> data, LoadContext? context = null)`,
+  );
   lines.push("    {");
   lines.push("        context ??= new LoadContext();");
 
@@ -651,17 +726,25 @@ function emitLoadMethod(
 
   // Note about alternate representations
   if (hasCoercions) {
-    lines.push("        // Note: Alternate (shorthand) representations are handled by the converter");
+    lines.push(
+      "        // Note: Alternate (shorthand) representations are handled by the converter",
+    );
   }
 
   lines.push("");
 
   for (const assign of type.load.assignments) {
-    const field = type.fields.find(candidate => candidate.name === assign.fieldName);
+    const field = type.fields.find(
+      (candidate) => candidate.name === assign.fieldName,
+    );
     if (!shouldGuardMissingRequiredField(field)) continue;
-    lines.push(`        if (!data.TryGetValue("${assign.sourceName}", out var required${toPascalCase(assign.fieldName)}Value) || required${toPascalCase(assign.fieldName)}Value is null)`);
+    lines.push(
+      `        if (!data.TryGetValue("${assign.sourceName}", out var required${toPascalCase(assign.fieldName)}Value) || required${toPascalCase(assign.fieldName)}Value is null)`,
+    );
     lines.push("        {");
-    lines.push(`            throw new ArgumentException($"{context!.At("${assign.sourceName}").Path}: missing required field");`);
+    lines.push(
+      `            throw new ArgumentException($"{context!.At("${assign.sourceName}").Path}: missing required field");`,
+    );
     lines.push("        }");
     lines.push("");
   }
@@ -685,7 +768,9 @@ function emitLoadMethod(
   if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
     lines.push(`        if (instance.GetType() == typeof(${typeName}))`);
     lines.push("        {");
-    lines.push(`            instance._raw = (Dictionary<string, object?>)CloneRawValue(data)!;`);
+    lines.push(
+      `            instance._raw = (Dictionary<string, object?>)CloneRawValue(data)!;`,
+    );
     lines.push("        }");
     lines.push("");
   }
@@ -708,9 +793,13 @@ function emitLoadAssignment(
   const propName = toPascalCase(assign.fieldName);
   const varName = `${assign.sourceName}Value`;
 
-  lines.push(`        if (data.TryGetValue("${assign.sourceName}", out var ${varName}) && ${varName} is not null)`);
+  lines.push(
+    `        if (data.TryGetValue("${assign.sourceName}", out var ${varName}) && ${varName} is not null)`,
+  );
   lines.push("        {");
-  lines.push(`            ${getLoadExpression(assign, propName, varName, findType)}`);
+  lines.push(
+    `            ${getLoadExpression(assign, propName, varName, findType)}`,
+  );
   lines.push("        }");
   lines.push("");
 }
@@ -726,7 +815,11 @@ function getLoadExpression(
     const csEnumName = toPascalCase(assign.enumName);
     return `instance.${propName} = ${csEnumName}Parser.Parse(${varName}.ToString()!);`;
   }
-  if (assign.enumName && assign.isOpenEnum && Object.keys(assign.parseAliases).length > 0) {
+  if (
+    assign.enumName &&
+    assign.isOpenEnum &&
+    Object.keys(assign.parseAliases).length > 0
+  ) {
     return `instance.${propName} = ${varName}.ToString()! switch { ${renderCSharpAliasSwitchArms(assign.parseAliases)}_ => ${varName}.ToString()! };`;
   }
   const cat = assign.category;
@@ -791,7 +884,9 @@ function emitCollectionLoadHelper(
   lines.push("    /// <summary>");
   lines.push(`    /// Load a list of ${elemType} from a dictionary or list.`);
   lines.push("    /// </summary>");
-  lines.push(`    public static IList<${elemType}> Load${propName}(object data, LoadContext? context)`);
+  lines.push(
+    `    public static IList<${elemType}> Load${propName}(object data, LoadContext? context)`,
+  );
   lines.push("    {");
   lines.push(`        var result = new List<${elemType}>();`);
   lines.push("");
@@ -804,27 +899,43 @@ function emitCollectionLoadHelper(
   lines.push("                if (kvp.Value is IEnumerable<object>)");
   lines.push("                {");
   lines.push("                    throw new ArgumentException(");
-  lines.push(`                        $"{(string.IsNullOrEmpty(context?.Path) ? "${helper.propertyName}" : context.Path)}.{kvp.Key}: invalid named collection entry category array. " +`);
-  lines.push(`                        $"'${helper.propertyName}' must be a flat list of objects or a name-keyed dict — " +`);
-  lines.push(`                        "not a nested {" + kvp.Key + ": [...]} structure.");`);
+  lines.push(
+    `                        $"{(string.IsNullOrEmpty(context?.Path) ? "${helper.propertyName}" : context.Path)}.{kvp.Key}: invalid named collection entry category array. " +`,
+  );
+  lines.push(
+    `                        $"'${helper.propertyName}' must be a flat list of objects or a name-keyed dict — " +`,
+  );
+  lines.push(
+    `                        "not a nested {" + kvp.Key + ": [...]} structure.");`,
+  );
   lines.push("                }");
-  lines.push("                var itemDict = new Dictionary<string, object?>(kvp.Value.GetDictionary());");
+  lines.push(
+    "                var itemDict = new Dictionary<string, object?>(kvp.Value.GetDictionary());",
+  );
   lines.push("                if (itemDict.Count > 0)");
   lines.push("                {");
   lines.push("                    // Value is an object, add name to it");
   lines.push('                    itemDict["name"] = kvp.Key;');
-  lines.push(`                    result.Add(${elemType}.Load(itemDict, context?.At(kvp.Key)));`);
+  lines.push(
+    `                    result.Add(${elemType}.Load(itemDict, context?.At(kvp.Key)));`,
+  );
   lines.push("                }");
   lines.push("                else");
   lines.push("                {");
-  lines.push("                    // Value is a scalar, infer the entry shape from its runtime type");
-  lines.push("                    var newDict = new Dictionary<string, object?>");
+  lines.push(
+    "                    // Value is a scalar, infer the entry shape from its runtime type",
+  );
+  lines.push(
+    "                    var newDict = new Dictionary<string, object?>",
+  );
   lines.push("                    {");
   lines.push('                        ["name"] = kvp.Key,');
   lines.push(`                        ["${primaryProp || ""}"] = kvp.Value`);
   lines.push("                    };");
   emitCsEntryShorthandArms(helper, lines);
-  lines.push(`                    result.Add(${elemType}.Load(newDict, context?.At(kvp.Key)));`);
+  lines.push(
+    `                    result.Add(${elemType}.Load(newDict, context?.At(kvp.Key)));`,
+  );
   lines.push("                }");
   lines.push("            }");
   lines.push("        }");
@@ -833,10 +944,14 @@ function emitCollectionLoadHelper(
   lines.push("            var itemIndex = 0;");
   lines.push("            foreach (var item in list)");
   lines.push("            {");
-  lines.push(`                var itemDict = item.GetDictionary(${elemType}.ShorthandProperty);`);
+  lines.push(
+    `                var itemDict = item.GetDictionary(${elemType}.ShorthandProperty);`,
+  );
   lines.push("                if (itemDict.Count > 0)");
   lines.push("                {");
-  lines.push(`                    result.Add(${elemType}.Load(itemDict, context?.AtIndex(itemIndex)));`);
+  lines.push(
+    `                    result.Add(${elemType}.Load(itemDict, context?.AtIndex(itemIndex)));`,
+  );
   lines.push("                }");
   lines.push("                itemIndex++;");
   lines.push("            }");
@@ -857,7 +972,9 @@ function emitCollectionLoadHelper(
  * named predicates in the TypeScript and Python emitters, so every backend agrees on which
  * schemas are open.
  */
-function absorbsUnknownValues(dispatch: PolymorphicDispatchDecl | null | undefined): boolean {
+function absorbsUnknownValues(
+  dispatch: PolymorphicDispatchDecl | null | undefined,
+): boolean {
   if (!dispatch) {
     return false;
   }
@@ -902,20 +1019,32 @@ function emitUnknownCarrier(type: TypeDecl, lines: string[]): void {
 
   lines.push("");
   lines.push("/// <summary>");
-  lines.push(`/// Carries a ${parentName} whose discriminator value matches no known subtype.`);
-  lines.push("/// The unrecognized value stays on the discriminator property and every key the schema");
-  lines.push(`/// does not declare is preserved verbatim, so an unknown ${parentName} survives a`);
+  lines.push(
+    `/// Carries a ${parentName} whose discriminator value matches no known subtype.`,
+  );
+  lines.push(
+    "/// The unrecognized value stays on the discriminator property and every key the schema",
+  );
+  lines.push(
+    `/// does not declare is preserved verbatim, so an unknown ${parentName} survives a`,
+  );
   lines.push("/// load/save round-trip unchanged.");
   lines.push("/// </summary>");
   lines.push(`public sealed partial class ${carrier} : ${parentName}`);
   lines.push("{");
   lines.push("    /// <summary>");
-  lines.push(`    /// Load an unrecognized ${parentName}, retaining its complete payload.`);
+  lines.push(
+    `    /// Load an unrecognized ${parentName}, retaining its complete payload.`,
+  );
   lines.push("    /// </summary>");
-  lines.push(`    public static new ${carrier} Load(Dictionary<string, object?> data, LoadContext? context = null)`);
+  lines.push(
+    `    public static new ${carrier} Load(Dictionary<string, object?> data, LoadContext? context = null)`,
+  );
   lines.push("    {");
   lines.push(`        var instance = new ${carrier}();`);
-  lines.push("        instance._raw = (Dictionary<string, object?>)CloneRawValue(data)!;");
+  lines.push(
+    "        instance._raw = (Dictionary<string, object?>)CloneRawValue(data)!;",
+  );
   for (const a of type.load.assignments) {
     lines.push(`        instance._raw.Remove("${a.sourceName}");`);
   }
@@ -929,23 +1058,33 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
   const dispatch = type.polymorphicDispatch!;
   const typeName = type.typeName.name;
   const isClosed = isClosedPolymorphicDispatch(dispatch);
-  const carrier = needsUnknownCarrier(type) ? unknownCarrierName(typeName) : undefined;
+  const carrier = needsUnknownCarrier(type)
+    ? unknownCarrierName(typeName)
+    : undefined;
   lines.push("");
   lines.push("    /// <summary>");
   lines.push(`    /// Load polymorphic ${typeName} based on discriminator.`);
   lines.push("    /// </summary>");
-  lines.push(`    private static ${typeName} LoadKind(Dictionary<string, object?> data, LoadContext? context)`);
+  lines.push(
+    `    private static ${typeName} LoadKind(Dictionary<string, object?> data, LoadContext? context)`,
+  );
   lines.push("    {");
-  lines.push(`        if (!data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) || discriminatorValue is not string discriminator || discriminator == "")`);
+  lines.push(
+    `        if (!data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) || discriminatorValue is not string discriminator || discriminator == "")`,
+  );
   lines.push("        {");
-  lines.push(`            throw new ArgumentException("Invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string");`);
+  lines.push(
+    `            throw new ArgumentException("Invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string");`,
+  );
   lines.push("        }");
   lines.push("");
   lines.push("        return discriminator switch");
   lines.push("        {");
 
   for (const variant of dispatch.variants) {
-    lines.push(`            "${variant.value}" => ${variant.typeName.name}.Load(data, context),`);
+    lines.push(
+      `            "${variant.value}" => ${variant.typeName.name}.Load(data, context),`,
+    );
   }
 
   // Default handling
@@ -953,12 +1092,16 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
     if (dispatch.defaultVariant.isSelfReference) {
       lines.push(`            _ => new ${typeName}(),`);
     } else {
-      lines.push(`            _ => ${dispatch.defaultVariant.typeName.name}.Load(data, context),`);
+      lines.push(
+        `            _ => ${dispatch.defaultVariant.typeName.name}.Load(data, context),`,
+      );
     }
   } else if (carrier) {
     lines.push(`            _ => ${carrier}.Load(data, context),`);
   } else if (isClosed || dispatch.isAbstract) {
-    lines.push(`            _ => throw new ArgumentException($"Unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: {discriminator}"),`);
+    lines.push(
+      `            _ => throw new ArgumentException($"Unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: {discriminator}"),`,
+    );
   } else {
     lines.push(`            _ => new ${typeName}(),`);
   }
@@ -1002,7 +1145,11 @@ function emitSaveRegion(
   lines.push("    #endregion");
 }
 
-function emitSaveMethod(type: TypeDecl, allTypes: TypeDecl[], lines: string[]): void {
+function emitSaveMethod(
+  type: TypeDecl,
+  allTypes: TypeDecl[],
+  lines: string[],
+): void {
   const typeName = type.typeName.name;
   const hasBase = type.save.hasBase;
   const hasChildren = type.polymorphicDispatch !== null || type.isAbstract;
@@ -1017,9 +1164,15 @@ function emitSaveMethod(type: TypeDecl, allTypes: TypeDecl[], lines: string[]): 
   lines.push("    /// <summary>");
   lines.push(`    /// Save the ${typeName} instance to a dictionary.`);
   lines.push("    /// </summary>");
-  lines.push('    /// <param name="context">Optional context with pre/post processing callbacks.</param>');
-  lines.push("    /// <returns>The dictionary representation of this instance.</returns>");
-  lines.push(`    public ${modifier}Dictionary<string, object?> Save(SaveContext? context = null)`);
+  lines.push(
+    '    /// <param name="context">Optional context with pre/post processing callbacks.</param>',
+  );
+  lines.push(
+    "    /// <returns>The dictionary representation of this instance.</returns>",
+  );
+  lines.push(
+    `    public ${modifier}Dictionary<string, object?> Save(SaveContext? context = null)`,
+  );
   lines.push("    {");
   lines.push("        var obj = this;");
   lines.push("        if (context is not null)");
@@ -1033,7 +1186,9 @@ function emitSaveMethod(type: TypeDecl, allTypes: TypeDecl[], lines: string[]): 
     lines.push("        // Start with parent class properties");
     lines.push("        var result = base.Save(context);");
   } else if (absorbsUnknownValues(type.polymorphicDispatch)) {
-    lines.push("        var result = (Dictionary<string, object?>)CloneRawValue(obj._raw)!;");
+    lines.push(
+      "        var result = (Dictionary<string, object?>)CloneRawValue(obj._raw)!;",
+    );
   } else {
     lines.push("        var result = new Dictionary<string, object?>();");
   }
@@ -1064,15 +1219,23 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
   const wire = type.wire!;
 
   lines.push("    /// <summary>");
-  lines.push(`    /// Convert this instance to a provider-specific wire-format dictionary.`);
+  lines.push(
+    `    /// Convert this instance to a provider-specific wire-format dictionary.`,
+  );
   lines.push("    /// </summary>");
-  lines.push('    /// <param name="provider">The provider name (e.g., "openai", "anthropic").</param>');
-  lines.push("    /// <returns>A dictionary with provider-specific field names.</returns>");
+  lines.push(
+    '    /// <param name="provider">The provider name (e.g., "openai", "anthropic").</param>',
+  );
+  lines.push(
+    "    /// <returns>A dictionary with provider-specific field names.</returns>",
+  );
   lines.push("    public Dictionary<string, object?> ToWire(string provider)");
   lines.push("    {");
   lines.push("        var data = Save();");
   lines.push("        var result = new Dictionary<string, object?>();");
-  lines.push("        var wireMap = new Dictionary<string, Dictionary<string, string>>");
+  lines.push(
+    "        var wireMap = new Dictionary<string, Dictionary<string, string>>",
+  );
   lines.push("        {");
 
   for (const mapping of wire.mappings) {
@@ -1119,7 +1282,9 @@ function emitSaveAssignment(assign: SaveAssignment, lines: string[]): void {
 function getSaveExpression(assign: SaveAssignment, propName: string): string {
   // Named enum — serialize as string (skip open enums — they're already string)
   if (assign.enumName && !assign.isOpenEnum) {
-    const valueExpr = assign.isOptional ? `obj.${propName}.Value` : `obj.${propName}`;
+    const valueExpr = assign.isOptional
+      ? `obj.${propName}.Value`
+      : `obj.${propName}`;
     return `result["${assign.targetName}"] = ${toPascalCase(assign.enumName)}Parser.ToValue(${valueExpr});`;
   }
   const cat = assign.category;
@@ -1127,7 +1292,11 @@ function getSaveExpression(assign: SaveAssignment, propName: string): string {
     case "scalar":
       return `result["${assign.targetName}"] = obj.${propName};`;
     case "dict":
-      if (cat.valueType && cat.valueType !== "unknown" && !CSHARP_TYPE_MAP[cat.valueType]) {
+      if (
+        cat.valueType &&
+        cat.valueType !== "unknown" &&
+        !CSHARP_TYPE_MAP[cat.valueType]
+      ) {
         return `result["${assign.targetName}"] = obj.${propName}.ToDictionary(kvp => kvp.Key, kvp => (object?)kvp.Value.Save(context));`;
       }
       return `result["${assign.targetName}"] = obj.${propName};`;
@@ -1140,22 +1309,36 @@ function getSaveExpression(assign: SaveAssignment, propName: string): string {
   }
 }
 
-function csharpDictLoadExpression(assign: LoadAssignment, propName: string, varName: string): string {
-  const valueType = assign.category.kind === "dict" ? assign.category.valueType : undefined;
+function csharpDictLoadExpression(
+  assign: LoadAssignment,
+  propName: string,
+  varName: string,
+): string {
+  const valueType =
+    assign.category.kind === "dict" ? assign.category.valueType : undefined;
   if (!valueType || valueType === "unknown") {
     return `instance.${propName} = ${varName}.GetDictionary()!;`;
   }
-  const valueExpr = csharpDictValueLoadExpr("kvp.Value", valueType, `context!.At("${assign.sourceName}").At(kvp.Key)`);
+  const valueExpr = csharpDictValueLoadExpr(
+    "kvp.Value",
+    valueType,
+    `context!.At("${assign.sourceName}").At(kvp.Key)`,
+  );
   return `instance.${propName} = ${varName}.GetDictionary()!.ToDictionary(kvp => kvp.Key, kvp => ${valueExpr});`;
 }
 
-function csharpDictValueLoadExpr(valueExpr: string, valueType: string, contextExpr: string): string {
+function csharpDictValueLoadExpr(
+  valueExpr: string,
+  valueType: string,
+  contextExpr: string,
+): string {
   const csType = CSHARP_TYPE_MAP[valueType];
   if (csType === "string") return `${valueExpr}.ToString()!`;
   if (csType && NON_NULLABLE_VALUE_TYPES.has(csType)) {
     return `Convert.To${CONVERT_MAP[csType]}(${valueExpr})`;
   }
-  if (csType === "object" || !valueType || valueType === "unknown") return valueExpr;
+  if (csType === "object" || !valueType || valueType === "unknown")
+    return valueExpr;
   return `${valueType}.Load(${valueExpr}.GetDictionary(${valueType}.ShorthandProperty), ${contextExpr})`;
 }
 
@@ -1171,7 +1354,10 @@ function csharpDictValueLoadExpr(valueExpr: string, valueType: string, contextEx
  * discriminator) inferred from the scalar's runtime type. Without an
  * `@entryShorthand` declaration nothing is emitted and behaviour is unchanged.
  */
-function emitCsEntryShorthandArms(helper: CollectionHelperDecl, lines: string[]): void {
+function emitCsEntryShorthandArms(
+  helper: CollectionHelperDecl,
+  lines: string[],
+): void {
   const shorthand = helper.entryShorthand;
   if (!shorthand || shorthand.cases.length === 0) return;
 
@@ -1183,7 +1369,9 @@ function emitCsEntryShorthandArms(helper: CollectionHelperDecl, lines: string[])
     lines.push(`${indent}${first ? "if" : "else if"} (${check})`);
     lines.push(`${indent}{`);
     for (const a of entryCase.assignments) {
-      lines.push(`${indent}    newDict["${a.fieldName}"] = ${csLiteral(a.literalValue)};`);
+      lines.push(
+        `${indent}    newDict["${a.fieldName}"] = ${csLiteral(a.literalValue)};`,
+      );
     }
     lines.push(`${indent}}`);
     first = false;
@@ -1198,8 +1386,10 @@ function emitCsEntryShorthandArms(helper: CollectionHelperDecl, lines: string[])
  * type patterns match the boxed runtime type exactly rather than by conversion.
  */
 function csScalarValueCheck(scalarType: string): string | null {
-  if (isIntegralScalar(scalarType)) return "kvp.Value is int or long or short or byte";
-  if (isFractionalScalar(scalarType)) return "kvp.Value is double or float or decimal";
+  if (isIntegralScalar(scalarType))
+    return "kvp.Value is int or long or short or byte";
+  if (isFractionalScalar(scalarType))
+    return "kvp.Value is double or float or decimal";
   if (isStringEncodedScalar(scalarType)) return "kvp.Value is string";
   if (isBooleanScalar(scalarType)) return "kvp.Value is bool";
   return null;
@@ -1219,7 +1409,10 @@ function csLiteral(value: string | number | boolean | null): string {
   return JSON.stringify(value);
 }
 
-function emitCollectionSaveHelper(helper: CollectionHelperDecl, lines: string[]): void {
+function emitCollectionSaveHelper(
+  helper: CollectionHelperDecl,
+  lines: string[],
+): void {
   const propName = toPascalCase(helper.propertyName);
   const elemType = helper.elementTypeName.name;
 
@@ -1227,17 +1420,23 @@ function emitCollectionSaveHelper(helper: CollectionHelperDecl, lines: string[])
   lines.push("    /// <summary>");
   lines.push(`    /// Save a list of ${elemType} to object or array format.`);
   lines.push("    /// </summary>");
-  lines.push(`    public static object Save${propName}(IList<${elemType}> items, SaveContext? context)`);
+  lines.push(
+    `    public static object Save${propName}(IList<${elemType}> items, SaveContext? context)`,
+  );
   lines.push("    {");
   lines.push("        context ??= new SaveContext();");
   lines.push("");
 
   if (helper.hasNameProperty) {
     lines.push("");
-    lines.push("        var serialized = items.Select(item => new Dictionary<string, object?>(item.Save(context))).ToList();");
+    lines.push(
+      "        var serialized = items.Select(item => new Dictionary<string, object?>(item.Save(context))).ToList();",
+    );
     lines.push("        foreach (var itemData in serialized)");
     lines.push("        {");
-    lines.push('            if (itemData.TryGetValue("name", out var nameValue) && nameValue is string { Length: 0 }) itemData.Remove("name");');
+    lines.push(
+      '            if (itemData.TryGetValue("name", out var nameValue) && nameValue is string { Length: 0 }) itemData.Remove("name");',
+    );
     lines.push("        }");
     lines.push("");
     lines.push('        if (context.CollectionFormat == "array")');
@@ -1245,10 +1444,14 @@ function emitCollectionSaveHelper(helper: CollectionHelperDecl, lines: string[])
     lines.push("            return serialized;");
     lines.push("        }");
     lines.push("");
-    lines.push("        var names = new HashSet<string>(StringComparer.Ordinal);");
+    lines.push(
+      "        var names = new HashSet<string>(StringComparer.Ordinal);",
+    );
     lines.push("        foreach (var itemData in serialized)");
     lines.push("        {");
-    lines.push('            if (!itemData.TryGetValue("name", out var nameValue) || nameValue is not string { Length: > 0 } name || !names.Add(name)) return serialized;');
+    lines.push(
+      '            if (!itemData.TryGetValue("name", out var nameValue) || nameValue is not string { Length: > 0 } name || !names.Add(name)) return serialized;',
+    );
     lines.push("        }");
     lines.push("");
     lines.push("        // Object format: use name as key");
@@ -1261,9 +1464,13 @@ function emitCollectionSaveHelper(helper: CollectionHelperDecl, lines: string[])
     lines.push('            itemData.Remove("name");');
     lines.push("");
     lines.push("            // Check if we can use shorthand");
-    lines.push(`            if (context.UseShorthand && ${elemType}.ShorthandProperty is string shorthandProp)`);
+    lines.push(
+      `            if (context.UseShorthand && ${elemType}.ShorthandProperty is string shorthandProp)`,
+    );
     lines.push("            {");
-    lines.push("                if (itemData.Count == 1 && itemData.ContainsKey(shorthandProp))");
+    lines.push(
+      "                if (itemData.Count == 1 && itemData.ContainsKey(shorthandProp))",
+    );
     lines.push("                {");
     lines.push("                    result[name] = itemData[shorthandProp];");
     lines.push("                    continue;");
@@ -1273,8 +1480,12 @@ function emitCollectionSaveHelper(helper: CollectionHelperDecl, lines: string[])
     lines.push("        }");
     lines.push("        return result;");
   } else {
-    lines.push("        // This collection type does not have a 'name' property, only array format is supported");
-    lines.push("        return items.Select(item => item.Save(context)).ToList();");
+    lines.push(
+      "        // This collection type does not have a 'name' property, only array format is supported",
+    );
+    lines.push(
+      "        return items.Select(item => item.Save(context)).ToList();",
+    );
   }
 
   lines.push("");
@@ -1295,8 +1506,12 @@ function emitSerializationMethods(type: TypeDecl, lines: string[]): void {
   lines.push("    /// <summary>");
   lines.push(`    /// Convert the ${typeName} instance to a YAML string.`);
   lines.push("    /// </summary>");
-  lines.push('    /// <param name="context">Optional context with pre/post processing callbacks.</param>');
-  lines.push("    /// <returns>The YAML string representation of this instance.</returns>");
+  lines.push(
+    '    /// <param name="context">Optional context with pre/post processing callbacks.</param>',
+  );
+  lines.push(
+    "    /// <returns>The YAML string representation of this instance.</returns>",
+  );
   lines.push(`    public ${new_}string ToYaml(SaveContext? context = null)`);
   lines.push("    {");
   lines.push("        context ??= new SaveContext();");
@@ -1308,10 +1523,18 @@ function emitSerializationMethods(type: TypeDecl, lines: string[]): void {
   lines.push("    /// <summary>");
   lines.push(`    /// Convert the ${typeName} instance to a JSON string.`);
   lines.push("    /// </summary>");
-  lines.push('    /// <param name="context">Optional context with pre/post processing callbacks.</param>');
-  lines.push('    /// <param name="indent">Whether to indent the output. Defaults to true.</param>');
-  lines.push("    /// <returns>The JSON string representation of this instance.</returns>");
-  lines.push(`    public ${new_}string ToJson(SaveContext? context = null, bool indent = true)`);
+  lines.push(
+    '    /// <param name="context">Optional context with pre/post processing callbacks.</param>',
+  );
+  lines.push(
+    '    /// <param name="indent">Whether to indent the output. Defaults to true.</param>',
+  );
+  lines.push(
+    "    /// <returns>The JSON string representation of this instance.</returns>",
+  );
+  lines.push(
+    `    public ${new_}string ToJson(SaveContext? context = null, bool indent = true)`,
+  );
   lines.push("    {");
   lines.push("        context ??= new SaveContext();");
   lines.push("        return context.ToJson(Save(context), indent);");
@@ -1341,23 +1564,37 @@ function emitFromJson(type: TypeDecl, lines: string[]): void {
   lines.push(`    /// Load a ${typeName} instance from a JSON string.`);
   lines.push("    /// </summary>");
   lines.push('    /// <param name="json">The JSON string to parse.</param>');
-  lines.push('    /// <param name="context">Optional context with pre/post processing callbacks.</param>');
+  lines.push(
+    '    /// <param name="context">Optional context with pre/post processing callbacks.</param>',
+  );
   lines.push(`    /// <returns>The loaded ${typeName} instance.</returns>`);
-  lines.push(`    public ${new_}static ${typeName} FromJson(string json, LoadContext? context = null)`);
+  lines.push(
+    `    public ${new_}static ${typeName} FromJson(string json, LoadContext? context = null)`,
+  );
   lines.push("    {");
   lines.push("        using var doc = JsonDocument.Parse(json);");
   lines.push("        Dictionary<string, object?> dict;");
 
   if (hasCoercions || hasCoercionProp) {
     lines.push("        // Handle alternate representations");
-    lines.push("        if (doc.RootElement.ValueKind != JsonValueKind.Object)");
+    lines.push(
+      "        if (doc.RootElement.ValueKind != JsonValueKind.Object)",
+    );
     lines.push("        {");
-    lines.push("            var value = JsonUtils.GetJsonElementValue(doc.RootElement);");
+    lines.push(
+      "            var value = JsonUtils.GetJsonElementValue(doc.RootElement);",
+    );
 
     if (hasCoercions) {
       lines.push("            dict = value switch");
       lines.push("            {");
-      emitCoercionSwitchArms(type.load.coercions, type.coercionProperty, "                ", "value", lines);
+      emitCoercionSwitchArms(
+        type.load.coercions,
+        type.coercionProperty,
+        "                ",
+        "value",
+        lines,
+      );
       lines.push("            };");
     } else {
       // Only coercionProperty, no typed coercions
@@ -1370,12 +1607,20 @@ function emitFromJson(type: TypeDecl, lines: string[]): void {
     lines.push("        }");
     lines.push("        else");
     lines.push("        {");
-    lines.push("            dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, JsonUtils.Options)");
-    lines.push('                ?? throw new ArgumentException("Failed to parse JSON as dictionary");');
+    lines.push(
+      "            dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, JsonUtils.Options)",
+    );
+    lines.push(
+      '                ?? throw new ArgumentException("Failed to parse JSON as dictionary");',
+    );
     lines.push("        }");
   } else {
-    lines.push("        dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, JsonUtils.Options)");
-    lines.push('            ?? throw new ArgumentException("Failed to parse JSON as dictionary");');
+    lines.push(
+      "        dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, JsonUtils.Options)",
+    );
+    lines.push(
+      '            ?? throw new ArgumentException("Failed to parse JSON as dictionary");',
+    );
   }
 
   lines.push("");
@@ -1397,21 +1642,31 @@ function emitFromYaml(type: TypeDecl, lines: string[]): void {
   lines.push(`    /// Load a ${typeName} instance from a YAML string.`);
   lines.push("    /// </summary>");
   lines.push('    /// <param name="yaml">The YAML string to parse.</param>');
-  lines.push('    /// <param name="context">Optional context with pre/post processing callbacks.</param>');
+  lines.push(
+    '    /// <param name="context">Optional context with pre/post processing callbacks.</param>',
+  );
   lines.push(`    /// <returns>The loaded ${typeName} instance.</returns>`);
-  lines.push(`    public ${new_}static ${typeName} FromYaml(string yaml, LoadContext? context = null)`);
+  lines.push(
+    `    public ${new_}static ${typeName} FromYaml(string yaml, LoadContext? context = null)`,
+  );
   lines.push("    {");
 
   if (hasCoercions || hasCoercionProp) {
-    lines.push("        // Handle alternate representations - try object first, fall back to scalar");
+    lines.push(
+      "        // Handle alternate representations - try object first, fall back to scalar",
+    );
     lines.push("        Dictionary<string, object?>? dictResult = null;");
     lines.push("        try");
     lines.push("        {");
-    lines.push("            dictResult = YamlUtils.Deserializer.Deserialize<Dictionary<string, object?>>(yaml);");
+    lines.push(
+      "            dictResult = YamlUtils.Deserializer.Deserialize<Dictionary<string, object?>>(yaml);",
+    );
     lines.push("        }");
     lines.push("        catch (YamlDotNet.Core.YamlException)");
     lines.push("        {");
-    lines.push("            // Not a dictionary, will be handled as scalar below");
+    lines.push(
+      "            // Not a dictionary, will be handled as scalar below",
+    );
     lines.push("        }");
     lines.push("");
     lines.push("        Dictionary<string, object?> dict;");
@@ -1427,7 +1682,13 @@ function emitFromYaml(type: TypeDecl, lines: string[]): void {
     if (hasCoercions) {
       lines.push("            dict = parsed switch");
       lines.push("            {");
-      emitCoercionSwitchArms(type.load.coercions, type.coercionProperty, "                ", "parsed", lines);
+      emitCoercionSwitchArms(
+        type.load.coercions,
+        type.coercionProperty,
+        "                ",
+        "parsed",
+        lines,
+      );
       lines.push("            };");
     } else {
       lines.push(`            dict = new Dictionary<string, object?>`);
@@ -1438,8 +1699,12 @@ function emitFromYaml(type: TypeDecl, lines: string[]): void {
 
     lines.push("        }");
   } else {
-    lines.push("        var dict = YamlUtils.Deserializer.Deserialize<Dictionary<string, object?>>(yaml)");
-    lines.push('            ?? throw new ArgumentException("Failed to parse YAML as dictionary");');
+    lines.push(
+      "        var dict = YamlUtils.Deserializer.Deserialize<Dictionary<string, object?>>(yaml)",
+    );
+    lines.push(
+      '            ?? throw new ArgumentException("Failed to parse YAML as dictionary");',
+    );
   }
 
   lines.push("");
@@ -1469,13 +1734,17 @@ function emitCoercionSwitchArms(
     emittedTypes.add(csharpType);
 
     // Emit the main type arm
-    lines.push(`${indent}${csharpType} ${varName} => new Dictionary<string, object?>`);
+    lines.push(
+      `${indent}${csharpType} ${varName} => new Dictionary<string, object?>`,
+    );
     lines.push(`${indent}{`);
     for (const assign of coercion.assignments) {
       if (assign.isInput) {
         lines.push(`${indent}    ["${assign.fieldName}"] = ${varName},`);
       } else {
-        lines.push(`${indent}    ["${assign.fieldName}"] = "${assign.literalValue}",`);
+        lines.push(
+          `${indent}    ["${assign.fieldName}"] = "${assign.literalValue}",`,
+        );
       }
     }
     lines.push(`${indent}},`);
@@ -1489,7 +1758,9 @@ function emitCoercionSwitchArms(
         if (assign.isInput) {
           lines.push(`${indent}    ["${assign.fieldName}"] = longValue,`);
         } else {
-          lines.push(`${indent}    ["${assign.fieldName}"] = "${assign.literalValue}",`);
+          lines.push(
+            `${indent}    ["${assign.fieldName}"] = "${assign.literalValue}",`,
+          );
         }
       }
       lines.push(`${indent}},`);
@@ -1497,13 +1768,17 @@ function emitCoercionSwitchArms(
 
     if (csharpType === "float" && !emittedTypes.has("double")) {
       emittedTypes.add("double");
-      lines.push(`${indent}double doubleValue => new Dictionary<string, object?>`);
+      lines.push(
+        `${indent}double doubleValue => new Dictionary<string, object?>`,
+      );
       lines.push(`${indent}{`);
       for (const assign of coercion.assignments) {
         if (assign.isInput) {
           lines.push(`${indent}    ["${assign.fieldName}"] = doubleValue,`);
         } else {
-          lines.push(`${indent}    ["${assign.fieldName}"] = "${assign.literalValue}",`);
+          lines.push(
+            `${indent}    ["${assign.fieldName}"] = "${assign.literalValue}",`,
+          );
         }
       }
       lines.push(`${indent}},`);
@@ -1517,7 +1792,9 @@ function emitCoercionSwitchArms(
     lines.push(`${indent}    ["${coercionProperty}"] = ${switchVarName}`);
     lines.push(`${indent}}`);
   } else {
-    lines.push(`${indent}_ => throw new ArgumentException($"Unsupported scalar type")`);
+    lines.push(
+      `${indent}_ => throw new ArgumentException($"Unsupported scalar type")`,
+    );
   }
 }
 
@@ -1525,7 +1802,11 @@ function emitCoercionSwitchArms(
 // Factory methods
 // ============================================================================
 
-function emitFactoryRegion(type: TypeDecl, visitor: ExprVisitor, lines: string[]): void {
+function emitFactoryRegion(
+  type: TypeDecl,
+  visitor: ExprVisitor,
+  lines: string[],
+): void {
   lines.push("");
   lines.push("    #region Factory Methods");
 
@@ -1537,26 +1818,41 @@ function emitFactoryRegion(type: TypeDecl, visitor: ExprVisitor, lines: string[]
   lines.push("    #endregion");
 }
 
-function emitFactoryMethod(factory: FactoryDecl, type: TypeDecl, visitor: ExprVisitor, lines: string[]): void {
+function emitFactoryMethod(
+  factory: FactoryDecl,
+  type: TypeDecl,
+  visitor: ExprVisitor,
+  lines: string[],
+): void {
   const methodName = getCSharpFactoryMethodName(factory.name, type);
-  const params = Object.entries(factory.params).map(([name, typeStr]) =>
-    `${getCSharpFactoryParamType(typeStr)} ${csharpIdentifier(name)}`
-  ).join(", ");
+  const params = Object.entries(factory.params)
+    .map(
+      ([name, typeStr]) =>
+        `${getCSharpFactoryParamType(typeStr)} ${csharpIdentifier(name)}`,
+    )
+    .join(", ");
   const body = visitor.visitExpr(factory.body);
 
   lines.push("");
   lines.push("    /// <summary>");
-  lines.push(`    /// Create a ${type.typeName.name} with preset field values.`);
+  lines.push(
+    `    /// Create a ${type.typeName.name} with preset field values.`,
+  );
   lines.push("    /// </summary>");
-  lines.push(`    public static ${type.typeName.name} ${methodName}(${params})`);
+  lines.push(
+    `    public static ${type.typeName.name} ${methodName}(${params})`,
+  );
   lines.push("    {");
   lines.push(`        return ${body};`);
   lines.push("    }");
 }
 
-function getCSharpFactoryMethodName(factoryName: string, type: TypeDecl): string {
+function getCSharpFactoryMethodName(
+  factoryName: string,
+  type: TypeDecl,
+): string {
   const methodName = factoryName.charAt(0).toUpperCase() + factoryName.slice(1);
-  const propertyNames = type.fields.map(f => toPascalCase(f.name));
+  const propertyNames = type.fields.map((f) => toPascalCase(f.name));
   // Also consider @method stubs that emit as properties (zero-param, non-verb names)
   for (const m of type.methods) {
     if (!isMethodStyle(m.name) && !m.params?.length) {
@@ -1571,14 +1867,24 @@ function getCSharpFactoryMethodName(factoryName: string, type: TypeDecl): string
 
 function getCSharpFactoryParamType(typeStr: string): string {
   switch (typeStr) {
-    case "string": return "string";
-    case "boolean": return "bool";
-    case "integer": case "int32": return "int";
-    case "int64": return "long";
-    case "float": case "float32": return "float";
-    case "float64": return "double";
-    case "unknown": return "object?";
-    default: return "object?";
+    case "string":
+      return "string";
+    case "boolean":
+      return "bool";
+    case "integer":
+    case "int32":
+      return "int";
+    case "int64":
+      return "long";
+    case "float":
+    case "float32":
+      return "float";
+    case "float64":
+      return "double";
+    case "unknown":
+      return "object?";
+    default:
+      return "object?";
   }
 }
 
@@ -1593,9 +1899,27 @@ function getCSharpFactoryParamType(typeStr: string): string {
  * ``message.ToTextContent()`` is a method).
  */
 const METHOD_VERB_PREFIXES = [
-  "to", "get", "set", "fetch", "compute", "make", "build", "create",
-  "load", "save", "convert", "parse", "format", "render", "serialize",
-  "deserialize", "find", "calculate", "invoke", "execute", "run",
+  "to",
+  "get",
+  "set",
+  "fetch",
+  "compute",
+  "make",
+  "build",
+  "create",
+  "load",
+  "save",
+  "convert",
+  "parse",
+  "format",
+  "render",
+  "serialize",
+  "deserialize",
+  "find",
+  "calculate",
+  "invoke",
+  "execute",
+  "run",
 ];
 
 function isMethodStyle(name: string): boolean {
@@ -1625,8 +1949,12 @@ function emitHelperInterface(type: TypeDecl, lines: string[]): void {
   lines.push("/// <summary>");
   lines.push(`/// Helper contract for <see cref="${name}"/>.`);
   lines.push("///");
-  lines.push(`/// Runtime implementations must provide these members on ${name} (via a`);
-  lines.push(`/// hand-written partial class). The C# compiler enforces conformance`);
+  lines.push(
+    `/// Runtime implementations must provide these members on ${name} (via a`,
+  );
+  lines.push(
+    `/// hand-written partial class). The C# compiler enforces conformance`,
+  );
   lines.push(`/// because ${name} declares : I${name}Helpers.`);
   lines.push("/// </summary>");
   lines.push(`public partial interface I${name}Helpers`);
@@ -1638,7 +1966,11 @@ function emitHelperInterface(type: TypeDecl, lines: string[]): void {
       emitXmlDocComment(m.description, "    ", lines);
     }
     const paramEntries = Object.entries(m.params);
-    if (paramEntries.length === 0 && !m.runtimeCancellable && !isMethodStyle(m.name)) {
+    if (
+      paramEntries.length === 0 &&
+      !m.runtimeCancellable &&
+      !isMethodStyle(m.name)
+    ) {
       // Property-style: ``T Foo { get; }``
       lines.push(`    ${ret} ${pascalName} { get; }`);
     } else {

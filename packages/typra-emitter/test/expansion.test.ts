@@ -49,12 +49,20 @@ function getVisitor(lang: string, registry?: TypeRegistry): ExprVisitor {
 // ============================================================================
 
 /** Create a minimal TypeNode for testing. */
-function makeType(name: string, props: PropertyNode[] = [], opts?: {
-  discriminator?: string;
-  childTypes?: TypeNode[];
-  namespace?: string;
-  factories?: Array<{ name: string; sets: Record<string, any>; params: Record<string, string> }>;
-}): TypeNode {
+function makeType(
+  name: string,
+  props: PropertyNode[] = [],
+  opts?: {
+    discriminator?: string;
+    childTypes?: TypeNode[];
+    namespace?: string;
+    factories?: Array<{
+      name: string;
+      sets: Record<string, any>;
+      params: Record<string, string>;
+    }>;
+  },
+): TypeNode {
   const node = new TypeNode({} as Model, `Test ${name}`);
   node.typeName = { namespace: opts?.namespace ?? "Test", name };
   node.properties = props;
@@ -65,19 +73,35 @@ function makeType(name: string, props: PropertyNode[] = [], opts?: {
 }
 
 /** Create a minimal PropertyNode for testing. */
-function makeProp(name: string, typeName: string, opts?: {
-  isScalar?: boolean;
-  isOptional?: boolean;
-  isCollection?: boolean;
-  isDict?: boolean;
-  type?: TypeNode;
-  defaultValue?: string | number | boolean | null;
-  namespace?: string;
-}): PropertyNode {
+function makeProp(
+  name: string,
+  typeName: string,
+  opts?: {
+    isScalar?: boolean;
+    isOptional?: boolean;
+    isCollection?: boolean;
+    isDict?: boolean;
+    type?: TypeNode;
+    defaultValue?: string | number | boolean | null;
+    namespace?: string;
+  },
+): PropertyNode {
   const prop = new PropertyNode({} as ModelProperty, `Test ${name}`);
   prop.name = name;
   prop.typeName = { namespace: opts?.namespace ?? "Test", name: typeName };
-  prop.isScalar = opts?.isScalar ?? (["string", "boolean", "number", "integer", "int32", "int64", "float", "float32", "float64"].includes(typeName));
+  prop.isScalar =
+    opts?.isScalar ??
+    [
+      "string",
+      "boolean",
+      "number",
+      "integer",
+      "int32",
+      "int64",
+      "float",
+      "float32",
+      "float64",
+    ].includes(typeName);
   prop.isOptional = opts?.isOptional ?? false;
   prop.isCollection = opts?.isCollection ?? false;
   prop.isDict = opts?.isDict ?? false;
@@ -108,12 +132,14 @@ const imagePart = makeType("ImagePart", [
 ]);
 
 // ContentPart: discriminated union with "kind" field
-const contentPart = makeType("ContentPart", [
-  makeProp("kind", "string", { isScalar: true }),
-], {
-  discriminator: "kind",
-  childTypes: [textPart, imagePart],
-});
+const contentPart = makeType(
+  "ContentPart",
+  [makeProp("kind", "string", { isScalar: true })],
+  {
+    discriminator: "kind",
+    childTypes: [textPart, imagePart],
+  },
+);
 
 // ToolResult: { parts: ContentPart[] }
 const toolResult = makeType("ToolResult", [
@@ -134,7 +160,13 @@ const modelType = makeType("Model", [
 
 function buildTestRegistry(): TypeRegistry {
   return TypeRegistry.fromTypeGraph([
-    guardrailResult, contentPart, textPart, imagePart, toolResult, message, modelType,
+    guardrailResult,
+    contentPart,
+    textPart,
+    imagePart,
+    toolResult,
+    message,
+    modelType,
   ]);
 }
 
@@ -223,18 +255,18 @@ describe("resolveFactoryExpr", () => {
   });
 
   it("resolves string literal set values", () => {
-    const expr = resolveFactoryExpr(
-      { role: "user" },
-      {},
-      message,
-      registry,
-    );
+    const expr = resolveFactoryExpr({ role: "user" }, {}, message, registry);
     assert.equal(expr.fields.length, 1);
-    assert.deepStrictEqual(expr.fields[0].value, { kind: "string", value: "user" });
+    assert.deepStrictEqual(expr.fields[0].value, {
+      kind: "string",
+      value: "user",
+    });
   });
 
   it("resolves number literal set values", () => {
-    const numType = makeType("NumType", [makeProp("count", "number", { isScalar: true })]);
+    const numType = makeType("NumType", [
+      makeProp("count", "number", { isScalar: true }),
+    ]);
     const expr = resolveFactoryExpr({ count: 42 }, {}, numType, registry);
     assert.deepStrictEqual(expr.fields[0].value, { kind: "number", value: 42 });
   });
@@ -248,7 +280,9 @@ describe("resolveFactoryExpr", () => {
     );
     assert.equal(expr.fields.length, 1);
     assert.deepStrictEqual(expr.fields[0].value, {
-      kind: "param", name: "role", paramType: "string",
+      kind: "param",
+      name: "role",
+      paramType: "string",
     });
   });
 
@@ -289,7 +323,9 @@ describe("resolveFactoryExpr", () => {
         assert.equal(item.fields[0].propertyName, "value");
         assert.equal(item.fields[0].isOptional, false);
         assert.deepStrictEqual(item.fields[0].value, {
-          kind: "param", name: "val", paramType: "string",
+          kind: "param",
+          name: "val",
+          paramType: "string",
         });
       }
     }
@@ -297,33 +333,47 @@ describe("resolveFactoryExpr", () => {
 
   it("throws for unknown property in sets", () => {
     assert.throws(
-      () => resolveFactoryExpr({ unknown: true }, {}, guardrailResult, registry),
+      () =>
+        resolveFactoryExpr({ unknown: true }, {}, guardrailResult, registry),
       /Property 'unknown' not found on type 'GuardrailResult'/,
     );
   });
 
   it("throws for param not matching any property", () => {
     assert.throws(
-      () => resolveFactoryExpr({}, { badParam: "string" }, guardrailResult, registry),
+      () =>
+        resolveFactoryExpr(
+          {},
+          { badParam: "string" },
+          guardrailResult,
+          registry,
+        ),
       /Parameter 'badParam' does not match any property/,
     );
   });
 
   it("throws for unresolved param placeholder", () => {
     assert.throws(
-      () => resolveFactoryExpr({ role: "{unknown}" }, { other: "string" }, message, registry),
+      () =>
+        resolveFactoryExpr(
+          { role: "{unknown}" },
+          { other: "string" },
+          message,
+          registry,
+        ),
       /Placeholder '\{unknown\}' does not match any declared parameter/,
     );
   });
 
   it("throws for unknown discriminator value", () => {
     assert.throws(
-      () => resolveFactoryExpr(
-        { parts: [{ kind: "unknown_type", value: "x" }] },
-        {},
-        toolResult,
-        registry,
-      ),
+      () =>
+        resolveFactoryExpr(
+          { parts: [{ kind: "unknown_type", value: "x" }] },
+          {},
+          toolResult,
+          registry,
+        ),
       /No child type of 'ContentPart' has kind='unknown_type'/,
     );
   });
@@ -361,9 +411,14 @@ describe("resolveCoerceExpr", () => {
       registry,
     );
     assert.equal(expr.fields.length, 2);
-    assert.deepStrictEqual(expr.fields[0].value, { kind: "string", value: "system" });
+    assert.deepStrictEqual(expr.fields[0].value, {
+      kind: "string",
+      value: "system",
+    });
     assert.deepStrictEqual(expr.fields[1].value, {
-      kind: "param", name: "value", paramType: "string",
+      kind: "param",
+      name: "value",
+      paramType: "string",
     });
   });
 });
@@ -376,7 +431,10 @@ describe("RustExprVisitor", () => {
   const v = new RustExprVisitor();
 
   it("renders string literal", () => {
-    assert.equal(v.visitExpr({ kind: "string", value: "hello" }), '"hello".to_string()');
+    assert.equal(
+      v.visitExpr({ kind: "string", value: "hello" }),
+      '"hello".to_string()',
+    );
   });
 
   it("renders number literal", () => {
@@ -418,10 +476,17 @@ describe("RustExprVisitor", () => {
       kind: "construct",
       typeName: { namespace: "Test", name: "GuardrailResult" },
       fields: [
-        { propertyName: "allowed", value: { kind: "boolean", value: true }, isOptional: false },
+        {
+          propertyName: "allowed",
+          value: { kind: "boolean", value: true },
+          isOptional: false,
+        },
       ],
     };
-    assert.equal(v.visitExpr(expr), "GuardrailResult { allowed: true, ..Default::default() }");
+    assert.equal(
+      v.visitExpr(expr),
+      "GuardrailResult { allowed: true, ..Default::default() }",
+    );
   });
 
   it("renders empty Construct with only default", () => {
@@ -438,8 +503,16 @@ describe("RustExprVisitor", () => {
       kind: "construct",
       typeName: { namespace: "Test", name: "GuardrailResult" },
       fields: [
-        { propertyName: "allowed", value: { kind: "boolean", value: false }, isOptional: false },
-        { propertyName: "reason", value: { kind: "param", name: "reason", paramType: "string" }, isOptional: true },
+        {
+          propertyName: "allowed",
+          value: { kind: "boolean", value: false },
+          isOptional: false,
+        },
+        {
+          propertyName: "reason",
+          value: { kind: "param", name: "reason", paramType: "string" },
+          isOptional: true,
+        },
       ],
     };
     assert.equal(
@@ -456,7 +529,11 @@ describe("RustExprVisitor", () => {
       discriminatorValue: "text",
       variantTypeName: { namespace: "Test", name: "TextPart" },
       fields: [
-        { propertyName: "value", value: { kind: "param", name: "val", paramType: "string" }, isOptional: false },
+        {
+          propertyName: "value",
+          value: { kind: "param", name: "val", paramType: "string" },
+          isOptional: false,
+        },
       ],
     };
     assert.equal(
@@ -488,10 +565,17 @@ describe("RustExprVisitor", () => {
       kind: "construct",
       typeName: { namespace: "Test", name: "Model" },
       fields: [
-        { propertyName: "apiType", value: { kind: "string", value: "chat" }, isOptional: false },
+        {
+          propertyName: "apiType",
+          value: { kind: "string", value: "chat" },
+          isOptional: false,
+        },
       ],
     };
-    assert.equal(v.visitExpr(expr), 'Model { api_type: "chat".to_string(), ..Default::default() }');
+    assert.equal(
+      v.visitExpr(expr),
+      'Model { api_type: "chat".to_string(), ..Default::default() }',
+    );
   });
 });
 
@@ -527,7 +611,11 @@ describe("TypeScriptExprVisitor", () => {
       kind: "construct",
       typeName: { namespace: "Test", name: "GuardrailResult" },
       fields: [
-        { propertyName: "allowed", value: { kind: "boolean", value: true }, isOptional: false },
+        {
+          propertyName: "allowed",
+          value: { kind: "boolean", value: true },
+          isOptional: false,
+        },
       ],
     };
     assert.equal(v.visitExpr(expr), "new GuardrailResult({ allowed: true })");
@@ -550,7 +638,11 @@ describe("TypeScriptExprVisitor", () => {
       discriminatorValue: "text",
       variantTypeName: { namespace: "Test", name: "TextPart" },
       fields: [
-        { propertyName: "value", value: { kind: "param", name: "val", paramType: "string" }, isOptional: false },
+        {
+          propertyName: "value",
+          value: { kind: "param", name: "val", paramType: "string" },
+          isOptional: false,
+        },
       ],
     };
     assert.equal(v.visitExpr(expr), "new TextPart({ value: val })");
@@ -560,7 +652,10 @@ describe("TypeScriptExprVisitor", () => {
     const expr: Expr = {
       kind: "array",
       elementTypeName: { namespace: "Test", name: "string" },
-      items: [{ kind: "string", value: "a" }, { kind: "string", value: "b" }],
+      items: [
+        { kind: "string", value: "a" },
+        { kind: "string", value: "b" },
+      ],
     };
     assert.equal(v.visitExpr(expr), '["a", "b"]');
   });
@@ -598,7 +693,11 @@ describe("PythonExprVisitor", () => {
       kind: "construct",
       typeName: { namespace: "Test", name: "GuardrailResult" },
       fields: [
-        { propertyName: "allowed", value: { kind: "boolean", value: true }, isOptional: false },
+        {
+          propertyName: "allowed",
+          value: { kind: "boolean", value: true },
+          isOptional: false,
+        },
       ],
     };
     assert.equal(v.visitExpr(expr), "GuardrailResult(allowed=True)");
@@ -612,7 +711,11 @@ describe("PythonExprVisitor", () => {
       discriminatorValue: "text",
       variantTypeName: { namespace: "Test", name: "TextPart" },
       fields: [
-        { propertyName: "value", value: { kind: "param", name: "val", paramType: "string" }, isOptional: false },
+        {
+          propertyName: "value",
+          value: { kind: "param", name: "val", paramType: "string" },
+          isOptional: false,
+        },
       ],
     };
     assert.equal(v.visitExpr(expr), "TextPart(value=val)");
@@ -652,7 +755,11 @@ describe("CSharpExprVisitor", () => {
       kind: "construct",
       typeName: { namespace: "Test", name: "GuardrailResult" },
       fields: [
-        { propertyName: "allowed", value: { kind: "boolean", value: true }, isOptional: false },
+        {
+          propertyName: "allowed",
+          value: { kind: "boolean", value: true },
+          isOptional: false,
+        },
       ],
     };
     assert.equal(v.visitExpr(expr), "new GuardrailResult { Allowed = true }");
@@ -675,7 +782,11 @@ describe("CSharpExprVisitor", () => {
       discriminatorValue: "text",
       variantTypeName: { namespace: "Test", name: "TextPart" },
       fields: [
-        { propertyName: "value", value: { kind: "param", name: "val", paramType: "string" }, isOptional: false },
+        {
+          propertyName: "value",
+          value: { kind: "param", name: "val", paramType: "string" },
+          isOptional: false,
+        },
       ],
     };
     assert.equal(v.visitExpr(expr), "new TextPart { Value = val }");
@@ -715,7 +826,11 @@ describe("GoExprVisitor", () => {
       kind: "construct",
       typeName: { namespace: "Test", name: "GuardrailResult" },
       fields: [
-        { propertyName: "allowed", value: { kind: "boolean", value: true }, isOptional: false },
+        {
+          propertyName: "allowed",
+          value: { kind: "boolean", value: true },
+          isOptional: false,
+        },
       ],
     };
     assert.equal(v.visitExpr(expr), "GuardrailResult{ Allowed: true }");
@@ -746,11 +861,21 @@ describe("GoExprVisitor", () => {
 
 describe("getVisitor", () => {
   it("returns visitors for all supported languages", () => {
-    for (const lang of ["rust", "typescript", "python", "csharp", "go", "java"]) {
+    for (const lang of [
+      "rust",
+      "typescript",
+      "python",
+      "csharp",
+      "go",
+      "java",
+    ]) {
       const visitor = getVisitor(lang);
       assert.ok(visitor, `No visitor for ${lang}`);
       // Smoke test — every visitor can render a string literal
-      assert.equal(typeof visitor.visitExpr({ kind: "string", value: "x" }), "string");
+      assert.equal(
+        typeof visitor.visitExpr({ kind: "string", value: "x" }),
+        "string",
+      );
     }
   });
 
@@ -770,51 +895,103 @@ describe("Integration: GuardrailResult factories", () => {
   const registry = buildTestRegistry();
 
   it("allow() → Rust", () => {
-    const expr = resolveFactoryExpr({ allowed: true }, {}, guardrailResult, registry);
+    const expr = resolveFactoryExpr(
+      { allowed: true },
+      {},
+      guardrailResult,
+      registry,
+    );
     const code = new RustExprVisitor().visitExpr(expr);
-    assert.equal(code, "GuardrailResult { allowed: true, ..Default::default() }");
+    assert.equal(
+      code,
+      "GuardrailResult { allowed: true, ..Default::default() }",
+    );
   });
 
   it("allow() → TypeScript", () => {
-    const expr = resolveFactoryExpr({ allowed: true }, {}, guardrailResult, registry);
+    const expr = resolveFactoryExpr(
+      { allowed: true },
+      {},
+      guardrailResult,
+      registry,
+    );
     const code = new TypeScriptExprVisitor().visitExpr(expr);
     assert.equal(code, "new GuardrailResult({ allowed: true })");
   });
 
   it("allow() → Python", () => {
-    const expr = resolveFactoryExpr({ allowed: true }, {}, guardrailResult, registry);
+    const expr = resolveFactoryExpr(
+      { allowed: true },
+      {},
+      guardrailResult,
+      registry,
+    );
     const code = new PythonExprVisitor().visitExpr(expr);
     assert.equal(code, "GuardrailResult(allowed=True)");
   });
 
   it("allow() → C#", () => {
-    const expr = resolveFactoryExpr({ allowed: true }, {}, guardrailResult, registry);
+    const expr = resolveFactoryExpr(
+      { allowed: true },
+      {},
+      guardrailResult,
+      registry,
+    );
     const code = new CSharpExprVisitor().visitExpr(expr);
     assert.equal(code, "new GuardrailResult { Allowed = true }");
   });
 
   it("deny(reason) → Rust", () => {
-    const expr = resolveFactoryExpr({ allowed: false }, { reason: "string" }, guardrailResult, registry);
+    const expr = resolveFactoryExpr(
+      { allowed: false },
+      { reason: "string" },
+      guardrailResult,
+      registry,
+    );
     const code = new RustExprVisitor().visitExpr(expr);
-    assert.equal(code, "GuardrailResult { allowed: false, reason: Some(reason.into()), ..Default::default() }");
+    assert.equal(
+      code,
+      "GuardrailResult { allowed: false, reason: Some(reason.into()), ..Default::default() }",
+    );
   });
 
   it("deny(reason) → TypeScript", () => {
-    const expr = resolveFactoryExpr({ allowed: false }, { reason: "string" }, guardrailResult, registry);
+    const expr = resolveFactoryExpr(
+      { allowed: false },
+      { reason: "string" },
+      guardrailResult,
+      registry,
+    );
     const code = new TypeScriptExprVisitor().visitExpr(expr);
-    assert.equal(code, "new GuardrailResult({ allowed: false, reason: reason })");
+    assert.equal(
+      code,
+      "new GuardrailResult({ allowed: false, reason: reason })",
+    );
   });
 
   it("deny(reason) → Python", () => {
-    const expr = resolveFactoryExpr({ allowed: false }, { reason: "string" }, guardrailResult, registry);
+    const expr = resolveFactoryExpr(
+      { allowed: false },
+      { reason: "string" },
+      guardrailResult,
+      registry,
+    );
     const code = new PythonExprVisitor().visitExpr(expr);
     assert.equal(code, "GuardrailResult(allowed=False, reason=reason)");
   });
 
   it("deny(reason) → C#", () => {
-    const expr = resolveFactoryExpr({ allowed: false }, { reason: "string" }, guardrailResult, registry);
+    const expr = resolveFactoryExpr(
+      { allowed: false },
+      { reason: "string" },
+      guardrailResult,
+      registry,
+    );
     const code = new CSharpExprVisitor().visitExpr(expr);
-    assert.equal(code, "new GuardrailResult { Allowed = false, Reason = reason }");
+    assert.equal(
+      code,
+      "new GuardrailResult { Allowed = false, Reason = reason }",
+    );
   });
 });
 
@@ -843,7 +1020,10 @@ describe("Integration: nested factory — ToolResult.text(val)", () => {
       registry,
     );
     const code = new TypeScriptExprVisitor().visitExpr(expr);
-    assert.equal(code, "new ToolResult({ parts: [new TextPart({ value: val })] })");
+    assert.equal(
+      code,
+      "new ToolResult({ parts: [new TextPart({ value: val })] })",
+    );
   });
 
   it("text(val) → Python", () => {
@@ -865,7 +1045,10 @@ describe("Integration: nested factory — ToolResult.text(val)", () => {
       registry,
     );
     const code = new CSharpExprVisitor().visitExpr(expr);
-    assert.equal(code, "new ToolResult { Parts = new List<ContentPart> { new TextPart { Value = val } } }");
+    assert.equal(
+      code,
+      "new ToolResult { Parts = new List<ContentPart> { new TextPart { Value = val } } }",
+    );
   });
 
   it("text(val) → Go", () => {
@@ -876,7 +1059,10 @@ describe("Integration: nested factory — ToolResult.text(val)", () => {
       registry,
     );
     const code = new GoExprVisitor(registry).visitExpr(expr);
-    assert.equal(code, 'ToolResult{ Parts: []interface{}{TextPart{ Kind: "text", Value: val }} }');
+    assert.equal(
+      code,
+      'ToolResult{ Parts: []interface{}{TextPart{ Kind: "text", Value: val }} }',
+    );
   });
 });
 
@@ -884,25 +1070,45 @@ describe("Integration: coercion — Model from string", () => {
   const registry = buildTestRegistry();
 
   it("Model coercion → Rust", () => {
-    const expr = resolveCoerceExpr({ id: "{value}" }, "string", modelType, registry);
+    const expr = resolveCoerceExpr(
+      { id: "{value}" },
+      "string",
+      modelType,
+      registry,
+    );
     const code = new RustExprVisitor().visitExpr(expr);
-    assert.equal(code, 'Model { id: value.into(), ..Default::default() }');
+    assert.equal(code, "Model { id: value.into(), ..Default::default() }");
   });
 
   it("Model coercion → TypeScript", () => {
-    const expr = resolveCoerceExpr({ id: "{value}" }, "string", modelType, registry);
+    const expr = resolveCoerceExpr(
+      { id: "{value}" },
+      "string",
+      modelType,
+      registry,
+    );
     const code = new TypeScriptExprVisitor().visitExpr(expr);
     assert.equal(code, "new Model({ id: value })");
   });
 
   it("Model coercion → Python", () => {
-    const expr = resolveCoerceExpr({ id: "{value}" }, "string", modelType, registry);
+    const expr = resolveCoerceExpr(
+      { id: "{value}" },
+      "string",
+      modelType,
+      registry,
+    );
     const code = new PythonExprVisitor().visitExpr(expr);
     assert.equal(code, "Model(id=value)");
   });
 
   it("Model coercion → C#", () => {
-    const expr = resolveCoerceExpr({ id: "{value}" }, "string", modelType, registry);
+    const expr = resolveCoerceExpr(
+      { id: "{value}" },
+      "string",
+      modelType,
+      registry,
+    );
     const code = new CSharpExprVisitor().visitExpr(expr);
     assert.equal(code, "new Model { Id = value }");
   });
@@ -923,16 +1129,21 @@ describe("Integration: Message.user(text) nested factory", () => {
     assert.equal(expr.kind, "construct");
     assert.equal(expr.fields.length, 2);
     assert.equal(expr.fields[0].propertyName, "role");
-    assert.deepStrictEqual(expr.fields[0].value, { kind: "string", value: "user" });
+    assert.deepStrictEqual(expr.fields[0].value, {
+      kind: "string",
+      value: "user",
+    });
     assert.equal(expr.fields[1].propertyName, "parts");
     assert.equal(expr.fields[1].value.kind, "array");
 
     // Verify each language
     const expected: Record<string, string> = {
       rust: 'Message { role: "user".to_string(), parts: vec![ContentPart { kind: ContentPartKind::TextPart { value: text.into() }, ..Default::default() }], ..Default::default() }',
-      typescript: 'new Message({ role: "user", parts: [new TextPart({ value: text })] })',
+      typescript:
+        'new Message({ role: "user", parts: [new TextPart({ value: text })] })',
       python: 'Message(role="user", parts=[TextPart(value=text)])',
-      csharp: 'new Message { Role = "user", Parts = new List<ContentPart> { new TextPart { Value = text } } }',
+      csharp:
+        'new Message { Role = "user", Parts = new List<ContentPart> { new TextPart { Value = text } } }',
       go: 'Message{ Role: "user", Parts: []interface{}{TextPart{ Kind: "text", Value: text }} }',
       java: 'new Message() {{ this.role = "user"; this.parts = new java.util.ArrayList<>(java.util.Arrays.asList(new TextPart() {{ this.value = text; }})); }}',
     };

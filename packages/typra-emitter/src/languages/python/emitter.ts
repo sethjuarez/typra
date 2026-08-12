@@ -58,35 +58,39 @@ import { toSnakeCase } from "../../ir/utilities.js";
  * Type mapping from TypeSpec scalar types to Python types.
  */
 const TYPE_MAP: Record<string, string> = {
-  "string": "str",
-  "number": "float",
-  "array": "list",
-  "object": "dict",
-  "boolean": "bool",
-  "int64": "int",
-  "int32": "int",
-  "float64": "float",
-  "float32": "float",
-  "integer": "int",
-  "float": "float",
-  "numeric": "float",
-  "any": "Any",
-  "dictionary": "dict[str, Any]",
+  string: "str",
+  number: "float",
+  array: "list",
+  object: "dict",
+  boolean: "bool",
+  int64: "int",
+  int32: "int",
+  float64: "float",
+  float32: "float",
+  integer: "int",
+  float: "float",
+  numeric: "float",
+  any: "Any",
+  dictionary: "dict[str, Any]",
 };
 
 function paramType(typeStr: string): string {
   if (typeStr === "string") return "str";
   if (typeStr === "boolean") return "bool";
-  if (typeStr === "integer" || typeStr === "int32" || typeStr === "int64") return "int";
-  if (typeStr === "float" || typeStr === "float64" || typeStr === "float32") return "float";
+  if (typeStr === "integer" || typeStr === "int32" || typeStr === "int64")
+    return "int";
+  if (typeStr === "float" || typeStr === "float64" || typeStr === "float32")
+    return "float";
   return "Any";
 }
 
 function returnType(typeStr: string): string {
   if (typeStr === "string") return "str";
   if (typeStr === "boolean") return "bool";
-  if (typeStr === "integer" || typeStr === "int32" || typeStr === "int64") return "int";
-  if (typeStr === "float" || typeStr === "float64" || typeStr === "float32") return "float";
+  if (typeStr === "integer" || typeStr === "int32" || typeStr === "int64")
+    return "int";
+  if (typeStr === "float" || typeStr === "float64" || typeStr === "float32")
+    return "float";
   return typeStr;
 }
 
@@ -122,13 +126,15 @@ export function emitPythonFile(
   // Collect all import lines, then sort them
   const stdlibImports: string[] = [];
   const localImports: string[] = [];
-  const hasProtocol = decl.types.some(t => t.isProtocol);
-  const hasNonProtocol = decl.types.some(t => !t.isProtocol);
-  const hasMethodHelpers = decl.types.some(t => !t.isProtocol && t.methods.length > 0);
-  const hasRuntimeCancellation = decl.types.some(type =>
-    type.methods.some(method => method.runtimeCancellable),
+  const hasProtocol = decl.types.some((t) => t.isProtocol);
+  const hasNonProtocol = decl.types.some((t) => !t.isProtocol);
+  const hasMethodHelpers = decl.types.some(
+    (t) => !t.isProtocol && t.methods.length > 0,
   );
-  const preservesRawPayload = decl.types.some(type =>
+  const hasRuntimeCancellation = decl.types.some((type) =>
+    type.methods.some((method) => method.runtimeCancellable),
+  );
+  const preservesRawPayload = decl.types.some((type) =>
     absorbsUnknownValues(type.polymorphicDispatch),
   );
   const usePydantic = options.nativeSerialization === "pydantic";
@@ -150,18 +156,22 @@ export function emitPythonFile(
     pydanticImports.push("PrivateAttr");
   }
   if (hasNonProtocol && usePydantic) {
-    localImports.push(`from pydantic import ${pydanticImports.sort().join(", ")}`);
+    localImports.push(
+      `from pydantic import ${pydanticImports.sort().join(", ")}`,
+    );
   }
   const typingImports = ["Any"];
   if (hasNonProtocol) typingImports.push("ClassVar");
   if (decl.enums.length > 0) typingImports.push("Literal");
-  if (hasProtocol || hasMethodHelpers) typingImports.push("Protocol", "runtime_checkable");
+  if (hasProtocol || hasMethodHelpers)
+    typingImports.push("Protocol", "runtime_checkable");
   typingImports.sort();
   stdlibImports.push(`from typing import ${typingImports.join(", ")}`);
   if (hasRuntimeCancellation) {
     localImports.push(
       pythonCancellationTokenImport(
-        options.cancellationTokenPath ?? "prompty.core.cancellation.CancellationToken",
+        options.cancellationTokenPath ??
+          "prompty.core.cancellation.CancellationToken",
       ),
     );
   }
@@ -173,14 +183,17 @@ export function emitPythonFile(
     }
     const moduleName = path.slice(0, separator);
     const symbolName = path.slice(separator + 1);
-    const alias = symbolName === "CancellationToken" ? "" : " as CancellationToken";
+    const alias =
+      symbolName === "CancellationToken" ? "" : " as CancellationToken";
     return `from ${moduleName} import ${symbolName}${alias}`;
   }
 
   // Context import — go up one level when inside a group subfolder
   if (hasNonProtocol) {
     const ctxPrefix = group ? ".." : ".";
-    localImports.push(`from ${ctxPrefix}_context import LoadContext, SaveContext`);
+    localImports.push(
+      `from ${ctxPrefix}_context import LoadContext, SaveContext`,
+    );
   }
 
   // Cross-group and same-group type imports
@@ -190,7 +203,9 @@ export function emitPythonFile(
       localImports.push(`from ._${imp.module} import ${imp.names.join(", ")}`);
     } else if (imp.group) {
       // Different non-empty group: go up to model root, then into the group subfolder
-      localImports.push(`from ..${imp.group}._${imp.module} import ${imp.names.join(", ")}`);
+      localImports.push(
+        `from ..${imp.group}._${imp.module} import ${imp.names.join(", ")}`,
+      );
     } else {
       // Imported module is at model root (no group): go up one level
       localImports.push(`from .._${imp.module} import ${imp.names.join(", ")}`);
@@ -210,7 +225,7 @@ export function emitPythonFile(
   if (decl.enums.length > 0) {
     lines.push("");
     for (const enumDef of decl.enums) {
-      const values = enumDef.values.map(v => `"${v}"`).join(", ");
+      const values = enumDef.values.map((v) => `"${v}"`).join(", ");
       if (enumDef.isOpen) {
         // Open enum — Literal values or any str
         lines.push(`${enumDef.name} = Literal[${values}] | str`);
@@ -233,18 +248,32 @@ export function emitPythonFile(
   return pruneUnusedTypingImports(emitCleanPythonLines(lines, "\n"));
 }
 
-function hasParseAliases(enumDef: { parseAliases: Record<string, string[]> }): boolean {
-  return Object.values(enumDef.parseAliases).some(aliases => aliases.length > 0);
+function hasParseAliases(enumDef: {
+  parseAliases: Record<string, string[]>;
+}): boolean {
+  return Object.values(enumDef.parseAliases).some(
+    (aliases) => aliases.length > 0,
+  );
 }
 
 function enumParserName(enumName: string): string {
   return `_parse_${toSnakeCase(enumName)}`;
 }
 
-function emitEnumParser(enumDef: { name: string; values: string[]; parseAliases: Record<string, string[]>; isOpen: boolean }, lines: string[]): void {
+function emitEnumParser(
+  enumDef: {
+    name: string;
+    values: string[];
+    parseAliases: Record<string, string[]>;
+    isOpen: boolean;
+  },
+  lines: string[],
+): void {
   if (!hasParseAliases(enumDef)) return;
   lines.push("");
-  lines.push(`def ${enumParserName(enumDef.name)}(value: Any) -> ${enumDef.name}:`);
+  lines.push(
+    `def ${enumParserName(enumDef.name)}(value: Any) -> ${enumDef.name}:`,
+  );
   lines.push("    text = str(value)");
   lines.push("    aliases = {");
   for (const value of enumDef.values) {
@@ -252,7 +281,9 @@ function emitEnumParser(enumDef: { name: string; values: string[]; parseAliases:
   }
   for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
     for (const alias of aliases) {
-      lines.push(`        ${JSON.stringify(alias)}: ${JSON.stringify(canonical)},`);
+      lines.push(
+        `        ${JSON.stringify(alias)}: ${JSON.stringify(canonical)},`,
+      );
     }
   }
   lines.push("    }");
@@ -261,12 +292,14 @@ function emitEnumParser(enumDef: { name: string; values: string[]; parseAliases:
   } else {
     lines.push("    if text in aliases:");
     lines.push("        return aliases[text]");
-    lines.push(`    raise ValueError(f"Invalid ${enumDef.name} value: {text}")`);
+    lines.push(
+      `    raise ValueError(f"Invalid ${enumDef.name} value: {text}")`,
+    );
   }
 }
 
 function emitCleanPythonLines(lines: string[], suffix = ""): string {
-  return lines.map(line => line.trimEnd()).join("\n") + suffix;
+  return lines.map((line) => line.trimEnd()).join("\n") + suffix;
 }
 
 function pruneUnusedTypingImports(source: string): string {
@@ -275,9 +308,14 @@ function pruneUnusedTypingImports(source: string): string {
     return source;
   }
 
-  const names = match.groups.names.split(",").map(name => name.trim()).filter(Boolean);
+  const names = match.groups.names
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
   const body = `${source.slice(0, match.index)}${source.slice(match.index + match[0].length)}`;
-  const usedNames = names.filter(name => new RegExp(`\\b${escapeRegExp(name)}\\b`).test(body));
+  const usedNames = names.filter((name) =>
+    new RegExp(`\\b${escapeRegExp(name)}\\b`).test(body),
+  );
 
   if (usedNames.length === names.length) {
     return source;
@@ -308,37 +346,48 @@ function assertNoPydanticReservedFieldNames(type: TypeDecl): void {
     const attributeName = toSnakeCase(field.name);
     if (PYDANTIC_RESERVED_FIELD_NAMES.has(attributeName)) {
       throw new Error(
-        `Python native-serialization 'pydantic' cannot emit ${type.typeName.name}.${field.name}: `
-        + `the Python attribute '${attributeName}' is reserved by Pydantic/Typra interop. `
-        + "Rename the TypeSpec property or use native-serialization: 'none'.",
+        `Python native-serialization 'pydantic' cannot emit ${type.typeName.name}.${field.name}: ` +
+          `the Python attribute '${attributeName}' is reserved by Pydantic/Typra interop. ` +
+          "Rename the TypeSpec property or use native-serialization: 'none'.",
       );
     }
   }
 }
 
-function assertNoPydanticReservedFactoryNames(type: TypeDecl, fieldNames: Set<string>): void {
+function assertNoPydanticReservedFactoryNames(
+  type: TypeDecl,
+  fieldNames: Set<string>,
+): void {
   for (const factory of type.factories) {
     const methodName = pythonFactoryMethodName(factory.name, fieldNames);
     if (PYDANTIC_RESERVED_FIELD_NAMES.has(methodName)) {
       throw new Error(
-        `Python native-serialization 'pydantic' cannot emit ${type.typeName.name}.${factory.name} factory: `
-        + `the Python method '${methodName}' is reserved by Pydantic/Typra interop. `
-        + "Rename the TypeSpec factory or use native-serialization: 'none'.",
+        `Python native-serialization 'pydantic' cannot emit ${type.typeName.name}.${factory.name} factory: ` +
+          `the Python method '${methodName}' is reserved by Pydantic/Typra interop. ` +
+          "Rename the TypeSpec factory or use native-serialization: 'none'.",
       );
     }
   }
 }
 
-function pythonFactoryMethodName(factoryName: string, fieldNames: Set<string>): string {
+function pythonFactoryMethodName(
+  factoryName: string,
+  fieldNames: Set<string>,
+): string {
   // In Python, a @classmethod with the same name as a dataclass field shadows
   // the field's default. Prefix with create_ to avoid the collision.
   return fieldNames.has(factoryName) ? `create_${factoryName}` : factoryName;
 }
 
-function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor, options: PythonEmitterOptions): void {
+function emitType(
+  type: TypeDecl,
+  lines: string[],
+  visitor: ExprVisitor,
+  options: PythonEmitterOptions,
+): void {
   const name = type.typeName.name;
   const usePydantic = options.nativeSerialization === "pydantic";
-  const fieldNames = new Set(type.fields.map(f => f.name));
+  const fieldNames = new Set(type.fields.map((f) => f.name));
 
   // Protocol types → emit as Protocol class with method signatures
   if (type.isProtocol) {
@@ -366,23 +415,33 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor, options
 
   // _shorthand_property ClassVar
   lines.push("");
-  const shorthand = type.coercionProperty ? `"${type.coercionProperty}"` : "None";
+  const shorthand = type.coercionProperty
+    ? `"${type.coercionProperty}"`
+    : "None";
   lines.push(`    _shorthand_property: ClassVar[str | None] = ${shorthand}`);
   if (usePydantic) {
-    lines.push("    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)");
+    lines.push(
+      "    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)",
+    );
   }
 
   // Field declarations (blank line between _shorthand and first field)
   lines.push("");
-  const saveTargets = new Map(type.save.assignments.map(a => [a.fieldName, a.targetName]));
+  const saveTargets = new Map(
+    type.save.assignments.map((a) => [a.fieldName, a.targetName]),
+  );
   for (const field of type.fields) {
     const wireName = saveTargets.get(field.name) ?? field.name;
-    lines.push(`    ${toSnakeCase(field.name)}: ${pythonTypeAnnotation(field)}${pythonDefaultValue(field, options, wireName)}`);
+    lines.push(
+      `    ${toSnakeCase(field.name)}: ${pythonTypeAnnotation(field)}${pythonDefaultValue(field, options, wireName)}`,
+    );
   }
   if (absorbsUnknownValues(type.polymorphicDispatch)) {
-    lines.push(usePydantic
-      ? "    _raw: dict[str, Any] = PrivateAttr(default_factory=dict)"
-      : "    _raw: dict[str, Any] = field(default_factory=dict, init=False, repr=False)");
+    lines.push(
+      usePydantic
+        ? "    _raw: dict[str, Any] = PrivateAttr(default_factory=dict)"
+        : "    _raw: dict[str, Any] = field(default_factory=dict, init=False, repr=False)",
+    );
   }
 
   // load() method
@@ -462,7 +521,11 @@ function emitType(type: TypeDecl, lines: string[], visitor: ExprVisitor, options
  * exact unrecognized value is already preserved by the time this instance is returned.
  * It needs no `save` either: the base's `save` seeds its result from `_raw`.
  */
-function emitUnknownCarrier(type: TypeDecl, lines: string[], options: PythonEmitterOptions): void {
+function emitUnknownCarrier(
+  type: TypeDecl,
+  lines: string[],
+  options: PythonEmitterOptions,
+): void {
   const parentName = type.typeName.name;
   const carrier = unknownCarrierName(parentName);
 
@@ -470,16 +533,24 @@ function emitUnknownCarrier(type: TypeDecl, lines: string[], options: PythonEmit
     lines.push("@dataclass");
   }
   lines.push(`class ${carrier}(${parentName}):`);
-  lines.push(`    """Carries a ${parentName} whose discriminator matches no known subtype.`);
+  lines.push(
+    `    """Carries a ${parentName} whose discriminator matches no known subtype.`,
+  );
   lines.push("");
-  lines.push(`    The unrecognized value stays on \`${toSnakeCase(type.polymorphicDispatch!.discriminatorField)}\` and every key the`);
-  lines.push(`    schema does not declare is preserved verbatim, so an unknown ${parentName}`);
+  lines.push(
+    `    The unrecognized value stays on \`${toSnakeCase(type.polymorphicDispatch!.discriminatorField)}\` and every key the`,
+  );
+  lines.push(
+    `    schema does not declare is preserved verbatim, so an unknown ${parentName}`,
+  );
   lines.push("    survives a load/save round-trip unchanged.");
   lines.push("");
   lines.push('    """');
   lines.push("");
   lines.push("    @staticmethod");
-  lines.push(`    def load(data: Any, context: LoadContext | None = None) -> "${carrier}":`);
+  lines.push(
+    `    def load(data: Any, context: LoadContext | None = None) -> "${carrier}":`,
+  );
   lines.push(`        instance = ${carrier}()`);
   lines.push("        instance._raw = copy.deepcopy(data)");
   for (const a of type.load.assignments) {
@@ -505,14 +576,23 @@ function emitMethodHelpersProtocol(type: TypeDecl, lines: string[]): void {
   lines.push(`class ${name}Helpers(Protocol):`);
   lines.push(`    """Helper contract for ${name}.`);
   lines.push("");
-  lines.push(`    Runtime implementations must provide these methods on every ${name}`);
-  lines.push("    instance (either by attaching them to the generated class or by wrapping it).");
-  lines.push("    The type checker can verify conformance by annotating against this Protocol");
-  lines.push(`    or by calling isinstance(instance, ${name}Helpers) at runtime.`);
+  lines.push(
+    `    Runtime implementations must provide these methods on every ${name}`,
+  );
+  lines.push(
+    "    instance (either by attaching them to the generated class or by wrapping it).",
+  );
+  lines.push(
+    "    The type checker can verify conformance by annotating against this Protocol",
+  );
+  lines.push(
+    `    or by calling isinstance(instance, ${name}Helpers) at runtime.`,
+  );
   lines.push(`    """`);
   for (const m of type.methods) {
-    const params = Object.entries(m.params)
-      .map(([pName, pType]) => `${toSnakeCase(pName)}: ${protocolType(pType)}`)
+    const params = Object.entries(m.params).map(
+      ([pName, pType]) => `${toSnakeCase(pName)}: ${protocolType(pType)}`,
+    );
     if (m.runtimeCancellable) {
       params.push("cancellation: CancellationToken | None = None");
     }
@@ -521,7 +601,10 @@ function emitMethodHelpersProtocol(type: TypeDecl, lines: string[]): void {
     const snakeName = toSnakeCase(m.name);
     // Zero-param, non-verb methods are emitted as @property — idiomatic Python
     // for accessor-style helpers (matches the C# emitter's heuristic).
-    const isProperty = Object.keys(m.params).length === 0 && !m.runtimeCancellable && !isMethodStyle(m.name);
+    const isProperty =
+      Object.keys(m.params).length === 0 &&
+      !m.runtimeCancellable &&
+      !isMethodStyle(m.name);
     lines.push("");
     if (isProperty) {
       lines.push("    @property");
@@ -541,9 +624,27 @@ function emitMethodHelpersProtocol(type: TypeDecl, lines: string[]): void {
  * ``message.text`` as a property and ``message.to_text_content()`` as a method.
  */
 const PY_METHOD_VERB_PREFIXES = [
-  "to", "get", "set", "fetch", "compute", "make", "build", "create",
-  "load", "save", "convert", "parse", "format", "render", "serialize",
-  "deserialize", "find", "calculate", "invoke", "execute", "run",
+  "to",
+  "get",
+  "set",
+  "fetch",
+  "compute",
+  "make",
+  "build",
+  "create",
+  "load",
+  "save",
+  "convert",
+  "parse",
+  "format",
+  "render",
+  "serialize",
+  "deserialize",
+  "find",
+  "calculate",
+  "invoke",
+  "execute",
+  "run",
 ];
 
 function isMethodStyle(name: string): boolean {
@@ -577,7 +678,8 @@ function protocolType(typeStr: string): string {
     return `list[${protocolType(inner)}]`;
   }
   // Handle Record/dict types
-  if (typeStr === "Record<unknown>" || typeStr === "dictionary") return "dict[str, Any]";
+  if (typeStr === "Record<unknown>" || typeStr === "dictionary")
+    return "dict[str, Any]";
   if (typeStr === "unknown" || typeStr === "any") return "Any";
   if (typeStr === "void") return "None";
   // Scalar types
@@ -612,8 +714,9 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
   }
 
   for (const method of type.methods) {
-    const params = Object.entries(method.params)
-      .map(([pName, pType]) => `${toSnakeCase(pName)}: ${protocolType(pType)}`)
+    const params = Object.entries(method.params).map(
+      ([pName, pType]) => `${toSnakeCase(pName)}: ${protocolType(pType)}`,
+    );
     if (method.runtimeCancellable) {
       params.push("cancellation: CancellationToken | None = None");
     }
@@ -623,7 +726,9 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
     // Sync method
     lines.push("");
     if (method.description) {
-      lines.push(`    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`);
+      lines.push(
+        `    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`,
+      );
       lines.push(`        """${method.description}"""`);
       if (method.optional) {
         lines.push("        return None");
@@ -632,10 +737,14 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
       }
     } else {
       if (method.optional) {
-        lines.push(`    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`);
+        lines.push(
+          `    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`,
+        );
         lines.push("        return None");
       } else {
-        lines.push(`    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`);
+        lines.push(
+          `    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`,
+        );
         emitRequiredProtocolMethodBody(lines);
       }
     }
@@ -644,7 +753,9 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
     if (!method.sync) {
       lines.push("");
       if (method.description) {
-        lines.push(`    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`);
+        lines.push(
+          `    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`,
+        );
         lines.push(`        """${method.description} (async variant)"""`);
         if (method.optional) {
           lines.push("        return None");
@@ -653,10 +764,14 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
         }
       } else {
         if (method.optional) {
-          lines.push(`    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`);
+          lines.push(
+            `    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`,
+          );
           lines.push("        return None");
         } else {
-          lines.push(`    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`);
+          lines.push(
+            `    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`,
+          );
           emitRequiredProtocolMethodBody(lines);
         }
       }
@@ -758,7 +873,11 @@ function pythonDocstringType(f: FieldDecl): string {
 // Default values
 // ============================================================================
 
-function pythonDefaultValue(f: FieldDecl, options: PythonEmitterOptions = {}, wireName?: string): string {
+function pythonDefaultValue(
+  f: FieldDecl,
+  options: PythonEmitterOptions = {},
+  wireName?: string,
+): string {
   if (options.nativeSerialization === "pydantic") {
     return pydanticDefaultValue(f, wireName ?? f.name);
   }
@@ -766,7 +885,9 @@ function pythonDefaultValue(f: FieldDecl, options: PythonEmitterOptions = {}, wi
   const cat = f.category;
 
   if (cat.kind === "collection_scalar" || cat.kind === "collection_complex") {
-    return shouldMaterializeCollectionDefault(f) ? " = field(default_factory=list)" : " = None";
+    return shouldMaterializeCollectionDefault(f)
+      ? " = field(default_factory=list)"
+      : " = None";
   }
 
   if (f.isOptional) {
@@ -786,9 +907,11 @@ function pythonDefaultValue(f: FieldDecl, options: PythonEmitterOptions = {}, wi
     } else if (f.isOptional) {
       args.push("default=None");
     } else if (f.enumName && f.allowedValues.length > 0) {
-      const dv = typeof f.defaultValue === "string" && f.allowedValues.includes(f.defaultValue)
-        ? f.defaultValue
-        : f.allowedValues[0];
+      const dv =
+        typeof f.defaultValue === "string" &&
+        f.allowedValues.includes(f.defaultValue)
+          ? f.defaultValue
+          : f.allowedValues[0];
       args.push(`default=${JSON.stringify(dv)}`);
     } else if (cat.kind === "scalar") {
       const t = cat.scalarType;
@@ -796,7 +919,13 @@ function pythonDefaultValue(f: FieldDecl, options: PythonEmitterOptions = {}, wi
         args.push(`default=${f.defaultValue ? "True" : "False"}`);
       } else if (t === "string") {
         args.push(`default=${JSON.stringify(f.defaultValue ?? "")}`);
-      } else if (t === "number" || t === "numeric" || t === "float64" || t === "float32" || t === "float") {
+      } else if (
+        t === "number" ||
+        t === "numeric" ||
+        t === "float64" ||
+        t === "float32" ||
+        t === "float"
+      ) {
         args.push(`default=${f.defaultValue ?? "0.0"}`);
       } else if (t === "int64" || t === "int32" || t === "integer") {
         args.push(`default=${f.defaultValue ?? "0"}`);
@@ -819,9 +948,11 @@ function pythonDefaultValue(f: FieldDecl, options: PythonEmitterOptions = {}, wi
 
   // Enum fields — use the field's default value or the first allowed value
   if (f.enumName && f.allowedValues.length > 0) {
-    const dv = typeof f.defaultValue === "string" && f.allowedValues.includes(f.defaultValue)
-      ? f.defaultValue
-      : f.allowedValues[0];
+    const dv =
+      typeof f.defaultValue === "string" &&
+      f.allowedValues.includes(f.defaultValue)
+        ? f.defaultValue
+        : f.allowedValues[0];
     return ` = field(default="${dv}")`;
   }
 
@@ -833,7 +964,13 @@ function pythonDefaultValue(f: FieldDecl, options: PythonEmitterOptions = {}, wi
     if (t === "string") {
       return ` = field(default="${f.defaultValue ?? ""}")`;
     }
-    if (t === "number" || t === "numeric" || t === "float64" || t === "float32" || t === "float") {
+    if (
+      t === "number" ||
+      t === "numeric" ||
+      t === "float64" ||
+      t === "float32" ||
+      t === "float"
+    ) {
       return ` = field(default=${f.defaultValue ?? "0.0"})`;
     }
     if (t === "int64" || t === "int32" || t === "integer") {
@@ -864,11 +1001,15 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   const name = type.typeName.name;
 
   lines.push("    @staticmethod");
-  lines.push(`    def load(data: Any, context: LoadContext | None = None) -> "${name}":`);
+  lines.push(
+    `    def load(data: Any, context: LoadContext | None = None) -> "${name}":`,
+  );
   lines.push(`        """Load a ${name} instance.`);
   lines.push("        Args:");
   lines.push("            data (Any): The data to load the instance from.");
-  lines.push("            context (Optional[LoadContext]): Optional context with pre/post processing callbacks.");
+  lines.push(
+    "            context (Optional[LoadContext]): Optional context with pre/post processing callbacks.",
+  );
   lines.push("        Returns:");
   lines.push(`            ${name}: The loaded ${name} instance.`);
   lines.push("");
@@ -889,13 +1030,21 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
 
   lines.push("        ");
   lines.push(`        if not isinstance(data, dict):`);
-  lines.push(`            raise ValueError(f"Invalid data for ${name}: {data}")`);
+  lines.push(
+    `            raise ValueError(f"Invalid data for ${name}: {data}")`,
+  );
 
   for (const a of type.load.assignments) {
-    const field = type.fields.find(candidate => candidate.name === a.fieldName);
+    const field = type.fields.find(
+      (candidate) => candidate.name === a.fieldName,
+    );
     if (!shouldGuardMissingRequiredField(field)) continue;
-    lines.push(`        if "${a.sourceName}" not in data or data["${a.sourceName}"] is None:`);
-    lines.push(`            raise ValueError(f"{context.at('${a.sourceName}').path}: missing required field")`);
+    lines.push(
+      `        if "${a.sourceName}" not in data or data["${a.sourceName}"] is None:`,
+    );
+    lines.push(
+      `            raise ValueError(f"{context.at('${a.sourceName}').path}: missing required field")`,
+    );
   }
 
   // Create instance (polymorphic dispatch or direct)
@@ -938,7 +1087,11 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
 function emitLoadAssignment(a: LoadAssignment): string {
   const snake = toSnakeCase(a.fieldName);
   const cat = a.category;
-  if (a.enumName && a.allowedValues.length > 0 && Object.keys(a.parseAliases).length > 0) {
+  if (
+    a.enumName &&
+    a.allowedValues.length > 0 &&
+    Object.keys(a.parseAliases).length > 0
+  ) {
     return `instance.${snake} = ${enumParserName(a.enumName)}(data["${a.sourceName}"])`;
   }
   switch (cat.kind) {
@@ -953,15 +1106,27 @@ function emitLoadAssignment(a: LoadAssignment): string {
       return `instance.${snake} = ${cat.typeName}.load(data["${a.sourceName}"], context.at("${a.sourceName}"))`;
   }
 
-  function dictLoadAssignment(fieldName: string, sourceName: string, valueType: string | undefined): string {
+  function dictLoadAssignment(
+    fieldName: string,
+    sourceName: string,
+    valueType: string | undefined,
+  ): string {
     if (!valueType || valueType === "unknown") {
       return `instance.${fieldName} = data["${sourceName}"]`;
     }
-    const valueExpr = dictValueLoadExpr("value", valueType, `context.at("${sourceName}").at(key)`);
+    const valueExpr = dictValueLoadExpr(
+      "value",
+      valueType,
+      `context.at("${sourceName}").at(key)`,
+    );
     return `instance.${fieldName} = {key: ${valueExpr} for key, value in data["${sourceName}"].items()}`;
   }
 
-  function dictValueLoadExpr(valueExpr: string, valueType: string, contextExpr: string): string {
+  function dictValueLoadExpr(
+    valueExpr: string,
+    valueType: string,
+    contextExpr: string,
+  ): string {
     switch (TYPE_MAP[valueType]) {
       case "str":
         return `str(${valueExpr})`;
@@ -998,11 +1163,13 @@ function emitCoercionBranch(
     // Dynamic discriminator — must go through dispatch
     const discSnake = toSnakeCase(type.polymorphicDispatch.discriminatorField);
     // Build a minimal dict for the dispatch method
-    const dictFields = c.assignments.map(a => {
+    const dictFields = c.assignments.map((a) => {
       const val = a.isInput ? "data" : `"${a.literalValue}"`;
       return `"${a.fieldName}": ${val}`;
     });
-    lines.push(`            return ${typeName}.load_${discSnake}({${dictFields.join(", ")}}, context)`);
+    lines.push(
+      `            return ${typeName}.load_${discSnake}({${dictFields.join(", ")}}, context)`,
+    );
   } else {
     // Direct property setting — no intermediate dict
     lines.push(`            instance = ${typeName}()`);
@@ -1024,29 +1191,45 @@ function emitCoercionBranch(
 // Collection helpers (load_X / save_X)
 // ============================================================================
 
-function emitCollectionLoadHelper(parentName: string, helper: CollectionHelperDecl, lines: string[]): void {
+function emitCollectionLoadHelper(
+  parentName: string,
+  helper: CollectionHelperDecl,
+  lines: string[],
+): void {
   const snake = toSnakeCase(helper.propertyName);
   const elemName = helper.elementTypeName.name;
   const shorthandField = entryShorthandTarget(helper, "kind");
 
   lines.push("");
   lines.push("    @staticmethod");
-  lines.push(`    def load_${snake}(data: dict | list, context: LoadContext | None) -> list[${elemName}]:`);
+  lines.push(
+    `    def load_${snake}(data: dict | list, context: LoadContext | None) -> list[${elemName}]:`,
+  );
   lines.push("        if context is None:");
-  lines.push(`            context = LoadContext(path="${helper.propertyName}")`);
+  lines.push(
+    `            context = LoadContext(path="${helper.propertyName}")`,
+  );
   lines.push("        if isinstance(data, dict):");
-  lines.push(`            # convert simple named ${helper.propertyName} to list of ${elemName}`);
+  lines.push(
+    `            # convert simple named ${helper.propertyName} to list of ${elemName}`,
+  );
   lines.push("            result = []");
   lines.push("            for k, v in data.items():");
   lines.push("                if isinstance(v, list):");
-  lines.push('                    raise TypeError(f"{context.at(k).path}: invalid named collection entry category array")');
+  lines.push(
+    '                    raise TypeError(f"{context.at(k).path}: invalid named collection entry category array")',
+  );
   lines.push("                if isinstance(v, dict):");
   lines.push("                    # value is an object, spread its properties");
-  lines.push(`                    result.append(${elemName}.load({"name": k, **v}, context.at(k)))`);
+  lines.push(
+    `                    result.append(${elemName}.load({"name": k, **v}, context.at(k)))`,
+  );
   lines.push("                else:");
   emitPyEntryShorthandArms(helper, shorthandField, elemName, lines);
   lines.push("            return result");
-  lines.push(`        return [${elemName}.load(item, context.at_index(index)) for index, item in enumerate(data)]`);
+  lines.push(
+    `        return [${elemName}.load(item, context.at_index(index)) for index, item in enumerate(data)]`,
+  );
 }
 
 /**
@@ -1074,13 +1257,15 @@ function emitPyEntryShorthandArms(
     return;
   }
 
-  lines.push(`${indent}# value is a scalar, infer the entry shape from its type`);
+  lines.push(
+    `${indent}# value is a scalar, infer the entry shape from its type`,
+  );
   let first = true;
   for (const entryCase of orderedEntryShorthandCases(shorthand.cases)) {
     const check = pyScalarValueCheck(entryCase.scalarType);
     if (!check) continue;
     const fields = entryCase.assignments
-      .map(a => `"${a.fieldName}": ${pythonLiteral(a.literalValue)}`)
+      .map((a) => `"${a.fieldName}": ${pythonLiteral(a.literalValue)}`)
       .concat(`"${shorthand.valueField}": v`)
       .join(", ");
     lines.push(`${indent}${first ? "if" : "elif"} ${check}:`);
@@ -1102,7 +1287,8 @@ function emitPyEntryShorthandArms(
  * exclusion makes the arms order-independent rather than relying on emission order.
  */
 function pyScalarValueCheck(scalarType: string): string | null {
-  if (isIntegralScalar(scalarType)) return "isinstance(v, int) and not isinstance(v, bool)";
+  if (isIntegralScalar(scalarType))
+    return "isinstance(v, int) and not isinstance(v, bool)";
   if (isFractionalScalar(scalarType)) return "isinstance(v, float)";
   if (isStringEncodedScalar(scalarType)) return "isinstance(v, str)";
   if (isBooleanScalar(scalarType)) return "isinstance(v, bool)";
@@ -1122,18 +1308,26 @@ function pythonLiteral(value: string | number | boolean | null): string {
   return JSON.stringify(value);
 }
 
-function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDecl, lines: string[]): void {
+function emitCollectionSaveHelper(
+  parentName: string,
+  helper: CollectionHelperDecl,
+  lines: string[],
+): void {
   const snake = toSnakeCase(helper.propertyName);
   const elemName = helper.elementTypeName.name;
 
   lines.push("    @staticmethod");
-  lines.push(`    def save_${snake}(items: list[${elemName}], context: SaveContext | None) -> dict[str, Any] | list[dict[str, Any]]:`);
+  lines.push(
+    `    def save_${snake}(items: list[${elemName}], context: SaveContext | None) -> dict[str, Any] | list[dict[str, Any]]:`,
+  );
   lines.push("        if context is None:");
   lines.push("            context = SaveContext()");
 
   if (helper.hasNameProperty) {
     lines.push("");
-    lines.push("        serialized = [dict(item.save(context)) for item in items]");
+    lines.push(
+      "        serialized = [dict(item.save(context)) for item in items]",
+    );
     lines.push("        for item_data in serialized:");
     lines.push('            if item_data.get("name") == "":');
     lines.push('                item_data.pop("name")');
@@ -1144,7 +1338,9 @@ function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDe
     lines.push("        names: set[str] = set()");
     lines.push("        for item_data in serialized:");
     lines.push('            name = item_data.get("name")');
-    lines.push("            if not isinstance(name, str) or not name or name in names:");
+    lines.push(
+      "            if not isinstance(name, str) or not name or name in names:",
+    );
     lines.push("                return serialized");
     lines.push("            names.add(name)");
     lines.push("");
@@ -1152,17 +1348,25 @@ function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDe
     lines.push("        result: dict[str, Any] = {}");
     lines.push("        for item, item_data in zip(items, serialized):");
     lines.push('            name = item_data.pop("name")');
-    lines.push("            # Check if we can use shorthand (only primary property set)");
-    lines.push("            if context.use_shorthand and hasattr(item, '_shorthand_property'):");
+    lines.push(
+      "            # Check if we can use shorthand (only primary property set)",
+    );
+    lines.push(
+      "            if context.use_shorthand and hasattr(item, '_shorthand_property'):",
+    );
     lines.push("                shorthand_prop = item._shorthand_property");
-    lines.push("                if shorthand_prop and len(item_data) == 1 and shorthand_prop in item_data:");
+    lines.push(
+      "                if shorthand_prop and len(item_data) == 1 and shorthand_prop in item_data:",
+    );
     lines.push("                    result[name] = item_data[shorthand_prop]");
     lines.push("                    continue");
     lines.push("            result[name] = item_data");
     lines.push("        return result");
   } else {
     lines.push("");
-    lines.push("        # The schema declares an ordered collection, so preserve array format");
+    lines.push(
+      "        # The schema declares an ordered collection, so preserve array format",
+    );
     lines.push("        return [item.save(context) for item in items]");
   }
 }
@@ -1173,7 +1377,9 @@ function emitCollectionSaveHelper(parentName: string, helper: CollectionHelperDe
  * `absorbsUnknownValues` in the TypeScript emitter; the predicate is deliberately identical
  * across backends so they agree on which schemas are open.
  */
-function absorbsUnknownValues(dispatch: PolymorphicDispatchDecl | null | undefined): boolean {
+function absorbsUnknownValues(
+  dispatch: PolymorphicDispatchDecl | null | undefined,
+): boolean {
   if (!dispatch) {
     return false;
   }
@@ -1213,11 +1419,19 @@ function emitPolymorphicDispatch(
   const discSnake = toSnakeCase(dispatch.discriminatorField);
   const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push("    @staticmethod");
-  lines.push(`    def load_${discSnake}(data: dict, context: LoadContext | None) -> "${parentName}":`);
+  lines.push(
+    `    def load_${discSnake}(data: dict, context: LoadContext | None) -> "${parentName}":`,
+  );
   lines.push(`        # load polymorphic ${parentName} instance`);
-  lines.push(`        discriminator_raw = data.get("${dispatch.discriminatorField}") if data is not None else None`);
-  lines.push("        if not isinstance(discriminator_raw, str) or discriminator_raw == \"\":");
-  lines.push(`            raise ValueError("Invalid ${parentName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`);
+  lines.push(
+    `        discriminator_raw = data.get("${dispatch.discriminatorField}") if data is not None else None`,
+  );
+  lines.push(
+    '        if not isinstance(discriminator_raw, str) or discriminator_raw == "":',
+  );
+  lines.push(
+    `            raise ValueError("Invalid ${parentName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`,
+  );
   lines.push("        discriminator_value = discriminator_raw");
 
   for (let i = 0; i < dispatch.variants.length; i++) {
@@ -1237,7 +1451,9 @@ function emitPolymorphicDispatch(
     } else {
       lines.push("");
       lines.push(`            # load default instance`);
-      lines.push(`            return ${dispatch.defaultVariant.typeName.name}.load(data, context)`);
+      lines.push(
+        `            return ${dispatch.defaultVariant.typeName.name}.load(data, context)`,
+      );
     }
   } else if (carrier) {
     lines.push("");
@@ -1247,7 +1463,9 @@ function emitPolymorphicDispatch(
   } else {
     lines.push("");
     lines.push("        else:");
-    lines.push(`            raise ValueError(f"Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: {discriminator_value}")`);
+    lines.push(
+      `            raise ValueError(f"Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: {discriminator_value}")`,
+    );
   }
 
   lines.push("");
@@ -1260,12 +1478,18 @@ function emitPolymorphicDispatch(
 function emitSaveMethod(type: TypeDecl, lines: string[]): void {
   const name = type.typeName.name;
 
-  lines.push(`    def save(self, context: SaveContext | None = None) -> dict[str, Any]:`);
+  lines.push(
+    `    def save(self, context: SaveContext | None = None) -> dict[str, Any]:`,
+  );
   lines.push(`        """Save the ${name} instance to a dictionary.`);
   lines.push("        Args:");
-  lines.push("            context (Optional[SaveContext]): Optional context with pre/post processing callbacks.");
+  lines.push(
+    "            context (Optional[SaveContext]): Optional context with pre/post processing callbacks.",
+  );
   lines.push("        Returns:");
-  lines.push("            dict[str, Any]: The dictionary representation of this instance.");
+  lines.push(
+    "            dict[str, Any]: The dictionary representation of this instance.",
+  );
   lines.push("");
   lines.push(`        """`);
   lines.push("        obj = self");
@@ -1316,7 +1540,11 @@ function emitSaveAssignment(a: SaveAssignment): string {
     case "collection_scalar":
       return `result["${a.targetName}"] = obj.${snake}`;
     case "dict":
-      if (cat.valueType && cat.valueType !== "unknown" && !TYPE_MAP[cat.valueType]) {
+      if (
+        cat.valueType &&
+        cat.valueType !== "unknown" &&
+        !TYPE_MAP[cat.valueType]
+      ) {
         return `result["${a.targetName}"] = {key: value.save(context) for key, value in obj.${snake}.items()}`;
       }
       return `result["${a.targetName}"] = obj.${snake}`;
@@ -1338,9 +1566,13 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
   lines.push(`    def to_wire(self, provider: str) -> dict[str, Any]:`);
   lines.push(`        """Convert to provider-specific wire format.`);
   lines.push("        Args:");
-  lines.push("            provider (str): The provider to convert to (e.g., \"openai\", \"anthropic\").");
+  lines.push(
+    '            provider (str): The provider to convert to (e.g., "openai", "anthropic").',
+  );
   lines.push("        Returns:");
-  lines.push("            dict[str, Any]: The wire-format dictionary with provider-specific field names.");
+  lines.push(
+    "            dict[str, Any]: The wire-format dictionary with provider-specific field names.",
+  );
   lines.push("");
   lines.push(`        """`);
   lines.push("        data = self.save()");
@@ -1369,12 +1601,18 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
 // ============================================================================
 
 function emitToYaml(name: string, lines: string[]): void {
-  lines.push(`    def to_yaml(self, context: SaveContext | None = None) -> str:`);
+  lines.push(
+    `    def to_yaml(self, context: SaveContext | None = None) -> str:`,
+  );
   lines.push(`        """Convert the ${name} instance to a YAML string.`);
   lines.push("        Args:");
-  lines.push("            context (Optional[SaveContext]): Optional context with pre/post processing callbacks.");
+  lines.push(
+    "            context (Optional[SaveContext]): Optional context with pre/post processing callbacks.",
+  );
   lines.push("        Returns:");
-  lines.push("            str: The YAML string representation of this instance.");
+  lines.push(
+    "            str: The YAML string representation of this instance.",
+  );
   lines.push("");
   lines.push(`        """`);
   lines.push("        if context is None:");
@@ -1384,13 +1622,21 @@ function emitToYaml(name: string, lines: string[]): void {
 }
 
 function emitToJson(name: string, lines: string[]): void {
-  lines.push(`    def to_json(self, context: SaveContext | None = None, indent: int = 2) -> str:`);
+  lines.push(
+    `    def to_json(self, context: SaveContext | None = None, indent: int = 2) -> str:`,
+  );
   lines.push(`        """Convert the ${name} instance to a JSON string.`);
   lines.push("        Args:");
-  lines.push("            context (Optional[SaveContext]): Optional context with pre/post processing callbacks.");
-  lines.push("            indent (int): Number of spaces for indentation. Defaults to 2.");
+  lines.push(
+    "            context (Optional[SaveContext]): Optional context with pre/post processing callbacks.",
+  );
+  lines.push(
+    "            indent (int): Number of spaces for indentation. Defaults to 2.",
+  );
   lines.push("        Returns:");
-  lines.push("            str: The JSON string representation of this instance.");
+  lines.push(
+    "            str: The JSON string representation of this instance.",
+  );
   lines.push("");
   lines.push(`        """`);
   lines.push("        if context is None:");
@@ -1402,37 +1648,67 @@ function emitToJson(name: string, lines: string[]): void {
 function emitPydanticInteropMethods(name: string, lines: string[]): void {
   lines.push("");
   lines.push("    @classmethod");
-  lines.push(`    def model_validate(cls, obj: Any, *args: Any, **kwargs: Any) -> "${name}":`);
-  lines.push("        \"\"\"Validate through Typra's authoritative load contract.\"\"\"");
+  lines.push(
+    `    def model_validate(cls, obj: Any, *args: Any, **kwargs: Any) -> "${name}":`,
+  );
+  lines.push(
+    '        """Validate through Typra\'s authoritative load contract."""',
+  );
   lines.push("        if args or kwargs:");
-  lines.push("            raise TypeError(\"Typra Pydantic mode delegates validation to load(); model_validate arguments are unsupported.\")");
+  lines.push(
+    '            raise TypeError("Typra Pydantic mode delegates validation to load(); model_validate arguments are unsupported.")',
+  );
   lines.push("        if isinstance(obj, cls):");
   lines.push("            return obj");
   lines.push("        return cls.load(obj)");
   lines.push("");
   lines.push("    @classmethod");
-  lines.push(`    def model_validate_json(cls, json_data: str | bytes | bytearray, *args: Any, **kwargs: Any) -> "${name}":`);
-  lines.push("        \"\"\"Validate JSON through Typra's authoritative load contract.\"\"\"");
+  lines.push(
+    `    def model_validate_json(cls, json_data: str | bytes | bytearray, *args: Any, **kwargs: Any) -> "${name}":`,
+  );
+  lines.push(
+    '        """Validate JSON through Typra\'s authoritative load contract."""',
+  );
   lines.push("        if args or kwargs:");
-  lines.push("            raise TypeError(\"Typra Pydantic mode delegates JSON validation to json.loads() and load(); model_validate_json arguments are unsupported.\")");
+  lines.push(
+    '            raise TypeError("Typra Pydantic mode delegates JSON validation to json.loads() and load(); model_validate_json arguments are unsupported.")',
+  );
   lines.push("        return cls.load(json.loads(json_data, strict=False))");
   lines.push("");
   lines.push("    @classmethod");
-  lines.push(`    def model_validate_strings(cls, obj: Any, *args: Any, **kwargs: Any) -> "${name}":`);
-  lines.push("        \"\"\"String-coercing Pydantic validation is unsupported by Typra.\"\"\"");
-  lines.push("        raise TypeError(\"Typra Pydantic mode does not support model_validate_strings(); use load() or model_validate_json() so Typra remains the authoritative loader.\")");
+  lines.push(
+    `    def model_validate_strings(cls, obj: Any, *args: Any, **kwargs: Any) -> "${name}":`,
+  );
+  lines.push(
+    '        """String-coercing Pydantic validation is unsupported by Typra."""',
+  );
+  lines.push(
+    '        raise TypeError("Typra Pydantic mode does not support model_validate_strings(); use load() or model_validate_json() so Typra remains the authoritative loader.")',
+  );
   lines.push("");
-  lines.push("    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:");
-  lines.push("        \"\"\"Serialize through Typra's authoritative save contract.\"\"\"");
+  lines.push(
+    "    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:",
+  );
+  lines.push(
+    '        """Serialize through Typra\'s authoritative save contract."""',
+  );
   lines.push("        if args or kwargs:");
-  lines.push("            raise TypeError(\"Typra Pydantic mode delegates serialization to save(); model_dump arguments are unsupported.\")");
+  lines.push(
+    '            raise TypeError("Typra Pydantic mode delegates serialization to save(); model_dump arguments are unsupported.")',
+  );
   lines.push("        return self.save()");
   lines.push("");
-  lines.push("    def model_dump_json(self, *args: Any, **kwargs: Any) -> str:");
-  lines.push("        \"\"\"Serialize JSON through Typra's authoritative to_json contract.\"\"\"");
-  lines.push("        indent = kwargs.pop(\"indent\", 2)");
+  lines.push(
+    "    def model_dump_json(self, *args: Any, **kwargs: Any) -> str:",
+  );
+  lines.push(
+    '        """Serialize JSON through Typra\'s authoritative to_json contract."""',
+  );
+  lines.push('        indent = kwargs.pop("indent", 2)');
   lines.push("        if args or kwargs:");
-  lines.push("            raise TypeError(\"Typra Pydantic mode delegates JSON serialization to to_json(); unsupported model_dump_json arguments were provided.\")");
+  lines.push(
+    '            raise TypeError("Typra Pydantic mode delegates JSON serialization to to_json(); unsupported model_dump_json arguments were provided.")',
+  );
   lines.push("        return self.to_json(indent=indent)");
   lines.push("");
 }
@@ -1441,7 +1717,13 @@ function emitPydanticInteropMethods(name: string, lines: string[]): void {
 // Factory methods
 // ============================================================================
 
-function emitFactory(parentName: string, factory: FactoryDecl, visitor: ExprVisitor, fieldNames: Set<string>, lines: string[]): void {
+function emitFactory(
+  parentName: string,
+  factory: FactoryDecl,
+  visitor: ExprVisitor,
+  fieldNames: Set<string>,
+  lines: string[],
+): void {
   const params = Object.entries(factory.params)
     .map(([pName, pType]) => `${toSnakeCase(pName)}: ${paramType(pType)}`)
     .join(", ");

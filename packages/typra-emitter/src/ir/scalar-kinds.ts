@@ -14,7 +14,10 @@
  * far harder to notice than a compile error.
  */
 
-import type { CollectionHelperDecl, EntryShorthandCase } from "./declarations.js";
+import type {
+  CollectionHelperDecl,
+  EntryShorthandCase,
+} from "./declarations.js";
 
 /**
  * TypeSpec scalars that decode from a JSON integer token.
@@ -94,9 +97,15 @@ export function isBooleanScalar(scalarType: string): boolean {
  * runtime checks. `null` means the scalar has no distinguishable JSON form and
  * the caller must decide whether to skip it or report it.
  */
-export type ScalarRuntimeKind = "integral" | "fractional" | "string" | "boolean";
+export type ScalarRuntimeKind =
+  | "integral"
+  | "fractional"
+  | "string"
+  | "boolean";
 
-export function scalarRuntimeKind(scalarType: string): ScalarRuntimeKind | null {
+export function scalarRuntimeKind(
+  scalarType: string,
+): ScalarRuntimeKind | null {
   if (isIntegralScalar(scalarType)) return "integral";
   if (isFractionalScalar(scalarType)) return "fractional";
   if (isStringEncodedScalar(scalarType)) return "string";
@@ -120,7 +129,7 @@ export function orderedEntryShorthandCases(
   cases: readonly EntryShorthandCase[],
 ): EntryShorthandCase[] {
   const byKind = (kind: ScalarRuntimeKind) =>
-    cases.filter(c => scalarRuntimeKind(c.scalarType) === kind);
+    cases.filter((c) => scalarRuntimeKind(c.scalarType) === kind);
   return [
     ...byKind("integral"),
     ...byKind("fractional"),
@@ -130,8 +139,12 @@ export function orderedEntryShorthandCases(
 }
 
 /** Scalar types in the shorthand table that no runtime check can recognise. */
-export function unmappableShorthandScalars(cases: readonly EntryShorthandCase[]): string[] {
-  return cases.filter(c => scalarRuntimeKind(c.scalarType) === null).map(c => c.scalarType);
+export function unmappableShorthandScalars(
+  cases: readonly EntryShorthandCase[],
+): string[] {
+  return cases
+    .filter((c) => scalarRuntimeKind(c.scalarType) === null)
+    .map((c) => c.scalarType);
 }
 
 /**
@@ -143,10 +156,13 @@ export function unmappableShorthandScalars(cases: readonly EntryShorthandCase[])
  * lands the raw scalar in the discriminator — but it is the historical behaviour
  * and is preserved so undeclared schemas do not change shape.
  */
-export function entryShorthandTarget(helper: CollectionHelperDecl, fallback = "value"): string {
+export function entryShorthandTarget(
+  helper: CollectionHelperDecl,
+  fallback = "value",
+): string {
   return (
-    helper.entryShorthand?.valueField
-    ?? helper.coercionProperty
-    ?? (helper.innerFields.length > 0 ? helper.innerFields[0] : fallback)
+    helper.entryShorthand?.valueField ??
+    helper.coercionProperty ??
+    (helper.innerFields.length > 0 ? helper.innerFields[0] : fallback)
   );
 }

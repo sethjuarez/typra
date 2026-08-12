@@ -2,7 +2,13 @@
  * Python expression visitor — Expr IR → Python source fragments.
  */
 
-import { Expr, Construct, VariantConstruct, ArrayLiteral, TypeRegistry } from "../../ir/expansion.js";
+import {
+  Expr,
+  Construct,
+  VariantConstruct,
+  ArrayLiteral,
+  TypeRegistry,
+} from "../../ir/expansion.js";
 import { ExprVisitor, assertNever } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 
@@ -32,7 +38,7 @@ export class PythonExprVisitor implements ExprVisitor {
       case "array":
         return this.visitArray(expr);
       case "dict":
-        return `{${expr.entries.map(e => `"${e.key}": ${this.visitExpr(e.value)}`).join(", ")}}`;
+        return `{${expr.entries.map((e) => `"${e.key}": ${this.visitExpr(e.value)}`).join(", ")}}`;
       case "field_read":
         return `${toSnakeCase(expr.objectName)}.${toSnakeCase(expr.fieldName)}`;
       default:
@@ -45,9 +51,9 @@ export class PythonExprVisitor implements ExprVisitor {
     if (expr.fields.length === 0) {
       return `${typeName}()`;
     }
-    const fields = expr.fields.map(f =>
-      `${toSnakeCase(f.propertyName)}=${this.visitExpr(f.value)}`
-    ).join(", ");
+    const fields = expr.fields
+      .map((f) => `${toSnakeCase(f.propertyName)}=${this.visitExpr(f.value)}`)
+      .join(", ");
     return `${typeName}(${fields})`;
   }
 
@@ -57,9 +63,9 @@ export class PythonExprVisitor implements ExprVisitor {
     if (expr.fields.length === 0) {
       return `${variantName}()`;
     }
-    const fields = expr.fields.map(f =>
-      `${toSnakeCase(f.propertyName)}=${this.visitExpr(f.value)}`
-    ).join(", ");
+    const fields = expr.fields
+      .map((f) => `${toSnakeCase(f.propertyName)}=${this.visitExpr(f.value)}`)
+      .join(", ");
     return `${variantName}(${fields})`;
   }
 
@@ -67,7 +73,7 @@ export class PythonExprVisitor implements ExprVisitor {
     if (expr.items.length === 0) {
       return "[]";
     }
-    const items = expr.items.map(i => this.visitExpr(i)).join(", ");
+    const items = expr.items.map((i) => this.visitExpr(i)).join(", ");
     return `[${items}]`;
   }
 

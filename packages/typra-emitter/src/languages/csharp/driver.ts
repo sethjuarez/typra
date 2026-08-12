@@ -10,13 +10,24 @@ import { existsSync, readdirSync } from "fs";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { CSharpExprVisitor } from "./visitor.js";
 import { lowerType, collectPolymorphicTypeNames } from "../../ir/lower.js";
-import { emitCSharpClass, emitCSharpEnum, isCSharpSinglePrecision } from "./emitter.js";
+import {
+  emitCSharpClass,
+  emitCSharpEnum,
+  isCSharpSinglePrecision,
+} from "./emitter.js";
 import { emitCSharpContext, emitCSharpUtils } from "./scaffolding.js";
 import { emitCSharpTest } from "./test-emitter.js";
 import { toPascalCase } from "../../ir/visitor.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
-import { collectProtocolNodes, emitCSharpProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
-import { buildExampleSamples, TypeResolver } from "../../testing/test-context.js";
+import {
+  collectProtocolNodes,
+  emitCSharpProtocolScaffolds,
+  shouldEmitCompileOnlyProtocolScaffolds,
+} from "../../protocol-scaffolds.js";
+import {
+  buildExampleSamples,
+  TypeResolver,
+} from "../../testing/test-context.js";
 
 /**
  * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the
@@ -28,7 +39,12 @@ function cleanupGeneratedCSharpFiles(relDir: string | undefined): void {
   return;
 }
 
-export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, node: TypeNode, emitTarget: EmitTarget, options?: GeneratorOptions) => {
+export const generateCsharp = async (
+  context: EmitContext<TypraEmitterOptions>,
+  node: TypeNode,
+  emitTarget: EmitTarget,
+  options?: GeneratorOptions,
+) => {
   const allTypes = Array.from(enumerateTypes(node));
   const nodes = filterNodes(allTypes, options);
 
@@ -45,16 +61,29 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
 
   // Emit context classes (LoadContext, SaveContext)
   const contextCode = emitCSharpContext(csharpNamespace);
-  await emitCsharpFile(context, node, contextCode, "Context.cs", emitTarget["output-dir"]);
+  await emitCsharpFile(
+    context,
+    node,
+    contextCode,
+    "Context.cs",
+    emitTarget["output-dir"],
+  );
 
   const utils = emitCSharpUtils(csharpNamespace);
 
-  await emitCsharpFile(context, node, utils, "Utils.cs", emitTarget["output-dir"]);
+  await emitCsharpFile(
+    context,
+    node,
+    utils,
+    "Utils.cs",
+    emitTarget["output-dir"],
+  );
 
   // Build Declaration IR once (loop-invariant)
   const polyNames = collectPolymorphicTypeNames(allTypes[0], registry);
-  const allTypeDecls = nodes.map(nd => lowerType(nd, registry, polyNames));
-  const findTypeDecl = (name: string) => allTypeDecls.find(t => t.typeName.name === name);
+  const allTypeDecls = nodes.map((nd) => lowerType(nd, registry, polyNames));
+  const findTypeDecl = (name: string) =>
+    allTypeDecls.find((t) => t.typeName.name === name);
 
   // Collect and emit unique enum types from all fields
   // Map each enum to the group of the first type that uses it
@@ -71,36 +100,93 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
   }
   for (const typeDecl of allTypeDecls) {
     for (const field of typeDecl.fields) {
-      if (field.enumName && !field.isOpenEnum && field.allowedValues.length > 0 && !emittedEnums.has(field.enumName)) {
+      if (
+        field.enumName &&
+        !field.isOpenEnum &&
+        field.allowedValues.length > 0 &&
+        !emittedEnums.has(field.enumName)
+      ) {
         emittedEnums.add(field.enumName);
         const enumCode = emitCSharpEnum(
-          { name: field.enumName, values: field.allowedValues, parseAliases: field.parseAliases, isOpen: field.isOpenEnum },
+          {
+            name: field.enumName,
+            values: field.allowedValues,
+            parseAliases: field.parseAliases,
+            isOpen: field.isOpenEnum,
+          },
           csharpNamespace,
         );
-        const csEnumName = field.enumName.charAt(0).toUpperCase() + field.enumName.slice(1);
+        const csEnumName =
+          field.enumName.charAt(0).toUpperCase() + field.enumName.slice(1);
         const grp = enumGroup.get(field.enumName) || "";
-        const enumOutDir = grp ? `${emitTarget["output-dir"]}/${grp}` : emitTarget["output-dir"];
-        await emitCsharpFile(context, nodes[0], enumCode, `${csEnumName}.cs`, enumOutDir, emitTarget["output-dir"]);
+        const enumOutDir = grp
+          ? `${emitTarget["output-dir"]}/${grp}`
+          : emitTarget["output-dir"];
+        await emitCsharpFile(
+          context,
+          nodes[0],
+          enumCode,
+          `${csEnumName}.cs`,
+          enumOutDir,
+          emitTarget["output-dir"],
+        );
       }
     }
   }
 
   for (const n of nodes) {
     const typeDecl = lowerType(n, registry, polyNames);
-    const classCode = emitCSharpClass(typeDecl, csharpNamespace, visitor, allTypeDecls, findTypeDecl);
+    const classCode = emitCSharpClass(
+      typeDecl,
+      csharpNamespace,
+      visitor,
+      allTypeDecls,
+      findTypeDecl,
+    );
     // Emit into group subfolder (C# uses namespaces, no re-export files needed)
-    const outDir = n.group ? `${emitTarget["output-dir"]}/${n.group}` : emitTarget["output-dir"];
-    await emitCsharpFile(context, n, classCode, `${n.typeName.name}.cs`, outDir, emitTarget["output-dir"]);
+    const outDir = n.group
+      ? `${emitTarget["output-dir"]}/${n.group}`
+      : emitTarget["output-dir"];
+    await emitCsharpFile(
+      context,
+      n,
+      classCode,
+      `${n.typeName.name}.cs`,
+      outDir,
+      emitTarget["output-dir"],
+    );
     if (emitTarget["test-dir"] && !n.isProtocol) {
-      const testDir = n.group ? `${emitTarget["test-dir"]}/${n.group}` : emitTarget["test-dir"];
-      await emitCsharpFile(context, n, renderTests(n, csharpNamespace, name => registry.get(name)), `${n.typeName.name}ConversionTests.cs`, testDir, emitTarget["test-dir"]);
+      const testDir = n.group
+        ? `${emitTarget["test-dir"]}/${n.group}`
+        : emitTarget["test-dir"];
+      await emitCsharpFile(
+        context,
+        n,
+        renderTests(n, csharpNamespace, (name) => registry.get(name)),
+        `${n.typeName.name}ConversionTests.cs`,
+        testDir,
+        emitTarget["test-dir"],
+      );
     }
   }
 
-  if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
-    const scaffoldContent = emitCSharpProtocolScaffolds(collectProtocolNodes(nodes), csharpNamespace);
+  if (
+    emitTarget["test-dir"] &&
+    shouldEmitCompileOnlyProtocolScaffolds(emitTarget)
+  ) {
+    const scaffoldContent = emitCSharpProtocolScaffolds(
+      collectProtocolNodes(nodes),
+      csharpNamespace,
+    );
     if (scaffoldContent) {
-      await emitCsharpFile(context, node, scaffoldContent, "ProtocolScaffolds.cs", emitTarget["test-dir"], emitTarget["test-dir"]);
+      await emitCsharpFile(
+        context,
+        node,
+        scaffoldContent,
+        "ProtocolScaffolds.cs",
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
     }
   }
 
@@ -117,7 +203,6 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
   }
 };
 
-
 // --- Test-rendering helpers ---
 
 /**
@@ -126,95 +211,128 @@ export const generateCsharp = async (context: EmitContext<TypraEmitterOptions>, 
  * Exported for regression coverage: the payload completion below is easy to drop when this
  * driver diverges from the shared `buildBaseTestContext` path the other backends use.
  */
-export const renderTests = (node: TypeNode, namespace: string, resolveType: TypeResolver): string => {
-  const examples = buildExampleSamples(node, resolveType).map(sample => {
+export const renderTests = (
+  node: TypeNode,
+  namespace: string,
+  resolveType: TypeResolver,
+): string => {
+  const examples = buildExampleSamples(node, resolveType).map((sample) => {
     // Create YAML document and customize string scalar style for values with special chars
     const doc = new YAML.Document(sample);
     YAML.visit(doc, {
       Scalar(key, node) {
         // Only quote string values that contain special characters requiring escaping
-        if (typeof node.value === 'string') {
+        if (typeof node.value === "string") {
           const str = node.value as string;
-          if (str.includes('\n') || str.includes('\t') || str.includes('#') || str.includes(':') || str.includes('"')) {
-            node.type = 'QUOTE_DOUBLE';
+          if (
+            str.includes("\n") ||
+            str.includes("\t") ||
+            str.includes("#") ||
+            str.includes(":") ||
+            str.includes('"')
+          ) {
+            node.type = "QUOTE_DOUBLE";
           }
         }
-      }
+      },
     });
     return {
-      json: JSON.stringify(sample, null, 2).split('\n'),
+      json: JSON.stringify(sample, null, 2).split("\n"),
       // `doubleQuotedMinMultiLineLength` (yaml's default is 40) folds a long double-quoted
       // scalar across lines using `\` line continuations. A space adjacent to such a fold is
       // not recoverable on reload, so the value silently loses one space per folded break.
       // Every backend that goes through `buildBaseTestContext` opts out of this via
       // `yamlDoubleQuotedMinMultiLineLength`; because this driver hand-rolls the document it
       // never inherited that, and its generated multiline fixtures did not round-trip. See #93.
-      yaml: doc.toString({
-        indent: 2,
-        lineWidth: 0,
-        doubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
-      }).split('\n'),
+      yaml: doc
+        .toString({
+          indent: 2,
+          lineWidth: 0,
+          doubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
+        })
+        .split("\n"),
       // Mirror the shared `buildValidations` filter in src/testing/test-context.ts: a
       // validation is only emitted for a key that is genuinely a scalar (or enum) property
       // of this node. Filtering on the sample alone asserts properties that do not exist on
       // the emitted class — a polymorphic base whose `@sample` shows a subtype payload, or a
       // complex field populated through a scalar coercion — and the generated test then
       // fails to compile against the generated loader.
-      validations: Object.keys(sample).filter(
-        key => isCSharpAssertableSampleKey(key, sample[key], node),
-      ).map(key => {
-        const val = sample[key];
-        // Check if this field is a closed enum — if so, use EnumName.MemberName syntax
-        // Skip discriminator fields — their enums are excluded from generation
-        const prop = node.properties.find(p => p.name === key);
-        const isDiscriminator = node.discriminator === key;
-        if (prop && prop.enumName && !prop.isOpenEnum && !isDiscriminator && typeof val === 'string') {
-          const csEnumName = toPascalCase(prop.enumName);
-          const memberName = toPascalCase(val);
+      validations: Object.keys(sample)
+        .filter((key) => isCSharpAssertableSampleKey(key, sample[key], node))
+        .map((key) => {
+          const val = sample[key];
+          // Check if this field is a closed enum — if so, use EnumName.MemberName syntax
+          // Skip discriminator fields — their enums are excluded from generation
+          const prop = node.properties.find((p) => p.name === key);
+          const isDiscriminator = node.discriminator === key;
+          if (
+            prop &&
+            prop.enumName &&
+            !prop.isOpenEnum &&
+            !isDiscriminator &&
+            typeof val === "string"
+          ) {
+            const csEnumName = toPascalCase(prop.enumName);
+            const memberName = toPascalCase(val);
+            return {
+              key: renderName(key),
+              value: `${csEnumName}.${memberName}`,
+              isExpression: true,
+            };
+          }
           return {
             key: renderName(key),
-            value: `${csEnumName}.${memberName}`,
-            isExpression: true,
+            value: val,
+            isExpression: false,
           };
-        }
-        return {
-          key: renderName(key),
-          value: val,
-          isExpression: false,
-        };
-      }),
+        }),
     };
   });
 
-  const coercions = node.coercions.map(alt => {
-    const example = alt.example ? (typeof (alt.example) === "string" ? '"' + alt.example + '"' : alt.example.toString()) : scalarValue[alt.scalar] || "None";
+  const coercions = node.coercions.map((alt) => {
+    const example = alt.example
+      ? typeof alt.example === "string"
+        ? '"' + alt.example + '"'
+        : alt.example.toString()
+      : scalarValue[alt.scalar] || "None";
     return {
       title: alt.title || alt.scalar,
       scalar: alt.scalar,
       value: example,
       // using 'validations' (plural) for consistency across languages
-      validations: Object.keys(alt.expansion).filter(key => typeof alt.expansion[key] !== 'object').map(key => {
-        const value = alt.expansion[key] === "{value}" ? example : alt.expansion[key];
-        // Check if this field is a closed enum (skip discriminator fields)
-        const prop = node.properties.find(p => p.name === key);
-        const isDiscriminator = node.discriminator === key;
-        if (prop && prop.enumName && !prop.isOpenEnum && !isDiscriminator) {
-          // Extract the raw string value (strip quotes if present from example substitution)
-          const rawValue = typeof value === 'string' ? value.replace(/^"|"$/g, '') : String(value);
-          const csEnumName = toPascalCase(prop.enumName);
-          const memberName = toPascalCase(rawValue);
+      validations: Object.keys(alt.expansion)
+        .filter((key) => typeof alt.expansion[key] !== "object")
+        .map((key) => {
+          const value =
+            alt.expansion[key] === "{value}" ? example : alt.expansion[key];
+          // Check if this field is a closed enum (skip discriminator fields)
+          const prop = node.properties.find((p) => p.name === key);
+          const isDiscriminator = node.discriminator === key;
+          if (prop && prop.enumName && !prop.isOpenEnum && !isDiscriminator) {
+            // Extract the raw string value (strip quotes if present from example substitution)
+            const rawValue =
+              typeof value === "string"
+                ? value.replace(/^"|"$/g, "")
+                : String(value);
+            const csEnumName = toPascalCase(prop.enumName);
+            const memberName = toPascalCase(rawValue);
+            return {
+              key: renderName(key),
+              value: `${csEnumName}.${memberName}`,
+              delimiter: "",
+            };
+          }
           return {
             key: renderName(key),
-            value: `${csEnumName}.${memberName}`,
-            delimiter: '',
+            value: value,
+            delimiter:
+              typeof value === "string" &&
+              !value.includes('"') &&
+              alt.expansion[key] !== "{value}"
+                ? '"'
+                : "",
           };
-        }
-        return {
-          key: renderName(key),
-          value: value,
-          delimiter: typeof value === 'string' && !value.includes('"') && alt.expansion[key] !== "{value}" ? '"' : '',
-        };
-      }),
+        }),
     };
   });
 
@@ -226,11 +344,17 @@ export const renderTests = (node: TypeNode, namespace: string, resolveType: Type
     factories: node.factories,
     singlePrecisionKeys: new Set(
       node.properties
-        .filter(p => p.isScalar && !p.isCollection && isCSharpSinglePrecision(p.typeName.name))
-        .map(p => renderName(p.name)),
+        .filter(
+          (p) =>
+            p.isScalar &&
+            !p.isCollection &&
+            isCSharpSinglePrecision(p.typeName.name),
+        )
+        .map((p) => renderName(p.name)),
     ),
     renderName,
-    renderCsharpFactoryMethodName: (factoryName: string) => renderCsharpFactoryMethodName(factoryName, node),
+    renderCsharpFactoryMethodName: (factoryName: string) =>
+      renderCsharpFactoryMethodName(factoryName, node),
     renderCsharpFactoryTestValue,
   });
 };
@@ -249,8 +373,8 @@ export const isCSharpAssertableSampleKey = (
   value: unknown,
   node: TypeNode,
 ): boolean => {
-  const prop = node.properties.find(p => p.name === key);
-  return typeof value !== 'object' && Boolean(prop?.isScalar || prop?.enumName);
+  const prop = node.properties.find((p) => p.name === key);
+  return typeof value !== "object" && Boolean(prop?.isScalar || prop?.enumName);
 };
 
 const renderName = (name: string): string => {
@@ -262,22 +386,35 @@ const renderName = (name: string): string => {
 
 const renderCsharpFactoryParamType = (typeStr: string): string => {
   switch (typeStr) {
-    case "string": return "string";
-    case "boolean": return "bool";
-    case "integer": case "int32": return "int";
-    case "int64": return "long";
-    case "float": case "float32": return "float";
-    case "float64": return "double";
-    case "unknown": return "object?";
-    default: return "object?";
+    case "string":
+      return "string";
+    case "boolean":
+      return "bool";
+    case "integer":
+    case "int32":
+      return "int";
+    case "int64":
+      return "long";
+    case "float":
+    case "float32":
+      return "float";
+    case "float64":
+      return "double";
+    case "unknown":
+      return "object?";
+    default:
+      return "object?";
   }
 };
 
 // Returns a factory method name that won't clash with C# property names on the same type.
 // If the capitalized factory name matches a property name, prefix with "Create".
-const renderCsharpFactoryMethodName = (factoryName: string, node: TypeNode): string => {
+const renderCsharpFactoryMethodName = (
+  factoryName: string,
+  node: TypeNode,
+): string => {
   const methodName = factoryName.charAt(0).toUpperCase() + factoryName.slice(1);
-  const propertyNames = node.properties.map(p => renderName(p.name));
+  const propertyNames = node.properties.map((p) => renderName(p.name));
   // Also consider zero-param non-verb method stubs that C# emits as properties
   for (const m of node.methods) {
     if (!m.params?.length) {
@@ -295,27 +432,45 @@ const renderCsharpFactoryMethodName = (factoryName: string, node: TypeNode): str
 
 const renderCsharpFactoryTestValue = (typeStr: string): string => {
   switch (typeStr) {
-    case "string": return '"test"';
-    case "boolean": return "true";
-    case "integer": case "int32": return "42";
-    case "int64": return "42L";
-    case "float": case "float32": return "3.14f";
-    case "float64": return "3.14";
-    case "unknown": return '"test"';
-    default: return '"test"';
+    case "string":
+      return '"test"';
+    case "boolean":
+      return "true";
+    case "integer":
+    case "int32":
+      return "42";
+    case "int64":
+      return "42L";
+    case "float":
+    case "float32":
+      return "3.14f";
+    case "float64":
+      return "3.14";
+    case "unknown":
+      return '"test"';
+    default:
+      return '"test"';
   }
 };
 
-
-const emitCsharpFile = async (context: EmitContext<TypraEmitterOptions>, type: TypeNode, python: string, filename: string, outputDir?: string, outputRoot?: string) => {
+const emitCsharpFile = async (
+  context: EmitContext<TypraEmitterOptions>,
+  type: TypeNode,
+  python: string,
+  filename: string,
+  outputDir?: string,
+  outputRoot?: string,
+) => {
   outputDir = outputDir || `${context.emitterOutputDir}/CSharp`;
   const typePath = type.typeName.namespace.split(".");
 
   // replace typename with file
   typePath.push(filename);
   const path = resolvePath(outputDir, filename);
-  await emitGeneratedFile(context, path, python, { outputRoot: outputRoot || outputDir });
-}
+  await emitGeneratedFile(context, path, python, {
+    outputRoot: outputRoot || outputDir,
+  });
+};
 
 /**
  * Format C# files using dotnet format.
@@ -328,7 +483,9 @@ function formatCSharpFiles(outputDir: string, testDir?: string): void {
   for (const dir of dirs) {
     const projectRoot = findDotNetProjectRoot(dir);
     if (!projectRoot) {
-      console.warn(`Warning: Could not find .csproj or .sln file for ${dir}. Skipping formatting.`);
+      console.warn(
+        `Warning: Could not find .csproj or .sln file for ${dir}. Skipping formatting.`,
+      );
       continue;
     }
 
@@ -341,11 +498,13 @@ function formatCSharpFiles(outputDir: string, testDir?: string): void {
     try {
       execFileSync("dotnet", ["format", projectRoot], {
         cwd: dirname(projectRoot),
-        stdio: 'pipe',
-        encoding: 'utf-8'
+        stdio: "pipe",
+        encoding: "utf-8",
       });
     } catch (error) {
-      console.warn(`Warning: dotnet format failed for ${projectRoot}. You may need to run it manually.`);
+      console.warn(
+        `Warning: dotnet format failed for ${projectRoot}. You may need to run it manually.`,
+      );
     }
   }
 }
@@ -356,19 +515,19 @@ function formatCSharpFiles(outputDir: string, testDir?: string): void {
  */
 function findDotNetProjectRoot(startDir: string): string | undefined {
   let currentDir = resolve(startDir);
-  const root = resolve('/');
+  const root = resolve("/");
 
   // On Windows, also check for drive root (e.g., "C:\")
   while (currentDir !== root && currentDir !== dirname(currentDir)) {
     // First check for .csproj (more specific)
     const files = existsSync(currentDir) ? readdirSync(currentDir) : [];
-    const csprojFile = files.find((f: string) => f.endsWith('.csproj'));
+    const csprojFile = files.find((f: string) => f.endsWith(".csproj"));
     if (csprojFile) {
       return resolve(currentDir, csprojFile);
     }
 
     // Then check for .sln
-    const slnFile = files.find((f: string) => f.endsWith('.sln'));
+    const slnFile = files.find((f: string) => f.endsWith(".sln"));
     if (slnFile) {
       return resolve(currentDir, slnFile);
     }

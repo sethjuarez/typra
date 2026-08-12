@@ -48,13 +48,19 @@ export async function emitHydrationBoundarySnapshot(
   snapshot: HydrationBoundarySnapshot,
 ): Promise<void> {
   await emitFile(context.program, {
-    path: resolvePath(context.emitterOutputDir, ".typra-generated", "hydration-seams.json"),
+    path: resolvePath(
+      context.emitterOutputDir,
+      ".typra-generated",
+      "hydration-seams.json",
+    ),
     content: `${JSON.stringify(snapshot, null, 2)}\n`,
   });
 }
 
 function uniqueSorted(values: string[]): string[] {
-  return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
+  return Array.from(new Set(values)).sort((left, right) =>
+    left.localeCompare(right),
+  );
 }
 
 function seamKey(seam: HydrationSeam): string {

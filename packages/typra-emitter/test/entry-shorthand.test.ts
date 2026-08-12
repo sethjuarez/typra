@@ -35,7 +35,11 @@ import { JavaExprVisitor } from "../src/languages/java/visitor.js";
  * that every other backend reaches the same three conclusions.
  */
 
-function makeProp(name: string, typeName: string, isScalar = false): PropertyNode {
+function makeProp(
+  name: string,
+  typeName: string,
+  isScalar = false,
+): PropertyNode {
   const prop = new PropertyNode({} as ModelProperty, `Test ${name}`);
   prop.name = name;
   prop.typeName = { namespace: "Test", name: typeName };
@@ -64,21 +68,36 @@ function makeType(name: string, properties: PropertyNode[]): TypeNode {
  * coercion table. `kind` is declared first precisely because that is what made
  * the positional fallback unsound.
  */
-function buildGraph(entryShorthand: string | null, literalExtras: Record<string, unknown> = {}) {
+function buildGraph(
+  entryShorthand: string | null,
+  literalExtras: Record<string, unknown> = {},
+) {
   const extraFields = Object.keys(literalExtras);
   const element = makeType("Property", [
     makeProp("name", "string", true),
     makeProp("kind", "string", true),
     makeProp("default", "unknown", true),
     makeProp("example", "unknown", true),
-    ...extraFields.map(f => makeProp(f, "unknown", true)),
+    ...extraFields.map((f) => makeProp(f, "unknown", true)),
   ]);
   element.discriminator = "kind";
   element.coercions = [
-    { scalar: "string", expansion: { kind: "string", ...literalExtras, example: "{value}" } },
-    { scalar: "integer", expansion: { kind: "integer", ...literalExtras, example: "{value}" } },
-    { scalar: "float32", expansion: { kind: "float", ...literalExtras, example: "{value}" } },
-    { scalar: "boolean", expansion: { kind: "boolean", ...literalExtras, example: "{value}" } },
+    {
+      scalar: "string",
+      expansion: { kind: "string", ...literalExtras, example: "{value}" },
+    },
+    {
+      scalar: "integer",
+      expansion: { kind: "integer", ...literalExtras, example: "{value}" },
+    },
+    {
+      scalar: "float32",
+      expansion: { kind: "float", ...literalExtras, example: "{value}" },
+    },
+    {
+      scalar: "boolean",
+      expansion: { kind: "boolean", ...literalExtras, example: "{value}" },
+    },
   ] as unknown as typeof element.coercions;
   element.entryShorthand = entryShorthand;
 
@@ -95,41 +114,79 @@ function buildGraph(entryShorthand: string | null, literalExtras: Record<string,
 /** Non-string coercion constants used to lock literal-type preservation. */
 const LITERAL_EXTRAS = { nullable: true, ordinal: 2 };
 
-function emitGo(entryShorthand: string | null, extras?: Record<string, unknown>): string {
+function emitGo(
+  entryShorthand: string | null,
+  extras?: Record<string, unknown>,
+): string {
   const { owner, registry } = buildGraph(entryShorthand, extras);
   const ownerDecl = lowerFile(owner, registry, new Set<string>()).types[0];
-  return emitGoFileContent([ownerDecl], "model", new GoExprVisitor(registry), new Set<string>());
+  return emitGoFileContent(
+    [ownerDecl],
+    "model",
+    new GoExprVisitor(registry),
+    new Set<string>(),
+  );
 }
 
-function emitTs(entryShorthand: string | null, extras?: Record<string, unknown>): string {
+function emitTs(
+  entryShorthand: string | null,
+  extras?: Record<string, unknown>,
+): string {
   const { owner, registry } = buildGraph(entryShorthand, extras);
-  return emitTypeScriptFile(lowerFile(owner, registry, new Set<string>()), new TypeScriptExprVisitor(registry));
+  return emitTypeScriptFile(
+    lowerFile(owner, registry, new Set<string>()),
+    new TypeScriptExprVisitor(registry),
+  );
 }
 
-function emitPy(entryShorthand: string | null, extras?: Record<string, unknown>): string {
+function emitPy(
+  entryShorthand: string | null,
+  extras?: Record<string, unknown>,
+): string {
   const { owner, registry } = buildGraph(entryShorthand, extras);
-  return emitPythonFile(lowerFile(owner, registry, new Set<string>()), new PythonExprVisitor(registry));
+  return emitPythonFile(
+    lowerFile(owner, registry, new Set<string>()),
+    new PythonExprVisitor(registry),
+  );
 }
 
-function emitCs(entryShorthand: string | null, extras?: Record<string, unknown>): string {
+function emitCs(
+  entryShorthand: string | null,
+  extras?: Record<string, unknown>,
+): string {
   const { owner, element, registry } = buildGraph(entryShorthand, extras);
   const ownerDecl = lowerFile(owner, registry, new Set<string>()).types[0];
   const elementDecl = lowerFile(element, registry, new Set<string>()).types[0];
   const all = [ownerDecl, elementDecl];
-  return emitCSharpClass(ownerDecl, "Test", new CSharpExprVisitor(registry), all, name =>
-    all.find(t => t.typeName.name === name),
+  return emitCSharpClass(
+    ownerDecl,
+    "Test",
+    new CSharpExprVisitor(registry),
+    all,
+    (name) => all.find((t) => t.typeName.name === name),
   );
 }
 
-function emitJava(entryShorthand: string | null, extras?: Record<string, unknown>): string {
+function emitJava(
+  entryShorthand: string | null,
+  extras?: Record<string, unknown>,
+): string {
   const { owner, registry } = buildGraph(entryShorthand, extras);
   const ownerDecl = lowerFile(owner, registry, new Set<string>()).types[0];
-  return emitJavaFileContent([ownerDecl], "test", new JavaExprVisitor(registry), new Set<string>());
+  return emitJavaFileContent(
+    [ownerDecl],
+    "test",
+    new JavaExprVisitor(registry),
+    new Set<string>(),
+  );
 }
 
 const backends: Array<{
   name: string;
-  emit: (entryShorthand: string | null, extras?: Record<string, unknown>) => string;
+  emit: (
+    entryShorthand: string | null,
+    extras?: Record<string, unknown>,
+  ) => string;
   /** Matches the emitted assignment of the inferred discriminator for a string entry. */
   stringArm: RegExp;
   /** Matches the emitted assignment of the inferred discriminator for an integer entry. */
@@ -188,8 +245,10 @@ const backends: Array<{
     emit: emitJava,
     stringArm: /itemData\.put\("kind", "string"\)/,
     integerArm: /itemData\.put\("kind", "integer"\)/,
-    integralCheck: /shorthandValue instanceof Integer \|\| shorthandValue instanceof Long/,
-    fractionalCheck: /shorthandValue instanceof Double \|\| shorthandValue instanceof Float/,
+    integralCheck:
+      /shorthandValue instanceof Integer \|\| shorthandValue instanceof Long/,
+    fractionalCheck:
+      /shorthandValue instanceof Double \|\| shorthandValue instanceof Float/,
     booleanLiteral: /itemData\.put\("nullable", true\)/,
     numericLiteral: /itemData\.put\("ordinal", 2\)/,
   },
@@ -201,15 +260,25 @@ describe("named-collection entry shorthand — cross-backend", () => {
       it("infers the discriminator from the coercion table", () => {
         const code = backend.emit("default");
 
-        assert.match(code, backend.stringArm, 'a string entry must infer kind "string"');
-        assert.match(code, backend.integerArm, 'an integer entry must infer kind "integer"');
+        assert.match(
+          code,
+          backend.stringArm,
+          'a string entry must infer kind "string"',
+        );
+        assert.match(
+          code,
+          backend.integerArm,
+          'an integer entry must infer kind "integer"',
+        );
       });
 
       it("does not leak direct-coercion example semantics", () => {
         const code = backend.emit("default");
 
         assert.ok(
-          !/"example"\]?\s*[:=]\s*(v\b|value\b|kvp\.Value|shorthandValue)/.test(code),
+          !/"example"\]?\s*[:=]\s*(v\b|value\b|kvp\.Value|shorthandValue)/.test(
+            code,
+          ),
           "the entry shorthand populates the declared field, never the coercion target",
         );
       });
@@ -242,7 +311,7 @@ describe("named-collection entry shorthand — cross-backend", () => {
         assert.match(
           code,
           backend.booleanLiteral,
-          "a boolean coercion constant must emit as a native boolean, not the string \"true\"",
+          'a boolean coercion constant must emit as a native boolean, not the string "true"',
         );
         assert.match(
           code,
@@ -250,8 +319,8 @@ describe("named-collection entry shorthand — cross-backend", () => {
           "a numeric coercion constant must emit unquoted",
         );
         assert.ok(
-          !/nullable"\]?\s*[:=]\s*"(true|True)"/.test(code)
-          && !/ordinal"\]?\s*[:=]\s*"2"/.test(code),
+          !/nullable"\]?\s*[:=]\s*"(true|True)"/.test(code) &&
+            !/ordinal"\]?\s*[:=]\s*"2"/.test(code),
           "stringifying every constant retypes any schema that expands into a non-string value",
         );
       });

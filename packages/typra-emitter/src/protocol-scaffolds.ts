@@ -28,13 +28,15 @@ const SCALAR_TYPES = new Set([
   "void",
 ]);
 
-export function shouldEmitCompileOnlyProtocolScaffolds(target: EmitTarget): boolean {
+export function shouldEmitCompileOnlyProtocolScaffolds(
+  target: EmitTarget,
+): boolean {
   return target["protocol-scaffolds"] === "compile-only";
 }
 
 export function collectProtocolNodes(nodes: TypeNode[]): TypeNode[] {
   return nodes
-    .filter(node => node.isProtocol)
+    .filter((node) => node.isProtocol)
     .sort((left, right) => {
       const byGroup = (left.group || "").localeCompare(right.group || "");
       if (byGroup !== 0) return byGroup;
@@ -42,7 +44,10 @@ export function collectProtocolNodes(nodes: TypeNode[]): TypeNode[] {
     });
 }
 
-export function emitTypeScriptProtocolScaffolds(protocols: TypeNode[], importPath: string): string {
+export function emitTypeScriptProtocolScaffolds(
+  protocols: TypeNode[],
+  importPath: string,
+): string {
   if (protocols.length === 0) return "";
 
   const importedNames = collectReferencedNames(protocols);
@@ -61,25 +66,34 @@ export function emitTypeScriptProtocolScaffolds(protocols: TypeNode[], importPat
     const className = `CompileOnly${protocolName}`;
     lines.push(`    class ${className} implements ${protocolName} {`);
     for (const method of protocol.methods) {
-      const params = Object.entries(method.params)
-        .map(([name, typeName]) => `${name}: ${typescriptType(typeName)}`)
+      const params = Object.entries(method.params).map(
+        ([name, typeName]) => `${name}: ${typescriptType(typeName)}`,
+      );
       if (method.runtimeCancellable) {
         params.push("signal?: AbortSignal");
       }
       const ret = typescriptType(method.returns);
       if (method.sync) {
         lines.push(`      ${method.name}(${params.join(", ")}): ${ret} {`);
-        lines.push(`        throw new Error("${protocolName}.${method.name} is a compile-only protocol scaffold.");`);
+        lines.push(
+          `        throw new Error("${protocolName}.${method.name} is a compile-only protocol scaffold.");`,
+        );
         lines.push("      }");
       } else {
-        lines.push(`      async ${method.name}(${params.join(", ")}): Promise<${ret}> {`);
-        lines.push(`        throw new Error("${protocolName}.${method.name} is a compile-only protocol scaffold.");`);
+        lines.push(
+          `      async ${method.name}(${params.join(", ")}): Promise<${ret}> {`,
+        );
+        lines.push(
+          `        throw new Error("${protocolName}.${method.name} is a compile-only protocol scaffold.");`,
+        );
         lines.push("      }");
       }
     }
     lines.push("    }");
     lines.push("");
-    lines.push(`    const ${lowerFirst(protocolName)}Scaffold: ${protocolName} = new ${className}();`);
+    lines.push(
+      `    const ${lowerFirst(protocolName)}Scaffold: ${protocolName} = new ${className}();`,
+    );
     lines.push(`    void ${lowerFirst(protocolName)}Scaffold;`);
     if (index < protocols.length - 1) {
       lines.push("");
@@ -100,9 +114,11 @@ export function emitPythonProtocolScaffolds(
   if (protocols.length === 0) return "";
 
   const importedNames = collectReferencedNames(protocols);
-  const needsAny = protocols.some(protocol =>
-    protocol.methods.some(method =>
-      Object.values(method.params).some(usesPythonAny) || usesPythonAny(method.returns),
+  const needsAny = protocols.some((protocol) =>
+    protocol.methods.some(
+      (method) =>
+        Object.values(method.params).some(usesPythonAny) ||
+        usesPythonAny(method.returns),
     ),
   );
   const lines: string[] = [
@@ -119,14 +135,21 @@ export function emitPythonProtocolScaffolds(
     lines.push("from typing import Any");
     lines.push("");
   }
-  if (protocols.some(protocol => protocol.methods.some(method => method.runtimeCancellable))) {
+  if (
+    protocols.some((protocol) =>
+      protocol.methods.some((method) => method.runtimeCancellable),
+    )
+  ) {
     const separator = cancellationTokenPath.lastIndexOf(".");
     if (separator < 1 || separator === cancellationTokenPath.length - 1) {
-      throw new Error(`Invalid Python cancellation-token-path: ${cancellationTokenPath}`);
+      throw new Error(
+        `Invalid Python cancellation-token-path: ${cancellationTokenPath}`,
+      );
     }
     const moduleName = cancellationTokenPath.slice(0, separator);
     const symbolName = cancellationTokenPath.slice(separator + 1);
-    const alias = symbolName === "CancellationToken" ? "" : " as CancellationToken";
+    const alias =
+      symbolName === "CancellationToken" ? "" : " as CancellationToken";
     lines.push(`from ${moduleName} import ${symbolName}${alias}`);
     lines.push("");
   }
@@ -141,47 +164,67 @@ export function emitPythonProtocolScaffolds(
       lines.push("    pass");
     }
     for (const method of protocol.methods) {
-      const params = Object.entries(method.params)
-        .map(([name, typeName]) => `${toSnakeCase(name)}: ${pythonType(typeName)}`)
+      const params = Object.entries(method.params).map(
+        ([name, typeName]) => `${toSnakeCase(name)}: ${pythonType(typeName)}`,
+      );
       if (method.runtimeCancellable) {
         params.push("cancellation: CancellationToken | None = None");
       }
       const paramPrefix = params.length > 0 ? `, ${params.join(", ")}` : "";
       const ret = pythonType(method.returns);
       if (method.sync) {
-        lines.push(`    def ${toSnakeCase(method.name)}(self${paramPrefix}) -> ${ret}:`);
+        lines.push(
+          `    def ${toSnakeCase(method.name)}(self${paramPrefix}) -> ${ret}:`,
+        );
         lines.push(...pythonUnsupportedBody(protocolName, method));
       } else {
-        lines.push(`    def ${toSnakeCase(method.name)}(self${paramPrefix}) -> ${ret}:`);
+        lines.push(
+          `    def ${toSnakeCase(method.name)}(self${paramPrefix}) -> ${ret}:`,
+        );
         lines.push(...pythonUnsupportedBody(protocolName, method));
         lines.push("");
-        lines.push(`    async def ${toSnakeCase(method.name)}_async(self${paramPrefix}) -> ${ret}:`);
+        lines.push(
+          `    async def ${toSnakeCase(method.name)}_async(self${paramPrefix}) -> ${ret}:`,
+        );
         lines.push(...pythonUnsupportedBody(protocolName, method));
       }
       lines.push("");
     }
     lines.push("");
-    lines.push(`${toSnakeCase(protocolName)}_scaffold: ${protocolName} = CompileOnly${protocolName}()`);
+    lines.push(
+      `${toSnakeCase(protocolName)}_scaffold: ${protocolName} = CompileOnly${protocolName}()`,
+    );
   }
 
   return lines.join("\n");
 }
 
-function pythonUnsupportedBody(protocolName: string, method: TypeNode["methods"][number]): string[] {
-  const lines = Object.keys(method.params).map(name => `        del ${toSnakeCase(name)}`);
-  lines.push(`        raise NotImplementedError("${protocolName}.${method.name} is a compile-only protocol scaffold.")`);
+function pythonUnsupportedBody(
+  protocolName: string,
+  method: TypeNode["methods"][number],
+): string[] {
+  const lines = Object.keys(method.params).map(
+    (name) => `        del ${toSnakeCase(name)}`,
+  );
+  lines.push(
+    `        raise NotImplementedError("${protocolName}.${method.name} is a compile-only protocol scaffold.")`,
+  );
   return lines;
 }
 
-export function emitGoProtocolScaffolds(protocols: TypeNode[], packageName: string, importPath: string): string {
+export function emitGoProtocolScaffolds(
+  protocols: TypeNode[],
+  packageName: string,
+  importPath: string,
+): string {
   if (protocols.length === 0) return "";
 
   const importAlias = "typra";
-  const needsErrors = protocols.some(protocol =>
-    protocol.methods.some(method => !(method.sync && method.optional)),
+  const needsErrors = protocols.some((protocol) =>
+    protocol.methods.some((method) => !(method.sync && method.optional)),
   );
-  const needsContext = protocols.some(protocol =>
-    protocol.methods.some(method => method.runtimeCancellable),
+  const needsContext = protocols.some((protocol) =>
+    protocol.methods.some((method) => method.runtimeCancellable),
   );
   const lines: string[] = [
     "// Code generated by Typra emitter; DO NOT EDIT.",
@@ -189,8 +232,8 @@ export function emitGoProtocolScaffolds(protocols: TypeNode[], packageName: stri
     `package ${packageName}_test`,
     "",
     "import (",
-    ...(needsContext ? ["\t\"context\""] : []),
-    ...(needsErrors ? ["\t\"errors\"", ""] : []),
+    ...(needsContext ? ['\t"context"'] : []),
+    ...(needsErrors ? ['\t"errors"', ""] : []),
     `\t${importAlias} \"${importPath}\"`,
     ")",
     "",
@@ -204,12 +247,15 @@ export function emitGoProtocolScaffolds(protocols: TypeNode[], packageName: stri
     lines.push(`var _ ${importAlias}.${protocolName} = (*${structName})(nil)`);
     lines.push("");
     for (const method of protocol.methods) {
-      const params = Object.entries(method.params)
-        .map(([name, typeName]) => `${name} ${goType(typeName, importAlias)}`)
+      const params = Object.entries(method.params).map(
+        ([name, typeName]) => `${name} ${goType(typeName, importAlias)}`,
+      );
       if (method.runtimeCancellable) {
         params.unshift("ctx context.Context");
       }
-      lines.push(`func (*${structName}) ${toPascalCase(method.name)}(${params.join(", ")})${goReturn(method, importAlias)} {`);
+      lines.push(
+        `func (*${structName}) ${toPascalCase(method.name)}(${params.join(", ")})${goReturn(method, importAlias)} {`,
+      );
       lines.push(...goUnsupportedBody(method, importAlias));
       lines.push("}");
       lines.push("");
@@ -219,7 +265,10 @@ export function emitGoProtocolScaffolds(protocols: TypeNode[], packageName: stri
   return lines.join("\n");
 }
 
-export function emitJavaProtocolScaffolds(protocols: TypeNode[], packageName: string): { className: string; source: string } | undefined {
+export function emitJavaProtocolScaffolds(
+  protocols: TypeNode[],
+  packageName: string,
+): { className: string; source: string } | undefined {
   if (protocols.length === 0) return undefined;
 
   const className = "ProtocolScaffoldsGeneratedTest";
@@ -233,14 +282,18 @@ export function emitJavaProtocolScaffolds(protocols: TypeNode[], packageName: st
     "  static void run() {",
   ];
   for (const protocol of protocols) {
-    lines.push(`    ${protocol.typeName.name} ${lowerFirst(protocol.typeName.name)} = new CompileOnly${protocol.typeName.name}();`);
+    lines.push(
+      `    ${protocol.typeName.name} ${lowerFirst(protocol.typeName.name)} = new CompileOnly${protocol.typeName.name}();`,
+    );
   }
   lines.push("  }");
   lines.push("");
 
   for (const protocol of protocols) {
     const protocolName = protocol.typeName.name;
-    lines.push(`  private static final class CompileOnly${protocolName} implements ${protocolName} {`);
+    lines.push(
+      `  private static final class CompileOnly${protocolName} implements ${protocolName} {`,
+    );
     for (const method of protocol.methods) {
       const params = Object.entries(method.params)
         .map(([name, typeName]) => `${javaType(typeName)} ${name}`)
@@ -248,7 +301,9 @@ export function emitJavaProtocolScaffolds(protocols: TypeNode[], packageName: st
       const ret = javaType(method.returns);
       lines.push("    @Override");
       lines.push(`    public ${ret} ${method.name}(${params}) {`);
-      lines.push(`      throw new UnsupportedOperationException("${protocolName}.${method.name} is a compile-only protocol scaffold.");`);
+      lines.push(
+        `      throw new UnsupportedOperationException("${protocolName}.${method.name} is a compile-only protocol scaffold.");`,
+      );
       lines.push("    }");
       lines.push("");
     }
@@ -261,7 +316,10 @@ export function emitJavaProtocolScaffolds(protocols: TypeNode[], packageName: st
   return { className, source: lines.join("\n") };
 }
 
-export function emitCSharpProtocolScaffolds(protocols: TypeNode[], namespace: string): string | undefined {
+export function emitCSharpProtocolScaffolds(
+  protocols: TypeNode[],
+  namespace: string,
+): string | undefined {
   if (protocols.length === 0) return undefined;
 
   const lines: string[] = [
@@ -286,8 +344,13 @@ export function emitCSharpProtocolScaffolds(protocols: TypeNode[], namespace: st
     lines.push(`internal sealed class ${className} : I${protocolName}`);
     lines.push("{");
     for (const method of protocol.methods) {
-      const params = renderCSharpProtocolParameters(method.params, method.runtimeCancellable);
-      const methodName = method.sync ? toPascalCase(method.name) : `${toPascalCase(method.name)}Async`;
+      const params = renderCSharpProtocolParameters(
+        method.params,
+        method.runtimeCancellable,
+      );
+      const methodName = method.sync
+        ? toPascalCase(method.name)
+        : `${toPascalCase(method.name)}Async`;
       const ret = csharpType(method.returns);
       const message = `${protocolName}.${method.name} is a compile-only protocol scaffold.`;
       if (method.sync) {
@@ -297,10 +360,14 @@ export function emitCSharpProtocolScaffolds(protocols: TypeNode[], namespace: st
         lines.push("    }");
       } else if (ret === "void") {
         lines.push(`    public Task ${methodName}(${params}) =>`);
-        lines.push(`        Task.FromException(new NotSupportedException("${message}"));`);
+        lines.push(
+          `        Task.FromException(new NotSupportedException("${message}"));`,
+        );
       } else {
         lines.push(`    public Task<${ret}> ${methodName}(${params}) =>`);
-        lines.push(`        Task.FromException<${ret}>(new NotSupportedException("${message}"));`);
+        lines.push(
+          `        Task.FromException<${ret}>(new NotSupportedException("${message}"));`,
+        );
       }
       lines.push("");
     }
@@ -308,7 +375,9 @@ export function emitCSharpProtocolScaffolds(protocols: TypeNode[], namespace: st
     lines.push("");
     lines.push(`file static class ${className}Conformance`);
     lines.push("{");
-    lines.push(`    internal static readonly I${protocolName} Scaffold = new ${className}();`);
+    lines.push(
+      `    internal static readonly I${protocolName} Scaffold = new ${className}();`,
+    );
     lines.push("}");
     lines.push("");
   }
@@ -329,10 +398,14 @@ export function emitRustProtocolScaffolds(
     "#![allow(unused_imports, dead_code, unused_variables, clippy::all)]",
     "",
     `use ${importPath}::*;`,
-    ...(protocols.some(protocol => protocol.methods.some(method => method.runtimeCancellable))
-      ? [cancellationTokenPath.endsWith("::CancellationToken")
-        ? `use ${cancellationTokenPath};`
-        : `use ${cancellationTokenPath} as CancellationToken;`]
+    ...(protocols.some((protocol) =>
+      protocol.methods.some((method) => method.runtimeCancellable),
+    )
+      ? [
+          cancellationTokenPath.endsWith("::CancellationToken")
+            ? `use ${cancellationTokenPath};`
+            : `use ${cancellationTokenPath} as CancellationToken;`,
+        ]
       : []),
     "",
   ];
@@ -345,20 +418,29 @@ export function emitRustProtocolScaffolds(
     lines.push("#[async_trait::async_trait]");
     lines.push(`impl ${protocolName} for ${structName} {`);
     for (const method of protocol.methods) {
-      const params = Object.entries(method.params)
-        .map(([name, typeName]) => `${toSnakeCase(name)}: &${rustType(typeName)}`)
+      const params = Object.entries(method.params).map(
+        ([name, typeName]) => `${toSnakeCase(name)}: &${rustType(typeName)}`,
+      );
       if (method.runtimeCancellable) {
         params.push("cancellation: &CancellationToken");
       }
       const paramPrefix = params.length > 0 ? `, ${params.join(", ")}` : "";
       const ret = rustType(method.returns);
       if (method.sync) {
-        lines.push(`    fn ${toSnakeCase(method.name)}(&self${paramPrefix}) -> ${ret} {`);
-        lines.push(`        panic!("${protocolName}.${method.name} is a compile-only protocol scaffold.")`);
+        lines.push(
+          `    fn ${toSnakeCase(method.name)}(&self${paramPrefix}) -> ${ret} {`,
+        );
+        lines.push(
+          `        panic!("${protocolName}.${method.name} is a compile-only protocol scaffold.")`,
+        );
         lines.push("    }");
       } else {
-        lines.push(`    async fn ${toSnakeCase(method.name)}(&self${paramPrefix}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>> {`);
-        lines.push(`        Err("${protocolName}.${method.name} is a compile-only protocol scaffold.".into())`);
+        lines.push(
+          `    async fn ${toSnakeCase(method.name)}(&self${paramPrefix}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>> {`,
+        );
+        lines.push(
+          `        Err("${protocolName}.${method.name} is a compile-only protocol scaffold.".into())`,
+        );
         lines.push("    }");
       }
     }
@@ -366,7 +448,9 @@ export function emitRustProtocolScaffolds(
     lines.push("");
     lines.push("#[test]");
     lines.push(`fn ${toSnakeCase(protocolName)}_compile_only_conformance() {`);
-    lines.push(`    let _scaffold: Box<dyn ${protocolName}> = Box::new(${structName});`);
+    lines.push(
+      `    let _scaffold: Box<dyn ${protocolName}> = Box::new(${structName});`,
+    );
     lines.push("}");
     lines.push("");
   }
@@ -379,7 +463,10 @@ function collectReferencedNames(protocols: TypeNode[]): string[] {
   for (const protocol of protocols) {
     names.add(protocol.typeName.name);
     for (const method of protocol.methods) {
-      for (const typeName of [method.returns, ...Object.values(method.params)]) {
+      for (const typeName of [
+        method.returns,
+        ...Object.values(method.params),
+      ]) {
         const reference = referencedTypeName(typeName);
         if (reference) {
           names.add(reference);
@@ -397,8 +484,10 @@ function referencedTypeName(typeName: string): string | undefined {
 }
 
 function typescriptType(typeName: string): string {
-  if (typeName.endsWith("?")) return `${typescriptType(typeName.slice(0, -1))} | null`;
-  if (typeName === "Record<unknown>" || typeName === "dictionary") return "Record<string, unknown>";
+  if (typeName.endsWith("?"))
+    return `${typescriptType(typeName.slice(0, -1))} | null`;
+  if (typeName === "Record<unknown>" || typeName === "dictionary")
+    return "Record<string, unknown>";
   if (typeName === "any") return "unknown";
   const map: Record<string, string> = {
     any: "unknown",
@@ -424,9 +513,12 @@ function typescriptType(typeName: string): string {
 }
 
 function pythonType(typeName: string): string {
-  if (typeName.endsWith("?")) return `${pythonType(typeName.slice(0, -1))} | None`;
-  if (typeName.endsWith("[]")) return `list[${pythonType(typeName.slice(0, -2))}]`;
-  if (typeName === "Record<unknown>" || typeName === "dictionary") return "dict[str, Any]";
+  if (typeName.endsWith("?"))
+    return `${pythonType(typeName.slice(0, -1))} | None`;
+  if (typeName.endsWith("[]"))
+    return `list[${pythonType(typeName.slice(0, -2))}]`;
+  if (typeName === "Record<unknown>" || typeName === "dictionary")
+    return "dict[str, Any]";
   if (typeName === "unknown" || typeName === "any") return "Any";
   if (typeName === "void") return "None";
   const map: Record<string, string> = {
@@ -446,13 +538,21 @@ function pythonType(typeName: string): string {
 
 function usesPythonAny(typeName: string): boolean {
   const normalized = typeName.replace(/\?$/, "").replace(/\[\]$/, "");
-  return normalized === "unknown" || normalized === "any" || normalized === "Record<unknown>" || normalized === "dictionary";
+  return (
+    normalized === "unknown" ||
+    normalized === "any" ||
+    normalized === "Record<unknown>" ||
+    normalized === "dictionary"
+  );
 }
 
 function goType(typeName: string, importAlias: string): string {
-  if (typeName.endsWith("?")) return `*${goType(typeName.slice(0, -1), importAlias)}`;
-  if (typeName.endsWith("[]")) return `[]${goType(typeName.slice(0, -2), importAlias)}`;
-  if (typeName === "Record<unknown>" || typeName === "dictionary") return "map[string]interface{}";
+  if (typeName.endsWith("?"))
+    return `*${goType(typeName.slice(0, -1), importAlias)}`;
+  if (typeName.endsWith("[]"))
+    return `[]${goType(typeName.slice(0, -2), importAlias)}`;
+  if (typeName === "Record<unknown>" || typeName === "dictionary")
+    return "map[string]interface{}";
   if (typeName === "unknown" || typeName === "any") return "interface{}";
   if (typeName === "void") return "";
   const map: Record<string, string> = {
@@ -470,7 +570,10 @@ function goType(typeName: string, importAlias: string): string {
   return map[typeName] || `${importAlias}.${typeName}`;
 }
 
-function goReturn(method: TypeNode["methods"][number], importAlias: string): string {
+function goReturn(
+  method: TypeNode["methods"][number],
+  importAlias: string,
+): string {
   const ret = goType(method.returns, importAlias);
   if (method.sync && method.optional) {
     return ret ? ` ${ret}` : "";
@@ -481,7 +584,10 @@ function goReturn(method: TypeNode["methods"][number], importAlias: string): str
   return ret ? ` (${ret}, error)` : " error";
 }
 
-function goUnsupportedBody(method: TypeNode["methods"][number], importAlias: string): string[] {
+function goUnsupportedBody(
+  method: TypeNode["methods"][number],
+  importAlias: string,
+): string[] {
   const ret = goType(method.returns, importAlias);
   if (method.sync && method.optional) {
     return [`\tpanic("compile-only protocol scaffold")`];
@@ -489,13 +595,17 @@ function goUnsupportedBody(method: TypeNode["methods"][number], importAlias: str
   if (!ret) {
     return [`\treturn errors.New("compile-only protocol scaffold")`];
   }
-  return [`\treturn *new(${ret}), errors.New("compile-only protocol scaffold")`];
+  return [
+    `\treturn *new(${ret}), errors.New("compile-only protocol scaffold")`,
+  ];
 }
 
 function javaType(typeName: string): string {
   if (typeName.endsWith("?")) return javaType(typeName.slice(0, -1));
-  if (typeName.endsWith("[]")) return `java.util.List<${javaType(typeName.slice(0, -2))}>`;
-  if (typeName === "Record<unknown>" || typeName === "dictionary") return "java.util.Map<String, Object>";
+  if (typeName.endsWith("[]"))
+    return `java.util.List<${javaType(typeName.slice(0, -2))}>`;
+  if (typeName === "Record<unknown>" || typeName === "dictionary")
+    return "java.util.Map<String, Object>";
   if (typeName === "unknown" || typeName === "any") return "Object";
   if (typeName === "void") return "void";
   const map: Record<string, string> = {
@@ -515,8 +625,10 @@ function javaType(typeName: string): string {
 
 function csharpType(typeName: string): string {
   if (typeName.endsWith("?")) return `${csharpType(typeName.slice(0, -1))}?`;
-  if (typeName.endsWith("[]")) return `List<${csharpType(typeName.slice(0, -2))}>`;
-  if (typeName === "Record<unknown>" || typeName === "dictionary") return "Dictionary<string, object?>";
+  if (typeName.endsWith("[]"))
+    return `List<${csharpType(typeName.slice(0, -2))}>`;
+  if (typeName === "Record<unknown>" || typeName === "dictionary")
+    return "Dictionary<string, object?>";
   if (typeName === "unknown" || typeName === "any") return "object";
   if (typeName === "void") return "void";
   const map: Record<string, string> = {
@@ -535,17 +647,28 @@ function csharpType(typeName: string): string {
   return map[typeName] || typeName;
 }
 
-function renderCSharpProtocolParameters(params: Record<string, string>, runtimeCancellable: boolean | undefined): string {
+function renderCSharpProtocolParameters(
+  params: Record<string, string>,
+  runtimeCancellable: boolean | undefined,
+): string {
   return Object.entries(params)
-    .map(([name, typeName]) => `${csharpType(typeName)} ${csharpIdentifier(name)}`)
-    .concat(runtimeCancellable ? ["CancellationToken cancellationToken = default"] : [])
+    .map(
+      ([name, typeName]) => `${csharpType(typeName)} ${csharpIdentifier(name)}`,
+    )
+    .concat(
+      runtimeCancellable
+        ? ["CancellationToken cancellationToken = default"]
+        : [],
+    )
     .join(", ");
 }
 
 function rustType(typeName: string): string {
-  if (typeName.endsWith("?")) return `Option<${rustType(typeName.slice(0, -1))}>`;
+  if (typeName.endsWith("?"))
+    return `Option<${rustType(typeName.slice(0, -1))}>`;
   if (typeName.endsWith("[]")) return `Vec<${rustType(typeName.slice(0, -2))}>`;
-  if (typeName === "Record<unknown>" || typeName === "dictionary") return "serde_json::Value";
+  if (typeName === "Record<unknown>" || typeName === "dictionary")
+    return "serde_json::Value";
   if (typeName === "unknown" || typeName === "any") return "serde_json::Value";
   if (typeName === "void") return "()";
   if (typeName === "string") return "String";

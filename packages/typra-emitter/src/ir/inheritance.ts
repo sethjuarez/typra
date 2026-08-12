@@ -10,7 +10,7 @@ function mergeInheritedByKey<T>(groups: T[][], key: (item: T) => string): T[] {
       chosen.set(itemKey, item);
     }
   }
-  return order.map(itemKey => chosen.get(itemKey)!);
+  return order.map((itemKey) => chosen.get(itemKey)!);
 }
 
 /**
@@ -18,11 +18,14 @@ function mergeInheritedByKey<T>(groups: T[][], key: (item: T) => string): T[] {
  * Derived declarations override inherited members with the same name while retaining
  * the ancestor-defined field order.
  */
-export function flattenInheritance(types: TypeDecl[], declarationUniverse: TypeDecl[] = types): TypeDecl[] {
+export function flattenInheritance(
+  types: TypeDecl[],
+  declarationUniverse: TypeDecl[] = types,
+): TypeDecl[] {
   const typeKey = (typeName: TypeDecl["typeName"]): string =>
     `${typeName.namespace}.${typeName.name}`;
   const byName = new Map(
-    declarationUniverse.map(type => [typeKey(type.typeName), type]),
+    declarationUniverse.map((type) => [typeKey(type.typeName), type]),
   );
 
   function ancestorChain(type: TypeDecl): TypeDecl[] {
@@ -37,38 +40,52 @@ export function flattenInheritance(types: TypeDecl[], declarationUniverse: TypeD
     return chain;
   }
 
-  return types.map(type => {
+  return types.map((type) => {
     if (!type.base) return type;
     const ancestors = ancestorChain(type);
     if (ancestors.length === 0) return type;
 
     const fields = mergeInheritedByKey(
-      [...ancestors.map(ancestor => ancestor.fields), type.fields],
-      field => field.name,
+      [...ancestors.map((ancestor) => ancestor.fields), type.fields],
+      (field) => field.name,
     );
     const loadAssignments = mergeInheritedByKey(
-      [...ancestors.map(ancestor => ancestor.load.assignments), type.load.assignments],
-      assignment => assignment.fieldName,
+      [
+        ...ancestors.map((ancestor) => ancestor.load.assignments),
+        type.load.assignments,
+      ],
+      (assignment) => assignment.fieldName,
     );
     const saveAssignments = mergeInheritedByKey(
-      [...ancestors.map(ancestor => ancestor.save.assignments), type.save.assignments],
-      assignment => assignment.fieldName,
+      [
+        ...ancestors.map((ancestor) => ancestor.save.assignments),
+        type.save.assignments,
+      ],
+      (assignment) => assignment.fieldName,
     );
     const collectionHelpers = mergeInheritedByKey(
-      [...ancestors.map(ancestor => ancestor.collectionHelpers), type.collectionHelpers],
-      helper => helper.propertyName,
+      [
+        ...ancestors.map((ancestor) => ancestor.collectionHelpers),
+        type.collectionHelpers,
+      ],
+      (helper) => helper.propertyName,
     );
-    const wireSources = [...ancestors.map(ancestor => ancestor.wire), type.wire]
-      .filter((wire): wire is WireDecl => wire !== null);
-    const wire = wireSources.length === 0
-      ? null
-      : {
-        providers: Array.from(new Set(wireSources.flatMap(source => source.providers))),
-        mappings: mergeInheritedByKey(
-          wireSources.map(source => source.mappings),
-          mapping => mapping.fieldName,
-        ),
-      };
+    const wireSources = [
+      ...ancestors.map((ancestor) => ancestor.wire),
+      type.wire,
+    ].filter((wire): wire is WireDecl => wire !== null);
+    const wire =
+      wireSources.length === 0
+        ? null
+        : {
+            providers: Array.from(
+              new Set(wireSources.flatMap((source) => source.providers)),
+            ),
+            mappings: mergeInheritedByKey(
+              wireSources.map((source) => source.mappings),
+              (mapping) => mapping.fieldName,
+            ),
+          };
 
     return {
       ...type,

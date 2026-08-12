@@ -2,7 +2,13 @@
  * C# expression visitor — Expr IR → C# source fragments.
  */
 
-import { Expr, Construct, VariantConstruct, ArrayLiteral, TypeRegistry } from "../../ir/expansion.js";
+import {
+  Expr,
+  Construct,
+  VariantConstruct,
+  ArrayLiteral,
+  TypeRegistry,
+} from "../../ir/expansion.js";
 import { ExprVisitor, toPascalCase, assertNever } from "../../ir/visitor.js";
 import { csharpIdentifier } from "./identifiers.js";
 
@@ -32,7 +38,7 @@ export class CSharpExprVisitor implements ExprVisitor {
       case "array":
         return this.visitArray(expr);
       case "dict":
-        return `new Dictionary<string, object?> { ${expr.entries.map(e => `{ "${e.key}", ${this.visitExpr(e.value)} }`).join(", ")} }`;
+        return `new Dictionary<string, object?> { ${expr.entries.map((e) => `{ "${e.key}", ${this.visitExpr(e.value)} }`).join(", ")} }`;
       case "field_read":
         return `${expr.objectName}.${toPascalCase(expr.fieldName)}`;
       default:
@@ -46,20 +52,24 @@ export class CSharpExprVisitor implements ExprVisitor {
       return `new ${typeName}()`;
     }
     // C# uses object initializer syntax: new Type { Prop = value }
-    const fields = expr.fields.map(f => {
-      let val = this.visitExpr(f.value);
-      // For enum fields, convert string literals to EnumName.MemberName
-      if (f.value.kind === "string" && this.registry) {
-        const typeNode = this.registry.get(typeName);
-        if (typeNode) {
-          const prop = typeNode.properties.find(p => p.name === f.propertyName);
-          if (prop?.enumName) {
-            val = `${prop.enumName}.${toPascalCase(f.value.value)}`;
+    const fields = expr.fields
+      .map((f) => {
+        let val = this.visitExpr(f.value);
+        // For enum fields, convert string literals to EnumName.MemberName
+        if (f.value.kind === "string" && this.registry) {
+          const typeNode = this.registry.get(typeName);
+          if (typeNode) {
+            const prop = typeNode.properties.find(
+              (p) => p.name === f.propertyName,
+            );
+            if (prop?.enumName) {
+              val = `${prop.enumName}.${toPascalCase(f.value.value)}`;
+            }
           }
         }
-      }
-      return `${toPascalCase(f.propertyName)} = ${val}`;
-    }).join(", ");
+        return `${toPascalCase(f.propertyName)} = ${val}`;
+      })
+      .join(", ");
     return `new ${typeName} { ${fields} }`;
   }
 
@@ -69,9 +79,11 @@ export class CSharpExprVisitor implements ExprVisitor {
     if (expr.fields.length === 0) {
       return `new ${variantName}()`;
     }
-    const fields = expr.fields.map(f =>
-      `${toPascalCase(f.propertyName)} = ${this.visitExpr(f.value)}`
-    ).join(", ");
+    const fields = expr.fields
+      .map(
+        (f) => `${toPascalCase(f.propertyName)} = ${this.visitExpr(f.value)}`,
+      )
+      .join(", ");
     return `new ${variantName} { ${fields} }`;
   }
 
@@ -80,7 +92,7 @@ export class CSharpExprVisitor implements ExprVisitor {
     if (expr.items.length === 0) {
       return `new List<${elementType}>()`;
     }
-    const items = expr.items.map(i => this.visitExpr(i)).join(", ");
+    const items = expr.items.map((i) => this.visitExpr(i)).join(", ");
     return `new List<${elementType}> { ${items} }`;
   }
 

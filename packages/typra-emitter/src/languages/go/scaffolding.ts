@@ -59,14 +59,20 @@ export function emitGoContext(ctx: GoContextContext): string {
   lines.push('\treturn &LoadContext{Path: ctx.Path + "." + segment}');
   lines.push("}");
   lines.push("");
-  lines.push("// AtIndex creates a child context for an array element. Rendered with bracket");
-  lines.push("// notation (messages[3]) so an index is never confused with a map key of the");
+  lines.push(
+    "// AtIndex creates a child context for an array element. Rendered with bracket",
+  );
+  lines.push(
+    "// notation (messages[3]) so an index is never confused with a map key of the",
+  );
   lines.push("// same name, which dot-joining would make ambiguous.");
   lines.push("func (ctx *LoadContext) AtIndex(index int) *LoadContext {");
   lines.push("\tif ctx == nil {");
   lines.push('\t\treturn &LoadContext{Path: fmt.Sprintf("[%d]", index)}');
   lines.push("\t}");
-  lines.push('\treturn &LoadContext{Path: fmt.Sprintf("%s[%d]", ctx.Path, index)}');
+  lines.push(
+    '\treturn &LoadContext{Path: fmt.Sprintf("%s[%d]", ctx.Path, index)}',
+  );
   lines.push("}");
   lines.push("");
   lines.push("// SaveContext provides context for saving operations");
@@ -80,10 +86,14 @@ export function emitGoContext(ctx: GoContextContext): string {
   lines.push("");
   lines.push("// NewSaveContext creates a new SaveContext");
   lines.push("func NewSaveContext() *SaveContext {");
-  lines.push("\treturn &SaveContext{CollectionFormat: CollectionFormatObject, UseShorthand: true}");
+  lines.push(
+    "\treturn &SaveContext{CollectionFormat: CollectionFormatObject, UseShorthand: true}",
+  );
   lines.push("}");
   lines.push("");
-  lines.push("// ptrOf returns a pointer to the given value. Used by factory functions");
+  lines.push(
+    "// ptrOf returns a pointer to the given value. Used by factory functions",
+  );
   lines.push("// to set optional (pointer) fields in struct literals.");
   lines.push("func ptrOf[T any](v T) *T {");
   lines.push("\treturn &v");
@@ -103,7 +113,9 @@ export function emitGoContext(ctx: GoContextContext): string {
   lines.push("\tcase nil:");
   lines.push('\t\treturn &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null"}');
   lines.push("\tcase string:");
-  lines.push('\t\tnode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v}');
+  lines.push(
+    '\t\tnode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v}',
+  );
   lines.push('\t\tif strings.Contains(v, "\\n") {');
   lines.push("\t\t\tnode.Style = yaml.DoubleQuotedStyle");
   lines.push("\t\t}");
@@ -111,7 +123,7 @@ export function emitGoContext(ctx: GoContextContext): string {
   lines.push("\tcase map[string]interface{}:");
   lines.push("\t\treturn mapToYAMLNode(v)");
   lines.push("\tcase []interface{}:");
-  lines.push("\t\tnode := &yaml.Node{Kind: yaml.SequenceNode, Tag: \"!!seq\"}");
+  lines.push('\t\tnode := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}');
   lines.push("\t\tfor _, item := range v {");
   lines.push("\t\t\tnode.Content = append(node.Content, toYAMLNode(item))");
   lines.push("\t\t}");
@@ -122,9 +134,11 @@ export function emitGoContext(ctx: GoContextContext): string {
   lines.push("\tif rv.IsValid() {");
   lines.push("\t\tswitch rv.Kind() {");
   lines.push("\t\tcase reflect.Slice, reflect.Array:");
-  lines.push("\t\t\tnode := &yaml.Node{Kind: yaml.SequenceNode, Tag: \"!!seq\"}");
+  lines.push('\t\t\tnode := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}');
   lines.push("\t\t\tfor i := 0; i < rv.Len(); i++ {");
-  lines.push("\t\t\t\tnode.Content = append(node.Content, toYAMLNode(rv.Index(i).Interface()))");
+  lines.push(
+    "\t\t\t\tnode.Content = append(node.Content, toYAMLNode(rv.Index(i).Interface()))",
+  );
   lines.push("\t\t\t}");
   lines.push("\t\t\treturn node");
   lines.push("\t\tcase reflect.Map:");
@@ -140,12 +154,16 @@ export function emitGoContext(ctx: GoContextContext): string {
   lines.push("");
   lines.push("\tnode := &yaml.Node{}");
   lines.push("\tif err := node.Encode(value); err == nil {");
-  lines.push('\t\tif node.Kind == yaml.ScalarNode && node.Tag == "!!str" && strings.Contains(node.Value, "\\n") {');
+  lines.push(
+    '\t\tif node.Kind == yaml.ScalarNode && node.Tag == "!!str" && strings.Contains(node.Value, "\\n") {',
+  );
   lines.push("\t\t\tnode.Style = yaml.DoubleQuotedStyle");
   lines.push("\t\t}");
   lines.push("\t\treturn node");
   lines.push("\t}");
-  lines.push('\treturn &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: fmt.Sprint(value)}');
+  lines.push(
+    '\treturn &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: fmt.Sprint(value)}',
+  );
   lines.push("}");
   lines.push("");
   lines.push("func mapToYAMLNode(items map[string]interface{}) *yaml.Node {");
@@ -156,7 +174,9 @@ export function emitGoContext(ctx: GoContextContext): string {
   lines.push("\t}");
   lines.push("\tsort.Strings(keys)");
   lines.push("\tfor _, key := range keys {");
-  lines.push('\t\tnode.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, toYAMLNode(items[key]))');
+  lines.push(
+    '\t\tnode.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, toYAMLNode(items[key]))',
+  );
   lines.push("\t}");
   lines.push("\treturn node");
   lines.push("}");
@@ -166,5 +186,5 @@ export function emitGoContext(ctx: GoContextContext): string {
 }
 
 function emitCleanGoLines(lines: string[], suffix = ""): string {
-  return lines.map(line => line.trimEnd()).join("\n") + suffix;
+  return lines.map((line) => line.trimEnd()).join("\n") + suffix;
 }

@@ -11,40 +11,56 @@ import {
   PythonFileContext,
   PythonInitContext,
   PythonLoadContextContext,
-  BaseTestContext
+  BaseTestContext,
 } from "../../ir/ast.js";
-import { resolveFactoryExpr, resolveCoerceExpr, TypeRegistry, collectExprTypeRefs } from "../../ir/expansion.js";
+import {
+  resolveFactoryExpr,
+  resolveCoerceExpr,
+  TypeRegistry,
+  collectExprTypeRefs,
+} from "../../ir/expansion.js";
 import { ExprVisitor, renderObjectLiteral } from "../../ir/visitor.js";
 import { PythonExprVisitor } from "./visitor.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { toSnakeCase } from "../../ir/utilities.js";
-import { buildBaseTestContext, pythonTestOptions } from "../../testing/test-context.js";
+import {
+  buildBaseTestContext,
+  pythonTestOptions,
+} from "../../testing/test-context.js";
 import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
 import { emitPythonFile as emitPythonFileDecl } from "./emitter.js";
-import { emitPythonContext, emitPythonInit, emitPythonGroupInit } from "./scaffolding.js";
+import {
+  emitPythonContext,
+  emitPythonInit,
+  emitPythonGroupInit,
+} from "./scaffolding.js";
 import { emitPythonTest, emitPythonTestContext } from "./test-emitter.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
-import { collectProtocolNodes, emitPythonProtocolScaffolds, shouldEmitCompileOnlyProtocolScaffolds } from "../../protocol-scaffolds.js";
+import {
+  collectProtocolNodes,
+  emitPythonProtocolScaffolds,
+  shouldEmitCompileOnlyProtocolScaffolds,
+} from "../../protocol-scaffolds.js";
 
 /**
  * Type mapping from TypeSpec scalar types to Python types.
  * This is passed as data to templates, not used for inline rendering.
  */
 export const pythonTypeMapper: Record<string, string> = {
-  "string": "str",
-  "number": "float",
-  "array": "list",
-  "object": "dict",
-  "boolean": "bool",
-  "int64": "int",
-  "int32": "int",
-  "float64": "float",
-  "float32": "float",
-  "integer": "int",
-  "float": "float",
-  "numeric": "float",
-  "any": "Any",
-  "dictionary": "dict[str, Any]",
+  string: "str",
+  number: "float",
+  array: "list",
+  object: "dict",
+  boolean: "bool",
+  int64: "int",
+  int32: "int",
+  float64: "float",
+  float32: "float",
+  integer: "int",
+  float: "float",
+  numeric: "float",
+  any: "Any",
+  dictionary: "dict[str, Any]",
 };
 
 /**
@@ -60,7 +76,7 @@ export const generatePython = async (
   context: EmitContext<TypraEmitterOptions>,
   node: TypeNode,
   emitTarget: EmitTarget,
-  options?: GeneratorOptions
+  options?: GeneratorOptions,
 ): Promise<void> => {
   const allTypes = Array.from(enumerateTypes(node));
   const nodes = filterNodes(allTypes, options);
@@ -77,24 +93,49 @@ export const generatePython = async (
   const nativeSerialization = pythonNativeSerialization(emitTarget);
 
   // Emit py.typed marker for PEP 561 compliance
-  await emitPythonFile(context, 'py.typed', '', emitTarget["output-dir"], emitTarget["output-dir"], { allowEmpty: true });
+  await emitPythonFile(
+    context,
+    "py.typed",
+    "",
+    emitTarget["output-dir"],
+    emitTarget["output-dir"],
+    { allowEmpty: true },
+  );
 
   // Render LoadContext file
   const contextContext = buildLoadContextContext();
   const contextContent = emitPythonContext(contextContext.header);
-  await emitPythonFile(context, '_context.py', contextContent, emitTarget["output-dir"]);
+  await emitPythonFile(
+    context,
+    "_context.py",
+    contextContent,
+    emitTarget["output-dir"],
+  );
 
   // Render LoadContext tests
   if (emitTarget["test-dir"]) {
     const testContextContext = buildLoadContextContext(importPath);
-    const testContextContent = emitPythonTestContext(testContextContext.header, importPath);
-    await emitPythonFile(context, 'test_context.py', testContextContent, emitTarget["test-dir"]);
+    const testContextContent = emitPythonTestContext(
+      testContextContext.header,
+      importPath,
+    );
+    await emitPythonFile(
+      context,
+      "test_context.py",
+      testContextContent,
+      emitTarget["test-dir"],
+    );
   }
 
   // Render init file — group-aware, imports from {group} subpackages
   const initContext = buildInitContext(nodes);
   const initContent = emitPythonInit(initContext.baseTypes, initContext.types);
-  await emitPythonFile(context, '__init__.py', initContent, emitTarget["output-dir"]);
+  await emitPythonFile(
+    context,
+    "__init__.py",
+    initContent,
+    emitTarget["output-dir"],
+  );
 
   // Collect polymorphic type names once for the full type graph
   const polymorphicTypeNames = new Set<string>();
@@ -124,35 +165,66 @@ export const generatePython = async (
         cancellationTokenPath: emitTarget["cancellation-token-path"],
         nativeSerialization,
       });
-      const outDir = group ? `${emitTarget["output-dir"]}/${group}` : emitTarget["output-dir"];
-      await emitPythonFile(context, `_${n.typeName.name}.py`, fileContent, outDir, emitTarget["output-dir"]);
+      const outDir = group
+        ? `${emitTarget["output-dir"]}/${group}`
+        : emitTarget["output-dir"];
+      await emitPythonFile(
+        context,
+        `_${n.typeName.name}.py`,
+        fileContent,
+        outDir,
+        emitTarget["output-dir"],
+      );
     }
 
     // Render test file for each type (skip protocols — they have no data to test)
     if (emitTarget["test-dir"] && !n.isProtocol) {
-      const testDir = n.group ? `${emitTarget["test-dir"]}/${n.group}` : emitTarget["test-dir"];
+      const testDir = n.group
+        ? `${emitTarget["test-dir"]}/${n.group}`
+        : emitTarget["test-dir"];
       const testContext = buildTestContext(n, importPath, registry);
       const testContent = emitPythonTest(testContext, {
         nativeSerialization,
       });
-      await emitPythonFile(context, `test_${toSnakeCase(n.typeName.name)}.py`, testContent, testDir, emitTarget["test-dir"]);
+      await emitPythonFile(
+        context,
+        `test_${toSnakeCase(n.typeName.name)}.py`,
+        testContent,
+        testDir,
+        emitTarget["test-dir"],
+      );
     }
   }
 
-  if (emitTarget["test-dir"] && shouldEmitCompileOnlyProtocolScaffolds(emitTarget)) {
+  if (
+    emitTarget["test-dir"] &&
+    shouldEmitCompileOnlyProtocolScaffolds(emitTarget)
+  ) {
     const scaffoldContent = emitPythonProtocolScaffolds(
       collectProtocolNodes(nodes),
       importPath,
       emitTarget["cancellation-token-path"],
     );
-    await emitPythonFile(context, "test_protocol_scaffolds.py", scaffoldContent, emitTarget["test-dir"], emitTarget["test-dir"]);
+    await emitPythonFile(
+      context,
+      "test_protocol_scaffolds.py",
+      scaffoldContent,
+      emitTarget["test-dir"],
+      emitTarget["test-dir"],
+    );
   }
 
   // Emit group-level __init__.py for each group
   for (const [group, groupNodes] of groupMap) {
     if (!group) continue; // Root-level types (if any) are covered by the root __init__.py
     const groupInitContent = emitPythonGroupInit(group, groupNodes);
-    await emitPythonFile(context, '__init__.py', groupInitContent, `${emitTarget["output-dir"]}/${group}`, emitTarget["output-dir"]);
+    await emitPythonFile(
+      context,
+      "__init__.py",
+      groupInitContent,
+      `${emitTarget["output-dir"]}/${group}`,
+      emitTarget["output-dir"],
+    );
   }
 
   // Format emitted files if format option is enabled (default: true)
@@ -169,8 +241,12 @@ export const generatePython = async (
   }
 };
 
-function pythonNativeSerialization(emitTarget: EmitTarget): "none" | "pydantic" {
-  return emitTarget["native-serialization"] === "pydantic" ? "pydantic" : "none";
+function pythonNativeSerialization(
+  emitTarget: EmitTarget,
+): "none" | "pydantic" {
+  return emitTarget["native-serialization"] === "pydantic"
+    ? "pydantic"
+    : "none";
 }
 
 /**
@@ -182,7 +258,9 @@ function formatPythonFiles(outputDir: string, testDir?: string): void {
   // Find the Python project root by looking for pyproject.toml
   const projectRoot = findPythonProjectRoot(outputDir);
   if (!projectRoot) {
-    console.warn(`Warning: Could not find pyproject.toml. Skipping formatting.`);
+    console.warn(
+      `Warning: Could not find pyproject.toml. Skipping formatting.`,
+    );
     return;
   }
 
@@ -193,22 +271,26 @@ function formatPythonFiles(outputDir: string, testDir?: string): void {
     try {
       execFileSync("uv", ["run", "ruff", "check", "--fix", dir], {
         cwd: projectRoot,
-        stdio: 'pipe',
-        encoding: 'utf-8'
+        stdio: "pipe",
+        encoding: "utf-8",
       });
     } catch (error) {
-      console.warn(`Warning: ruff check failed for ${dir}. You may need to install ruff or run it manually.`);
+      console.warn(
+        `Warning: ruff check failed for ${dir}. You may need to install ruff or run it manually.`,
+      );
     }
 
     // Run ruff format (formatting — matches CI's `ruff format --check`)
     try {
       execFileSync("uv", ["run", "ruff", "format", dir], {
         cwd: projectRoot,
-        stdio: 'pipe',
-        encoding: 'utf-8'
+        stdio: "pipe",
+        encoding: "utf-8",
       });
     } catch (error) {
-      console.warn(`Warning: ruff format failed for ${dir}. You may need to install ruff or run it manually.`);
+      console.warn(
+        `Warning: ruff format failed for ${dir}. You may need to install ruff or run it manually.`,
+      );
     }
   }
 }
@@ -219,11 +301,11 @@ function formatPythonFiles(outputDir: string, testDir?: string): void {
  */
 function findPythonProjectRoot(startDir: string): string | undefined {
   let currentDir = resolve(startDir);
-  const root = resolve('/');
+  const root = resolve("/");
 
   // On Windows, also check for drive root (e.g., "C:\")
   while (currentDir !== root && currentDir !== dirname(currentDir)) {
-    const pyprojectPath = resolve(currentDir, 'pyproject.toml');
+    const pyprojectPath = resolve(currentDir, "pyproject.toml");
     if (existsSync(pyprojectPath)) {
       return currentDir;
     }
@@ -243,36 +325,50 @@ function buildClassContext(
   visitor?: ExprVisitor,
 ): PythonClassContext {
   // Pre-compute safe factory method names to avoid field/classmethod collisions.
-  const fieldNames = new Set(node.properties.map(p => toSnakeCase(p.name)));
+  const fieldNames = new Set(node.properties.map((p) => toSnakeCase(p.name)));
   const factoryNameMap: Record<string, string> = {};
   for (const factory of node.factories) {
     const snakeName = toSnakeCase(factory.name);
-    factoryNameMap[factory.name] = fieldNames.has(snakeName) ? `create_${snakeName}` : snakeName;
+    factoryNameMap[factory.name] = fieldNames.has(snakeName)
+      ? `create_${snakeName}`
+      : snakeName;
   }
 
   // Resolve factories via expression IR (when registry+visitor available)
   const factoryTypeRefs: string[] = [];
-  const renderedFactories = (registry && visitor) ? (node.factories || []).map(f => {
-    const expr = resolveFactoryExpr(f.sets, f.params, node, registry);
-    for (const ref of collectExprTypeRefs(expr)) {
-      factoryTypeRefs.push(ref.name);
-    }
-    return {
-      name: f.name,
-      safeName: factoryNameMap[f.name],
-      params: f.params,
-      body: visitor.visitExpr(expr),
-    };
-  }) : [];
+  const renderedFactories =
+    registry && visitor
+      ? (node.factories || []).map((f) => {
+          const expr = resolveFactoryExpr(f.sets, f.params, node, registry);
+          for (const ref of collectExprTypeRefs(expr)) {
+            factoryTypeRefs.push(ref.name);
+          }
+          return {
+            name: f.name,
+            safeName: factoryNameMap[f.name],
+            params: f.params,
+            body: visitor.visitExpr(expr),
+          };
+        })
+      : [];
 
   // Resolve coercions via expression IR
-  const renderedCoercions = (registry && visitor) ? (node.coercions || []).map(c => {
-    const expr = resolveCoerceExpr(c.expansion, c.scalar, node, registry, "data");
-    return {
-      scalar: pythonTypeMapper[c.scalar] || c.scalar,
-      expression: renderObjectLiteral(expr, visitor, "py"),
-    };
-  }) : [];
+  const renderedCoercions =
+    registry && visitor
+      ? (node.coercions || []).map((c) => {
+          const expr = resolveCoerceExpr(
+            c.expansion,
+            c.scalar,
+            node,
+            registry,
+            "data",
+          );
+          return {
+            scalar: pythonTypeMapper[c.scalar] || c.scalar,
+            expression: renderObjectLiteral(expr, visitor, "py"),
+          };
+        })
+      : [];
 
   // Keep factory-referenced types for file-level import resolution
   // Don't merge into class imports — the file template handles imports
@@ -303,12 +399,15 @@ function buildFileContext(
 ): PythonFileContext {
   const classes: PythonClassContext[] = [
     buildClassContext(node, registry, visitor),
-    ...node.childTypes.map(ct => buildClassContext(ct, registry, visitor))
+    ...node.childTypes.map((ct) => buildClassContext(ct, registry, visitor)),
   ];
 
   // Build grouped imports: module → set of type names to import from that module
   // This handles both base types (module == type) and child types (module == parent type)
-  const childTypeNames = new Set([node.typeName.name, ...node.childTypes.map(ct => ct.typeName.name)]);
+  const childTypeNames = new Set([
+    node.typeName.name,
+    ...node.childTypes.map((ct) => ct.typeName.name),
+  ]);
   const importMap = new Map<string, Set<string>>();
 
   const addImport = (typeName: string) => {
@@ -337,7 +436,8 @@ function buildFileContext(
     .sort((a, b) => a.module.localeCompare(b.module));
 
   return {
-    containsAbstract: node.isAbstract || node.childTypes.some(c => c.isAbstract),
+    containsAbstract:
+      node.isAbstract || node.childTypes.some((c) => c.isAbstract),
     typings: ["Any", "Callable", "Optional"],
     imports,
     classes,
@@ -350,7 +450,7 @@ function buildFileContext(
  */
 function buildInitContext(nodes: TypeNode[]): PythonInitContext {
   return {
-    baseTypes: nodes.filter(n => !n.base),
+    baseTypes: nodes.filter((n) => !n.base),
     types: nodes,
   };
 }
@@ -358,8 +458,17 @@ function buildInitContext(nodes: TypeNode[]): PythonInitContext {
 /**
  * Build context for rendering a test file using the standardized shared helper.
  */
-function buildTestContext(node: TypeNode, packageName: string, registry: TypeRegistry): BaseTestContext & { classCtx: PythonClassContext } {
-  const base = buildBaseTestContext(node, packageName, pythonTestOptions, name => registry.get(name));
+function buildTestContext(
+  node: TypeNode,
+  packageName: string,
+  registry: TypeRegistry,
+): BaseTestContext & { classCtx: PythonClassContext } {
+  const base = buildBaseTestContext(
+    node,
+    packageName,
+    pythonTestOptions,
+    (name) => registry.get(name),
+  );
   const classCtx = buildClassContext(node);
   return { ...base, classCtx };
 }
@@ -367,7 +476,9 @@ function buildTestContext(node: TypeNode, packageName: string, registry: TypeReg
 /**
  * Build context for rendering the LoadContext file.
  */
-function buildLoadContextContext(packageName?: string): PythonLoadContextContext {
+function buildLoadContextContext(
+  packageName?: string,
+): PythonLoadContextContext {
   return {
     header: "Typra LoadContext",
     package: packageName,
@@ -378,16 +489,18 @@ function buildLoadContextContext(packageName?: string): PythonLoadContextContext
  * Prepare coercion representations for template rendering.
  * Converts coercions to Python-specific format with JSON stringification.
  */
-function prepareCoercions(node: TypeNode): Array<{ scalar: string; alternate: string }> {
+function prepareCoercions(
+  node: TypeNode,
+): Array<{ scalar: string; alternate: string }> {
   if (!node.coercions || node.coercions.length === 0) {
     return [];
   }
 
-  return node.coercions.map(alt => ({
+  return node.coercions.map((alt) => ({
     scalar: pythonTypeMapper[alt.scalar],
-    alternate: JSON.stringify(alt.expansion, null, '')
-      .replaceAll('\n', '')
-      .replaceAll('"{value}"', ' data'),
+    alternate: JSON.stringify(alt.expansion, null, "")
+      .replaceAll("\n", "")
+      .replaceAll('"{value}"', " data"),
   }));
 }
 
@@ -414,12 +527,17 @@ function getCoercionProperty(node: TypeNode): string | null {
 /**
  * Get collection properties with their nested type info for load_* methods.
  */
-function getCollectionTypes(node: TypeNode): Array<{ prop: PropertyNode; type: string[]; hasNameProperty: boolean }> {
+function getCollectionTypes(
+  node: TypeNode,
+): Array<{ prop: PropertyNode; type: string[]; hasNameProperty: boolean }> {
   return node.properties
-    .filter(p => p.isCollection && !p.isScalar && !p.isDict)
-    .map(p => ({
+    .filter((p) => p.isCollection && !p.isScalar && !p.isDict)
+    .map((p) => ({
       prop: p,
-      type: p.type?.properties.filter(t => t.name !== "name").map(t => t.name) || [],
+      type:
+        p.type?.properties
+          .filter((t) => t.name !== "name")
+          .map((t) => t.name) || [],
       // Ordinary lists remain ordered arrays even when their element has a `name` field.
       // Only Record<T>|Named<T>[] explicitly opts into name-keyed map serialization.
       hasNameProperty: p.isNamedCollection,
@@ -432,11 +550,17 @@ function getCollectionTypes(node: TypeNode): Array<{ prop: PropertyNode; type: s
  */
 function getUniqueImportTypes(node: TypeNode): string[] {
   const imports = [
-    node.properties.filter(p => !p.isScalar && !p.isDict).map(p => p.typeName.name),
-    ...node.childTypes.flatMap(c =>
-      c.properties.filter(p => !p.isScalar && !p.isDict).map(p => p.typeName.name)
-    )
-  ].flat().filter(n => n !== node.typeName.name && node.base?.name !== n);
+    node.properties
+      .filter((p) => !p.isScalar && !p.isDict)
+      .map((p) => p.typeName.name),
+    ...node.childTypes.flatMap((c) =>
+      c.properties
+        .filter((p) => !p.isScalar && !p.isDict)
+        .map((p) => p.typeName.name),
+    ),
+  ]
+    .flat()
+    .filter((n) => n !== node.typeName.name && node.base?.name !== n);
 
   // Remove duplicates and sort
   return Array.from(new Set(imports)).sort();
@@ -456,5 +580,8 @@ async function emitPythonFile(
   outputDir = outputDir || `${context.emitterOutputDir}/python`;
   const filePath = resolvePath(outputDir, filename);
 
-  await emitGeneratedFile(context, filePath, content, { outputRoot: outputRoot || outputDir, allowEmpty: options.allowEmpty });
+  await emitGeneratedFile(context, filePath, content, {
+    outputRoot: outputRoot || outputDir,
+    allowEmpty: options.allowEmpty,
+  });
 }

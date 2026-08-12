@@ -1,8 +1,13 @@
 import { EmitContext, resolvePath } from "@typespec/compiler";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
-import { enumerateTypes, PropertyNode, TypeName, TypeNode } from "../../ir/ast.js";
+import {
+  enumerateTypes,
+  PropertyNode,
+  TypeName,
+  TypeNode,
+} from "../../ir/ast.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
-import * as YAML from 'yaml';
+import * as YAML from "yaml";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 
 function deepMerge<T extends Record<string, any>>(...objects: T[]): T {
@@ -21,7 +26,9 @@ function deepMerge<T extends Record<string, any>>(...objects: T[]): T {
   }, {} as T);
 }
 
-export function markdownMethodRuntimeShape(method: TypeNode["methods"][number]): string {
+export function markdownMethodRuntimeShape(
+  method: TypeNode["methods"][number],
+): string {
   const labels = [method.sync ? "sync" : "async-capable"];
   if (method.runtimeCancellable) labels.push("runtime-cancellable");
   if (method.atomic) labels.push("atomic");
@@ -37,7 +44,9 @@ function emitIndexMarkdown(
   compositionTypes: { source: string; target: string }[],
 ): string {
   const typeMap = new Map(types.map((type) => [type.typeName.name, type]));
-  const renderMethodSignature = (method: TypeNode["methods"][number]): string => {
+  const renderMethodSignature = (
+    method: TypeNode["methods"][number],
+  ): string => {
     const params = Object.entries(method.params)
       .map(([name, type]) => `${name}: ${type}`)
       .join(", ");
@@ -88,12 +97,17 @@ function emitIndexMarkdown(
   const sections: [string, string[]][] = [
     [
       "Prompt File Core",
-      [rootObject, "Model", "Template", "FormatConfig", "ParserConfig", "Property", "Tool"],
+      [
+        rootObject,
+        "Model",
+        "Template",
+        "FormatConfig",
+        "ParserConfig",
+        "Property",
+        "Tool",
+      ],
     ],
-    [
-      "Properties and Schemas",
-      ["Property", "ObjectProperty", "ArrayProperty"],
-    ],
+    ["Properties and Schemas", ["Property", "ObjectProperty", "ArrayProperty"]],
     [
       "Models and Connections",
       [
@@ -148,15 +162,31 @@ function emitIndexMarkdown(
     ],
     [
       "Token and Status Events",
-      ["TokenEventPayload", "ThinkingEventPayload", "StatusEventPayload", "ErrorEventPayload"],
+      [
+        "TokenEventPayload",
+        "ThinkingEventPayload",
+        "StatusEventPayload",
+        "ErrorEventPayload",
+      ],
     ],
     [
       "Tool and Message Events",
-      ["ToolCallStartPayload", "ToolResultPayload", "MessagesUpdatedPayload", "ToolResult", "Message"],
+      [
+        "ToolCallStartPayload",
+        "ToolResultPayload",
+        "MessagesUpdatedPayload",
+        "ToolResult",
+        "Message",
+      ],
     ],
     [
       "Turn Completion and Compaction Events",
-      ["DoneEventPayload", "CompactionCompletePayload", "CompactionFailedPayload", "Message"],
+      [
+        "DoneEventPayload",
+        "CompactionCompletePayload",
+        "CompactionFailedPayload",
+        "Message",
+      ],
     ],
   ];
 
@@ -190,7 +220,10 @@ types is specified in the [Prompty Specification](/specification/).
   by hand.
 `;
   for (const [title, typeNames] of sections) {
-    out += renderDiagram(title, typeNames.filter((typeName) => typeMap.has(typeName)));
+    out += renderDiagram(
+      title,
+      typeNames.filter((typeName) => typeMap.has(typeName)),
+    );
   }
   return out;
 }
@@ -200,10 +233,18 @@ function emitFileMarkdown(
   yml: string | undefined,
   md: string | undefined,
   compositionTypes: TypeNode[],
-  alternateCtors: { title: string; description: string; scalar: string; simple: string; expanded: string }[],
+  alternateCtors: {
+    title: string;
+    description: string;
+    scalar: string;
+    simple: string;
+    expanded: string;
+  }[],
   parent: TypeNode | undefined,
 ): string {
-  const renderMethodSignature = (method: TypeNode["methods"][number]): string => {
+  const renderMethodSignature = (
+    method: TypeNode["methods"][number],
+  ): string => {
     const params = Object.entries(method.params)
       .map(([name, type]) => `${name}: ${type}`)
       .join(", ");
@@ -336,33 +377,59 @@ classDiagram`;
   return out;
 }
 
-export const generateMarkdown = async (context: EmitContext<TypraEmitterOptions>, node: TypeNode, emitTarget: EmitTarget, options?: GeneratorOptions) => {
-
+export const generateMarkdown = async (
+  context: EmitContext<TypraEmitterOptions>,
+  node: TypeNode,
+  emitTarget: EmitTarget,
+  options?: GeneratorOptions,
+) => {
   const rootObject = context.options["root-alias"] || "AgentDefinition";
 
   const nodes = filterNodes(Array.from(enumerateTypes(node)), options);
 
-  const childTypes: { source: string, target: string }[] = nodes.map(n => {
-    return n.childTypes.map(c => {
-      return { source: n.typeName.name, target: c.typeName.name };
-    });
-  }).flat();
+  const childTypes: { source: string; target: string }[] = nodes
+    .map((n) => {
+      return n.childTypes.map((c) => {
+        return { source: n.typeName.name, target: c.typeName.name };
+      });
+    })
+    .flat();
 
-  const compositionTypes: { source: string, target: string }[] = nodes.map(n => {
-    return n.properties.filter(p => !p.isScalar).map(c => {
-      return { source: n.typeName.name, target: c.typeName.name };
-    });
-  }).flat();
+  const compositionTypes: { source: string; target: string }[] = nodes
+    .map((n) => {
+      return n.properties
+        .filter((p) => !p.isScalar)
+        .map((c) => {
+          return { source: n.typeName.name, target: c.typeName.name };
+        });
+    })
+    .flat();
 
-  const readmeContent = emitIndexMarkdown(nodes, rootObject, childTypes, compositionTypes);
-  await emitMarkdownFile(context, "index", readmeContent, emitTarget["output-dir"]);
+  const readmeContent = emitIndexMarkdown(
+    nodes,
+    rootObject,
+    childTypes,
+    compositionTypes,
+  );
+  await emitMarkdownFile(
+    context,
+    "index",
+    readmeContent,
+    emitTarget["output-dir"],
+  );
 
   const findNodeByName = (name: TypeName): TypeNode | undefined => {
-    return nodes.find(n => n.typeName.name === name.name && n.typeName.namespace === name.namespace);
-  }
+    return nodes.find(
+      (n) =>
+        n.typeName.name === name.name &&
+        n.typeName.namespace === name.namespace,
+    );
+  };
 
   for (const node of nodes) {
-    const sample = node.properties.filter(p => p.samples.length > 0).map(p => p.samples[0].sample);
+    const sample = node.properties
+      .filter((p) => p.samples.length > 0)
+      .map((p) => p.samples[0].sample);
     let yml: string | undefined = undefined;
     let md: string | undefined = undefined;
     if (sample.length > 0) {
@@ -383,9 +450,14 @@ export const generateMarkdown = async (context: EmitContext<TypraEmitterOptions>
       node.base ? findNodeByName(node.base) : undefined,
     );
 
-    await emitMarkdownFile(context, node.typeName.name, markdown, emitTarget["output-dir"]);
+    await emitMarkdownFile(
+      context,
+      node.typeName.name,
+      markdown,
+      emitTarget["output-dir"],
+    );
   }
-}
+};
 
 export const renderType = (prop: PropertyNode) => {
   const arrayString = prop.isCollection ? "[]" : "";
@@ -400,7 +472,7 @@ export const renderType = (prop: PropertyNode) => {
 
 export const renderChildTypes = (node: PropertyNode) => {
   if (!node.isScalar && node.type) {
-    const childTypes = node.type.childTypes.map(c => {
+    const childTypes = node.type.childTypes.map((c) => {
       return `[${c.typeName.name}](../${c.typeName.name.toLowerCase()}/)`;
     });
 
@@ -413,40 +485,61 @@ export const renderChildTypes = (node: PropertyNode) => {
   return "";
 };
 
-export const getChildTypes = (node: TypeNode): { source: string, target: string }[] => {
-  return node.childTypes.flatMap(c => [{
-    source: node.typeName.name,
-    target: c.typeName.name
-  }, ...getChildTypes(c)]);
+export const getChildTypes = (
+  node: TypeNode,
+): { source: string; target: string }[] => {
+  return node.childTypes.flatMap((c) => [
+    {
+      source: node.typeName.name,
+      target: c.typeName.name,
+    },
+    ...getChildTypes(c),
+  ]);
 };
 
 export const getCompositionTypes = (node: TypeNode): TypeNode[] => {
-  const nonScalars = node.properties.filter(p => !p.isScalar && !p.isDict);
-  return nonScalars.flatMap(c => c.type ? [c.type] : []);
+  const nonScalars = node.properties.filter((p) => !p.isScalar && !p.isDict);
+  return nonScalars.flatMap((c) => (c.type ? [c.type] : []));
 };
 
 const typeExampleMapper: Record<string, string> = {
-  "string": "\"example\"",
-  "number": "5",
-  "boolean": "true",
-  "int64": "5",
-  "int32": "5",
-  "float64": "3.14",
-  "float32": "3.14",
-  "integer": "5",
-  "float": "3.14",
-  "numeric": "3.14",
+  string: '"example"',
+  number: "5",
+  boolean: "true",
+  int64: "5",
+  int32: "5",
+  float64: "3.14",
+  float32: "3.14",
+  integer: "5",
+  float: "3.14",
+  numeric: "3.14",
 };
 
-export const generateCoercions = (node: TypeNode): { title: string; description: string; scalar: string; simple: string, expanded: string }[] => {
+export const generateCoercions = (
+  node: TypeNode,
+): {
+  title: string;
+  description: string;
+  scalar: string;
+  simple: string;
+  expanded: string;
+}[] => {
   if (node.coercions && node.coercions.length > 0) {
-    const alts: { title: string; description: string; scalar: string; simple: string, expanded: string }[] = [];
+    const alts: {
+      title: string;
+      description: string;
+      scalar: string;
+      simple: string;
+      expanded: string;
+    }[] = [];
     for (const alt of node.coercions) {
       const scalar = alt.scalar;
-      const sample = typeExampleMapper[scalar] ? typeExampleMapper[scalar] : "example";
+      const sample = typeExampleMapper[scalar]
+        ? typeExampleMapper[scalar]
+        : "example";
 
       const simple: { [key: string]: any } = {};
-      simple[alt.title || "value"] = "\"{value}\"";
+      simple[alt.title || "value"] = '"{value}"';
       const expansion: { [key: string]: any } = {};
       expansion[alt.title || "value"] = alt.expansion;
 
@@ -454,8 +547,13 @@ export const generateCoercions = (node: TypeNode): { title: string; description:
         title: alt.title || "",
         description: alt.description || "",
         scalar: scalar,
-        simple: YAML.stringify(simple, { indent: 2 }).replace("\"{value}\"", sample).replaceAll("'", ""),
-        expanded: YAML.stringify(expansion, { indent: 2 }).replace("\"{value}\"", sample)
+        simple: YAML.stringify(simple, { indent: 2 })
+          .replace('"{value}"', sample)
+          .replaceAll("'", ""),
+        expanded: YAML.stringify(expansion, { indent: 2 }).replace(
+          '"{value}"',
+          sample,
+        ),
       });
     }
     return alts;
@@ -464,7 +562,14 @@ export const generateCoercions = (node: TypeNode): { title: string; description:
   }
 };
 
-const emitMarkdownFile = async (context: EmitContext<TypraEmitterOptions>, name: string, markdown: string, outputDir?: string) => {
+const emitMarkdownFile = async (
+  context: EmitContext<TypraEmitterOptions>,
+  name: string,
+  markdown: string,
+  outputDir?: string,
+) => {
   const dir = outputDir || `${context.emitterOutputDir}/markdown`;
-  await emitGeneratedFile(context, resolvePath(dir, `${name}.md`), markdown, { outputRoot: dir });
-}
+  await emitGeneratedFile(context, resolvePath(dir, `${name}.md`), markdown, {
+    outputRoot: dir,
+  });
+};

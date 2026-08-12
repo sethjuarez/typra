@@ -5,7 +5,10 @@ import { TypeNode } from "../src/ir/ast.js";
 import { isCSharpAssertableSampleKey } from "../src/languages/csharp/driver.js";
 
 const nodeWith = (properties: any[]): TypeNode =>
-  ({ typeName: { namespace: "Fixtures", name: "N" }, properties }) as unknown as TypeNode;
+  ({
+    typeName: { namespace: "Fixtures", name: "N" },
+    properties,
+  }) as unknown as TypeNode;
 
 describe("C# generated conversion-test validations", () => {
   it("asserts scalar and enum properties declared on the node", () => {
@@ -23,7 +26,10 @@ describe("C# generated conversion-test validations", () => {
     // so asserting instance.Endpoint on the base does not compile (CS1061).
     const base = nodeWith([{ name: "kind", isScalar: true }]);
 
-    assert.equal(isCSharpAssertableSampleKey("endpoint", "https://example.test", base), false);
+    assert.equal(
+      isCSharpAssertableSampleKey("endpoint", "https://example.test", base),
+      false,
+    );
   });
 
   it("skips complex properties populated through a scalar coercion", () => {
@@ -31,6 +37,9 @@ describe("C# generated conversion-test validations", () => {
     // the scalar sample to the complex property resolves to the wrong overload (CS1503).
     const node = nodeWith([{ name: "reference", isScalar: false }]);
 
-    assert.equal(isCSharpAssertableSampleKey("reference", "ref-shortcut", node), false);
+    assert.equal(
+      isCSharpAssertableSampleKey("reference", "ref-shortcut", node),
+      false,
+    );
   });
 });

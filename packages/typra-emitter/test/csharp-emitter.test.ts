@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { TypeDecl } from "../src/ir/declarations.js";
-import { emitCSharpClass, isCSharpSinglePrecision } from "../src/languages/csharp/emitter.js";
+import {
+  emitCSharpClass,
+  isCSharpSinglePrecision,
+} from "../src/languages/csharp/emitter.js";
 import { CSharpExprVisitor } from "../src/languages/csharp/visitor.js";
 
 describe("C# emitter guarded scalar loads", () => {
@@ -14,47 +17,53 @@ describe("C# emitter guarded scalar loads", () => {
       isAbstract: false,
       isProtocol: false,
       description: "",
-      fields: [{
-        name: "message",
-        typeName: { namespace: "", name: "string" },
-        category,
-        isOptional: false,
-        defaultValue: null,
-        allowedValues: [],
-        parseAliases: {},
-        enumName: null,
-        isOpenEnum: false,
-        description: "",
-        knownAs: {},
-      }],
+      fields: [
+        {
+          name: "message",
+          typeName: { namespace: "", name: "string" },
+          category,
+          isOptional: false,
+          defaultValue: null,
+          allowedValues: [],
+          parseAliases: {},
+          enumName: null,
+          isOpenEnum: false,
+          description: "",
+          knownAs: {},
+        },
+      ],
       coercionProperty: null,
       load: {
         coercions: [],
-        assignments: [{
-          sourceName: "message",
-          fieldName: "message",
-          category,
-          isOptional: false,
-          parentTypeName: "FailureChunk",
-          enumName: null,
-          allowedValues: [],
-          parseAliases: {},
-          defaultValue: null,
-          isOpenEnum: false,
-        }],
+        assignments: [
+          {
+            sourceName: "message",
+            fieldName: "message",
+            category,
+            isOptional: false,
+            parentTypeName: "FailureChunk",
+            enumName: null,
+            allowedValues: [],
+            parseAliases: {},
+            defaultValue: null,
+            isOpenEnum: false,
+          },
+        ],
         hasPolymorphicDispatch: false,
         hasContextHooks: true,
       },
       save: {
-        assignments: [{
-          targetName: "message",
-          fieldName: "message",
-          category,
-          isOptional: false,
-          parentTypeName: "FailureChunk",
-          enumName: null,
-          isOpenEnum: false,
-        }],
+        assignments: [
+          {
+            targetName: "message",
+            fieldName: "message",
+            category,
+            isOptional: false,
+            parentTypeName: "FailureChunk",
+            enumName: null,
+            isOpenEnum: false,
+          },
+        ],
         hasBase: false,
         hasContextHooks: true,
       },
@@ -114,7 +123,7 @@ describe("C# emitter guarded scalar loads", () => {
       coercionProperty: null,
       load: {
         coercions: [],
-        assignments: [field, optionalField, typedField].map(item => ({
+        assignments: [field, optionalField, typedField].map((item) => ({
           sourceName: item.name,
           fieldName: item.name,
           category: item.category,
@@ -130,7 +139,7 @@ describe("C# emitter guarded scalar loads", () => {
         hasContextHooks: true,
       },
       save: {
-        assignments: [field, optionalField, typedField].map(item => ({
+        assignments: [field, optionalField, typedField].map((item) => ({
           targetName: item.name,
           fieldName: item.name,
           category: item.category,
@@ -157,9 +166,18 @@ describe("C# emitter guarded scalar loads", () => {
       () => undefined,
     );
 
-    assert.match(source, /public IDictionary<string, object\?> Metadata \{ get; set; \} = new Dictionary<string, object\?>\(\);/);
-    assert.match(source, /public IDictionary<string, object\?>\? OptionalMetadata \{ get; set; \}/);
-    assert.match(source, /public IDictionary<string, FixtureOwner> Owners \{ get; set; \} = new Dictionary<string, FixtureOwner>\(\);/);
+    assert.match(
+      source,
+      /public IDictionary<string, object\?> Metadata \{ get; set; \} = new Dictionary<string, object\?>\(\);/,
+    );
+    assert.match(
+      source,
+      /public IDictionary<string, object\?>\? OptionalMetadata \{ get; set; \}/,
+    );
+    assert.match(
+      source,
+      /public IDictionary<string, FixtureOwner> Owners \{ get; set; \} = new Dictionary<string, FixtureOwner>\(\);/,
+    );
     assert.doesNotMatch(source, /IDictionary<string, FixtureOwner\?>/);
   });
 
@@ -186,17 +204,19 @@ describe("C# emitter guarded scalar loads", () => {
       factories: [],
       collectionHelpers: [],
       polymorphicDispatch: null,
-      methods: [{
-        name: "save",
-        returns: "void",
-        description: "",
-        params: {
-          requiredState: "Record<unknown>",
-          optionalState: "Record<unknown>?",
+      methods: [
+        {
+          name: "save",
+          returns: "void",
+          description: "",
+          params: {
+            requiredState: "Record<unknown>",
+            optionalState: "Record<unknown>?",
+          },
+          optional: false,
+          sync: true,
         },
-        optional: false,
-        sync: true,
-      }],
+      ],
       wire: null,
     };
 
@@ -208,8 +228,14 @@ describe("C# emitter guarded scalar loads", () => {
       () => undefined,
     );
 
-    assert.match(source, /void Save\(Dictionary<string, object\?> requiredState, Dictionary<string, object\?>\? optionalState\);/);
-    assert.doesNotMatch(source, /#nullable disable annotations|IDictionary<string, object>/);
+    assert.match(
+      source,
+      /void Save\(Dictionary<string, object\?> requiredState, Dictionary<string, object\?>\? optionalState\);/,
+    );
+    assert.doesNotMatch(
+      source,
+      /#nullable disable annotations|IDictionary<string, object>/,
+    );
   });
 });
 
@@ -222,7 +248,7 @@ function abstractOpenConnection(): TypeDecl {
     isAbstract: true,
     isProtocol: false,
     description: "",
-    fields: names.map(name => ({
+    fields: names.map((name) => ({
       name,
       typeName: { namespace: "", name: "string" },
       category,
@@ -238,7 +264,7 @@ function abstractOpenConnection(): TypeDecl {
     coercionProperty: null,
     load: {
       coercions: [],
-      assignments: names.map(name => ({
+      assignments: names.map((name) => ({
         sourceName: name,
         fieldName: name,
         category,
@@ -254,7 +280,7 @@ function abstractOpenConnection(): TypeDecl {
       hasContextHooks: true,
     },
     save: {
-      assignments: names.map(name => ({
+      assignments: names.map((name) => ({
         targetName: name,
         fieldName: name,
         category,
@@ -270,7 +296,12 @@ function abstractOpenConnection(): TypeDecl {
     collectionHelpers: [],
     polymorphicDispatch: {
       discriminatorField: "kind",
-      variants: [{ value: "managed", typeName: { namespace: "Test", name: "ManagedConnection" } }],
+      variants: [
+        {
+          value: "managed",
+          typeName: { namespace: "Test", name: "ManagedConnection" },
+        },
+      ],
       defaultVariant: null,
       isClosed: false,
       isAbstract: true,
@@ -283,27 +314,51 @@ function abstractOpenConnection(): TypeDecl {
 describe("C# abstract open polymorphic dispatch", () => {
   it("absorbs unknown discriminators into a carrier instead of throwing", () => {
     const model = abstractOpenConnection();
-    const source = emitCSharpClass(model, "Test", new CSharpExprVisitor(), [model], () => undefined);
+    const source = emitCSharpClass(
+      model,
+      "Test",
+      new CSharpExprVisitor(),
+      [model],
+      () => undefined,
+    );
 
     // The base stays abstract, so `new Connection()` remains a compile error and the
     // schema author's @abstract is honoured. The carrier is what makes the fallback
     // constructible.
     assert.match(source, /public abstract partial class Connection/);
-    assert.match(source, /public sealed partial class UnknownConnection : Connection/);
+    assert.match(
+      source,
+      /public sealed partial class UnknownConnection : Connection/,
+    );
     assert.doesNotMatch(source, /Unknown Connection discriminator field/);
-    assert.match(source, /Invalid Connection discriminator field 'kind': expected non-blank string/);
+    assert.match(
+      source,
+      /Invalid Connection discriminator field 'kind': expected non-blank string/,
+    );
     assert.match(source, /_ => UnknownConnection\.Load\(data, context\),/);
 
     // The retained payload is deep-cloned and stripped of the declared fields, so save
     // re-emits the unknown keys without duplicating the modelled ones.
-    assert.match(source, /instance\._raw = \(Dictionary<string, object\?>\)CloneRawValue\(data\)!;/);
+    assert.match(
+      source,
+      /instance\._raw = \(Dictionary<string, object\?>\)CloneRawValue\(data\)!;/,
+    );
     assert.match(source, /instance\._raw\.Remove\("kind"\);/);
     assert.match(source, /instance\._raw\.Remove\("label"\);/);
-    assert.match(source, /var result = \(Dictionary<string, object\?>\)CloneRawValue\(obj\._raw\)!;/);
+    assert.match(
+      source,
+      /var result = \(Dictionary<string, object\?>\)CloneRawValue\(obj\._raw\)!;/,
+    );
 
     // The carrier is a separate class, so the retained-payload members cannot be private.
-    assert.match(source, /protected Dictionary<string, object\?> _raw = new\(\);/);
-    assert.match(source, /protected static object\? CloneRawValue\(object\? value\)/);
+    assert.match(
+      source,
+      /protected Dictionary<string, object\?> _raw = new\(\);/,
+    );
+    assert.match(
+      source,
+      /protected static object\? CloneRawValue\(object\? value\)/,
+    );
   });
 
   it("does not emit a carrier for a closed abstract dispatch", () => {
@@ -311,12 +366,21 @@ describe("C# abstract open polymorphic dispatch", () => {
     // rejecting them stays correct.
     const model = abstractOpenConnection();
     model.polymorphicDispatch!.isClosed = true;
-    const source = emitCSharpClass(model, "Test", new CSharpExprVisitor(), [model], () => undefined);
+    const source = emitCSharpClass(
+      model,
+      "Test",
+      new CSharpExprVisitor(),
+      [model],
+      () => undefined,
+    );
 
     assert.doesNotMatch(source, /class UnknownConnection/);
     assert.doesNotMatch(source, /_raw/);
     assert.match(source, /Unknown Connection discriminator field/);
-    assert.match(source, /Invalid Connection discriminator field 'kind': expected non-blank string/);
+    assert.match(
+      source,
+      /Invalid Connection discriminator field 'kind': expected non-blank string/,
+    );
   });
 });
 

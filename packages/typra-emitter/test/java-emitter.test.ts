@@ -6,8 +6,17 @@ import type { EnumDef, TypeDecl } from "../src/ir/declarations.js";
 import { PropertyNode, TypeNode } from "../src/ir/ast.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
 import { javaTestOptions } from "../src/languages/java/driver.js";
-import { emitJavaEnum, emitJavaFileContent, emitJavaMethodHelper, emitJavaUnknownCarrier, ensureJavaEditableSeamMarker } from "../src/languages/java/emitter.js";
-import { emitJavaSaveContext, emitJavaYaml } from "../src/languages/java/scaffolding.js";
+import {
+  emitJavaEnum,
+  emitJavaFileContent,
+  emitJavaMethodHelper,
+  emitJavaUnknownCarrier,
+  ensureJavaEditableSeamMarker,
+} from "../src/languages/java/emitter.js";
+import {
+  emitJavaSaveContext,
+  emitJavaYaml,
+} from "../src/languages/java/scaffolding.js";
 import { emitJavaTest } from "../src/languages/java/test-emitter.js";
 import {
   javaEnumTypeName,
@@ -25,7 +34,12 @@ function typeDecl(fields: TypeDecl["fields"]): TypeDecl {
     description: "",
     fields,
     coercionProperty: null,
-    load: { coercions: [], assignments: [], hasPolymorphicDispatch: false, hasContextHooks: true },
+    load: {
+      coercions: [],
+      assignments: [],
+      hasPolymorphicDispatch: false,
+      hasContextHooks: true,
+    },
     save: { assignments: [], hasBase: false, hasContextHooks: true },
     factories: [],
     collectionHelpers: [],
@@ -126,12 +140,23 @@ describe("Java emitter naming", () => {
       isOpenEnum: false,
     });
 
-    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+    const source = emitJavaFileContent(
+      [decl],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+    );
 
     assert.match(source, /public String defaultValue = null;/);
     assert.match(source, /map\.containsKey\("default"\)/);
-    assert.match(source, /result\.defaultValue = String\.valueOf\(map\.get\("default"\)\)/);
-    assert.match(source, /result\.put\("default", serializeScalar\(obj\.defaultValue\)\)/);
+    assert.match(
+      source,
+      /result\.defaultValue = String\.valueOf\(map\.get\("default"\)\)/,
+    );
+    assert.match(
+      source,
+      /result\.put\("default", serializeScalar\(obj\.defaultValue\)\)/,
+    );
     assert.doesNotMatch(source, /com\.fasterxml\.jackson/);
   });
 
@@ -172,15 +197,44 @@ describe("Java emitter naming", () => {
       isOpenEnum: false,
     });
 
-    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set(), [], [decl], "jackson");
+    const source = emitJavaFileContent(
+      [decl],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+      [],
+      [decl],
+      "jackson",
+    );
 
-    assert.match(source, /import com\.fasterxml\.jackson\.annotation\.JsonProperty;/);
-    assert.match(source, /@JsonSerialize\(using = KeywordModel\.TypraJacksonSerializer\.class\)/);
-    assert.match(source, /@JsonDeserialize\(using = KeywordModel\.TypraJacksonDeserializer\.class\)/);
-    assert.match(source, /@JsonProperty\("default"\)\s+@JsonInclude\(JsonInclude\.Include\.NON_NULL\)\s+public String defaultValue = null;/);
-    assert.match(source, /generator\.writeObject\(value == null \? null : value\.save\(new SaveContext\(\)\)\);/);
-    assert.match(source, /Object data = parser\.getCodec\(\)\.readValue\(parser, Object\.class\);/);
-    assert.match(source, /return KeywordModel\.load\(data, new LoadContext\(\)\);/);
+    assert.match(
+      source,
+      /import com\.fasterxml\.jackson\.annotation\.JsonProperty;/,
+    );
+    assert.match(
+      source,
+      /@JsonSerialize\(using = KeywordModel\.TypraJacksonSerializer\.class\)/,
+    );
+    assert.match(
+      source,
+      /@JsonDeserialize\(using = KeywordModel\.TypraJacksonDeserializer\.class\)/,
+    );
+    assert.match(
+      source,
+      /@JsonProperty\("default"\)\s+@JsonInclude\(JsonInclude\.Include\.NON_NULL\)\s+public String defaultValue = null;/,
+    );
+    assert.match(
+      source,
+      /generator\.writeObject\(value == null \? null : value\.save\(new SaveContext\(\)\)\);/,
+    );
+    assert.match(
+      source,
+      /Object data = parser\.getCodec\(\)\.readValue\(parser, Object\.class\);/,
+    );
+    assert.match(
+      source,
+      /return KeywordModel\.load\(data, new LoadContext\(\)\);/,
+    );
   });
 
   it("emits PascalCase public enums as standalone compilation units", () => {
@@ -234,8 +288,16 @@ describe("Java emitter naming", () => {
       isOpenEnum: false,
     });
 
-    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
-    assert.match(source, /public ApprovalModeKind mode = ApprovalModeKind\.fromValue\("always"\);/);
+    const source = emitJavaFileContent(
+      [decl],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+    );
+    assert.match(
+      source,
+      /public ApprovalModeKind mode = ApprovalModeKind\.fromValue\("always"\);/,
+    );
     assert.match(source, /result\.mode = ApprovalModeKind\.fromValue/);
   });
 });
@@ -247,7 +309,9 @@ describe("Java emitter runtime semantics", () => {
     base.isAbstract = true;
     base.polymorphicDispatch = {
       discriminatorField: "kind",
-      variants: [{ value: "known", typeName: { namespace: "Test", name: "KnownTool" } }],
+      variants: [
+        { value: "known", typeName: { namespace: "Test", name: "KnownTool" } },
+      ],
       defaultVariant: {
         typeName: { namespace: "Test", name: "CustomTool" },
         isSelfReference: false,
@@ -269,11 +333,28 @@ describe("Java emitter runtime semantics", () => {
     custom.save.hasBase = true;
     addAssignments(custom);
 
-    const baseSource = emitJavaFileContent([base], "test", new JavaExprVisitor(), new Set(), [], [base, custom]);
-    const customSource = emitJavaFileContent([custom], "test", new JavaExprVisitor(), new Set(), [], [base, custom]);
+    const baseSource = emitJavaFileContent(
+      [base],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+      [],
+      [base, custom],
+    );
+    const customSource = emitJavaFileContent(
+      [custom],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+      [],
+      [base, custom],
+    );
 
     assert.doesNotMatch(baseSource, /new Tool\(\)/);
-    assert.match(baseSource, /default:\s+return CustomTool\.load\(data, ctx\);/);
+    assert.match(
+      baseSource,
+      /default:\s+return CustomTool\.load\(data, ctx\);/,
+    );
     assert.match(baseSource, /Cannot instantiate abstract Tool/);
     assert.doesNotMatch(customSource, /public String kind/);
     assert.match(customSource, /this\.kind = "\*";/);
@@ -283,19 +364,34 @@ describe("Java emitter runtime semantics", () => {
   });
 
   it("absorbs an unrecognized discriminator on an abstract open base instead of rejecting it", () => {
-    const base = typeDecl([field("kind", "string"), field("label", "string", { isOptional: true })]);
+    const base = typeDecl([
+      field("kind", "string"),
+      field("label", "string", { isOptional: true }),
+    ]);
     base.typeName = { namespace: "Test", name: "OpenBase" };
     base.isAbstract = true;
     base.polymorphicDispatch = {
       discriminatorField: "kind",
-      variants: [{ value: "managed", typeName: { namespace: "Test", name: "ManagedThing" } }],
+      variants: [
+        {
+          value: "managed",
+          typeName: { namespace: "Test", name: "ManagedThing" },
+        },
+      ],
       defaultVariant: null,
       isAbstract: true,
       isClosed: false,
     };
     addAssignments(base);
 
-    const baseSource = emitJavaFileContent([base], "test", new JavaExprVisitor(), new Set(), [], [base]);
+    const baseSource = emitJavaFileContent(
+      [base],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+      [],
+      [base],
+    );
     const carrier = emitJavaUnknownCarrier(base, "test");
 
     // Abstract is about instantiability, not about closedness: an unrecognized kind on an open
@@ -305,13 +401,25 @@ describe("Java emitter runtime semantics", () => {
     // The carrier subclasses the base, so the base must expose the payload field and the clone
     // helpers it stores through.
     assert.match(baseSource, /protected Map<String, Object> rawPayload;/);
-    assert.match(baseSource, /protected static Map<String, Object> cloneRawMap\(/);
-    assert.match(baseSource, /obj\.rawPayload == null \? new LinkedHashMap<>\(\) : cloneRawMap\(obj\.rawPayload\)/);
+    assert.match(
+      baseSource,
+      /protected static Map<String, Object> cloneRawMap\(/,
+    );
+    assert.match(
+      baseSource,
+      /obj\.rawPayload == null \? new LinkedHashMap<>\(\) : cloneRawMap\(obj\.rawPayload\)/,
+    );
 
     assert.ok(carrier);
     assert.equal(carrier.filename, "UnknownOpenBase.java");
-    assert.match(carrier.source, /public final class UnknownOpenBase extends OpenBase/);
-    assert.match(carrier.source, /result\.rawPayload = OpenBase\.cloneRawMap\(map\);/);
+    assert.match(
+      carrier.source,
+      /public final class UnknownOpenBase extends OpenBase/,
+    );
+    assert.match(
+      carrier.source,
+      /result\.rawPayload = OpenBase\.cloneRawMap\(map\);/,
+    );
     // Declared fields are loaded through loadBaseInto, so leaving them in the payload as well
     // would emit them twice.
     assert.match(carrier.source, /result\.rawPayload\.remove\("kind"\);/);
@@ -326,7 +434,10 @@ describe("Java emitter runtime semantics", () => {
     wildcard.polymorphicDispatch = {
       discriminatorField: "kind",
       variants: [],
-      defaultVariant: { typeName: { namespace: "Test", name: "CustomThing" }, isSelfReference: false },
+      defaultVariant: {
+        typeName: { namespace: "Test", name: "CustomThing" },
+        isSelfReference: false,
+      },
       isAbstract: true,
       isClosed: false,
     };
@@ -337,7 +448,12 @@ describe("Java emitter runtime semantics", () => {
     closed.isAbstract = true;
     closed.polymorphicDispatch = {
       discriminatorField: "kind",
-      variants: [{ value: "managed", typeName: { namespace: "Test", name: "ManagedThing" } }],
+      variants: [
+        {
+          value: "managed",
+          typeName: { namespace: "Test", name: "ManagedThing" },
+        },
+      ],
       defaultVariant: null,
       isAbstract: true,
       isClosed: true,
@@ -348,8 +464,16 @@ describe("Java emitter runtime semantics", () => {
     concrete.typeName = { namespace: "Test", name: "ConcreteBase" };
     concrete.polymorphicDispatch = {
       discriminatorField: "kind",
-      variants: [{ value: "managed", typeName: { namespace: "Test", name: "ManagedThing" } }],
-      defaultVariant: { typeName: { namespace: "Test", name: "ConcreteBase" }, isSelfReference: true },
+      variants: [
+        {
+          value: "managed",
+          typeName: { namespace: "Test", name: "ManagedThing" },
+        },
+      ],
+      defaultVariant: {
+        typeName: { namespace: "Test", name: "ConcreteBase" },
+        isSelfReference: true,
+      },
       isAbstract: false,
       isClosed: false,
     };
@@ -364,14 +488,27 @@ describe("Java emitter runtime semantics", () => {
     // Payload visibility is uniform across every retaining class. Java forbids hiding an inherited
     // static method with weaker access, so a subclass that also retains a payload could not
     // compile against a more visible helper on its base.
-    const concreteSource = emitJavaFileContent([concrete], "test", new JavaExprVisitor(), new Set(), [], [concrete]);
+    const concreteSource = emitJavaFileContent(
+      [concrete],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+      [],
+      [concrete],
+    );
     assert.match(concreteSource, /protected Map<String, Object> rawPayload;/);
-    assert.match(concreteSource, /protected static Map<String, Object> cloneRawMap\(/);
+    assert.match(
+      concreteSource,
+      /protected static Map<String, Object> cloneRawMap\(/,
+    );
   });
 
   describe("Java generated tests", () => {
     it("preserves raw multiline strings for Java literal rendering", () => {
-      assert.equal(javaTestOptions.escapeString("some \npersonal"), "some \npersonal");
+      assert.equal(
+        javaTestOptions.escapeString("some \npersonal"),
+        "some \npersonal",
+      );
     });
 
     it("asserts named map/list shorthand and expanded collection items", () => {
@@ -394,7 +531,10 @@ describe("Java emitter runtime semantics", () => {
 
       const container = new TypeNode({ name: "Tool" } as Model, "");
       container.typeName = { namespace: "Test", name: "Tool" };
-      const bindings = new PropertyNode({ name: "bindings" } as ModelProperty, "");
+      const bindings = new PropertyNode(
+        { name: "bindings" } as ModelProperty,
+        "",
+      );
       bindings.typeName = item.typeName;
       bindings.type = item;
       bindings.isCollection = true;
@@ -405,31 +545,60 @@ describe("Java emitter runtime semantics", () => {
         node: container,
         isAbstract: false,
         package: "test",
-        examples: [{
-          sample: {
-            bindings: {
-              alpha: "text",
-              beta: 2.5,
-              gamma: { value: "expanded", weight: 3 },
+        examples: [
+          {
+            sample: {
+              bindings: {
+                alpha: "text",
+                beta: 2.5,
+                gamma: { value: "expanded", weight: 3 },
+              },
             },
+            json: ["{}"],
+            yaml: ["{}"],
+            validations: [],
           },
-          json: ["{}"],
-          yaml: ["{}"],
-          validations: [],
-        }],
+        ],
         coercions: [],
         factories: [],
       });
 
-      assert.match(source, /assertEquals\(3, instance1\.bindings\.size\(\), "Expected bindings size"\);/);
-      assert.match(source, /Binding instance1Bindings0Entry = instance1\.bindings\.stream\(\)\.filter\(item -> "alpha"\.equals\(item\.name\)\)/);
-      assert.match(source, /assertEquals\("alpha", instance1Bindings0Entry\.name, "Expected bindings\.alpha name"\);/);
-      assert.match(source, /assertEquals\("text", instance1Bindings0Entry\.value, "Expected bindings\.alpha\.value"\);/);
-      assert.match(source, /Binding instance1Bindings1Entry = instance1\.bindings\.stream\(\)\.filter\(item -> "beta"\.equals\(item\.name\)\)/);
-      assert.match(source, /assertEquals\(2\.5, instance1Bindings1Entry\.weight, "Expected bindings\.beta\.weight"\);/);
-      assert.match(source, /Binding instance1Bindings2Entry = instance1\.bindings\.stream\(\)\.filter\(item -> "gamma"\.equals\(item\.name\)\)/);
-      assert.match(source, /assertEquals\("expanded", instance1Bindings2Entry\.value, "Expected instance1Bindings2Entry\.value"\);/);
-      assert.match(source, /assertEquals\(3, instance1Bindings2Entry\.weight, "Expected instance1Bindings2Entry\.weight"\);/);
+      assert.match(
+        source,
+        /assertEquals\(3, instance1\.bindings\.size\(\), "Expected bindings size"\);/,
+      );
+      assert.match(
+        source,
+        /Binding instance1Bindings0Entry = instance1\.bindings\.stream\(\)\.filter\(item -> "alpha"\.equals\(item\.name\)\)/,
+      );
+      assert.match(
+        source,
+        /assertEquals\("alpha", instance1Bindings0Entry\.name, "Expected bindings\.alpha name"\);/,
+      );
+      assert.match(
+        source,
+        /assertEquals\("text", instance1Bindings0Entry\.value, "Expected bindings\.alpha\.value"\);/,
+      );
+      assert.match(
+        source,
+        /Binding instance1Bindings1Entry = instance1\.bindings\.stream\(\)\.filter\(item -> "beta"\.equals\(item\.name\)\)/,
+      );
+      assert.match(
+        source,
+        /assertEquals\(2\.5, instance1Bindings1Entry\.weight, "Expected bindings\.beta\.weight"\);/,
+      );
+      assert.match(
+        source,
+        /Binding instance1Bindings2Entry = instance1\.bindings\.stream\(\)\.filter\(item -> "gamma"\.equals\(item\.name\)\)/,
+      );
+      assert.match(
+        source,
+        /assertEquals\("expanded", instance1Bindings2Entry\.value, "Expected instance1Bindings2Entry\.value"\);/,
+      );
+      assert.match(
+        source,
+        /assertEquals\(3, instance1Bindings2Entry\.weight, "Expected instance1Bindings2Entry\.weight"\);/,
+      );
     });
 
     it("emits YAML control-character roundtrip assertions", () => {
@@ -440,12 +609,14 @@ describe("Java emitter runtime semantics", () => {
         node,
         isAbstract: false,
         package: "test",
-        examples: [{
-          sample: {},
-          json: ["{}"],
-          yaml: ["{}"],
-          validations: [],
-        }],
+        examples: [
+          {
+            sample: {},
+            json: ["{}"],
+            yaml: ["{}"],
+            validations: [],
+          },
+        ],
         coercions: [],
         factories: [],
       });
@@ -462,7 +633,10 @@ describe("Java emitter runtime semantics", () => {
     it("escapes all YAML control characters and rejects unsupported escape sequences", () => {
       const source = emitJavaYaml("test");
 
-      assert.match(source, /result\.append\(String\.format\("\\\\u%04x", \(int\) current\)\)/);
+      assert.match(
+        source,
+        /result\.append\(String\.format\("\\\\u%04x", \(int\) current\)\)/,
+      );
       assert.match(source, /case 'b' -> result\.append\('\\b'\);/);
       assert.match(source, /case 'f' -> result\.append\('\\f'\);/);
       assert.match(source, /case 'u' -> \{/);
@@ -495,17 +669,22 @@ describe("Java emitter runtime semantics", () => {
         node: container,
         isAbstract: false,
         package: "test",
-        examples: [{
-          sample: { nested: { kind: "string" } },
-          json: ["{}"],
-          yaml: ["{}"],
-          validations: [],
-        }],
+        examples: [
+          {
+            sample: { nested: { kind: "string" } },
+            json: ["{}"],
+            yaml: ["{}"],
+            validations: [],
+          },
+        ],
         coercions: [],
         factories: [],
       });
 
-      assert.match(source, /StringProperty instance1NestedValue = \(StringProperty\) instance1\.nested;/);
+      assert.match(
+        source,
+        /StringProperty instance1NestedValue = \(StringProperty\) instance1\.nested;/,
+      );
       assert.doesNotMatch(source, /StringProperty instance1\.nested/);
     });
 
@@ -522,7 +701,10 @@ describe("Java emitter runtime semantics", () => {
 
       const container = new TypeNode({ name: "Tool" } as Model, "");
       container.typeName = { namespace: "Test", name: "Tool" };
-      const approvalProp = new PropertyNode({ name: "approval" } as ModelProperty, "");
+      const approvalProp = new PropertyNode(
+        { name: "approval" } as ModelProperty,
+        "",
+      );
       approvalProp.name = "approval";
       approvalProp.typeName = approval.typeName;
       approvalProp.type = approval;
@@ -532,12 +714,14 @@ describe("Java emitter runtime semantics", () => {
         node: container,
         isAbstract: false,
         package: "test",
-        examples: [{
-          sample: { approval: { kind: "always" } },
-          json: ["{}"],
-          yaml: ["{}"],
-          validations: [],
-        }],
+        examples: [
+          {
+            sample: { approval: { kind: "always" } },
+            json: ["{}"],
+            yaml: ["{}"],
+            validations: [],
+          },
+        ],
         coercions: [],
         factories: [],
       });
@@ -559,14 +743,20 @@ describe("Java emitter runtime semantics", () => {
 
       const template = new TypeNode({ name: "Template" } as Model, "");
       template.typeName = { namespace: "Test", name: "Template" };
-      const formatProp = new PropertyNode({ name: "format" } as ModelProperty, "");
+      const formatProp = new PropertyNode(
+        { name: "format" } as ModelProperty,
+        "",
+      );
       formatProp.typeName = format.typeName;
       formatProp.type = format;
       template.properties = [formatProp];
 
       const container = new TypeNode({ name: "Prompt" } as Model, "");
       container.typeName = { namespace: "Test", name: "Prompt" };
-      const templateProp = new PropertyNode({ name: "template" } as ModelProperty, "");
+      const templateProp = new PropertyNode(
+        { name: "template" } as ModelProperty,
+        "",
+      );
       templateProp.typeName = template.typeName;
       templateProp.type = template;
       container.properties = [templateProp];
@@ -575,12 +765,14 @@ describe("Java emitter runtime semantics", () => {
         node: container,
         isAbstract: false,
         package: "test",
-        examples: [{
-          sample: { template: { format: "mustache" } },
-          json: ["{}"],
-          yaml: ["{}"],
-          validations: [],
-        }],
+        examples: [
+          {
+            sample: { template: { format: "mustache" } },
+            json: ["{}"],
+            yaml: ["{}"],
+            validations: [],
+          },
+        ],
         coercions: [],
         factories: [],
       });
@@ -589,7 +781,10 @@ describe("Java emitter runtime semantics", () => {
         source,
         /assertEquals\("mustache", instance1\.template\.format\.kind, "Expected format\.kind"\);/,
       );
-      assert.doesNotMatch(source, /assertEquals\("mustache", instance1\.template\.format,/);
+      assert.doesNotMatch(
+        source,
+        /assertEquals\("mustache", instance1\.template\.format,/,
+      );
     });
 
     it("keeps polymorphic discriminator assertions as raw strings", () => {
@@ -603,7 +798,10 @@ describe("Java emitter runtime semantics", () => {
       baseKind.allowedValues = ["string", "number"];
       base.properties = [baseKind];
 
-      const stringProperty = new TypeNode({ name: "StringProperty" } as Model, "");
+      const stringProperty = new TypeNode(
+        { name: "StringProperty" } as Model,
+        "",
+      );
       stringProperty.typeName = { namespace: "Test", name: "StringProperty" };
       const childKind = new PropertyNode({ name: "kind" } as ModelProperty, "");
       childKind.typeName = { namespace: "TypeSpec", name: "string" };
@@ -611,7 +809,10 @@ describe("Java emitter runtime semantics", () => {
       childKind.enumName = "simpleTypes";
       childKind.allowedValues = ["string", "number"];
       childKind.defaultValue = "string";
-      const priority = new PropertyNode({ name: "priority" } as ModelProperty, "");
+      const priority = new PropertyNode(
+        { name: "priority" } as ModelProperty,
+        "",
+      );
       priority.typeName = { namespace: "TypeSpec", name: "string" };
       priority.isScalar = true;
       priority.enumName = "priority";
@@ -622,7 +823,10 @@ describe("Java emitter runtime semantics", () => {
 
       const container = new TypeNode({ name: "ObjectProperty" } as Model, "");
       container.typeName = { namespace: "Test", name: "ObjectProperty" };
-      const properties = new PropertyNode({ name: "properties" } as ModelProperty, "");
+      const properties = new PropertyNode(
+        { name: "properties" } as ModelProperty,
+        "",
+      );
       properties.typeName = base.typeName;
       properties.type = base;
       properties.isCollection = true;
@@ -632,19 +836,27 @@ describe("Java emitter runtime semantics", () => {
         node: container,
         isAbstract: false,
         package: "test",
-        examples: [{
-          sample: { properties: [{ kind: "string", priority: "normal" }] },
-          json: ["{}"],
-          yaml: ["{}"],
-          validations: [],
-        }],
+        examples: [
+          {
+            sample: { properties: [{ kind: "string", priority: "normal" }] },
+            json: ["{}"],
+            yaml: ["{}"],
+            validations: [],
+          },
+        ],
         coercions: [],
         factories: [],
       });
 
-      assert.match(source, /assertEquals\("string", instance1Properties0Value\.kind, "Expected kind"\);/);
+      assert.match(
+        source,
+        /assertEquals\("string", instance1Properties0Value\.kind, "Expected kind"\);/,
+      );
       assert.doesNotMatch(source, /SimpleTypes\.fromValue\("string"\)/);
-      assert.match(source, /assertEquals\(Priority\.fromValue\("normal"\), instance1Properties0Value\.priority, "Expected priority"\);/);
+      assert.match(
+        source,
+        /assertEquals\(Priority\.fromValue\("normal"\), instance1Properties0Value\.priority, "Expected priority"\);/,
+      );
     });
   });
 
@@ -652,24 +864,37 @@ describe("Java emitter runtime semantics", () => {
     it("delegates generated model methods to a hand-editable helper", () => {
       const decl = typeDecl([]);
       decl.typeName = { namespace: "Test", name: "Message" };
-      decl.methods = [{
-        name: "text",
-        returns: "string",
-        description: "Render message text.",
-        params: { prefix: "string" },
-        optional: false,
-        sync: true,
-      }];
+      decl.methods = [
+        {
+          name: "text",
+          returns: "string",
+          description: "Render message text.",
+          params: { prefix: "string" },
+          optional: false,
+          sync: true,
+        },
+      ];
 
-      const modelSource = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+      const modelSource = emitJavaFileContent(
+        [decl],
+        "test",
+        new JavaExprVisitor(),
+        new Set(),
+      );
       const helper = emitJavaMethodHelper(decl, "test");
 
       assert.match(modelSource, /return MessageMethods\.text\(this, prefix\);/);
       assert.ok(helper);
       assert.equal(helper.filename, "MessageMethods.java");
       assert.match(helper.source, /^\/\/ <typra-editable-seam>\n/);
-      assert.match(helper.source, /Typra editable seam\. This file is created once and is safe to edit\./);
-      assert.match(helper.source, /public static String text\(Message self, String prefix\)/);
+      assert.match(
+        helper.source,
+        /Typra editable seam\. This file is created once and is safe to edit\./,
+      );
+      assert.match(
+        helper.source,
+        /public static String text\(Message self, String prefix\)/,
+      );
       assert.match(helper.source, /Implement Message\.text in MessageMethods/);
       assert.doesNotMatch(helper.source, /Code generated|auto-generated/);
     });
@@ -692,26 +917,34 @@ describe("Java emitter runtime semantics", () => {
 
       assert.ok(migrated);
       assert.match(migrated, /^\/\/ <typra-editable-seam>\n/);
-      assert.match(migrated, /Typra editable seam\. This file is created once and is safe to edit\./);
+      assert.match(
+        migrated,
+        /Typra editable seam\. This file is created once and is safe to edit\./,
+      );
       // The hand-written body must survive migration untouched.
       assert.match(migrated, /return prefix \+ self\.content;/);
       assert.ok(migrated.endsWith(legacy));
     });
 
     it("leaves already-marked seams untouched and is idempotent", () => {
-      const marked = emitJavaMethodHelper((() => {
-        const decl = typeDecl([]);
-        decl.typeName = { namespace: "Test", name: "Message" };
-        decl.methods = [{
-          name: "text",
-          returns: "string",
-          description: "Render message text.",
-          params: {},
-          optional: false,
-          sync: true,
-        }];
-        return decl;
-      })(), "test");
+      const marked = emitJavaMethodHelper(
+        (() => {
+          const decl = typeDecl([]);
+          decl.typeName = { namespace: "Test", name: "Message" };
+          decl.methods = [
+            {
+              name: "text",
+              returns: "string",
+              description: "Render message text.",
+              params: {},
+              optional: false,
+              sync: true,
+            },
+          ];
+          return decl;
+        })(),
+        "test",
+      );
 
       assert.ok(marked);
       assert.equal(ensureJavaEditableSeamMarker(marked.source), null);
@@ -749,7 +982,10 @@ describe("Java emitter runtime semantics", () => {
       ].join("\n");
 
       const migrated = ensureJavaEditableSeamMarker(impostor);
-      assert.ok(migrated, "a marker inside a string literal must not count as a seam header");
+      assert.ok(
+        migrated,
+        "a marker inside a string literal must not count as a seam header",
+      );
       assert.match(migrated, /^\/\/ <typra-editable-seam>\n/);
       assert.equal(ensureJavaEditableSeamMarker(migrated), null);
     });
@@ -759,17 +995,27 @@ describe("Java emitter runtime semantics", () => {
       base.typeName = { namespace: "Test", name: "Tool" };
       base.polymorphicDispatch = {
         discriminatorField: "kind",
-        variants: [{
-          value: "FunctionTool",
-          typeName: { namespace: "Test", name: "FunctionTool" },
-        }],
+        variants: [
+          {
+            value: "FunctionTool",
+            typeName: { namespace: "Test", name: "FunctionTool" },
+          },
+        ],
         defaultVariant: null,
         isAbstract: true,
         isClosed: true,
       };
 
-      const source = emitJavaFileContent([base], "test", new JavaExprVisitor(), new Set(["Tool"]));
-      assert.match(source, /discriminator instanceof String discriminatorString/);
+      const source = emitJavaFileContent(
+        [base],
+        "test",
+        new JavaExprVisitor(),
+        new Set(["Tool"]),
+      );
+      assert.match(
+        source,
+        /discriminator instanceof String discriminatorString/,
+      );
       assert.match(source, /switch \(discriminatorString\)/);
       assert.match(source, /case "FunctionTool":/);
       assert.doesNotMatch(source, /toLowerCase\(java\.util\.Locale\.ROOT\)/);
@@ -785,10 +1031,12 @@ describe("Java emitter runtime semantics", () => {
       addAssignments(base);
       base.polymorphicDispatch = {
         discriminatorField: "kind",
-        variants: [{
-          value: "custom",
-          typeName: { namespace: "Test", name: "CustomConnection" },
-        }],
+        variants: [
+          {
+            value: "custom",
+            typeName: { namespace: "Test", name: "CustomConnection" },
+          },
+        ],
         defaultVariant: {
           typeName: base.typeName,
           isSelfReference: true,
@@ -797,30 +1045,48 @@ describe("Java emitter runtime semantics", () => {
         isClosed: false,
       };
 
-      const source = emitJavaFileContent([base], "test", new JavaExprVisitor(), new Set(["Connection"]));
+      const source = emitJavaFileContent(
+        [base],
+        "test",
+        new JavaExprVisitor(),
+        new Set(["Connection"]),
+      );
 
       assert.match(source, /protected Map<String, Object> rawPayload;/);
       assert.match(source, /result\.rawPayload = cloneRawMap\(map\);/);
       assert.match(source, /result\.rawPayload\.remove\("kind"\);/);
       assert.match(source, /result\.rawPayload\.remove\("name"\);/);
-      assert.match(source, /obj\.rawPayload == null \? new LinkedHashMap<>\(\) : cloneRawMap\(obj\.rawPayload\)/);
-      assert.match(source, /if \(value instanceof Map<\?, \?> map\) return cloneRawMap\(map\);/);
+      assert.match(
+        source,
+        /obj\.rawPayload == null \? new LinkedHashMap<>\(\) : cloneRawMap\(obj\.rawPayload\)/,
+      );
+      assert.match(
+        source,
+        /if \(value instanceof Map<\?, \?> map\) return cloneRawMap\(map\);/,
+      );
       assert.match(source, /if \(value instanceof Iterable<\?> values\)/);
     });
 
     it("delegates void methods without returning a value", () => {
       const decl = typeDecl([]);
       decl.typeName = { namespace: "Test", name: "Message" };
-      decl.methods = [{
-        name: "clear",
-        returns: "void",
-        description: "Clear the message.",
-        params: {},
-        optional: false,
-        sync: true,
-      }];
+      decl.methods = [
+        {
+          name: "clear",
+          returns: "void",
+          description: "Clear the message.",
+          params: {},
+          optional: false,
+          sync: true,
+        },
+      ];
 
-      const modelSource = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+      const modelSource = emitJavaFileContent(
+        [decl],
+        "test",
+        new JavaExprVisitor(),
+        new Set(),
+      );
       assert.match(modelSource, /MessageMethods\.clear\(this\);/);
       assert.doesNotMatch(modelSource, /return MessageMethods\.clear/);
     });
@@ -829,14 +1095,16 @@ describe("Java emitter runtime semantics", () => {
       const decl = typeDecl([]);
       decl.typeName = { namespace: "Test", name: "MessageSink" };
       decl.isProtocol = true;
-      decl.methods = [{
-        name: "emit",
-        returns: "void",
-        description: "Emit a message.",
-        params: { value: "string" },
-        optional: false,
-        sync: true,
-      }];
+      decl.methods = [
+        {
+          name: "emit",
+          returns: "void",
+          description: "Emit a message.",
+          params: { value: "string" },
+          optional: false,
+          sync: true,
+        },
+      ];
 
       assert.equal(emitJavaMethodHelper(decl, "test"), null);
     });
@@ -864,9 +1132,21 @@ describe("Java emitter runtime semantics", () => {
       kind: "construct",
       typeName: model.typeName,
       fields: [
-        { propertyName: "mode", value: { kind: "string", value: "fast" }, isOptional: false },
-        { propertyName: "count", value: { kind: "number", value: 1 }, isOptional: false },
-        { propertyName: "ratio", value: { kind: "number", value: 1 }, isOptional: false },
+        {
+          propertyName: "mode",
+          value: { kind: "string", value: "fast" },
+          isOptional: false,
+        },
+        {
+          propertyName: "count",
+          value: { kind: "number", value: 1 },
+          isOptional: false,
+        },
+        {
+          propertyName: "ratio",
+          value: { kind: "number", value: 1 },
+          isOptional: false,
+        },
       ],
     });
 
@@ -890,8 +1170,16 @@ describe("Java emitter runtime semantics", () => {
     });
     addAssignments(decl);
 
-    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
-    assert.match(source, /result\.mode = FactoryMode\.fromValue\(String\.valueOf\(data\)\)/);
+    const source = emitJavaFileContent(
+      [decl],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+    );
+    assert.match(
+      source,
+      /result\.mode = FactoryMode\.fromValue\(String\.valueOf\(data\)\)/,
+    );
     assert.match(source, /public Long count = 1L;/);
     assert.match(source, /public Double ratio = 1\.0d;/);
   });
@@ -935,14 +1223,31 @@ describe("Java emitter runtime semantics", () => {
       },
     ];
 
-    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
-    const integralGuard = "data instanceof Integer || data instanceof Long || data instanceof Short || data instanceof Byte";
+    const source = emitJavaFileContent(
+      [decl],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+    );
+    const integralGuard =
+      "data instanceof Integer || data instanceof Long || data instanceof Short || data instanceof Byte";
     assert.match(source, /if \(data instanceof String\)/);
     assert.match(source, /if \(data instanceof Boolean\)/);
-    assert.match(source, new RegExp(`if \\(\\(${integralGuard.replace(/\|\|/g, "\\|\\|")}\\)\\)`));
-    assert.match(source, /result\.kind = "integer"[\s\S]*result\.value = \(data instanceof Number n \? n\.intValue\(\)/);
-    assert.match(source, /result\.kind = "float"[\s\S]*result\.value = \(data instanceof Number n \? n\.floatValue\(\)/);
-    assert.ok(source.indexOf(integralGuard) < source.indexOf("data instanceof Number"));
+    assert.match(
+      source,
+      new RegExp(`if \\(\\(${integralGuard.replace(/\|\|/g, "\\|\\|")}\\)\\)`),
+    );
+    assert.match(
+      source,
+      /result\.kind = "integer"[\s\S]*result\.value = \(data instanceof Number n \? n\.intValue\(\)/,
+    );
+    assert.match(
+      source,
+      /result\.kind = "float"[\s\S]*result\.value = \(data instanceof Number n \? n\.floatValue\(\)/,
+    );
+    assert.ok(
+      source.indexOf(integralGuard) < source.indexOf("data instanceof Number"),
+    );
     assert.equal(source.match(/if \(data instanceof Number\)/g)?.length, 1);
   });
 
@@ -955,7 +1260,7 @@ describe("Java emitter runtime semantics", () => {
       ["floating-point", ["float32", "float64"]],
     ] as const) {
       const decl = typeDecl([kind, value]);
-      decl.load.coercions = scalarTypes.map(scalarType => ({
+      decl.load.coercions = scalarTypes.map((scalarType) => ({
         scalarType,
         assignments: [
           { fieldName: "kind", isInput: false, literalValue: scalarType },
@@ -965,7 +1270,8 @@ describe("Java emitter runtime semantics", () => {
       }));
 
       assert.throws(
-        () => emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set()),
+        () =>
+          emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set()),
         new RegExp(`cannot distinguish multiple ${family} coercions`),
       );
     }
@@ -988,19 +1294,46 @@ describe("Java emitter runtime semantics", () => {
       examples: [],
       coercions: [
         { title: "integer", scalarType: "int32", value: "7", validations: [] },
-        { title: "float", scalarType: "float32", value: "3.5", validations: [] },
-        { title: "boolean", scalarType: "boolean", value: "true", validations: [] },
-        { title: "string", scalarType: "string", value: "\"hello\"", validations: [] },
+        {
+          title: "float",
+          scalarType: "float32",
+          value: "3.5",
+          validations: [],
+        },
+        {
+          title: "boolean",
+          scalarType: "boolean",
+          value: "true",
+          validations: [],
+        },
+        {
+          title: "string",
+          scalarType: "string",
+          value: '"hello"',
+          validations: [],
+        },
       ],
       factories: [],
     });
 
     assert.match(source, /GeneratedExamples\.load\(42, new LoadContext\(\)\)/);
     assert.match(source, /GeneratedExamples\.load\(42L, new LoadContext\(\)\)/);
-    assert.match(source, /GeneratedExamples\.load\(3\.14, new LoadContext\(\)\)/);
-    assert.match(source, /GeneratedExamples\.load\(3\.14f, new LoadContext\(\)\)/);
-    assert.match(source, /GeneratedExamples\.load\(true, new LoadContext\(\)\)/);
-    assert.match(source, /GeneratedExamples\.load\("hello", new LoadContext\(\)\)/);
+    assert.match(
+      source,
+      /GeneratedExamples\.load\(3\.14, new LoadContext\(\)\)/,
+    );
+    assert.match(
+      source,
+      /GeneratedExamples\.load\(3\.14f, new LoadContext\(\)\)/,
+    );
+    assert.match(
+      source,
+      /GeneratedExamples\.load\(true, new LoadContext\(\)\)/,
+    );
+    assert.match(
+      source,
+      /GeneratedExamples\.load\("hello", new LoadContext\(\)\)/,
+    );
     assert.match(source, /GeneratedExamples\.fromJson\(/);
     assert.match(source, /GeneratedExamples\.fromYaml\(/);
   });
@@ -1022,10 +1355,21 @@ describe("Java emitter runtime semantics", () => {
     const decl = typeDecl([optionalItems, requiredMode, requiredModes]);
     addAssignments(decl);
 
-    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
+    const source = emitJavaFileContent(
+      [decl],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+    );
     assert.match(source, /public List<String> items = null;/);
-    assert.match(source, /public ApprovalMode mode = ApprovalMode\.fromValue\("always"\);/);
-    assert.match(source, /public List<ApprovalMode> modes = new ArrayList<>\(\);/);
+    assert.match(
+      source,
+      /public ApprovalMode mode = ApprovalMode\.fromValue\("always"\);/,
+    );
+    assert.match(
+      source,
+      /public List<ApprovalMode> modes = new ArrayList<>\(\);/,
+    );
   });
 
   it("loads and saves explicit named collection maps, lists, and shorthand", () => {
@@ -1034,23 +1378,54 @@ describe("Java emitter runtime semantics", () => {
       category: { kind: "collection_complex", typeName: "Binding" },
     });
     const decl = typeDecl([bindings]);
-    decl.collectionHelpers = [{
-      propertyName: "bindings",
-      elementTypeName: bindings.typeName,
-      innerFields: ["source"],
-      hasNameProperty: true,
-    }];
+    decl.collectionHelpers = [
+      {
+        propertyName: "bindings",
+        elementTypeName: bindings.typeName,
+        innerFields: ["source"],
+        hasNameProperty: true,
+      },
+    ];
     addAssignments(decl);
 
-    const source = emitJavaFileContent([decl], "test", new JavaExprVisitor(), new Set());
-    assert.match(source, /map\.get\("bindings"\) instanceof Map<\?, \?> values/);
-    assert.match(source, /if \(entry\.getValue\(\) instanceof Iterable<\?>\) \{[\s\S]*invalid named collection entry category array/);
-    assert.match(source, /itemData\.put\("name", String\.valueOf\(entry\.getKey\(\)\)\);\s+Binding item = Binding\.load\(itemData, ctx\.at\("bindings"\)\.at\(String\.valueOf\(entry\.getKey\(\)\)\)\);/);
-    assert.match(source, /else if \(map\.get\("bindings"\) instanceof Iterable<\?> values\)/);
-    assert.match(source, /String itemName = item\.name;\s+itemNames\.add\(itemName\);\s+if \(itemName == null \|\| itemName\.isEmpty\(\) \|\| !names\.add\(itemName\)\) canUseObject = false;/);
-    assert.match(source, /if \("array"\.equals\(ctx\.collectionFormat\) \|\| !canUseObject\)/);
-    assert.match(source, /String itemName = itemNames\.get\(index\);\s+itemData\.remove\("name"\);/);
-    assert.match(source, /ctx\.useShorthand && Binding\.SHORTHAND_PROPERTY != null/);
+    const source = emitJavaFileContent(
+      [decl],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+    );
+    assert.match(
+      source,
+      /map\.get\("bindings"\) instanceof Map<\?, \?> values/,
+    );
+    assert.match(
+      source,
+      /if \(entry\.getValue\(\) instanceof Iterable<\?>\) \{[\s\S]*invalid named collection entry category array/,
+    );
+    assert.match(
+      source,
+      /itemData\.put\("name", String\.valueOf\(entry\.getKey\(\)\)\);\s+Binding item = Binding\.load\(itemData, ctx\.at\("bindings"\)\.at\(String\.valueOf\(entry\.getKey\(\)\)\)\);/,
+    );
+    assert.match(
+      source,
+      /else if \(map\.get\("bindings"\) instanceof Iterable<\?> values\)/,
+    );
+    assert.match(
+      source,
+      /String itemName = item\.name;\s+itemNames\.add\(itemName\);\s+if \(itemName == null \|\| itemName\.isEmpty\(\) \|\| !names\.add\(itemName\)\) canUseObject = false;/,
+    );
+    assert.match(
+      source,
+      /if \("array"\.equals\(ctx\.collectionFormat\) \|\| !canUseObject\)/,
+    );
+    assert.match(
+      source,
+      /String itemName = itemNames\.get\(index\);\s+itemData\.remove\("name"\);/,
+    );
+    assert.match(
+      source,
+      /ctx\.useShorthand && Binding\.SHORTHAND_PROPERTY != null/,
+    );
   });
 
   it("applies postSave once after the complete inheritance chain", () => {
@@ -1063,9 +1438,22 @@ describe("Java emitter runtime semantics", () => {
     child.save.hasBase = true;
     addAssignments(child);
 
-    const source = emitJavaFileContent([child], "test", new JavaExprVisitor(), new Set(), [], [base, child]);
-    assert.match(source, /obj\.saveFields\(result, ctx\);\s+return ctx\.processDict\(result\);/);
-    assert.match(source, /protected void saveFields\(Map<String, Object> result, SaveContext ctx\) \{\s+super\.saveFields\(result, ctx\);/);
+    const source = emitJavaFileContent(
+      [child],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+      [],
+      [base, child],
+    );
+    assert.match(
+      source,
+      /obj\.saveFields\(result, ctx\);\s+return ctx\.processDict\(result\);/,
+    );
+    assert.match(
+      source,
+      /protected void saveFields\(Map<String, Object> result, SaveContext ctx\) \{\s+super\.saveFields\(result, ctx\);/,
+    );
     assert.doesNotMatch(source, /super\.save\(ctx\)/);
     assert.equal(source.match(/processDict\(result\)/g)?.length, 1);
   });
@@ -1074,7 +1462,10 @@ describe("Java emitter runtime semantics", () => {
     const source = emitJavaSaveContext("test");
     assert.match(source, /public final String collectionFormat;/);
     assert.match(source, /public final boolean useShorthand;/);
-    assert.match(source, /public SaveContext\(Function<Object, Object> preSave, Function<Map<String, Object>, Map<String, Object>> postSave\)/);
+    assert.match(
+      source,
+      /public SaveContext\(Function<Object, Object> preSave, Function<Map<String, Object>, Map<String, Object>> postSave\)/,
+    );
     assert.match(source, /this\(preSave, postSave, "object", true\);/);
   });
 });
@@ -1094,7 +1485,10 @@ describe("Java provider wire mapping", () => {
           category: { kind: "scalar", scalarType: "string" },
           isOptional: true,
           parentTypeName: decl.typeName.name,
-          wireNames: { openai: "max_completion_tokens", anthropic: "max_tokens" },
+          wireNames: {
+            openai: "max_completion_tokens",
+            anthropic: "max_tokens",
+          },
         },
         {
           fieldName: "temperature",
@@ -1111,20 +1505,42 @@ describe("Java provider wire mapping", () => {
   it("omits fields the requested provider does not map", () => {
     // Every other backend keys emission on the provider having a mapping. Seeding wireName with
     // the schema field name leaked unmapped fields, including for a null or empty provider.
-    const source = emitJavaFileContent([wireDecl()], "test", new JavaExprVisitor(), new Set());
+    const source = emitJavaFileContent(
+      [wireDecl()],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+    );
 
     assert.match(source, /String wireName = null;/);
     assert.doesNotMatch(source, /String wireName = "temperature";/);
     assert.doesNotMatch(source, /boolean include/);
-    assert.match(source, /if \(wireName != null && this\.temperature != null\)/);
+    assert.match(
+      source,
+      /if \(wireName != null && this\.temperature != null\)/,
+    );
   });
 
   it("still emits fields the requested provider does map", () => {
     // Counterpart guard: omission must key on the missing mapping, not disable wire mapping.
-    const source = emitJavaFileContent([wireDecl()], "test", new JavaExprVisitor(), new Set());
+    const source = emitJavaFileContent(
+      [wireDecl()],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+    );
 
-    assert.match(source, /if \(target\.equals\("openai"\)\) \{ wireName = "max_completion_tokens";/);
-    assert.match(source, /if \(target\.equals\("anthropic"\)\) \{ wireName = "max_tokens";/);
-    assert.match(source, /if \(target\.equals\("openai"\)\) \{ wireName = "temperature";/);
+    assert.match(
+      source,
+      /if \(target\.equals\("openai"\)\) \{ wireName = "max_completion_tokens";/,
+    );
+    assert.match(
+      source,
+      /if \(target\.equals\("anthropic"\)\) \{ wireName = "max_tokens";/,
+    );
+    assert.match(
+      source,
+      /if \(target\.equals\("openai"\)\) \{ wireName = "temperature";/,
+    );
   });
 });

@@ -368,7 +368,9 @@ const PROPERTY_CORPUS_CASE_COUNT = Number.parseInt(
   10,
 );
 const propertyCorpus = buildFixtureRootPropertyCorpus();
-const propertyCorpusJsonLiteral = JSON.stringify(JSON.stringify(propertyCorpus));
+const propertyCorpusJsonLiteral = JSON.stringify(
+  JSON.stringify(propertyCorpus),
+);
 const conformancePropertyCases = propertyCorpus.map((entry) => ({
   id: entry.id,
   seed: entry.seed,
@@ -502,7 +504,10 @@ function normalizeConformanceValue(value) {
 }
 
 function buildFixtureRootPropertyCorpus() {
-  if (!Number.isSafeInteger(PROPERTY_CORPUS_CASE_COUNT) || PROPERTY_CORPUS_CASE_COUNT < 1) {
+  if (
+    !Number.isSafeInteger(PROPERTY_CORPUS_CASE_COUNT) ||
+    PROPERTY_CORPUS_CASE_COUNT < 1
+  ) {
     throw new Error(
       `Invalid TYPRA_PROPERTY_CASE_COUNT: ${process.env.TYPRA_PROPERTY_CASE_COUNT}`,
     );
@@ -567,7 +572,10 @@ function assertConformanceResult(target, rawOutput) {
     return;
   }
 
-  const propertyFailure = formatPropertyCaseFailure(conformanceExpected, actual);
+  const propertyFailure = formatPropertyCaseFailure(
+    conformanceExpected,
+    actual,
+  );
   fail(
     `Executable conformance for ${target} did not match canonical output.\nExpected: ${JSON.stringify(conformanceExpected)}\nActual: ${actualJson}` +
       (propertyFailure ? `\n${propertyFailure}` : ""),
@@ -982,7 +990,12 @@ function assertGeneratedStructuredLoadCoverage() {
     {
       target: "swift-codable",
       outputRoot: "generated/fixtures/swift-codable",
-      dir: path.join(generatedRoot, "swift-codable", "Tests", "TypraFixturesTests"),
+      dir: path.join(
+        generatedRoot,
+        "swift-codable",
+        "Tests",
+        "TypraFixturesTests",
+      ),
       testFile: (file) => file.endsWith("Tests.swift"),
       expectedTestPath: (_name, group, source) => {
         const moduleName = path.basename(source, ".swift");
@@ -995,7 +1008,8 @@ function assertGeneratedStructuredLoadCoverage() {
           `${pascalCase(moduleName)}Tests.swift`,
         );
       },
-      hasStructuredLoad: (content) => /func testJSONRoundTrip\d+\(\) throws/.test(content),
+      hasStructuredLoad: (content) =>
+        /func testJSONRoundTrip\d+\(\) throws/.test(content),
     },
     {
       target: "go",
@@ -1176,7 +1190,7 @@ function typeScriptTypeRoots(tscCli) {
 
 function runGeneratedTypeScriptCompileFor(targetDir, label) {
   const sourceDir = path.join(generatedRoot, targetDir);
-  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".ts"));
+  const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".ts"));
 
   if (sourceFiles.length === 0) {
     fail(`No generated ${label} files found to compile.`);
@@ -1229,8 +1243,11 @@ function runGeneratedTypeScriptCompileFor(targetDir, label) {
       stdio: "pipe",
     });
   } catch (error) {
-    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
-    fail(`Generated ${label} source and tests do not compile:\n${output || error.message}`);
+    const output =
+      `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(
+      `Generated ${label} source and tests do not compile:\n${output || error.message}`,
+    );
   } finally {
     for (const tempPath of [configPath, ambientPath]) {
       if (existsSync(tempPath)) {
@@ -1515,7 +1532,18 @@ function requirePythonRunner(label) {
   }
   return {
     command: "uv",
-    argsPrefix: ["run", "--python", "3.12", "--with", "pydantic", "--with", "pytest", "--with", "PyYAML", "python"],
+    argsPrefix: [
+      "run",
+      "--python",
+      "3.12",
+      "--with",
+      "pydantic",
+      "--with",
+      "pytest",
+      "--with",
+      "PyYAML",
+      "python",
+    ],
   };
 }
 
@@ -1761,12 +1789,16 @@ function runRustTests(target = "rust", packageName = "fixtures") {
     let output = "";
     let crashed = null;
     try {
-      output = execFileSync("cargo", useSerdeFeature ? ["test", "--features", "serde"] : ["test"], {
-        cwd: sourceDir,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, CARGO_TARGET_DIR: targetDir },
-      });
+      output = execFileSync(
+        "cargo",
+        useSerdeFeature ? ["test", "--features", "serde"] : ["test"],
+        {
+          cwd: sourceDir,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+        },
+      );
     } catch (error) {
       output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`;
       crashed = error;
@@ -2991,7 +3023,13 @@ function runTypeScriptExecutableConformance() {
 
 function runTypeScriptZodExecutableConformance() {
   const sourceDir = path.join(generatedRoot, "typescript-zod");
-  const sourceFiles = walkFiles(sourceDir, file => file.endsWith(".ts") && !file.includes(`${path.sep}.typra-conformance${path.sep}`) && !file.includes(`${path.sep}tests${path.sep}`));
+  const sourceFiles = walkFiles(
+    sourceDir,
+    (file) =>
+      file.endsWith(".ts") &&
+      !file.includes(`${path.sep}.typra-conformance${path.sep}`) &&
+      !file.includes(`${path.sep}tests${path.sep}`),
+  );
   if (sourceFiles.length === 0) {
     fail("No generated TypeScript Zod files found for executable conformance.");
     return;
@@ -3002,66 +3040,91 @@ function runTypeScriptZodExecutableConformance() {
   const runnerPath = path.join(sourceDir, "conformance.validate.ts");
   const configPath = path.join(sourceDir, "tsconfig.conformance.json");
   const outDir = path.join(sourceDir, ".typra-conformance");
-  writeFileSync(runnerPath, [
-    'import { FixtureConnection, FixtureContent, FixtureRoot, FixtureToolbox, WireOptions } from "./index";',
-    "",
-    "function stable(value: unknown): string {",
-    "  if (Array.isArray(value)) return JSON.stringify(value.map(item => JSON.parse(stable(item))));",
-    "  if (value && typeof value === \"object\") {",
-    "    const result: Record<string, unknown> = {};",
-    "    for (const key of Object.keys(value as Record<string, unknown>).sort()) result[key] = (value as Record<string, unknown>)[key];",
-    "    for (const key of Object.keys(result)) result[key] = JSON.parse(stable(result[key]));",
-    "    return JSON.stringify(result);",
-    "  }",
-    "  return JSON.stringify(value);",
-    "}",
-    "function assertSame(label: string, actual: unknown, expected: unknown): void {",
-    "  const actualJson = stable(actual);",
-    "  const expectedJson = stable(expected);",
-    "  if (actualJson !== expectedJson) throw new Error(`${label} diverged\\nactual=${actualJson}\\nexpected=${expectedJson}`);",
-    "}",
-    "function assertSchemaAgrees<T extends { save(): Record<string, unknown> }>(label: string, model: { load(data: Record<string, unknown>): T; schema: { parse(data: unknown): Record<string, unknown> } }, input: Record<string, unknown>): void {",
-    "  const expected = model.load(input).save();",
-    "  const actual = model.schema.parse(input);",
-    "  assertSame(label, actual, expected);",
-    "}",
-    `assertSchemaAgrees("FixtureRoot", FixtureRoot, JSON.parse(${fixtureRootSampleJsonLiteral}));`,
-    `assertSchemaAgrees("FixtureContent", FixtureContent, ${JSON.stringify(imageContentSample)});`,
-    'assertSchemaAgrees("WireOptions", WireOptions, { maxOutputTokens: 256, temperature: 0.7 });',
-    'assertSchemaAgrees("FixtureConnection open unknown", FixtureConnection, { kind: "future-auth", name: "future", config: { nested: [1, null, { enabled: true }] }, nullable: null });',
-    'try { FixtureConnection.schema.parse({ kind: "custom", name: "claimed-known" }); throw new Error("open fallback accepted known custom connection without endpoint"); } catch (error) { const message = String(error); if (!message.includes("endpoint") && !message.includes("concrete schema")) throw error; }',
-    'try { FixtureContent.schema.parse({ kind: "video", value: "hello" }); throw new Error("closed discriminator Zod schema accepted an unknown content kind"); } catch (error) { const message = String(error); if (!message.includes("video") && !message.includes("discriminator")) throw error; }',
-    'try { FixtureToolbox.schema.parse({ tools: { custom: { kind: "vendor" } }, inheritedMapBindingTool: { kind: "function", name: "map", command: "run" }, inheritedListBindingTool: { kind: "function", name: "list", command: "run" } } as any); throw new Error("Zod schema accepted missing required CustomTool.connection"); } catch (error) { const message = String(error); if (!message.includes("tools.custom.connection") || !message.includes("missing required field")) throw error; }',
-    "console.log(JSON.stringify({ ok: true }));",
-    "",
-  ].join("\n"));
-  writeFileSync(configPath, JSON.stringify({
-    compilerOptions: {
-      target: "ES2022",
-      module: "commonjs",
-      moduleResolution: "node",
-      esModuleInterop: true,
-      skipLibCheck: true,
-      types: ["node"],
-      typeRoots: typeScriptTypeRoots(tscCli),
-      lib: ["ES2022"],
-      outDir,
-      rootDir: sourceDir,
-    },
-    files: [...sourceFiles, runnerPath],
-  }, null, 2));
+  writeFileSync(
+    runnerPath,
+    [
+      'import { FixtureConnection, FixtureContent, FixtureRoot, FixtureToolbox, WireOptions } from "./index";',
+      "",
+      "function stable(value: unknown): string {",
+      "  if (Array.isArray(value)) return JSON.stringify(value.map(item => JSON.parse(stable(item))));",
+      '  if (value && typeof value === "object") {',
+      "    const result: Record<string, unknown> = {};",
+      "    for (const key of Object.keys(value as Record<string, unknown>).sort()) result[key] = (value as Record<string, unknown>)[key];",
+      "    for (const key of Object.keys(result)) result[key] = JSON.parse(stable(result[key]));",
+      "    return JSON.stringify(result);",
+      "  }",
+      "  return JSON.stringify(value);",
+      "}",
+      "function assertSame(label: string, actual: unknown, expected: unknown): void {",
+      "  const actualJson = stable(actual);",
+      "  const expectedJson = stable(expected);",
+      "  if (actualJson !== expectedJson) throw new Error(`${label} diverged\\nactual=${actualJson}\\nexpected=${expectedJson}`);",
+      "}",
+      "function assertSchemaAgrees<T extends { save(): Record<string, unknown> }>(label: string, model: { load(data: Record<string, unknown>): T; schema: { parse(data: unknown): Record<string, unknown> } }, input: Record<string, unknown>): void {",
+      "  const expected = model.load(input).save();",
+      "  const actual = model.schema.parse(input);",
+      "  assertSame(label, actual, expected);",
+      "}",
+      `assertSchemaAgrees("FixtureRoot", FixtureRoot, JSON.parse(${fixtureRootSampleJsonLiteral}));`,
+      `assertSchemaAgrees("FixtureContent", FixtureContent, ${JSON.stringify(imageContentSample)});`,
+      'assertSchemaAgrees("WireOptions", WireOptions, { maxOutputTokens: 256, temperature: 0.7 });',
+      'assertSchemaAgrees("FixtureConnection open unknown", FixtureConnection, { kind: "future-auth", name: "future", config: { nested: [1, null, { enabled: true }] }, nullable: null });',
+      'try { FixtureConnection.schema.parse({ kind: "custom", name: "claimed-known" }); throw new Error("open fallback accepted known custom connection without endpoint"); } catch (error) { const message = String(error); if (!message.includes("endpoint") && !message.includes("concrete schema")) throw error; }',
+      'try { FixtureContent.schema.parse({ kind: "video", value: "hello" }); throw new Error("closed discriminator Zod schema accepted an unknown content kind"); } catch (error) { const message = String(error); if (!message.includes("video") && !message.includes("discriminator")) throw error; }',
+      'try { FixtureToolbox.schema.parse({ tools: { custom: { kind: "vendor" } }, inheritedMapBindingTool: { kind: "function", name: "map", command: "run" }, inheritedListBindingTool: { kind: "function", name: "list", command: "run" } } as any); throw new Error("Zod schema accepted missing required CustomTool.connection"); } catch (error) { const message = String(error); if (!message.includes("tools.custom.connection") || !message.includes("missing required field")) throw error; }',
+      "console.log(JSON.stringify({ ok: true }));",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: "ES2022",
+          module: "commonjs",
+          moduleResolution: "node",
+          esModuleInterop: true,
+          skipLibCheck: true,
+          types: ["node"],
+          typeRoots: typeScriptTypeRoots(tscCli),
+          lib: ["ES2022"],
+          outDir,
+          rootDir: sourceDir,
+        },
+        files: [...sourceFiles, runnerPath],
+      },
+      null,
+      2,
+    ),
+  );
 
   try {
-    execFileSync(process.execPath, [tscCli, "-p", configPath], { cwd: packageRoot, stdio: "pipe" });
-    writeFileSync(path.join(outDir, "package.json"), JSON.stringify({ type: "commonjs" }, null, 2));
-    const output = execFileSync(process.execPath, [path.join(outDir, "conformance.validate.js")], { cwd: outDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    execFileSync(process.execPath, [tscCli, "-p", configPath], {
+      cwd: packageRoot,
+      stdio: "pipe",
+    });
+    writeFileSync(
+      path.join(outDir, "package.json"),
+      JSON.stringify({ type: "commonjs" }, null, 2),
+    );
+    const output = execFileSync(
+      process.execPath,
+      [path.join(outDir, "conformance.validate.js")],
+      { cwd: outDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
     const result = JSON.parse(output);
     if (result.ok !== true) {
-      fail(`Generated TypeScript Zod executable conformance emitted an unexpected result: ${output}`);
+      fail(
+        `Generated TypeScript Zod executable conformance emitted an unexpected result: ${output}`,
+      );
     }
   } catch (error) {
-    const output = `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
-    fail(`Generated TypeScript Zod executable conformance failed:\n${output || error.message}`);
+    const output =
+      `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(
+      `Generated TypeScript Zod executable conformance failed:\n${output || error.message}`,
+    );
   } finally {
     for (const tempPath of [runnerPath, configPath]) {
       if (existsSync(tempPath)) {
@@ -3209,11 +3272,15 @@ function runPythonExecutableConformance(
   const runnerPath = path.join(validationRoot, `${target}-conformance.py`);
   writeFileSync(runnerPath, runner);
   try {
-    const output = execFileSync(python.command, [...python.argsPrefix, runnerPath], {
-      cwd: packageRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    }).trim();
+    const output = execFileSync(
+      python.command,
+      [...python.argsPrefix, runnerPath],
+      {
+        cwd: packageRoot,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    ).trim();
     assertConformanceResult(target, output);
   } catch (error) {
     const output =
@@ -3686,7 +3753,10 @@ function runGoExecutableConformance() {
   }
 }
 
-function runRustExecutableConformance(target = "rust", packageName = "fixtures") {
+function runRustExecutableConformance(
+  target = "rust",
+  packageName = "fixtures",
+) {
   const sourceDir = path.join(generatedRoot, target);
   const useSerdeFeature = target === "rust-serde";
   const cargoPath = path.join(sourceDir, "Cargo.toml");
@@ -3695,7 +3765,9 @@ function runRustExecutableConformance(target = "rust", packageName = "fixtures")
   const runnerPath = path.join(sourceDir, "conformance_validate.rs");
   const targetDir = mkdtempSync(path.join(tmpdir(), "typra-rust-conformance-"));
   if (!existsSync(sourceDir)) {
-    fail(`No generated ${target} Rust directory found for executable conformance.`);
+    fail(
+      `No generated ${target} Rust directory found for executable conformance.`,
+    );
     return;
   }
 
@@ -3739,15 +3811,15 @@ function runRustExecutableConformance(target = "rust", packageName = "fixtures")
       `    let property_cases: Vec<serde_json::Value> = serde_json::from_str(${propertyCorpusJsonLiteral}).unwrap();`,
       "    let property_outputs: Vec<serde_json::Value> = property_cases.iter().map(|entry| {",
       useSerdeFeature
-        ? "        let root: FixtureRoot = serde_json::from_value(entry[\"input\"].clone()).unwrap();"
-        : "        let root = FixtureRoot::load_from_value(&entry[\"input\"], &load_ctx);",
+        ? '        let root: FixtureRoot = serde_json::from_value(entry["input"].clone()).unwrap();'
+        : '        let root = FixtureRoot::load_from_value(&entry["input"], &load_ctx);',
       "        json!({",
-      "            \"id\": entry[\"id\"].clone(),",
-      "            \"seed\": entry[\"seed\"].clone(),",
-      "            \"caseId\": entry[\"caseId\"].clone(),",
+      '            "id": entry["id"].clone(),',
+      '            "seed": entry["seed"].clone(),',
+      '            "caseId": entry["caseId"].clone(),',
       useSerdeFeature
-        ? "            \"root\": serde_json::to_value(&root).unwrap()"
-        : "            \"root\": root.to_value(&save_ctx)",
+        ? '            "root": serde_json::to_value(&root).unwrap()'
+        : '            "root": root.to_value(&save_ctx)',
       "        })",
       "    }).collect();",
       useSerdeFeature
@@ -3820,12 +3892,12 @@ function runRustExecutableConformance(target = "rust", packageName = "fixtures")
       useSerdeFeature
         ? "    assert_eq!(serde_json::to_value(&known_connection).unwrap(), known_connection_input);"
         : "",
-      "    for invalid_connection_input in [json!({}), json!({\"kind\": \"\"}), json!({\"kind\": null}), json!({\"kind\": 42})] {",
+      '    for invalid_connection_input in [json!({}), json!({"kind": ""}), json!({"kind": null}), json!({"kind": 42})] {',
       useSerdeFeature
-        ? "        let invalid_connection_error = serde_json::from_value::<FixtureConnection>(invalid_connection_input.clone()).expect_err(\"serde invalid FixtureConnection discriminator\");"
-        : "        let invalid_connection_error = FixtureConnection::from_json(&invalid_connection_input.to_string(), &load_ctx).expect_err(\"invalid FixtureConnection discriminator\");",
+        ? '        let invalid_connection_error = serde_json::from_value::<FixtureConnection>(invalid_connection_input.clone()).expect_err("serde invalid FixtureConnection discriminator");'
+        : '        let invalid_connection_error = FixtureConnection::from_json(&invalid_connection_input.to_string(), &load_ctx).expect_err("invalid FixtureConnection discriminator");',
       "        let invalid_connection_message = invalid_connection_error.to_string();",
-      "        assert!(invalid_connection_message.contains(\"kind\") || invalid_connection_message.contains(\"discriminator\"), \"{invalid_connection_message}\");",
+      '        assert!(invalid_connection_message.contains("kind") || invalid_connection_message.contains("discriminator"), "{invalid_connection_message}");',
       "    }",
       // A named open-enum discriminator must round-trip an unrecognized kind losslessly.
       // (This is adjacent to issue #38 but does not reproduce it — see the fixture doc.)
@@ -3977,7 +4049,14 @@ function runRustExecutableConformance(target = "rust", packageName = "fixtures")
     const output = execFileSync(
       "cargo",
       useSerdeFeature
-        ? ["run", "--quiet", "--features", "serde", "--bin", "conformance_validate"]
+        ? [
+            "run",
+            "--quiet",
+            "--features",
+            "serde",
+            "--bin",
+            "conformance_validate",
+          ]
         : ["run", "--quiet", "--bin", "conformance_validate"],
       {
         cwd: sourceDir,
@@ -4178,13 +4257,13 @@ function runCSharpExecutableConformance() {
       "var propertyOutputs = new List<Dictionary<string, object?>>();",
       "foreach (var entry in propertyDocument.RootElement.EnumerateArray())",
       "{",
-      "    var propertyRoot = FixtureRoot.FromJson(entry.GetProperty(\"input\").GetRawText());",
+      '    var propertyRoot = FixtureRoot.FromJson(entry.GetProperty("input").GetRawText());',
       "    propertyOutputs.Add(new Dictionary<string, object?>",
       "    {",
-      "        [\"id\"] = entry.GetProperty(\"id\").GetString(),",
-      "        [\"seed\"] = entry.GetProperty(\"seed\").GetString(),",
-      "        [\"caseId\"] = entry.GetProperty(\"caseId\").GetString(),",
-      "        [\"root\"] = propertyRoot.Save(),",
+      '        ["id"] = entry.GetProperty("id").GetString(),',
+      '        ["seed"] = entry.GetProperty("seed").GetString(),',
+      '        ["caseId"] = entry.GetProperty("caseId").GetString(),',
+      '        ["root"] = propertyRoot.Save(),',
       "    });",
       "}",
       'if (root.Metadata is null) throw new InvalidOperationException("Record<unknown> metadata must load from the canonical conformance payload");',
@@ -4390,12 +4469,12 @@ function runJavaExecutableConformance() {
       "    List<Object> propertyOutputs = new java.util.ArrayList<>();",
       "    for (Object rawEntry : propertyCases) {",
       "      Map<String, Object> entry = (Map<String, Object>) rawEntry;",
-      "      FixtureRoot propertyRoot = FixtureRoot.load((Map<String, Object>) entry.get(\"input\"), new LoadContext());",
+      '      FixtureRoot propertyRoot = FixtureRoot.load((Map<String, Object>) entry.get("input"), new LoadContext());',
       "      Map<String, Object> propertyOutput = new LinkedHashMap<>();",
-      "      propertyOutput.put(\"id\", entry.get(\"id\"));",
-      "      propertyOutput.put(\"seed\", entry.get(\"seed\"));",
-      "      propertyOutput.put(\"caseId\", entry.get(\"caseId\"));",
-      "      propertyOutput.put(\"root\", propertyRoot.save(new SaveContext()));",
+      '      propertyOutput.put("id", entry.get("id"));',
+      '      propertyOutput.put("seed", entry.get("seed"));',
+      '      propertyOutput.put("caseId", entry.get("caseId"));',
+      '      propertyOutput.put("root", propertyRoot.save(new SaveContext()));',
       "      propertyOutputs.add(propertyOutput);",
       "    }",
       "    Map<String, Object> wireData = new LinkedHashMap<>();",
@@ -4658,7 +4737,11 @@ function swiftToolchainEnv() {
  * `runSwiftTests`. `swift test` interleaves its own progress output, so the payload is tagged with
  * a sentinel and extracted rather than read off the last line.
  */
-function runSwiftExecutableConformance(context = {}, targetDir = "swift", useCodable = false) {
+function runSwiftExecutableConformance(
+  context = {},
+  targetDir = "swift",
+  useCodable = false,
+) {
   const sourceDir = path.join(generatedRoot, targetDir);
   const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".swift"));
   if (sourceFiles.length === 0) {
@@ -4705,7 +4788,9 @@ final class ConformanceValidateTests: XCTestCase {
     ${useCodable ? "" : "return try FixtureRoot.load(data)"}
   }
 
-  ${useCodable ? `private func assertCodableMatchesTypra<T: TypraModel & Codable>(_ value: T, _ message: String) throws {
+  ${
+    useCodable
+      ? `private func assertCodableMatchesTypra<T: TypraModel & Codable>(_ value: T, _ message: String) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     let codableObject = try JSONSerialization.jsonObject(with: encoder.encode(value))
@@ -4713,10 +4798,12 @@ final class ConformanceValidateTests: XCTestCase {
     let codableJson = try TypraRuntime.jsonString(from: codableObject)
     let typraJson = try TypraRuntime.jsonString(from: typraObject)
     XCTAssertEqual(codableJson, typraJson, message)
-  }` : `private func assertCodableMatchesTypra(_ value: Any, _ message: String) throws {
+  }`
+      : `private func assertCodableMatchesTypra(_ value: Any, _ message: String) throws {
     _ = value
     _ = message
-  }`}
+  }`
+  }
 
   func testEmitsCanonicalConformancePayload() throws {
     let propertyCases = try JSONSerialization.jsonObject(with: Data(${propertyCorpusJsonLiteral}.utf8)) as! [[String: Any]]
@@ -4939,7 +5026,10 @@ function runExecutableConformance() {
       ["swift", runSwiftExecutableConformance],
       ["swift-codable", runSwiftCodableExecutableConformance],
     ]),
-    allowedSkips: { swift: TOOLCHAIN_UNAVAILABLE, "swift-codable": TOOLCHAIN_UNAVAILABLE },
+    allowedSkips: {
+      swift: TOOLCHAIN_UNAVAILABLE,
+      "swift-codable": TOOLCHAIN_UNAVAILABLE,
+    },
   });
   assertExecutableConformanceCoverage();
   assertExecutableConformanceAgreement();
@@ -4992,12 +5082,17 @@ function assertStaticFixtureCoverage() {
   assertIncludes(
     path.join("generated", "fixtures", "typescript-zod", "fixture-content.ts"),
     'import { z } from "zod";',
-    'static readonly wireSchema',
+    "static readonly wireSchema",
     'z.discriminatedUnion("kind"',
-    'static readonly schema',
+    "static readonly schema",
   );
   assertIncludes(
-    path.join("generated", "fixtures", "typescript-zod", "fixture-connection.ts"),
+    path.join(
+      "generated",
+      "fixtures",
+      "typescript-zod",
+      "fixture-connection.ts",
+    ),
     "wireObjectSchemaWithoutName",
     ".passthrough()",
     "return FixtureConnection.load(data as Record<string, unknown>).save();",
@@ -5327,7 +5422,7 @@ function assertStaticFixtureCoverage() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "rust-serde", "fixture_root.rs"),
-    "#[cfg(feature = \"serde\")]",
+    '#[cfg(feature = "serde")]',
     "impl serde::Serialize for FixtureRoot",
     "self.to_value(&SaveContext::default())",
     "impl<'de> serde::Deserialize<'de> for FixtureRoot",
@@ -5340,7 +5435,13 @@ function assertStaticFixtureCoverage() {
     "FixtureConnection::load_from_value(&value, &LoadContext::default()).kind",
   );
   assertIncludes(
-    path.join("generated", "fixtures", "rust-serde", "tests", "fixture_discriminator_edges_test.rs"),
+    path.join(
+      "generated",
+      "fixtures",
+      "rust-serde",
+      "tests",
+      "fixture_discriminator_edges_test.rs",
+    ),
     '#[cfg(feature = "serde")]',
     "serde_json::from_str(json)",
     "serde_json::to_value(&instance)",
@@ -5489,13 +5590,31 @@ function assertExportSurfaceSnapshot() {
       fail(`Export surface snapshot is missing target: ${target}`);
     }
   }
-  if (!snapshot.targets?.some(target => target.target === "typescript" && target.outputRoot?.endsWith("generated/fixtures/typescript-zod"))) {
+  if (
+    !snapshot.targets?.some(
+      (target) =>
+        target.target === "typescript" &&
+        target.outputRoot?.endsWith("generated/fixtures/typescript-zod"),
+    )
+  ) {
     fail("Export surface snapshot is missing the TypeScript Zod output root.");
   }
-  if (!snapshot.targets?.some(target => target.target === "rust" && target.outputRoot?.endsWith("generated/fixtures/rust-serde"))) {
+  if (
+    !snapshot.targets?.some(
+      (target) =>
+        target.target === "rust" &&
+        target.outputRoot?.endsWith("generated/fixtures/rust-serde"),
+    )
+  ) {
     fail("Export surface snapshot is missing the Rust serde output root.");
   }
-  if (!snapshot.targets?.some(target => target.target === "swift" && target.outputRoot?.endsWith("generated/fixtures/swift-codable"))) {
+  if (
+    !snapshot.targets?.some(
+      (target) =>
+        target.target === "swift" &&
+        target.outputRoot?.endsWith("generated/fixtures/swift-codable"),
+    )
+  ) {
     fail("Export surface snapshot is missing the Swift Codable output root.");
   }
 
@@ -5857,7 +5976,10 @@ function runDeclaredValidationStages() {
       ["java-jackson.generated-tests", runJavaJacksonGeneratedTests],
       ["executable-conformance", runExecutableConformance],
     ]),
-    allowedSkips: { "swift.generated-tests": TOOLCHAIN_UNAVAILABLE, "swift-codable.generated-tests": TOOLCHAIN_UNAVAILABLE },
+    allowedSkips: {
+      "swift.generated-tests": TOOLCHAIN_UNAVAILABLE,
+      "swift-codable.generated-tests": TOOLCHAIN_UNAVAILABLE,
+    },
   });
 }
 
