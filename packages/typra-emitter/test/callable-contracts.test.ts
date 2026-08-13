@@ -280,6 +280,75 @@ describe("callable-contract IR", () => {
     ]);
   });
 
+  it("encodes optional params and `T | null` returns with the seam's `?` nullability suffix", () => {
+    const nullVariant = { kind: "Intrinsic", name: "null" } as unknown as Type;
+    const union = {
+      kind: "Union",
+      variants: new Map<string, { type: Type }>([
+        ["checkpoint", { type: type("Checkpoint") }],
+        ["null", { type: nullVariant }],
+      ]),
+    } as unknown as Type;
+    const operations = new Map<string, unknown>([
+      [
+        "writeSummary",
+        {
+          kind: "Operation",
+          name: "writeSummary",
+          parameters: {
+            kind: "Model",
+            name: "",
+            properties: new Map([
+              ["summary", { type: type("SessionSummary"), optional: true }],
+            ]),
+          },
+          returnType: { kind: "Intrinsic", name: "void" },
+        },
+      ],
+      [
+        "loadCheckpoint",
+        {
+          kind: "Operation",
+          name: "loadCheckpoint",
+          parameters: {
+            kind: "Model",
+            name: "",
+            properties: new Map([["id", { type: type("string") }]]),
+          },
+          returnType: union,
+        },
+      ],
+    ]);
+    const iface = {
+      kind: "Interface",
+      name: "ReproSeam",
+      namespace: {
+        name: "Runtime",
+        namespaces: new Map(),
+        interfaces: new Map(),
+        models: new Map(),
+        namespace: { name: "Typra" },
+      },
+      operations,
+    } as unknown as Interface;
+    const program = {
+      stateMap: () => new Map(),
+    } as unknown as Program;
+
+    const contract = lowerTypeSpecCallableContract(
+      program,
+      iface,
+      "Typra.Runtime",
+      "Runtime",
+    );
+    const byName = new Map(contract.operations.map((op) => [op.name, op]));
+
+    // GAP 1: optional param keeps its optionality via the trailing "?".
+    assert.equal(byName.get("writeSummary")?.params.summary, "SessionSummary?");
+    // GAP 2: `Checkpoint | null` folds to the nullable "?" spelling (no raw union text).
+    assert.equal(byName.get("loadCheckpoint")?.returns, "Checkpoint?");
+  });
+
   it("projects TypeSpec-native callable contracts as protocol nodes for target renderers", () => {
     const { program, iface } = nativeInterface();
     const contract = lowerTypeSpecCallableContract(

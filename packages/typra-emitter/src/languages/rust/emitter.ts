@@ -2450,11 +2450,23 @@ function emitProtocolTrait(type: TypeDecl, lines: string[]): void {
     if (method.sync) {
       // Synchronous method
       if (method.optional) {
-        // Return type already includes nullability from ? suffix — don't double-wrap
+        // An optional op supplies a default body. When the return already carries
+        // nullability (Option<T>) or is unit, "not provided" is representable in the
+        // return type itself. For a value return (e.g. `String`) there is no in-band
+        // sentinel, so diverge with `unimplemented!()` — the sync analogue of the async
+        // path's `Err(...)` — instead of emitting a type-incorrect `None`.
         lines.push(
           `    fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> ${ret} {`,
         );
-        lines.push(ret === "()" ? "        ()" : "        None");
+        if (ret === "()") {
+          lines.push("        ()");
+        } else if (ret.startsWith("Option<")) {
+          lines.push("        None");
+        } else {
+          lines.push(
+            `        unimplemented!("${toSnakeCase(method.name)} is an optional operation with no default")`,
+          );
+        }
         lines.push("    }");
       } else {
         lines.push(
