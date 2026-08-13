@@ -15,6 +15,9 @@ Typra lowers TypeSpec into an internal contract AST before emitting targets. Tha
 | String unions | Generate constrained enum-like runtime values, with optional parse aliases. |
 | Open unions | Preserve known values while allowing target-specific open string handling. |
 | Discriminated models | Generate polymorphic load/save dispatch using the discriminator field. |
-| Decorators | Add test samples, wire-name mappings, coercions, factories, methods, defaults, and protocol contracts. |
+| Interfaces and operations | Generate callable protocol/interface/trait-style seams from TypeSpec-native callable contracts. |
+| Operation decorators | Add runtime cancellation, sync signatures, optional operations, effect metadata, and vectors to TypeSpec operations. |
+| HTTP transport | Project TypeSpec HTTP path, query, header, cookie, body, status, success, and error semantics into producer and consumer seams. |
+| Decorators | Add test samples, vectors, wire-name mappings, coercions, factories, defaults, and parse aliases. |
 
 The mapping pages use examples from Typra's fixture contract so the docs stay aligned with exercised behavior.

@@ -68,8 +68,8 @@ Nested TypeSpec namespaces below `root-namespace` remain part of the lowered
 model/callable/transport identity. Target renderers then project the semantic namespace through runtime-specific
 rules. `namespace-output` defaults to `structural`, which means targets with
 module/folder support place nested namespaces in nested output folders. Set
-`namespace-output: flat` globally or on a target to keep the legacy flat
-generated file layout while preserving semantic namespace metadata.
+`namespace-output: flat` globally or on a target to keep a flat generated file
+layout while preserving semantic namespace metadata.
 
 | Target | Default projection |
 | --- | --- |
@@ -103,7 +103,7 @@ Each `emit-targets` entry has a required `type` and can set target-specific opti
 | `enum-parsing` | Rust enum parsing mode. |
 | `protocol-scaffolds` | Compile-only protocol scaffold generation. |
 | `outputs` | Internal output contributor requests identified by `kind` and optional `provider`. Existing target generation remains compatible with top-level options. |
-| `native-serialization` | Opt-in native interop surface. TypeScript supports `"none"` or `"zod"`; `"standard-schema"` is reserved and fails fast. Python supports `"none"` or `"pydantic"`, Java supports `"none"` or `"jackson"`, Rust supports `"none"` or `"serde"`, and Swift supports `"none"` or `"codable"`. Rust preserves its legacy cfg-gated serde surface when omitted; set `"none"` to opt out. |
+| `native-serialization` | Opt-in native interop surface. TypeScript supports `"none"` or `"zod"`; `"standard-schema"` is reserved and fails fast. Python supports `"none"` or `"pydantic"`, Java supports `"none"` or `"jackson"`, Rust supports `"none"` or `"serde"`, and Swift supports `"none"` or `"codable"`. Rust keeps its default cfg-gated serde surface when omitted; set `"none"` to opt out. |
 | `cancellation-token-path` | Full runtime-native cancellation token symbol path for generated `runtimeCancellable` method parameters. Rust uses `::` paths; Python uses dotted module paths. |
 
 `protocol-scaffolds: "compile-only"` emits test-only implementations that prove generated protocols compile. They intentionally throw or reject when called and are not runtime fakes.

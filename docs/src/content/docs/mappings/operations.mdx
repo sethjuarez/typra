@@ -1,0 +1,274 @@
+---
+title: Interfaces, operations, and transport
+description: How Typra maps TypeSpec-native interfaces, operations, operation effects, vectors, and HTTP transport metadata.
+draft: false
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+Typra uses TypeSpec-native `interface` and `op` declarations for callable seams.
+Models remain the data contract; operations describe how host-owned runtime code is
+called; operation decorators describe runtime-only details that should not become
+serialized model fields.
+
+## Callable interfaces
+
+```typespec
+import "@typra/emitter";
+
+model RenderRequest {
+  prompt: string;
+}
+
+model RenderResult {
+  text: string;
+}
+
+interface Renderer {
+  render(request: RenderRequest): RenderResult;
+}
+```
+
+| TypeSpec | Typra mapping |
+| --- | --- |
+| `interface Renderer` | A callable contract named `Renderer`. |
+| `render(request: RenderRequest)` | A generated callable operation with a typed request parameter. |
+| `RenderResult` return type | A typed success result loaded through generated model helpers. |
+
+Generated targets project this shared callable contract into idiomatic protocol,
+interface, trait, or stub surfaces. Host apps provide runtime behavior behind the
+generated seam.
+
+## Operation effects
+
+```typespec
+interface Renderer {
+  @runtimeCancellable
+  render(request: RenderRequest): RenderResult;
+
+  @sync
+  preview(request: RenderRequest): string;
+
+  @effect(#{ atomic: true })
+  commit(result: RenderResult): void;
+
+  @optionalOperation
+  @effect(#{ nonFatal: true })
+  observe(result: RenderResult): void;
+}
+```
+
+| Decorator | Typra mapping |
+| --- | --- |
+| `@runtimeCancellable` | Adds a host-owned cancellation parameter, such as `AbortSignal`, `CancellationToken`, Go `context.Context`, or a configured runtime token path. |
+| `@sync` | Marks the operation as synchronously callable where the target has distinct sync/async surfaces. |
+| `@effect(#{ atomic: true })` | Records that the operation is an atomic effect boundary. Typra records metadata; the host app owns transaction policy. |
+| `@effect(#{ nonFatal: true })` | Records that operation failures are non-fatal metadata. The host app owns failure handling policy. |
+| `@optionalOperation` | Marks the operation as optional on generated callable surfaces. |
+
+These decorators are operation metadata. They do not alter model load/save shape,
+do not become transport parameters, and do not make Typra responsible for
+transactions, retries, token acquisition, credential storage, or observability.
+
+## Vectors on operations
+
+Use `@vector` when an operation needs executable conformance evidence. Vectors can
+be authored inline or loaded from a constant vector set.
+
+```typespec
+const RenderVectors = #[
+  #{
+    name: "basic-render",
+    stage: "render",
+    input: #{ request: #{ prompt: "Hello, Typra" } },
+    expected: #{ text: "Hello, Typra" }
+  }
+];
+
+interface Renderer {
+  @vector(RenderVectors)
+  render(request: RenderRequest): RenderResult;
+}
+```
+
+Typra lowers vectors into language-neutral conformance records. Generated tests
+can prove that target runtimes load typed inputs, normalize results, and keep the
+same observable contract.
+
+## Converting previous callable decorators
+
+Some existing Typra contracts may describe callable seams with model-level
+decorators. Convert those declarations to TypeSpec-native interfaces and
+operations before adding new coverage.
+
+| Previous decorator form | TypeSpec-native form |
+| --- | --- |
+| `@@protocol(Renderer); model Renderer {}` | `interface Renderer { ... }` |
+| `@@method(Renderer, "render", "RenderResult", "...", #{ request: "RenderRequest" })` | `render(request: RenderRequest): RenderResult;` |
+| `optional: true` argument on `@@method` | `@optionalOperation` on the operation. |
+| `sync: true` argument on `@@method` | `@sync` on the operation. |
+| `#{ runtimeCancellable: true }` options | `@runtimeCancellable` on the operation. |
+| `#{ atomic: true }` options | `@effect(#{ atomic: true })` on the operation. |
+| `#{ nonFatal: true }` options | `@effect(#{ nonFatal: true })` on the operation. |
+
+Before:
+
+```typespec
+model RenderRequest {
+  prompt: string;
+}
+
+model RenderResult {
+  text: string;
+}
+
+@@protocol(Renderer);
+@@method(
+  Renderer,
+  "render",
+  "RenderResult",
+  "Render a prompt.",
+  #{ request: "RenderRequest" },
+  false,
+  false,
+  #{ runtimeCancellable: true }
+);
+@@method(
+  Renderer,
+  "observe",
+  "void",
+  "Observe a rendered result.",
+  #{ result: "RenderResult" },
+  true,
+  false,
+  #{ nonFatal: true }
+);
+model Renderer {}
+```
+
+After:
+
+```typespec
+model RenderRequest {
+  prompt: string;
+}
+
+model RenderResult {
+  text: string;
+}
+
+interface Renderer {
+  @runtimeCancellable
+  render(request: RenderRequest): RenderResult;
+
+  @optionalOperation
+  @effect(#{ nonFatal: true })
+  observe(result: RenderResult): void;
+}
+```
+
+Conversion rules:
+
+1. Keep the existing model names and parameter names unless they conflict with TypeSpec operation syntax.
+2. Replace string type names in `@@method` parameters and returns with real TypeSpec type references.
+3. Move runtime-only booleans and effect options onto operation decorators.
+4. Keep `@vector` data on the operation that owns the behavior case.
+5. Keep HTTP metadata on TypeSpec HTTP decorators such as `@route`, `@path`, `@query`, `@header`, `@cookie`, `@body`, and `@statusCode`.
+
+## HTTP transport
+
+Transport projection consumes official TypeSpec HTTP metadata. Typra does not add
+a separate route or parameter vocabulary.
+
+```typespec
+import "@typespec/http";
+
+using TypeSpec.Http;
+
+@route("/renders")
+interface RenderApi {
+  @post
+  create(
+    @header requestId: string,
+    @cookie session: string,
+    @body request: RenderRequest
+  ): {
+    @statusCode statusCode: 201;
+    @body result: RenderResult;
+  } | {
+    @statusCode statusCode: 400;
+    @body error: RenderError;
+  };
+}
+
+model RenderError {
+  message: string;
+}
+```
+
+| HTTP construct | Typra mapping |
+| --- | --- |
+| `@route`, `@get`, `@post`, etc. | Producer and consumer route/verb metadata. |
+| `@path` | URI path binding. |
+| `@query` | Query string binding. |
+| `@header` | Header binding. |
+| `@cookie` | Cookie binding. |
+| `@body` | Request or response body binding. |
+| `@statusCode` | Exact response status selection. |
+
+Generated consumers hydrate only the declared success response body for the
+matching status. Non-matching 2xx responses and non-2xx responses remain on the
+error seam with the original status and body, so error payloads are not loaded as
+success models.
+
+### Generated callable shape
+
+<Tabs syncKey="typra-target">
+  <TabItem label="TypeScript">
+
+```ts
+export interface Renderer {
+  render(request: RenderRequest, signal?: AbortSignal): Promise<RenderResult>;
+  preview(request: RenderRequest): string;
+  commit(result: RenderResult): Promise<void>;
+  observe?(result: RenderResult): Promise<void>;
+}
+```
+
+  </TabItem>
+  <TabItem label="Python">
+
+```py
+class Renderer(Protocol):
+    async def render(
+        self,
+        request: RenderRequest,
+        cancellation: CancellationToken | None = None,
+    ) -> RenderResult: ...
+
+    def preview(self, request: RenderRequest) -> str: ...
+    async def commit(self, result: RenderResult) -> None: ...
+    async def observe(self, result: RenderResult) -> None: ...
+```
+
+  </TabItem>
+  <TabItem label="JSON AST">
+
+```json
+{
+  "contracts": [
+    {
+      "name": "Renderer",
+      "operations": [
+        { "name": "render", "runtimeCancellable": true },
+        { "name": "preview", "sync": true },
+        { "name": "commit", "effects": { "atomic": true } },
+        { "name": "observe", "optional": true, "effects": { "nonFatal": true } }
+      ]
+    }
+  ]
+}
+```
+
+  </TabItem>
+</Tabs>

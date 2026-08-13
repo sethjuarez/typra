@@ -24,7 +24,7 @@ emit-targets:
 | `import-path` | Import path used by generated tests. |
 | `enum-parsing` | Controls whether enum parsing is case-sensitive or case-insensitive. |
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
-| `native-serialization` | `"serde"` emits feature-gated `Serialize`/`Deserialize` impls; `"none"` opts out. Omission preserves the legacy cfg-gated serde surface for compatibility. |
+| `native-serialization` | `"serde"` emits feature-gated `Serialize`/`Deserialize` impls; `"none"` opts out. Omission keeps the default cfg-gated serde surface for compatibility. |
 
 Generated Rust surfaces include serde-oriented model structures, `from_json`/`to_json` and `from_yaml`/`to_yaml` helpers, provider wire mapping, and optional case-insensitive enum parsing.
 
