@@ -1283,6 +1283,12 @@ function assertFocusedFeatureFixtures() {
         "wire-payload-model-key",
         '"model":{"id":"cfg-1"',
         '"model":"demo-model"',
+        // Sparse model-typed vector inputs must survive verbatim: opaque
+        // evidence is never normalized to canonical `save()` form, so the
+        // required-with-default `ProviderConfig.id` must NOT be materialized.
+        "sparse-empty-model-input",
+        '"request":{},"signal":"noop"',
+        '"request":{"model":{"provider":"openai"}},"signal":"noop"',
       ]) {
         if (!serialized.includes(expected)) {
           fail(

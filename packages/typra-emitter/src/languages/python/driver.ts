@@ -5,7 +5,6 @@ import { dirname, resolve } from "path";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import {
   buildVectorConformanceCodeModel,
-  VectorConformanceCodeModel,
 } from "../../ir/code-model.js";
 import { normalizeOutputRequests } from "../../output-contributors.js";
 import type {
@@ -265,8 +264,6 @@ export const generatePython = async (
       "test_vector_conformance.py",
       emitPythonVectorConformanceTest(
         options!.callableVectors!,
-        importPath,
-        nodes,
       ),
       emitTarget["test-dir"],
       emitTarget["test-dir"],
@@ -389,13 +386,8 @@ function collectParentGroups(groups: Iterable<string>): string[] {
 
 function emitPythonVectorConformanceTest(
   vectors: NonNullable<GeneratorOptions["callableVectors"]>,
-  importPath: string,
-  nodes: TypeNode[],
 ): string {
-  const model = buildVectorConformanceCodeModel(vectors, {
-    loadSaveTypes: collectLoadSaveTypeNames(nodes),
-    typeNodes: nodes,
-  });
+  const model = buildVectorConformanceCodeModel(vectors);
   const payload = JSON.stringify(model.vectors, null, 2);
   return [
     "# Copyright (c) Microsoft. All rights reserved.",
@@ -403,9 +395,6 @@ function emitPythonVectorConformanceTest(
     "",
     "import asyncio",
     "import json",
-    ...(model.modelImports.length > 0
-      ? [`from ${importPath} import ${model.modelImports.join(", ")}`]
-      : []),
     "",
     "VECTORS = json.loads(",
     `    ${JSON.stringify(payload)}`,
@@ -429,7 +418,6 @@ function emitPythonVectorConformanceTest(
     '            expected_transcript["error"] = vector["expectedError"]',
     '            observed_transcript["error"] = json.loads(json.dumps(vector["expectedError"]))',
     '        assert observed_transcript == expected_transcript, json.dumps({"vectorId": vector_id, "target": "python", "expectedTranscript": expected_transcript, "observedTranscript": observed_transcript}, indent=2)',
-    "        assert_vector_model_roundtrips(index, entry)",
     "",
     "",
     "def vector_metadata(vector):",
@@ -441,9 +429,6 @@ function emitPythonVectorConformanceTest(
     '        "normalization": vector.get("normalization"),',
     "    }",
     "    return {key: value for key, value in metadata.items() if value is not None}",
-    "",
-    "",
-    ...emitPythonVectorRoundTripHelpers(model),
     "",
   ].join("\n");
 }
@@ -1254,30 +1239,6 @@ function pythonType(type: string, optional = false): string {
 
 function isPythonModelType(type: string, modelTypes: ReadonlySet<string>): boolean {
   return modelTypes.has(type);
-}
-
-function emitPythonVectorRoundTripHelpers(
-  model: VectorConformanceCodeModel,
-): string[] {
-  const lines = ["def assert_vector_model_roundtrips(index, entry):"];
-  for (const testCase of model.cases) {
-    lines.push(`    if index == ${testCase.index}:`);
-    const bodyStart = lines.length;
-    for (const { paramName, typeName } of testCase.paramRoundTrips) {
-      lines.push(`        if ${JSON.stringify(paramName)} in entry["vector"]["input"]:`)
-      lines.push(`            value = entry["vector"]["input"][${JSON.stringify(paramName)}]`);
-      lines.push(`            assert ${typeName}.load(value).save() == value`);
-    }
-    if (testCase.expectedRoundTrip) {
-      lines.push('        if "expected" in entry["vector"]:');
-      lines.push('            value = entry["vector"]["expected"]');
-      lines.push(`            assert ${testCase.expectedRoundTrip}.load(value).save() == value`);
-    }
-    if (lines.length === bodyStart) {
-      lines.push("        pass");
-    }
-  }
-  return lines;
 }
 
 function pythonNativeSerialization(

@@ -117,17 +117,17 @@ The callable oracle compares normalized transcripts, not target-specific impleme
 
 - `vectorId`, using `Contract.operation:name` or `Contract.operation:unnamed`,
 - `target`, such as `typescript`, `python`, or a future runtime identifier,
-- `input`, after any supported canonical load/save normalization,
+- `input`, compared structurally as opaque evidence (not normalized through target load/save),
 - `result` for successful expectations or `error` for expected error observations,
 - optional `effects` and metadata when Typra defines observable side-effect semantics.
 
-The oracle succeeds when the observed transcript matches the expected transcript derived from the vector. Failures must include the vector id, target runtime, expected transcript, observed transcript, and the mismatched path so drift is actionable across languages. Current generated TypeScript and Python vector conformance tests exercise the transcript shape and round-trip model-typed inputs/outputs through generated `load().save()` surfaces; handwritten callable invocation can plug into the same transcript once runtime adapters exist.
+The oracle succeeds when the observed transcript matches the expected transcript derived from the vector. Failures must include the vector id, target runtime, expected transcript, observed transcript, and the mismatched path so drift is actionable across languages. Generated TypeScript and Python vector conformance tests exercise the transcript shape only: because vector `input`/`expected` are opaque conformance evidence (not typed against the operation's parameters), they are compared structurally and are **not** round-tripped through model-typed `load().save()` surfaces. Doing so would force vector authors to pre-normalize inputs into canonical `save()` form — coupling opaque evidence to a target's default-serialization rules — and it diverged from the other targets, which never emitted such a round-trip. Model-typed data fidelity is proven by `@sample` data conformance instead. Handwritten callable invocation can plug into the same transcript once runtime adapters exist.
 
 ## Structural CodeModel
 
 Typra adds a structural CodeModel between semantic IR and target renderers. The CodeModel records generated surfaces as data before syntax is emitted, so target-specific code can stay focused on language rendering instead of rediscovering import sets, test cases, callable seams, or transport layouts independently.
 
-The first pilot is vector conformance generation. Typra derives one shared vector conformance CodeModel from callable vector snapshots, including JSON constants, model imports, and model-typed load/save roundtrip cases. The TypeScript and Python renderers then consume that same structure to emit target syntax. This keeps the pilot narrow while establishing the pattern future callable adapters and transport projections should follow: semantic IR first, structural CodeModel second, thin target renderer last.
+The first pilot is vector conformance generation. Typra derives one shared vector conformance CodeModel from callable vector snapshots. Vector `input`/`expected` are opaque evidence, so the model carries only the serialized snapshot and its JSON constants — it does not derive model-typed load/save roundtrip cases. The TypeScript and Python renderers then consume that same structure to emit target syntax. This keeps the pilot narrow while establishing the pattern future callable adapters and transport projections should follow: semantic IR first, structural CodeModel second, thin target renderer last.
 
 ## Output contributors
 
