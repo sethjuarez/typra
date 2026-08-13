@@ -33,6 +33,13 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   with `unimplemented!(...)` — the sync analogue of the async default's `Err(...)` —
   while optional and unit returns keep their `None`/`()` defaults.
 
+## [0.8.0](https://github.com/sethjuarez/typra/compare/v0.7.0...v0.8.0) (2026-08-13)
+
+
+### Features
+
+* accept JSON-string [@vector](https://github.com/vector) sets for keyword-named and opaque wire inputs ([#204](https://github.com/sethjuarez/typra/issues/204)) ([74bea30](https://github.com/sethjuarez/typra/commit/74bea3008ae32bc7c7080a2ddd4c095e6061c2b3))
+
 ## [0.7.0](https://github.com/sethjuarez/typra/compare/v0.6.2...v0.7.0) (2026-08-13)
 
 
