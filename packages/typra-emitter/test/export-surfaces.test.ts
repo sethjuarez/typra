@@ -513,7 +513,7 @@ describe("export surface scaffolding", () => {
     );
     assert.match(
       typeScript,
-      /measure\(count: number, at: Date, payload: Record<string, unknown>, bytes: Uint8Array\): number/,
+      /measure\(_count: number, _at: Date, _payload: Record<string, unknown>, _bytes: Uint8Array\): number/,
     );
     assert.doesNotMatch(typeScript, /calls|recorded|recording/i);
 

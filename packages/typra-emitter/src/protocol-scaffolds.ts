@@ -67,10 +67,10 @@ export function emitTypeScriptProtocolScaffolds(
     lines.push(`    class ${className} implements ${protocolName} {`);
     for (const method of protocol.methods) {
       const params = Object.entries(method.params).map(
-        ([name, typeName]) => `${name}: ${typescriptType(typeName)}`,
+        ([name, typeName]) => `_${name}: ${typescriptType(typeName)}`,
       );
       if (method.runtimeCancellable) {
-        params.push("signal?: AbortSignal");
+        params.push("_signal?: AbortSignal");
       }
       const ret = typescriptType(method.returns);
       if (method.sync) {

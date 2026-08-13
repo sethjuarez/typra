@@ -1019,7 +1019,9 @@ function emitSaveField(
       if (shouldOmitAbsentOnSave(field, "always-check"))
         lines.push(`    if (obj.${propertyName} != null) {`);
       if (collectionHelper?.hasNameProperty) {
-        lines.push("      List<Object> serializedItems = new ArrayList<>();");
+        lines.push(
+          "      List<Map<String, Object>> serializedItems = new ArrayList<>();",
+        );
         lines.push("      List<String> itemNames = new ArrayList<>();");
         lines.push(
           "      java.util.Set<String> names = new java.util.HashSet<>();",
@@ -1053,7 +1055,7 @@ function emitSaveField(
           "        for (int index = 0; index < serializedItems.size(); index++) {",
         );
         lines.push(
-          "          Map<String, Object> itemData = new LinkedHashMap<>((Map<String, Object>) serializedItems.get(index));",
+          "          Map<String, Object> itemData = new LinkedHashMap<>(serializedItems.get(index));",
         );
         lines.push("          String itemName = itemNames.get(index);");
         lines.push('          itemData.remove("name");');

@@ -471,7 +471,7 @@ function emitUnknownCarrier(type: TypeDecl, lines: string[]): void {
   lines.push(` */`);
   lines.push(`export class ${carrier} extends ${parentName} {`);
   lines.push(
-    `  static load(data: Record<string, unknown>, context?: LoadContext): ${carrier} {`,
+    `  static load(data: Record<string, unknown>, _context?: LoadContext): ${carrier} {`,
   );
   lines.push(`    const instance = new ${carrier}();`);
   lines.push(

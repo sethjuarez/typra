@@ -262,7 +262,9 @@ export function emitPythonFile(
     emitType(type, lines, visitor, options);
   }
 
-  return pruneUnusedTypingImports(emitCleanPythonLines(lines, "\n"));
+  return pruneUnusedDataclassField(
+    pruneUnusedTypingImports(emitCleanPythonLines(lines, "\n")),
+  );
 }
 
 function hasParseAliases(enumDef: {
@@ -343,6 +345,22 @@ function pruneUnusedTypingImports(source: string): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+// Drop the `field` name from `from dataclasses import dataclass, field` when the
+// emitted body never calls `field(...)`. The import is added whenever a
+// dataclass is emitted, but a type whose attributes need no defaults or
+// default factories never references `field`, which would trip pyflakes F401.
+function pruneUnusedDataclassField(source: string): string {
+  const match = /^from dataclasses import dataclass, field$/m.exec(source);
+  if (!match) {
+    return source;
+  }
+  const body = `${source.slice(0, match.index)}${source.slice(match.index + match[0].length)}`;
+  if (/\bfield\s*\(/.test(body)) {
+    return source;
+  }
+  return `${source.slice(0, match.index)}from dataclasses import dataclass${source.slice(match.index + match[0].length)}`;
 }
 
 // ============================================================================
@@ -751,7 +769,7 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
       );
       lines.push(`        """${method.description}"""`);
       if (method.optional) {
-        lines.push("        return None");
+        emitOptionalProtocolMethodBody(lines, ret);
       } else {
         emitRequiredProtocolMethodBody(lines);
       }
@@ -760,7 +778,7 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
         lines.push(
           `    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`,
         );
-        lines.push("        return None");
+        emitOptionalProtocolMethodBody(lines, ret);
       } else {
         lines.push(
           `    def ${toSnakeCase(method.name)}(self${paramList}) -> ${ret}:`,
@@ -778,7 +796,7 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
         );
         lines.push(`        """${method.description} (async variant)"""`);
         if (method.optional) {
-          lines.push("        return None");
+          emitOptionalProtocolMethodBody(lines, ret);
         } else {
           emitRequiredProtocolMethodBody(lines);
         }
@@ -787,7 +805,7 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
           lines.push(
             `    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`,
           );
-          lines.push("        return None");
+          emitOptionalProtocolMethodBody(lines, ret);
         } else {
           lines.push(
             `    async def ${toSnakeCase(method.name)}_async(self${paramList}) -> ${ret}:`,
@@ -803,6 +821,19 @@ function emitProtocolClass(type: TypeDecl, lines: string[]): void {
 
 function emitRequiredProtocolMethodBody(lines: string[]): void {
   lines.push("        raise NotImplementedError");
+}
+
+// Default body for an @optionalOperation. When the return type can hold `None`
+// (a unit `None` return or an `X | None` union), the no-op default `return None`
+// is type-correct. For a value-returning optional op there is no valid default
+// value, so the method diverges with `raise NotImplementedError` rather than
+// returning a type-incorrect `None` (mirrors the Rust `unimplemented!()` body).
+function emitOptionalProtocolMethodBody(lines: string[], ret: string): void {
+  if (ret === "None" || ret.split(" | ").includes("None")) {
+    lines.push("        return None");
+  } else {
+    lines.push("        raise NotImplementedError");
+  }
 }
 
 // ============================================================================

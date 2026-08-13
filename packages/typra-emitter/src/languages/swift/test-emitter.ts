@@ -51,9 +51,7 @@ export function emitSwiftTests(
         : undefined;
     if (child) {
       const rawPattern = isWildcardFallbackChild(ctx.node, child) ? ", _" : "";
-      lines.push(
-        `    if case .${swiftPropertyName(child.typeName.name)}(let concrete${rawPattern}) = instance {`,
-      );
+      const body: string[] = [];
       for (const validation of coercion.validations) {
         if (validation.key === ctx.node.discriminator) continue;
         const expected = validationExpected(validation);
@@ -61,7 +59,7 @@ export function emitSwiftTests(
           findProperty(child, validation.key) ??
           findProperty(ctx.node, validation.key);
         emitPropertyAssertion(
-          lines,
+          body,
           `concrete.${swiftPropertyName(validation.key)}`,
           expected,
           prop,
@@ -69,6 +67,11 @@ export function emitSwiftTests(
           validationCast(validation),
         );
       }
+      const binding = body.length > 0 ? `(let concrete${rawPattern})` : "";
+      lines.push(
+        `    if case .${swiftPropertyName(child.typeName.name)}${binding} = instance {`,
+      );
+      lines.push(...body);
       lines.push("    } else {");
       lines.push(
         `      XCTFail("Expected ${swiftTypeName(child.typeName.name)}")`,
@@ -361,15 +364,18 @@ function emitUnknownPatternValidation(
   node: TypeNode,
   indent: string,
 ): void {
-  lines.push(`${indent}if case .unknown(let concrete) = ${accessor} {`);
+  const body: string[] = [];
   for (const [key, expected] of Object.entries(sample)) {
     const literal = swiftExpectedLiteral(expected);
     if (literal === null) continue;
     const cast = swiftDictionaryCast(expected);
-    lines.push(
+    body.push(
       `${indent}  XCTAssertEqual(concrete[${swiftStringLiteral(key)}] as? ${cast}, ${literal})`,
     );
   }
+  const binding = body.length > 0 ? "(let concrete)" : "";
+  lines.push(`${indent}if case .unknown${binding} = ${accessor} {`);
+  lines.push(...body);
   lines.push(`${indent}} else {`);
   lines.push(
     `${indent}  XCTFail("Expected ${swiftTypeName(node.typeName.name)}.unknown")`,
@@ -386,9 +392,7 @@ function emitChildPatternValidation(
   indent: string,
 ): void {
   const rawPattern = isWildcardFallbackChild(node, child) ? ", _" : "";
-  lines.push(
-    `${indent}if case .${swiftPropertyName(child.typeName.name)}(let concrete${rawPattern}) = ${accessor} {`,
-  );
+  const body: string[] = [];
   for (const [key, expected] of Object.entries(sample)) {
     if (key === node.discriminator) continue;
     const literal = swiftExpectedLiteral(expected);
@@ -396,13 +400,18 @@ function emitChildPatternValidation(
     const prop = findProperty(child, key) ?? findProperty(node, key);
     if (!prop) continue;
     emitPropertyAssertion(
-      lines,
+      body,
       `concrete.${swiftPropertyName(prop.name)}`,
       literal,
       prop,
       `${indent}  `,
     );
   }
+  const binding = body.length > 0 ? `(let concrete${rawPattern})` : "";
+  lines.push(
+    `${indent}if case .${swiftPropertyName(child.typeName.name)}${binding} = ${accessor} {`,
+  );
+  lines.push(...body);
   lines.push(`${indent}} else {`);
   lines.push(
     `${indent}  XCTFail("Expected ${swiftTypeName(child.typeName.name)}")`,
@@ -559,7 +568,7 @@ function emitUnknownCoercionValidation(
   expansion: Record<string, unknown> | undefined,
   scalarType: string | undefined,
 ): void {
-  lines.push("    if case .unknown(let concrete) = instance {");
+  const body: string[] = [];
   for (const validation of validations) {
     const expected = validation.delimiter
       ? `${validation.delimiter}${validation.value}${validation.delimiter}`
@@ -570,10 +579,13 @@ function emitUnknownCoercionValidation(
         ? swiftCoercionCast(scalarType)
         : swiftDictionaryCast(rawValue)
       : validationCast(validation);
-    lines.push(
+    body.push(
       `      XCTAssertEqual(concrete[${swiftStringLiteral(validation.key)}] as? ${cast}, ${expected})`,
     );
   }
+  const binding = body.length > 0 ? "(let concrete)" : "";
+  lines.push(`    if case .unknown${binding} = instance {`);
+  lines.push(...body);
   lines.push("    } else {");
   lines.push('      XCTFail("Expected unknown polymorphic fallback")');
   lines.push("    }");
