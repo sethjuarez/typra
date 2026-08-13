@@ -1135,7 +1135,6 @@ function assertGeneratedStructuredLoadCoverage() {
               .join("\n"),
         );
       }
-
     }
 
     const files = walkFiles(suite.dir, (file) => {
@@ -1201,7 +1200,11 @@ function assertFocusedFeatureFixtures() {
       .relative(path.join(packageRoot, "fixtures", "features"), fixture)
       .split(path.sep);
     const featureName = relative[0];
-    const outputRoot = path.join(validationRoot, "focused-features", featureName);
+    const outputRoot = path.join(
+      validationRoot,
+      "focused-features",
+      featureName,
+    );
 
     try {
       execFileSync(
@@ -1243,10 +1246,14 @@ function assertFocusedFeatureFixtures() {
     if (featureName === "samples") {
       const properties = model.properties ?? [];
       const inline = properties.find((field) => field.name === "inline");
-      const fileBacked = properties.find((field) => field.name === "fileBacked");
+      const fileBacked = properties.find(
+        (field) => field.name === "fileBacked",
+      );
       if (
         !JSON.stringify(inline?.samples ?? []).includes("inline-sample") ||
-        !JSON.stringify(fileBacked?.samples ?? []).includes("file-backed-sample")
+        !JSON.stringify(fileBacked?.samples ?? []).includes(
+          "file-backed-sample",
+        )
       ) {
         fail(
           "Focused samples fixture must preserve both inline and imported sample payloads.",
@@ -1287,10 +1294,10 @@ function assertFocusedFeatureFixtures() {
       const exportSurface = existsSync(exportSurfacePath)
         ? JSON.parse(readFileSync(exportSurfacePath, "utf8"))
         : undefined;
+      const protocols = exportSurface?.targets?.[0]?.protocols ?? [];
       const methods =
-        exportSurface?.targets?.[0]?.protocols?.find(
-          (protocol) => protocol.name === "CheckpointStore",
-        )?.methods ?? [];
+        protocols.find((protocol) => protocol.name === "CheckpointStore")
+          ?.methods ?? [];
       const load = methods.find((method) => method.name === "load");
       const observe = methods.find((method) => method.name === "observe");
       const save = methods.find((method) => method.name === "save");
@@ -1302,6 +1309,33 @@ function assertFocusedFeatureFixtures() {
       ) {
         fail(
           "Focused protocols fixture must preserve native operation decorator metadata.",
+        );
+      }
+
+      const optionalSeam =
+        protocols.find((protocol) => protocol.name === "OptionalSeam")
+          ?.methods ?? [];
+      const writeSummary = optionalSeam.find(
+        (method) => method.name === "writeSummary",
+      );
+      const loadCheckpoint = optionalSeam.find(
+        (method) => method.name === "loadCheckpoint",
+      );
+      const preRender = optionalSeam.find(
+        (method) => method.name === "preRender",
+      );
+      if (
+        // GAP 1: optional param keeps its optionality via the trailing "?".
+        writeSummary?.params?.summary !== "SessionSummary?" ||
+        // GAP 2: `Checkpoint | null` folds to the nullable "?" spelling.
+        loadCheckpoint?.returns !== "Checkpoint?" ||
+        // GAP 3: optional, value-returning op stays optional + sync.
+        preRender?.optional !== true ||
+        preRender?.sync !== true ||
+        preRender?.returns !== "string"
+      ) {
+        fail(
+          "Focused protocols fixture must carry native-op optional/nullable lowering (optional param, nullable return, optional value-returning op).",
         );
       }
     }
@@ -6039,12 +6073,7 @@ function assertActualGeneratedSurface() {
     "package fixtures",
   );
   assertIncludes(
-    path.join(
-      "generated",
-      "fixtures",
-      "typescript",
-      "event-sink.ts",
-    ),
+    path.join("generated", "fixtures", "typescript", "event-sink.ts"),
     "emit(event: unknown, signal?: AbortSignal): Promise<void>;",
   );
   assertIncludes(

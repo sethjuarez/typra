@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Design ruling / usage question
+    url: https://github.com/sethjuarez/typra/discussions
+    about: >
+      Not sure whether a diagnostic or restriction is intended? Ask for a maintainer ruling in Discussions
+      before filing a bug — some tightenings are principled and the answer may be "conform to the pattern."

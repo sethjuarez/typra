@@ -1,0 +1,96 @@
+name: Emitter drift / codegen bug
+description: Report incorrect or unexpected generated output from @typra/emitter (wrong types, invalid target code, dropped nullability, etc.).
+title: "fix(emitter): <short description of the drift>"
+labels: ["bug", "emitter"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Typra fixes codegen bugs **reproduction-first**: a good report can become a focused
+        fixture almost verbatim, which is what lets us fix the bug *and* keep it fixed. Please give us all three
+        of the pieces below — they map directly onto how the emitter is tested:
+
+        1. **The TypeSpec shape** — the smallest `.tsp` that exhibits the drift.
+        2. **What breaks** — the expected vs. actual generated output (a would-be `@vector`/`@sample` or a target snippet).
+        3. **The generated code** (optional but strongly encouraged) — the exact emitted snippet, per target language.
+  - type: input
+    id: emitter-version
+    attributes:
+      label: "@typra/emitter version"
+      placeholder: "0.6.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Target language(s)
+      description: Which backend(s) show the drift?
+      multiple: true
+      options:
+        - Rust
+        - Go
+        - C#
+        - Python
+        - Python (Pydantic)
+        - TypeScript
+        - TypeScript (Zod)
+        - Swift
+        - Java
+        - JSON Schema / JSON AST
+        - Markdown
+        - Other / not target-specific
+    validations:
+      required: true
+  - type: textarea
+    id: tsp-shape
+    attributes:
+      label: "1. Minimal TypeSpec shape (`.tsp`)"
+      description: The smallest self-contained spec that reproduces the drift. Keep it domain-agnostic — no downstream branding.
+      render: tsp
+      placeholder: |
+        import "@typra/emitter";
+        namespace Repro;
+
+        model Sample { id: string; }
+        interface Seam {
+          load(id: string): Sample | null;
+        }
+        model Root { sample: Sample; }
+    validations:
+      required: true
+  - type: textarea
+    id: expected-vs-actual
+    attributes:
+      label: "2. Expected vs. actual (the test that breaks)"
+      description: >
+        What you expected the emitter to produce, and what it produced instead. If this is a behavioral/runtime
+        mismatch, phrase it as a would-be `@vector` (input → expected/expectedError). If it is a codegen shape,
+        describe the expected vs. actual type/signature.
+      placeholder: |
+        Expected: `async fn load(&self, id: &String) -> Result<Option<Sample>, ...>`
+        Actual:   `async fn load(&self, id: &String) -> Result<Sample | null, ...>`  (invalid Rust)
+    validations:
+      required: true
+  - type: textarea
+    id: generated-code
+    attributes:
+      label: "3. Generated code snippet (per target)"
+      description: The verbatim emitted output that is wrong. Paste the smallest offending region.
+      render: rust
+    validations:
+      required: false
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: TypeSpec compiler version, Node version, OS, and any relevant peer deps.
+      placeholder: "TypeSpec 1.10.0, Node 24.11.1, Windows"
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Config options, a suspected root cause, prior-version behavior, or anything else that helps.
+    validations:
+      required: false
