@@ -5,7 +5,7 @@ import { buildVectorConformanceCodeModel } from "../src/ir/code-model.js";
 import type { CallableVectorSnapshot } from "../src/ir/vector.js";
 
 describe("structural CodeModel", () => {
-  it("derives vector conformance imports and roundtrip cases once for target renderers", () => {
+  it("carries opaque vector payloads without deriving model-typed round-trip cases", () => {
     const snapshot: CallableVectorSnapshot = {
       emitter: "typra-emitter",
       version: 1,
@@ -50,36 +50,15 @@ describe("structural CodeModel", () => {
       ],
     };
 
-    assert.deepEqual(
-      buildVectorConformanceCodeModel(snapshot, {
-        loadSaveTypes: new Set(["RenderRequest", "RenderResult"]),
-      }),
-      {
-        fileName: "vector-conformance",
-        vectors: snapshot.vectors,
-        constants: [{ name: "vectors", value: snapshot.vectors }],
-        modelImports: ["RenderRequest", "RenderResult"],
-        cases: [
-          {
-            index: 0,
-            contract: "Renderer",
-            operation: "render",
-            vectorName: "basic",
-            paramRoundTrips: [
-              { paramName: "request", typeName: "RenderRequest" },
-            ],
-            expectedRoundTrip: "RenderResult",
-          },
-          {
-            index: 1,
-            contract: "Parser",
-            operation: "parse",
-            vectorName: undefined,
-            paramRoundTrips: [],
-            expectedRoundTrip: undefined,
-          },
-        ],
-      },
-    );
+    // Vector input/expected are opaque conformance evidence. The CodeModel must
+    // NOT type them against the operation's model-typed params (`RenderRequest`,
+    // `RenderResult`) or derive any `load()/save()` round-trip cases — that
+    // would contradict the opaque-input contract and force vector authors to
+    // pre-normalize inputs. It carries only the opaque payload.
+    assert.deepEqual(buildVectorConformanceCodeModel(snapshot), {
+      fileName: "vector-conformance",
+      vectors: snapshot.vectors,
+      constants: [{ name: "vectors", value: snapshot.vectors }],
+    });
   });
 });

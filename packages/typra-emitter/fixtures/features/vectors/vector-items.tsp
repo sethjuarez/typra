@@ -36,3 +36,27 @@ const WirePayloadVectors = """
   }
 ]
 """;
+
+// Regression fixture for the sparse model-typed vector input drift: the op
+// ignores `request` (only `signal` is read), so these vectors author `request`
+// WITHOUT the required-with-default `ProviderConfig.id` (and one omits `model`
+// entirely). Vector `input`/`expected` are opaque conformance evidence, so the
+// snapshot must preserve them verbatim and no target may load/save round-trip
+// them — a `load(x).save() == x` assertion would fail purely because `save()`
+// faithfully materializes `id: ""`. See fixtures/features/vectors/main.tsp.
+const SparseModelInputVectors = """
+[
+  {
+    "name": "sparse-empty-model-input",
+    "stage": "callable",
+    "input": { "request": {}, "signal": "noop" },
+    "expected": "noop"
+  },
+  {
+    "name": "sparse-partial-model-input",
+    "stage": "callable",
+    "input": { "request": { "model": { "provider": "openai" } }, "signal": "noop" },
+    "expected": "noop"
+  }
+]
+""";

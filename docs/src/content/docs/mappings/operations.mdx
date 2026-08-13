@@ -92,8 +92,12 @@ interface Renderer {
 ```
 
 Typra lowers vectors into language-neutral conformance records. Generated tests
-can prove that target runtimes load typed inputs, normalize results, and keep the
-same observable contract.
+compare each target's observable transcript against the vector. Vector
+`input`/`expected` are opaque evidence, compared structurally rather than typed
+against the operation's parameters or round-tripped through model `load()/save()`,
+so authored inputs may be sparse (omitting required-with-default fields the
+operation ignores). Model-typed data fidelity is proven separately by `@sample`
+data conformance.
 
 ## Converting previous callable decorators
 

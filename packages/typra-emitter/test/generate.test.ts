@@ -447,6 +447,10 @@ describe("generate", () => {
       assert.match(tsVectorTest, /callable vector conformance/);
       assert.match(tsVectorTest, /"contract": "Renderer"/);
       assert.match(tsVectorTest, /"operation": "render"/);
+      // Vector inputs are opaque evidence: no model-typed load/save round-trip
+      // is generated even though `render` takes a `RenderRequest` param.
+      assert.doesNotMatch(tsVectorTest, /assertVectorModelRoundTrips/);
+      assert.doesNotMatch(tsVectorTest, /RenderRequest\.load/);
       const pyVectorTest = readFileSync(
         path.join(
           output,
@@ -457,9 +461,9 @@ describe("generate", () => {
         "utf8",
       );
       assert.match(pyVectorTest, /test_callable_vector_payloads_roundtrip/);
-      assert.match(pyVectorTest, /from typra\.callableprobe import .*RenderRequest/);
-      assert.match(pyVectorTest, /if index == 0:[\s\S]*RenderRequest\.load/);
-      assert.match(pyVectorTest, /if index == 1:[\s\S]*pass/);
+      assert.match(pyVectorTest, /assert observed_transcript == expected_transcript/);
+      assert.doesNotMatch(pyVectorTest, /assert_vector_model_roundtrips/);
+      assert.doesNotMatch(pyVectorTest, /RenderRequest\.load/);
       assert.equal(
         existsSync(path.join(output, "generated", "typescript", "cache.ts")),
         false,
@@ -733,7 +737,7 @@ describe("generate", () => {
       assert.match(vectorTest, /"normalization": \{\s+"trailingNewline": "trim"/);
       assert.match(vectorTest, /"contract": "Harness"/);
       assert.match(vectorTest, /"expectedError": \{\s+"code": "replay-drift"/);
-      assert.match(vectorTest, /RenderRequest\.load\(value\)\.save\(\)/);
+      assert.doesNotMatch(vectorTest, /RenderRequest\.load\(value\)\.save\(\)/);
 
       const scaffold = readFileSync(
         path.join(
@@ -997,8 +1001,12 @@ describe("generate", () => {
         path.join(output, "generated", "python-tests", "test_vector_conformance.py"),
         "utf8",
       );
-      assert.match(pythonVectorConformance, /assert Pet\.load\(value\)\.save\(\) == value/);
-      assert.doesNotMatch(pythonVectorConformance, /assert CreatedPet\.load\(value\)\.save\(\) == value/);
+      // Transport vectors no longer round-trip the body-envelope return type
+      // (`Pet`) through generated load/save; only the opaque transcript compare
+      // remains.
+      assert.doesNotMatch(pythonVectorConformance, /\.load\(value\)\.save\(\) == value/);
+      assert.doesNotMatch(pythonVectorConformance, /assert_vector_model_roundtrips/);
+      assert.match(pythonVectorConformance, /assert observed_transcript == expected_transcript/);
 
       const tsClient = readFileSync(
         path.join(output, "generated", "typescript", "transport-client.ts"),

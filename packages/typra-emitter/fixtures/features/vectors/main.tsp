@@ -44,6 +44,14 @@ interface Processor {
   process(request: CallRequest, response: unknown): unknown;
 }
 
+interface Ignorer {
+  // `ignore` reads only `signal`; `request` is a model-typed param the op
+  // ignores, so its vectors are authored sparse. Opaque vector inputs must not
+  // be typed against `CallRequest` or normalized to canonical `save()` form.
+  @vector(SparseModelInputVectors)
+  ignore(request: CallRequest, signal: string): unknown;
+}
+
 model Root {
   request: RenderRequest;
 }

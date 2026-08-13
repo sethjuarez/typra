@@ -22,6 +22,19 @@ PR #36 has since been merged and `main` is once again the source of truth for re
 
 ### Bug Fixes
 
+- **emitter:** stop generating a model-typed `load(x).save() == x` round-trip in
+  the TypeScript and Python vector-conformance tests. Vector `input`/`expected`
+  are opaque conformance evidence (not typed against the operation's parameters),
+  yet these two targets alone typed each model-shaped param/return and asserted a
+  strict round-trip against the raw authored value. That silently required every
+  vector input to already be in canonical `save()` form: a sparse-but-valid input
+  such as `{}` failed because `save()` faithfully materializes required-with-default
+  fields (e.g. `name: ""`), and Rust/Go/C#/Java never emitted the assertion at all.
+  The generated tests now compare only the opaque transcript, so sparse inputs for
+  operation parameters the callable ignores are valid evidence again and every
+  target is consistent. Model-typed data fidelity remains covered by `@sample`
+  data conformance. Regression fixture: `fixtures/features/vectors` (the
+  `Ignorer.ignore` sparse `SparseModelInputVectors`).
 - **emitter:** carry optionality and `T | null` returns through the TypeSpec-native
   operation seam. Optional op parameters (`p?: T`) and nullable returns (`T | null`)
   now lower to the seam's trailing-`?` nullability encoding, so every backend renders
