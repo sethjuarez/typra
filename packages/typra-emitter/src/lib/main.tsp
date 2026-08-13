@@ -121,6 +121,32 @@ extern dec optionalOperation(target: Operation);
  *   render(request: RenderRequest): RenderResult;
  * }
  * ```
+ *
+ * Vector `input`/`expected` values are opaque conformance evidence, not typed
+ * against the operation's parameters. TypeSpec object-value literals (`#{ ... }`)
+ * require keys to be bare, non-keyword identifiers, so they cannot express inputs
+ * whose domain models carry TypeSpec-keyword field names (e.g. `model`) or that
+ * replay opaque provider wire payloads with arbitrary keys. For those cases,
+ * author the vector set as a JSON string (typically a triple-quoted string
+ * constant); Typra parses it into the entries.
+ *
+ * @example
+ * ```typespec
+ * const WireVectors = """
+ * [
+ *   {
+ *     "name": "wire-replay",
+ *     "input": { "request": { "model": { "provider": "openai" } } },
+ *     "expected": "Hello!"
+ *   }
+ * ]
+ * """;
+ *
+ * interface Processor {
+ *   @vector(WireVectors)
+ *   process(request: CallRequest, response: unknown): unknown;
+ * }
+ * ```
  */
 extern dec vector(target: Operation, vector: valueof unknown);
 

@@ -8,6 +8,18 @@ PR #36 has since been merged and `main` is once again the source of truth for re
 
 ## Unreleased
 
+### Features
+
+- **emitter:** allow `@vector` sets to be authored as a JSON string (e.g. a
+  triple-quoted TypeSpec constant), which Typra parses into entries. Vector
+  `input`/`expected` values are opaque conformance evidence, but TypeSpec
+  object-value literals (`#{ ... }`) reject reserved-keyword keys such as `model`
+  (and reject the quoted `#{ "model": ... }` form), so inputs whose domain models
+  carry keyword field names or that replay opaque provider wire payloads were
+  previously unauthorable. The JSON-string form bypasses the object-literal
+  grammar; native `#{ ... }` authoring is unchanged and the two mix by stacking
+  `@vector` decorators.
+
 ### Bug Fixes
 
 - **emitter:** carry optionality and `T | null` returns through the TypeSpec-native
