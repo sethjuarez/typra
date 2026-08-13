@@ -16,13 +16,12 @@ success path, not a regression.
 
 ## Contract projection roadmap
 
-1. Define the [Typra contract vocabulary and migration rules](/concepts/contracts/).
+1. Define the [Typra contract vocabulary and adoption rules](/concepts/contracts/).
 2. Preserve a Prompty-informed compatibility baseline for load/save, coercion shorthands,
    named collections, discriminators, provider wire mappings, factories,
    methods, protocols, and existing load/render/parse vector categories.
 3. Move callable contracts toward TypeSpec-native `interface` and `op`.
-4. Lower legacy `@protocol` and `@method` declarations into the same callable IR
-   as TypeSpec-native callables.
+4. Add operation decorators for runtime cancellation, sync signatures, optional operations, and effect metadata.
 5. Add `@vector` for callable behavior backed by a callable conformance oracle.
 6. Add shared structural CodeModel and target renderers to reduce per-language
    emitter duplication.
