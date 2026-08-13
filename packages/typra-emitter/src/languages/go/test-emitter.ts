@@ -494,13 +494,21 @@ function emitWireValidationTest(
   sample: TestExample,
   node: TypeNode,
 ): void {
-  const mappings = node.properties.flatMap((prop) =>
-    prop.knownAs.map((mapping) => ({
-      fieldName: prop.name,
-      provider: mapping.provider,
-      wireName: mapping.name,
-    })),
-  );
+  // The fixture generator synthesizes required-only payloads — optional fields are
+  // deliberately omitted (see `synthesizeCompleteComplexSample` in test-context.ts).
+  // `ToWire` only emits a wire key when its source field was populated, so restrict the
+  // presence assertions to fields the fixture actually carries. Asserting a wire field
+  // whose optional source was never set produces a test that fails against the very
+  // payload the generator built beside it.
+  const mappings = node.properties
+    .filter((prop) => prop.name in sample.sample)
+    .flatMap((prop) =>
+      prop.knownAs.map((mapping) => ({
+        fieldName: prop.name,
+        provider: mapping.provider,
+        wireName: mapping.name,
+      })),
+    );
   if (mappings.length === 0) return;
 
   const providers = [...new Set(mappings.map((mapping) => mapping.provider))];

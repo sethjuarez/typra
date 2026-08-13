@@ -1778,6 +1778,76 @@ describe("lowerFile", () => {
         /\|[-+]?/,
       );
     });
+
+    // Regression for the Go-only ToWire conformance test: the fixture generator
+    // synthesizes required-only payloads (optional fields are deliberately omitted —
+    // see `synthesizeCompleteComplexSample`), so the ToWire presence assertions must
+    // only cover wire-mapped fields the fixture actually populates. Otherwise the two
+    // halves of the same generated test disagree and the optional field's assertion is
+    // guaranteed to fail. See go-towire-optional-field escalation.
+    it("does not assert ToWire presence for optional wire fields the fixture omits", () => {
+      const accessToken = makeProp("accessToken", "string", { isScalar: true });
+      accessToken.knownAs = [{ provider: "foundry", name: "access_token" }];
+      const refreshToken = makeProp("refreshToken", "string", {
+        isScalar: true,
+        isOptional: true,
+      });
+      refreshToken.knownAs = [{ provider: "foundry", name: "refresh_token" }];
+      const token = makeType("Token", [accessToken, refreshToken]);
+
+      const context = buildBaseTestContext(token, "auth", goTestOptions);
+
+      // The synthesized fixture omits the optional field entirely.
+      assert.equal(context.examples[0].sample.accessToken, "sample");
+      assert.equal("refreshToken" in context.examples[0].sample, false);
+
+      const code = emitGoTest({ ...context, importPath: "auth/model" });
+
+      // Required wire field is populated, so its presence assertion is valid.
+      assert.match(code, /foundryWire\["access_token"\]/);
+      // Optional wire field is absent from the fixture — asserting its presence would
+      // fail against the generator's own payload, so it must not be emitted.
+      assert.doesNotMatch(code, /foundryWire\["refresh_token"\]/);
+    });
+
+    // When every wire-mapped field is optional (and thus absent from the required-only
+    // fixture), there is nothing to assert, so no ToWire test should be emitted at all
+    // rather than an empty test function.
+    it("emits no ToWire test when all wire fields are optional and omitted", () => {
+      const maxTokens = makeProp("maxTokens", "int32", {
+        isScalar: true,
+        isOptional: true,
+      });
+      maxTokens.knownAs = [
+        { provider: "openai", name: "max_completion_tokens" },
+      ];
+      const options = makeType("WireOptions", [maxTokens]);
+
+      const context = buildBaseTestContext(options, "wire", goTestOptions);
+      const code = emitGoTest({ ...context, importPath: "wire/model" });
+
+      assert.doesNotMatch(code, /func TestWireOptionsToWire/);
+    });
+
+    // A consumer that wants an optional wire field exercised opts in with `@sample`;
+    // once the fixture populates the field, ToWire emits (and asserts) it.
+    it("asserts ToWire presence for an optional wire field once a @sample populates it", () => {
+      const refreshToken = makeProp("refreshToken", "string", {
+        isScalar: true,
+        isOptional: true,
+      });
+      refreshToken.knownAs = [{ provider: "foundry", name: "refresh_token" }];
+      refreshToken.samples = [
+        { sample: { refreshToken: "rt-123" }, description: "" },
+      ];
+      const token = makeType("Token", [refreshToken]);
+
+      const context = buildBaseTestContext(token, "auth", goTestOptions);
+      assert.equal(context.examples[0].sample.refreshToken, "rt-123");
+
+      const code = emitGoTest({ ...context, importPath: "auth/model" });
+      assert.match(code, /foundryWire\["refresh_token"\]/);
+    });
   });
 
   it("lowers a polymorphic file with parent + children", () => {

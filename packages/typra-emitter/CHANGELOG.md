@@ -32,6 +32,15 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   `@optionalOperation @sync` op whose return is a required value. Such ops now diverge
   with `unimplemented!(...)` — the sync analogue of the async default's `Err(...)` —
   while optional and unit returns keep their `None`/`()` defaults.
+- **go:** stop generating a guaranteed-failing `ToWire` conformance test for models
+  with an optional `@@knownAs`-mapped field. The fixture generator synthesizes
+  required-only payloads (optional fields are deliberately omitted), yet the Go
+  `ToWire` test unconditionally asserted every wire-mapped field — including optionals
+  its own fixture never populated — so `ToWire` (which only emits a key when its source
+  field is set) could never satisfy the assertion. Presence assertions are now scoped to
+  the wire fields the fixture actually carries; a model whose wire fields are all
+  optional-and-omitted emits no `ToWire` test at all. Populating an optional wire field
+  via `@sample` opts it back into the fixture and its assertion.
 
 ## [0.8.0](https://github.com/sethjuarez/typra/compare/v0.7.0...v0.8.0) (2026-08-13)
 
