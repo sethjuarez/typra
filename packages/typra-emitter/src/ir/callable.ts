@@ -9,6 +9,8 @@ import {
   Program,
   Type,
 } from "@typespec/compiler";
+import { getStateScalar, OperationEffectEntry } from "../decorators.js";
+import { StateKeys } from "../lib.js";
 import { TypeNode } from "./ast.js";
 import { CallableVector, lowerOperationVectors } from "./vector.js";
 
@@ -195,16 +197,22 @@ function lowerTypeSpecCallableOperation(
   source: CallableSource,
 ): CallableOperation {
   const vectors = lowerOperationVectors(program, operation);
+  const effects =
+    getStateScalar<OperationEffectEntry>(
+      program,
+      StateKeys.operationEffects,
+      operation,
+    ) ?? {};
   return {
     name: operation.name,
     returns: typeToCallableName(operation.returnType),
     description: getDoc(program, operation) || "",
     params: lowerOperationParameters(operation),
-    optional: false,
-    sync: false,
-    runtimeCancellable: false,
-    atomic: false,
-    nonFatal: false,
+    optional: effects.optional === true,
+    sync: effects.sync === true,
+    runtimeCancellable: effects.runtimeCancellable === true,
+    atomic: effects.atomic === true,
+    nonFatal: effects.nonFatal === true,
     ...(vectors.length > 0 ? { vectors } : {}),
     source,
   };

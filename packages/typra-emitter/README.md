@@ -130,12 +130,13 @@ import "@typra/emitter";
 namespace MyProject;
 ```
 
-`@method` accepts an optional eighth options object with
-`runtimeCancellable`, `atomic`, and `nonFatal` boolean flags. All default to
-`false`. Runtime cancellation is emitted as a native synthetic parameter and
-never becomes a model or serialized field. Set `cancellation-token-path` to the
-full runtime-native symbol path, such as `crate::engine::CancellationToken` for
-Rust or `prompty.core.cancellation.CancellationToken` for Python.
+Use TypeSpec-native `interface`/`op` declarations for new callable seams. Typra
+operation decorators describe runtime-only callable effects: `@runtimeCancellable`,
+`@sync`, `@optionalOperation`, and `@effect(#{ atomic: true, nonFatal: true })`.
+Runtime cancellation is emitted as a native synthetic parameter and never
+becomes a model or serialized field. Set `cancellation-token-path` to the full
+runtime-native symbol path, such as `crate::engine::CancellationToken` for Rust
+or `prompty.core.cancellation.CancellationToken` for Python.
 
 Python supports opt-in Pydantic v2 model emission with
 `native-serialization: "pydantic"` on the Python target. The default remains
@@ -188,6 +189,12 @@ The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust,
 Swift, Markdown, and JSON AST generation from synthetic TypeSpec shapes.
 Fixture validation also exercises generated metadata, verifier CLI output,
 consumer smoke wiring, and cross-language generated-code compile/test surfaces.
+Broad integration coverage lives under `fixtures/integration/`. Focused,
+runtime-agnostic feature coverage lives under `fixtures/features/<feature>/`;
+runtime-specific quirks live under
+`fixtures/runtimes/<runtime>/<case>/` so generated output can be inspected by
+feature or runtime without turning the top-level fixture folder into a flat list
+of test names.
 
 ### Go parity and validation
 

@@ -15,6 +15,10 @@ Typra includes decorators for runtime concerns TypeSpec does not model by defaul
 | `@@coerce` | Expands scalar input into an object during load. |
 | `@@factory` | Generates factory constructors for a model. |
 | `@@method` | Generates legacy callable method or protocol signatures. |
+| `@runtimeCancellable` | Adds runtime-native cancellation to an operation without serializing it. |
+| `@sync` | Marks an operation as synchronously callable where targets support sync surfaces. |
+| `@effect` | Records operation effect metadata such as `atomic` and `nonFatal`. |
+| `@optionalOperation` | Marks an operation as optional on generated callable surfaces. |
 | `@vector` | Attaches callable behavior expectations to TypeSpec operations. |
 | `@@knownAs` | Maps a property to provider-specific wire names. |
 | `@@defaultFor` | Records provider-specific required defaults. |
@@ -391,10 +395,31 @@ const EmitVectors = #[
 ];
 
 interface EventSink {
+  @runtimeCancellable
   @vector(EmitVectors)
   emit(event: Event): EmitResult;
+
+  @sync
+  format(event: Event): string;
+
+  @effect(#{ atomic: true })
+  append(event: Event): void;
+
+  @optionalOperation
+  @effect(#{ nonFatal: true })
+  observe(event: Event): void;
 }
 ```
+
+Operation decorators apply only to TypeSpec-native operations:
+
+| Decorator | Runtime meaning |
+| --- | --- |
+| `@runtimeCancellable` | Projects a host-owned cancellation parameter such as `AbortSignal`, `CancellationToken`, Go `context.Context`, or a configured runtime token path. It never becomes a model field, vector input, or serialized transport binding. |
+| `@sync` | Emits a synchronous signature in targets that distinguish sync and async callable surfaces. |
+| `@effect(#{ atomic: true })` | Marks the operation as an atomic effect boundary for generated metadata, docs, and conformance evidence. Typra does not implement transactions. |
+| `@effect(#{ nonFatal: true })` | Marks a post-commit or side-effect operation whose failures are non-fatal metadata. Host apps own error policy. |
+| `@optionalOperation` | Allows an optional/default implementation shape. Prefer smaller capability interfaces unless compatibility requires optional methods. |
 
 ### Legacy protocol compatibility
 

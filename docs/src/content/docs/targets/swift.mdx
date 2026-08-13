@@ -101,9 +101,14 @@ let wire = try options.toWire("openai")
 // maxOutputTokens is emitted as "max_completion_tokens"
 ```
 
-## Method stubs
+## Callable stubs
 
-`@@method` signatures emit throwing stubs that must be completed by hand-authored extension code. Until implemented, they throw `TypraRuntimeError.unsupported`, so generated code compiles while keeping domain behavior in the consuming app.
+TypeSpec-native `interface`/`op` callables emit throwing stubs that must be
+completed by hand-authored extension code. Operation decorators such as `@sync`
+shape the emitted Swift signature. Until implemented, stubs throw
+`TypraRuntimeError.unsupported`, so generated code compiles while keeping domain
+behavior in the consuming app. Legacy `@@method` declarations remain a
+compatibility input to the same generated surface.
 
 ## Validation coverage
 

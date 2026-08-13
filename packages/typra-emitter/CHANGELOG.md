@@ -6,6 +6,14 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.6.2](https://github.com/sethjuarez/typra/compare/v0.6.1...v0.6.2) (2026-08-13)
+
+### Features
+
+- **emitter:** add TypeSpec-native operation decorators for callable runtime effects.
+- **fixtures:** replace legacy shape fixtures with feature, integration, and runtime fixture catalogs.
+- **docs:** document native callable seams, operation effects, and fixture evidence layout.
+
 ## [0.6.1](https://github.com/sethjuarez/typra/compare/v0.6.0...v0.6.1) (2026-08-13)
 
 

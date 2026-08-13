@@ -220,6 +220,20 @@ export interface MethodOptions {
   nonFatal?: boolean;
 }
 
+export interface OperationEffectOptions {
+  /** Whether the operation is atomic (metadata/documentation only) */
+  atomic?: boolean;
+  /** Whether failures are non-fatal (metadata/documentation only) */
+  nonFatal?: boolean;
+}
+
+export interface OperationEffectEntry extends MethodOptions {
+  /** Whether this operation is optional on generated callable surfaces */
+  optional?: boolean;
+  /** Whether this operation is synchronous */
+  sync?: boolean;
+}
+
 export interface MethodEntry extends MethodOptions {
   /** Method name (e.g., "text") */
   name: string;
@@ -233,6 +247,23 @@ export interface MethodEntry extends MethodOptions {
   optional: boolean;
   /** Whether this method is synchronous (not wrapped in async/Promise/Task) */
   sync: boolean;
+}
+
+function setOperationEffect(
+  context: DecoratorContext,
+  target: Operation,
+  effect: OperationEffectEntry,
+) {
+  const existing =
+    getStateScalar<OperationEffectEntry>(
+      context.program,
+      StateKeys.operationEffects,
+      target,
+    ) ?? {};
+  setStateScalar(context, StateKeys.operationEffects, target, {
+    ...existing,
+    ...effect,
+  });
 }
 
 function deserializeValue(value: unknown): any {
@@ -330,6 +361,55 @@ export function $method(
   appendStateValue<MethodEntry>(context, StateKeys.methods, target, entry);
 }
 
+export function $runtimeCancellable(
+  context: DecoratorContext,
+  target: Operation,
+) {
+  setOperationEffect(context, target, { runtimeCancellable: true });
+}
+
+export function $sync(context: DecoratorContext, target: Operation) {
+  setOperationEffect(context, target, { sync: true });
+}
+
+export function $effect(
+  context: DecoratorContext,
+  target: Operation,
+  options: object,
+) {
+  const optionsValue = deserializeValue(options);
+  if (!isRecord(optionsValue)) {
+    reportEffectDiagnostic(
+      context,
+      target,
+      "@effect options must be an object.",
+    );
+    return;
+  }
+  const allowed = new Set(["atomic", "nonFatal"]);
+  for (const key of Object.keys(optionsValue)) {
+    if (!allowed.has(key)) {
+      reportEffectDiagnostic(
+        context,
+        target,
+        `Unknown @effect option '${key}'. Supported options are 'atomic' and 'nonFatal'.`,
+      );
+      return;
+    }
+  }
+  setOperationEffect(context, target, {
+    atomic: (optionsValue as OperationEffectOptions).atomic === true,
+    nonFatal: (optionsValue as OperationEffectOptions).nonFatal === true,
+  });
+}
+
+export function $optionalOperation(
+  context: DecoratorContext,
+  target: Operation,
+) {
+  setOperationEffect(context, target, { optional: true });
+}
+
 export function $vector(
   context: DecoratorContext,
   target: Operation,
@@ -401,6 +481,19 @@ function reportVectorDiagnostic(
 ): void {
   context.program.reportDiagnostic({
     code: "typra-emitter-vector-shape",
+    message,
+    severity: "error",
+    target,
+  });
+}
+
+function reportEffectDiagnostic(
+  context: DecoratorContext,
+  target: Operation,
+  message: string,
+): void {
+  context.program.reportDiagnostic({
+    code: "typra-emitter-effect-shape",
     message,
     severity: "error",
     target,

@@ -17,6 +17,7 @@ Prompty is compatibility evidence, not the authority for Typra's design. Typra s
 | Data shape | TypeSpec `model`, `scalar`, `union` | Generate load/save/runtime model surfaces and conformance evidence. |
 | Data examples | Typra `@sample` | Generate examples and data conformance tests. |
 | Callable behavior | TypeSpec `interface` + `op` | Lower to callable IR and generate interface/protocol/trait-style surfaces. |
+| Callable runtime effects | Typra operation decorators | Describe runtime cancellation, sync signatures, optional operations, and effect metadata TypeSpec does not model. |
 | Legacy callable compatibility | Typra `@protocol` + `@method` | Preserve current generated surfaces while lowering into the same callable IR as `interface`/`op`. |
 | Cross-runtime behavior cases | Typra `@vector` | Describe behavior that a callable conformance oracle can execute or simulate. |
 | Transport shape | TypeSpec HTTP decorators | Layer transport IR on top of callable IR; do not replace TypeSpec HTTP vocabulary. |
@@ -27,12 +28,13 @@ Prompty is compatibility evidence, not the authority for Typra's design. Typra s
 ## Migration rules
 
 1. Keep data contracts on TypeSpec-native `model`, `scalar`, and `union` declarations. Existing load/save behavior, provider wire mappings, named collections, discriminators, coercions, factories, and parse aliases remain compatibility-critical.
-2. Prefer TypeSpec `interface` and `op` for new callable contracts once callable IR support exists.
-3. Treat `@protocol` and `@method` as legacy callable compatibility surfaces. They remain supported during migration and must lower to the same callable IR as equivalent `interface`/`op` declarations.
-4. Keep `@sample`, `@coerce`, `@entryShorthand`, `@knownAs`, `@defaultFor`, `@factory`, and `@parseAlias` as Typra model/runtime projection decorators because they describe behavior TypeSpec does not directly model for Typra's current runtimes.
-5. Add `@vector` only for behavior the callable oracle can observe: inputs, successful results, errors/status, supported effect observations, vector metadata, and target runtime metadata.
-6. Do not introduce Typra-specific HTTP decorators for concepts TypeSpec HTTP already owns. HTTP projection consumes TypeSpec HTTP metadata after callable/vector conformance is proven.
-7. Preserve nested TypeSpec namespaces in the shared IR and structural generated output. Target package, module, and import paths are projections of that semantic identity, not replacements for it.
+2. Use TypeSpec `interface` and `op` for new callable contracts.
+3. Use operation decorators for runtime-only callable effects: `@runtimeCancellable`, `@sync`, `@optionalOperation`, and `@effect`.
+4. Treat `@protocol` and `@method` as legacy callable compatibility surfaces. They remain supported during migration and must lower to the same callable IR as equivalent `interface`/`op` declarations.
+5. Keep `@sample`, `@coerce`, `@entryShorthand`, `@knownAs`, `@defaultFor`, `@factory`, and `@parseAlias` as Typra model/runtime projection decorators because they describe behavior TypeSpec does not directly model for Typra's current runtimes.
+6. Add `@vector` only for behavior the callable oracle can observe: inputs, successful results, errors/status, supported effect observations, vector metadata, and target runtime metadata.
+7. Do not introduce Typra-specific HTTP decorators for concepts TypeSpec HTTP already owns. HTTP projection consumes TypeSpec HTTP metadata after callable/vector conformance is proven.
+8. Preserve nested TypeSpec namespaces in the shared IR and structural generated output. Target package, module, and import paths are projections of that semantic identity, not replacements for it.
 
 ## Namespace projection
 
@@ -82,8 +84,12 @@ const RenderVectors = #[
 ];
 
 interface Renderer {
+  @runtimeCancellable
   @vector(RenderVectors)
   render(request: PromptRequest): PromptResult;
+
+  @sync
+  summarize(result: PromptResult): string;
 }
 
 @route("/render")
@@ -93,15 +99,15 @@ interface RenderApi {
 }
 ```
 
-This is the preferred Typra shape: models remain the data contract, `interface` / `op` owns callable seams, `@vector` supplies behavior evidence, and TypeSpec HTTP decorators optionally describe transport. Generated targets should keep handwritten runtime logic behind these seams while Typra verifies that observed behavior matches the durable TypeSpec contract.
+This is the preferred Typra shape: models remain the data contract, `interface` / `op` owns callable seams, operation decorators describe runtime-only callable effects, `@vector` supplies behavior evidence, and TypeSpec HTTP decorators optionally describe transport. Generated targets should keep handwritten runtime logic behind these seams while Typra verifies that observed behavior matches the durable TypeSpec contract.
 
 ## Callable IR
 
 Typra uses a language-neutral callable-contract IR between TypeSpec and target emitters. The IR records the contract name, operation names, parameter and return types, documentation, grouping, sync/async behavior, runtime cancellation, atomic/non-fatal metadata, source metadata, and the generated/handwritten hydration seam.
 
-Legacy `@protocol` / `@method` declarations and TypeSpec-native `interface` / `op` declarations both lower into this IR before target rendering. That gives Typra one place to compare legacy and native contracts before generating language-specific protocol, trait, interface, adapter, or vector surfaces. Migration tests should prove that equivalent legacy and native declarations produce the same callable IR, export surface, hydration seam, and generated protocol file before a legacy decorator is retired.
+Legacy `@protocol` / `@method` declarations and TypeSpec-native `interface` / `op` declarations both lower into this IR before target rendering. That gives Typra one place to compare legacy and native contracts before generating language-specific protocol, trait, interface, adapter, or vector surfaces. New contracts should use TypeSpec-native callable declarations plus operation decorators for effect metadata.
 
-Today, equivalence applies to the shared TypeSpec-native operation shape: name, documentation, parameters, return type, generated boundary, export surface, and hydration seam. Legacy-only `@method` flags such as `optional`, `sync`, `runtimeCancellable`, `atomic`, and `nonFatal` remain compatibility metadata until Typra defines a principled native vocabulary for those effects.
+Operation decorators provide the native vocabulary for the old `@method` flags: `@optionalOperation`, `@sync`, `@runtimeCancellable`, and `@effect(#{ atomic: true, nonFatal: true })`.
 
 ## Behavior vectors
 
@@ -143,7 +149,7 @@ Prompty depends on Typra as an agent drift prevention layer, not primarily as an
 - discriminated polymorphism,
 - provider wire mappings through `@knownAs` and `@defaultFor`,
 - generated `@factory` helpers,
-- `@protocol` and `@method` callable signatures and hydration seams,
+- TypeSpec-native callable signatures, operation decorators, and hydration seams,
 - existing load/render/parse vector categories.
 
 Prompty also shows where Typra should be opinionated: callable seams should move to TypeSpec-native `interface`/`op`, vectors should become executable conformance evidence rather than ad hoc tests, and host-sensitive behavior such as `${env}` / `${file}` expansion should remain a hydration seam instead of becoming generic schema defaults. Compatibility shims can protect existing users while Typra points Prompty at a better contract shape.

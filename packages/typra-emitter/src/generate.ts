@@ -176,7 +176,7 @@ export async function generate(
   const packageRoot = path.resolve(__dirname, "../..");
   const modelPath = source
     ? path.resolve(source)
-    : path.resolve(packageRoot, "fixtures", "shapes", "main.tsp");
+    : path.resolve(packageRoot, "fixtures", "integration", "main.tsp");
   if (!existsSync(modelPath)) {
     return {
       success: false,

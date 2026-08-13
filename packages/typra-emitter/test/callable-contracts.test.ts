@@ -11,6 +11,7 @@ import {
 } from "../src/ir/callable.js";
 import { lowerType } from "../src/ir/lower.js";
 import { TypeRegistry } from "../src/ir/expansion.js";
+import { StateKeys } from "../src/lib.js";
 
 function protocol(name: string, group = "pipeline"): TypeNode {
   const node = new TypeNode({} as Model, `Callable ${name}`);
@@ -51,7 +52,10 @@ function type(name: string): Type {
   } as unknown as Type;
 }
 
-function nativeInterface(includeReset = true): { program: Program; iface: Interface } {
+function nativeInterface(
+  includeReset = true,
+  effects: Map<string, unknown> = new Map(),
+): { program: Program; iface: Interface } {
   const operations = new Map<string, unknown>([
     [
       "render",
@@ -103,8 +107,16 @@ function nativeInterface(includeReset = true): { program: Program; iface: Interf
     [iface, { value: "Render callable contract." }],
     [Array.from(iface.operations.values())[0], { value: "Render a request." }],
   ]);
+  const operationEffects = new Map<unknown, unknown>();
+  for (const [name, effect] of effects) {
+    const operation = operations.get(name);
+    if (operation) {
+      operationEffects.set(operation, effect);
+    }
+  }
   const program = {
-    stateMap: () => docs,
+    stateMap: (key: symbol) =>
+      key === StateKeys.operationEffects ? operationEffects : docs,
   } as unknown as Program;
 
   return { program, iface };
@@ -359,7 +371,7 @@ describe("callable-contract IR", () => {
     );
   });
 
-  it("documents legacy method flags that have no TypeSpec-native equivalent yet", () => {
+  it("lowers TypeSpec-native operation decorators into callable effect metadata", () => {
     const legacyNode = protocol("Renderer");
     legacyNode.typeName = { namespace: "Typra.Runtime", name: "Renderer" };
     legacyNode.methods = [
@@ -376,7 +388,21 @@ describe("callable-contract IR", () => {
       },
     ];
     const legacy = lowerLegacyCallableContract(legacyNode);
-    const { program, iface } = nativeInterface(false);
+    const { program, iface } = nativeInterface(
+      false,
+      new Map([
+        [
+          "render",
+          {
+            optional: true,
+            sync: true,
+            runtimeCancellable: true,
+            atomic: true,
+            nonFatal: true,
+          },
+        ],
+      ]),
+    );
     const native = lowerTypeSpecCallableContract(
       program,
       iface,
@@ -384,7 +410,7 @@ describe("callable-contract IR", () => {
       "Runtime",
     );
 
-    assert.notDeepEqual(
+    assert.deepEqual(
       native.operations.map((operation) => ({
         name: operation.name,
         optional: operation.optional,
@@ -401,26 +427,6 @@ describe("callable-contract IR", () => {
         atomic: operation.atomic,
         nonFatal: operation.nonFatal,
       })),
-    );
-    assert.deepEqual(
-      native.operations.map((operation) => ({
-        name: operation.name,
-        optional: operation.optional,
-        sync: operation.sync,
-        runtimeCancellable: operation.runtimeCancellable,
-        atomic: operation.atomic,
-        nonFatal: operation.nonFatal,
-      })),
-      [
-        {
-          name: "render",
-          optional: false,
-          sync: false,
-          runtimeCancellable: false,
-          atomic: false,
-          nonFatal: false,
-        },
-      ],
     );
   });
 });

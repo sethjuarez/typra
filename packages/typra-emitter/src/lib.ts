@@ -269,6 +269,10 @@ export const $lib = createTypeSpecLibrary({
     abstracts: { description: "Abstract models" },
     factories: { description: "Factory methods for model construction" },
     methods: { description: "Method stubs for model types" },
+    operationEffects: {
+      description:
+        "TypeSpec-native operation metadata for callable runtime effects",
+    },
     knownAs: { description: "Wire field name mappings per target system" },
     defaultFor: { description: "Per-target required default values" },
     protocols: { description: "Pipeline interface markers" },
