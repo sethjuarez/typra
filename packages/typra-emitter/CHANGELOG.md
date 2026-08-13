@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.6.1](https://github.com/sethjuarez/typra/compare/v0.6.0...v0.6.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* validate namespaced rust unknown fixtures ([e494fe8](https://github.com/sethjuarez/typra/commit/e494fe8de1f903e772de4dc196b99ab2dd09ca1f))
+
 ## [0.6.0](https://github.com/sethjuarez/typra/compare/v0.5.0...v0.6.0) (2026-08-12)
 
 
