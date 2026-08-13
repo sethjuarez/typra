@@ -74,6 +74,35 @@ extern dec method(
 );
 
 /**
+ * Marks an operation as accepting host/runtime cancellation outside the logical
+ * serialized contract. Target emitters project this to native cancellation
+ * parameters such as AbortSignal, CancellationToken, context.Context, or a
+ * configured runtime token path.
+ */
+extern dec runtimeCancellable(target: Operation);
+
+/**
+ * Marks an operation as synchronously callable. Targets that distinguish sync
+ * and async surfaces emit a sync signature; other targets may treat this as
+ * metadata.
+ */
+extern dec sync(target: Operation);
+
+/**
+ * Records operation effect metadata for conformance and documentation. Typra
+ * does not implement transactions or error policy; host applications own the
+ * runtime behavior.
+ */
+extern dec effect(target: Operation, options: valueof unknown);
+
+/**
+ * Marks an operation as optional on generated protocol/capability surfaces.
+ * Prefer smaller capability interfaces unless optional behavior is required for
+ * compatibility.
+ */
+extern dec optionalOperation(target: Operation);
+
+/**
  * Attaches callable behavior expectations to a TypeSpec operation.
  *
  * A vector must provide `input` and exactly one of `expected` or `expectedError`.

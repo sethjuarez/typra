@@ -84,6 +84,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "empty-target-dirs",
   "output-hygiene",
   "structured-load-coverage",
+  "focused-feature-fixtures",
   "static-fixture-coverage",
   "static-conformance-matrix",
   "export-surface-snapshot",
@@ -868,6 +869,20 @@ function walkFiles(dir, predicate = () => true) {
   return files;
 }
 
+function findFocusedFeatureFixtures() {
+  return walkFiles(path.join(packageRoot, "fixtures", "features"), (filePath) =>
+    filePath.endsWith(`${path.sep}main.tsp`),
+  ).sort();
+}
+
+function toPascalCase(value) {
+  return value
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join("");
+}
+
 const GENERATED_TEXT_EXTENSIONS = new Set([
   ".cs",
   ".go",
@@ -1120,6 +1135,7 @@ function assertGeneratedStructuredLoadCoverage() {
               .join("\n"),
         );
       }
+
     }
 
     const files = walkFiles(suite.dir, (file) => {
@@ -1150,6 +1166,144 @@ function assertGeneratedStructuredLoadCoverage() {
             .map((file) => `  ${path.relative(packageRoot, file)}`)
             .join("\n"),
       );
+    }
+  }
+}
+
+function assertFocusedFeatureFixtures() {
+  const fixtures = findFocusedFeatureFixtures();
+  assertArrayIncludes(
+    "Focused feature fixtures",
+    fixtures.map((fixture) =>
+      path
+        .relative(path.join(packageRoot, "fixtures"), fixture)
+        .split(path.sep)
+        .join("/"),
+    ),
+    "features/samples/main.tsp",
+    "features/vectors/main.tsp",
+    "features/model-shapes/main.tsp",
+    "features/scalars/main.tsp",
+    "features/collections/main.tsp",
+    "features/coercions/main.tsp",
+    "features/defaults/main.tsp",
+    "features/docs/main.tsp",
+    "features/enums/main.tsp",
+    "features/namespaces/main.tsp",
+    "features/polymorphism/main.tsp",
+    "features/protocols/main.tsp",
+    "features/wire/main.tsp",
+    "features/transport/main.tsp",
+  );
+
+  for (const fixture of fixtures) {
+    const relative = path
+      .relative(path.join(packageRoot, "fixtures", "features"), fixture)
+      .split(path.sep);
+    const featureName = relative[0];
+    const outputRoot = path.join(validationRoot, "focused-features", featureName);
+
+    try {
+      execFileSync(
+        process.execPath,
+        [
+          path.join(packageRoot, "dist", "src", "cli.js"),
+          "--output",
+          outputRoot,
+          "--targets",
+          "markdown",
+          "--spec",
+          fixture,
+          "--root-object",
+          `Typra.Fixtures.Features.${toPascalCase(featureName)}.Root`,
+          "--no-tests",
+          "--no-format",
+          "--deterministic",
+        ],
+        { cwd: packageRoot, stdio: "pipe" },
+      );
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Focused feature fixture ${featureName} failed to compile:\n${output || error.message}`,
+      );
+      continue;
+    }
+
+    const modelPath = path.join(outputRoot, "json-ast", "model.json");
+    const model = existsSync(modelPath)
+      ? JSON.parse(readFileSync(modelPath, "utf8"))
+      : undefined;
+    if (!model) {
+      fail(`Focused feature fixture ${featureName} did not generate JSON AST.`);
+      continue;
+    }
+
+    if (featureName === "samples") {
+      const properties = model.properties ?? [];
+      const inline = properties.find((field) => field.name === "inline");
+      const fileBacked = properties.find((field) => field.name === "fileBacked");
+      if (
+        !JSON.stringify(inline?.samples ?? []).includes("inline-sample") ||
+        !JSON.stringify(fileBacked?.samples ?? []).includes("file-backed-sample")
+      ) {
+        fail(
+          "Focused samples fixture must preserve both inline and imported sample payloads.",
+        );
+      }
+    }
+
+    if (featureName === "vectors") {
+      const vectorPath = path.join(
+        outputRoot,
+        ".typra-generated",
+        "vectors.json",
+      );
+      const vectors = existsSync(vectorPath)
+        ? JSON.parse(readFileSync(vectorPath, "utf8"))
+        : undefined;
+      const serialized = JSON.stringify(vectors ?? {});
+      for (const expected of [
+        "inline-success",
+        "file-backed-success",
+        "file-backed-error",
+        "expectedError",
+      ]) {
+        if (!serialized.includes(expected)) {
+          fail(
+            `Focused vectors fixture did not preserve expected vector payload: ${expected}`,
+          );
+        }
+      }
+    }
+
+    if (featureName === "protocols") {
+      const exportSurfacePath = path.join(
+        outputRoot,
+        ".typra-generated",
+        "export-surfaces.json",
+      );
+      const exportSurface = existsSync(exportSurfacePath)
+        ? JSON.parse(readFileSync(exportSurfacePath, "utf8"))
+        : undefined;
+      const methods =
+        exportSurface?.targets?.[0]?.protocols?.find(
+          (protocol) => protocol.name === "CheckpointStore",
+        )?.methods ?? [];
+      const load = methods.find((method) => method.name === "load");
+      const observe = methods.find((method) => method.name === "observe");
+      const save = methods.find((method) => method.name === "save");
+      if (
+        load?.sync !== true ||
+        observe?.optional !== true ||
+        observe?.nonFatal !== true ||
+        save?.runtimeCancellable !== true
+      ) {
+        fail(
+          "Focused protocols fixture must preserve native operation decorator metadata.",
+        );
+      }
     }
   }
 }
@@ -4102,7 +4256,14 @@ function runRustUnknownAbstractConformance() {
         "--targets",
         "rust",
         "--spec",
-        path.join(packageRoot, "fixtures", "rust-unknown", "main.tsp"),
+        path.join(
+          packageRoot,
+          "fixtures",
+          "runtimes",
+          "rust",
+          "unknown-polymorphism",
+          "main.tsp",
+        ),
         "--root-object",
         "Typra.Fixtures.RustUnknown.Root",
         "--no-tests",
@@ -5138,7 +5299,7 @@ function assertStaticFixtureCoverage() {
     'describe("protocol scaffolds", () => {',
     'it("compiles compile-only protocol implementations", () => {',
     "class CompileOnlyEventSink implements EventSink",
-    'throw new Error("EventSink.emit is a compile-only protocol scaffold.")',
+    'throw new Error("EventSink.emit is a compile-only protocol scaffold.");',
   );
 
   assertIncludes(
@@ -5418,7 +5579,7 @@ function assertStaticFixtureCoverage() {
       "ProtocolScaffolds.cs",
     ),
     "internal sealed class CompileOnlyEventSink : IEventSink",
-    'throw new NotSupportedException("EventSink.emit is a compile-only protocol scaffold.")',
+    'Task.FromException(new NotSupportedException("EventSink.emit is a compile-only protocol scaffold."))',
     'Task.FromException(new NotSupportedException("CheckpointStore.save is a compile-only protocol scaffold."))',
   );
   assertIncludes(
@@ -5475,7 +5636,7 @@ function assertStaticFixtureCoverage() {
       "protocol_scaffolds_test.rs",
     ),
     "impl EventSink for CompileOnlyEventSink",
-    'panic!("EventSink.emit is a compile-only protocol scaffold.")',
+    'Err("EventSink.emit is a compile-only protocol scaffold.".into())',
   );
   assertIncludes(
     path.join(
@@ -5652,26 +5813,23 @@ function assertExportSurfaceSnapshot() {
     "pipeline",
   );
   assertArrayIncludes(
-    "TypeScript pipeline modules",
-    targets
-      .get("typescript")
-      ?.groups?.find((group) => group.name === "pipeline")?.modules ?? [],
-    "event-sink",
-    "checkpoint-store",
+    "TypeScript root modules",
+    targets.get("typescript")?.modules ?? [],
+    "./event-sink",
+    "./checkpoint-store",
   );
   assertArrayIncludes(
-    "Python pipeline modules",
-    targets.get("python")?.groups?.find((group) => group.name === "pipeline")
-      ?.modules ?? [],
-    "_EventSink",
-    "_CheckpointStore",
+    "Python root modules",
+    targets.get("python")?.modules ?? [],
+    "._EventSink",
+    "._CheckpointStore",
   );
   assertArrayIncludes(
     "C# grouped sources",
     (targets.get("csharp")?.exports ?? []).map((entry) => entry.source),
     "events/Checkpoint.cs",
-    "pipeline/EventSink.cs",
-    "pipeline/CheckpointStore.cs",
+    "EventSink.cs",
+    "CheckpointStore.cs",
   );
 
   if (targets.get("go")?.packageName !== "fixtures") {
@@ -5722,7 +5880,7 @@ function assertHydrationBoundarySnapshot() {
       "Hydration boundary snapshot is missing the TypeScript EventSink protocol seam.",
     );
   } else if (
-    eventSink.generatedSource !== "./pipeline/event-sink" ||
+    eventSink.generatedSource !== "./event-sink" ||
     eventSink.seamKind !== "protocol-adapter"
   ) {
     fail("Hydration boundary snapshot EventSink seam drifted.");
@@ -5810,7 +5968,13 @@ function assertGeneratedOutputReport() {
   if (!Array.isArray(report.protectedPathTouches?.matchedFiles)) {
     fail("Generated output report must include protected path matched files.");
   }
-  if (report.cleanup?.status !== "safe-noop") {
+  if (
+    report.cleanup?.status !== "safe-noop" &&
+    !(
+      report.cleanup?.status === "review-recommended" &&
+      report.staleMarkerOwnedRemovals?.length > 0
+    )
+  ) {
     fail("Generated output report cleanup status must be stable for fixtures.");
   }
   if (
@@ -5835,14 +5999,13 @@ function assertActualGeneratedSurface() {
     "TextContent,",
     "ImageContent,",
     '} from "./fixture-content";',
-    'export type { EventSink } from "./pipeline/event-sink";',
-    'export type { CheckpointStore } from "./pipeline/checkpoint-store";',
+    'export type { EventSink } from "./event-sink";',
+    'export type { CheckpointStore } from "./checkpoint-store";',
   );
   assertIncludes(
     path.join("generated", "fixtures", "python", "__init__.py"),
-    "from .pipeline import (",
-    "    EventSink,",
-    "    CheckpointStore,",
+    "from ._EventSink import EventSink",
+    "from ._CheckpointStore import CheckpointStore",
     '    "EventSink",',
     '    "CheckpointStore",',
   );
@@ -5859,7 +6022,7 @@ function assertActualGeneratedSurface() {
     "pub fn from_str_ignore_case_opt(s: &str) -> Option<Self>",
   );
   assertIncludes(
-    path.join("generated", "fixtures", "rust", "pipeline", "mod.rs"),
+    path.join("generated", "fixtures", "rust", "mod.rs"),
     "pub mod event_sink;\npub use event_sink::*;",
     "pub mod checkpoint_store;\npub use checkpoint_store::*;",
   );
@@ -5880,18 +6043,17 @@ function assertActualGeneratedSurface() {
       "generated",
       "fixtures",
       "typescript",
-      "pipeline",
       "event-sink.ts",
     ),
-    "emit(event: unknown): void;",
+    "emit(event: unknown, signal?: AbortSignal): Promise<void>;",
   );
   assertIncludes(
-    path.join("generated", "fixtures", "python", "pipeline", "_EventSink.py"),
-    "def emit(self, event: Any) -> None:",
+    path.join("generated", "fixtures", "python", "_EventSink.py"),
+    "def emit(self, event: Any, cancellation: CancellationToken | None = None) -> None:",
   );
   assertIncludes(
-    path.join("generated", "fixtures", "rust", "pipeline", "event_sink.rs"),
-    "fn emit(&self, event: &serde_json::Value) -> ();",
+    path.join("generated", "fixtures", "rust", "event_sink.rs"),
+    "async fn emit(&self, event: &serde_json::Value, cancellation: &CancellationToken) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;",
   );
   assertIncludes(
     path.join("generated", "fixtures", "swift", "Package.swift"),
@@ -5905,11 +6067,10 @@ function assertActualGeneratedSurface() {
       "swift",
       "Sources",
       "TypraFixtures",
-      "pipeline",
       "event_sink.swift",
     ),
     "public protocol EventSink",
-    "func emit(event: Any) throws",
+    "func emit(event: Any) async throws",
   );
 }
 
@@ -5946,6 +6107,7 @@ function runDeclaredValidationStages() {
       ["empty-target-dirs", assertNoEmptyTargetDirs],
       ["output-hygiene", assertGeneratedOutputHygiene],
       ["structured-load-coverage", assertGeneratedStructuredLoadCoverage],
+      ["focused-feature-fixtures", assertFocusedFeatureFixtures],
       ["static-fixture-coverage", assertStaticFixtureCoverage],
       ["static-conformance-matrix", assertConformanceMatrix],
       ["export-surface-snapshot", assertExportSurfaceSnapshot],

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   type DecoratorContext,
+  type Operation,
   type Program,
   type Type,
 } from "@typespec/compiler";
@@ -13,9 +14,13 @@ import {
   $factory,
   $knownAs,
   $method,
+  $effect,
+  $optionalOperation,
   $parseAlias,
   $protocol,
+  $runtimeCancellable,
   $sample,
+  $sync,
   appendStateValue,
   getStateScalar,
   getStateValue,
@@ -68,6 +73,38 @@ describe("decorator state helpers", () => {
       "second",
       "third",
     ]);
+  });
+
+  it("records TypeSpec-native operation effect metadata", () => {
+    const { context, program } = createContext();
+    const target = { kind: "Operation", name: "authorize" } as Operation;
+
+    $runtimeCancellable(context, target);
+    $sync(context, target);
+    $effect(context, target, { atomic: true, nonFatal: true });
+    $optionalOperation(context, target);
+
+    assert.deepEqual(
+      getStateScalar(program, StateKeys.operationEffects, target),
+      {
+        runtimeCancellable: true,
+        sync: true,
+        atomic: true,
+        nonFatal: true,
+        optional: true,
+      },
+    );
+  });
+
+  it("reports unknown @effect options", () => {
+    const { context, program, diagnostics } = createContext();
+    const target = { kind: "Operation", name: "authorize" } as Operation;
+
+    $effect(context, target, { atmoic: true });
+
+    assert.deepEqual(getStateScalar(program, StateKeys.operationEffects, target), undefined);
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].code, "typra-emitter-effect-shape");
   });
 
   it("stores scalar state and treats absent values as undefined", () => {
