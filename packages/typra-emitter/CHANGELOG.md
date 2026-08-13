@@ -55,6 +55,13 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   optional-and-omitted emits no `ToWire` test at all. Populating an optional wire field
   via `@sample` opts it back into the fixture and its assertion.
 
+## [0.8.2](https://github.com/sethjuarez/typra/compare/v0.8.1...v0.8.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* drop model-typed load/save round-trip from vector conformance ([#208](https://github.com/sethjuarez/typra/issues/208)) ([13df485](https://github.com/sethjuarez/typra/commit/13df4857f086f6603f7738809ff08c1977f9a8b7))
+
 ## [0.8.1](https://github.com/sethjuarez/typra/compare/v0.8.0...v0.8.1) (2026-08-13)
 
 
