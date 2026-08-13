@@ -67,6 +67,7 @@ export default defineConfig({
             { label: "Models and properties", link: "/mappings/models/" },
             { label: "Collections and records", link: "/mappings/collections/" },
             { label: "Unions and polymorphism", link: "/mappings/unions-polymorphism/" },
+            { label: "Interfaces, operations, and transport", link: "/mappings/operations/" },
             { label: "Decorators and wire names", link: "/mappings/decorators/" },
           ],
         },
