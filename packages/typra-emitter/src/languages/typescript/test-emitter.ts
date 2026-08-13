@@ -119,6 +119,9 @@ export function emitTypeScriptTest(
       lines.push(`      const instance = ${typeName}.fromJson(json);`);
       lines.push(`      const output = instance.toJson();`);
       lines.push(`      const reloaded = ${typeName}.fromJson(output);`);
+      if (example.validations.length === 0) {
+        lines.push(`      expect(reloaded).toBeDefined();`);
+      }
       for (const val of example.validations) {
         lines.push(
           `      expect(reloaded.${val.key}).toEqual(instance.${val.key});`,
@@ -154,6 +157,9 @@ export function emitTypeScriptTest(
       lines.push(`      const instance = ${typeName}.fromYaml(yaml);`);
       lines.push(`      const output = instance.toYaml();`);
       lines.push(`      const reloaded = ${typeName}.fromYaml(output);`);
+      if (example.validations.length === 0) {
+        lines.push(`      expect(reloaded).toBeDefined();`);
+      }
       for (const val of example.validations) {
         lines.push(
           `      expect(reloaded.${val.key}).toEqual(instance.${val.key});`,

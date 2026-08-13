@@ -98,6 +98,8 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "typescript.generated-tests",
   "python.compile",
   "python_pydantic.compile",
+  "python.lint",
+  "python_pydantic.lint",
   "python.generated-tests",
   "python_pydantic.generated-tests",
   "go.generated-tests",
@@ -1135,7 +1137,6 @@ function assertGeneratedStructuredLoadCoverage() {
               .join("\n"),
         );
       }
-
     }
 
     const files = walkFiles(suite.dir, (file) => {
@@ -1201,7 +1202,11 @@ function assertFocusedFeatureFixtures() {
       .relative(path.join(packageRoot, "fixtures", "features"), fixture)
       .split(path.sep);
     const featureName = relative[0];
-    const outputRoot = path.join(validationRoot, "focused-features", featureName);
+    const outputRoot = path.join(
+      validationRoot,
+      "focused-features",
+      featureName,
+    );
 
     try {
       execFileSync(
@@ -1243,10 +1248,14 @@ function assertFocusedFeatureFixtures() {
     if (featureName === "samples") {
       const properties = model.properties ?? [];
       const inline = properties.find((field) => field.name === "inline");
-      const fileBacked = properties.find((field) => field.name === "fileBacked");
+      const fileBacked = properties.find(
+        (field) => field.name === "fileBacked",
+      );
       if (
         !JSON.stringify(inline?.samples ?? []).includes("inline-sample") ||
-        !JSON.stringify(fileBacked?.samples ?? []).includes("file-backed-sample")
+        !JSON.stringify(fileBacked?.samples ?? []).includes(
+          "file-backed-sample",
+        )
       ) {
         fail(
           "Focused samples fixture must preserve both inline and imported sample payloads.",
@@ -1287,10 +1296,10 @@ function assertFocusedFeatureFixtures() {
       const exportSurface = existsSync(exportSurfacePath)
         ? JSON.parse(readFileSync(exportSurfacePath, "utf8"))
         : undefined;
+      const protocols = exportSurface?.targets?.[0]?.protocols ?? [];
       const methods =
-        exportSurface?.targets?.[0]?.protocols?.find(
-          (protocol) => protocol.name === "CheckpointStore",
-        )?.methods ?? [];
+        protocols.find((protocol) => protocol.name === "CheckpointStore")
+          ?.methods ?? [];
       const load = methods.find((method) => method.name === "load");
       const observe = methods.find((method) => method.name === "observe");
       const save = methods.find((method) => method.name === "save");
@@ -1302,6 +1311,33 @@ function assertFocusedFeatureFixtures() {
       ) {
         fail(
           "Focused protocols fixture must preserve native operation decorator metadata.",
+        );
+      }
+
+      const optionalSeam =
+        protocols.find((protocol) => protocol.name === "OptionalSeam")
+          ?.methods ?? [];
+      const writeSummary = optionalSeam.find(
+        (method) => method.name === "writeSummary",
+      );
+      const loadCheckpoint = optionalSeam.find(
+        (method) => method.name === "loadCheckpoint",
+      );
+      const preRender = optionalSeam.find(
+        (method) => method.name === "preRender",
+      );
+      if (
+        // GAP 1: optional param keeps its optionality via the trailing "?".
+        writeSummary?.params?.summary !== "SessionSummary?" ||
+        // GAP 2: `Checkpoint | null` folds to the nullable "?" spelling.
+        loadCheckpoint?.returns !== "Checkpoint?" ||
+        // GAP 3: optional, value-returning op stays optional + sync.
+        preRender?.optional !== true ||
+        preRender?.sync !== true ||
+        preRender?.returns !== "string"
+      ) {
+        fail(
+          "Focused protocols fixture must carry native-op optional/nullable lowering (optional param, nullable return, optional value-returning op).",
         );
       }
     }
@@ -1380,6 +1416,8 @@ function runGeneratedTypeScriptCompileFor(targetDir, label) {
           moduleResolution: "node",
           esModuleInterop: true,
           skipLibCheck: true,
+          noUnusedLocals: true,
+          noUnusedParameters: true,
           types: ["node"],
           typeRoots: typeScriptTypeRoots(tscCli),
           lib: ["ES2022"],
@@ -1765,6 +1803,46 @@ function runPythonCompile(target = "python") {
 }
 
 /**
+ * Lints the generated Python with ruff's pyflakes (`F`) rules — the
+ * "compiler warning" equivalent for Python: unused imports/variables and
+ * undefined names. We deliberately scope to `F` rather than ruff's opinionated
+ * style rules (import ordering, naming, try/except shape) because the emitter
+ * makes intentional choices there (e.g. `_TypeName.py` module names). This gate
+ * is what catches regressions like the unused `dataclasses.field` import.
+ */
+function runPythonRuffCheck(target = "python") {
+  const sourceDir = path.join(generatedRoot, target);
+  if (!existsSync(sourceDir)) {
+    fail(`No generated ${target} directory found to lint.`);
+    return;
+  }
+  if (!commandExists("uv")) {
+    fail(
+      `Generated ${target} lint validation cannot run because uv is not available.`,
+    );
+    return;
+  }
+  runCommand(
+    `Generated ${target} ruff lint validation`,
+    "uv",
+    [
+      "run",
+      "--python",
+      "3.12",
+      "--with",
+      "ruff",
+      "ruff",
+      "check",
+      sourceDir,
+      "--select",
+      "F",
+      "--no-cache",
+    ],
+    { cwd: packageRoot },
+  );
+}
+
+/**
  * Runs the generated Python tests. Compiling them proved nothing about whether they pass —
  * Python was the last backend whose generated suite was never executed, which is how the
  * literal and factory defects fixed in #107 reached main unnoticed. See #96.
@@ -1950,7 +2028,7 @@ function runRustTests(target = "rust", packageName = "fixtures") {
           cwd: sourceDir,
           encoding: "utf8",
           stdio: ["ignore", "pipe", "pipe"],
-          env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+          env: { ...process.env, CARGO_TARGET_DIR: targetDir, RUSTFLAGS: "-D warnings" },
         },
       );
     } catch (error) {
@@ -2305,7 +2383,7 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     try {
       output = execFileSync(
         "swift",
-        ["test", "--package-path", sourceDir, "--scratch-path", buildDir],
+        ["test", "--package-path", sourceDir, "--scratch-path", buildDir, "-Xswiftc", "-warnings-as-errors"],
         {
           cwd: sourceDir,
           encoding: "utf8",
@@ -2446,7 +2524,7 @@ function runCSharpBuild() {
       "  <PropertyGroup>",
       `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
       "    <Nullable>enable</Nullable>",
-      "    <WarningsAsErrors>nullable</WarningsAsErrors>",
+      "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>",
       "    <ImplicitUsings>enable</ImplicitUsings>",
       "  </PropertyGroup>",
       "  <ItemGroup>",
@@ -2513,7 +2591,7 @@ function runCSharpConsumerNullabilityBuild() {
       "  <PropertyGroup>",
       `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
       "    <Nullable>enable</Nullable>",
-      "    <WarningsAsErrors>nullable</WarningsAsErrors>",
+      "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>",
       "    <ImplicitUsings>enable</ImplicitUsings>",
       "    <AssemblyName>TypraFixtureConsumerLibrary</AssemblyName>",
       "  </PropertyGroup>",
@@ -2560,7 +2638,7 @@ function runCSharpConsumerNullabilityBuild() {
         "    <OutputType>Exe</OutputType>",
         `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
         "    <Nullable>enable</Nullable>",
-        "    <WarningsAsErrors>nullable</WarningsAsErrors>",
+        "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>",
         "    <ImplicitUsings>enable</ImplicitUsings>",
         "  </PropertyGroup>",
         "  <ItemGroup>",
@@ -2641,7 +2719,7 @@ function runCSharpGeneratedTests() {
       "  <PropertyGroup>",
       `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
       "    <Nullable>enable</Nullable>",
-      "    <WarningsAsErrors>nullable</WarningsAsErrors>",
+      "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>",
       "    <ImplicitUsings>enable</ImplicitUsings>",
       "    <IsTestProject>true</IsTestProject>",
       "    <IsPackable>false</IsPackable>",
@@ -2733,7 +2811,7 @@ function runCSharpProtocolScaffoldBuild() {
       "  <PropertyGroup>",
       `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
       "    <Nullable>enable</Nullable>",
-      "    <WarningsAsErrors>nullable</WarningsAsErrors>",
+      "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>",
       "    <ImplicitUsings>enable</ImplicitUsings>",
       "  </PropertyGroup>",
       "  <ItemGroup>",
@@ -2802,7 +2880,7 @@ function runJavaTargetBuild(targetDir, label, classpath = "") {
     runCommand(
       label,
       "javac",
-      [...javaClasspathArgs(classpath), "-d", classesDir, ...sourceFiles],
+      [...javaClasspathArgs(classpath), "-Xlint:all", "-Werror", "-d", classesDir, ...sourceFiles],
       { cwd: sourceDir },
     );
   } finally {
@@ -2879,6 +2957,8 @@ function runJavaTargetGeneratedTests(targetDir, label, classpath = "") {
       "javac",
       [
         ...javaClasspathArgs(classpath),
+        "-Xlint:all",
+        "-Werror",
         "-d",
         classesDir,
         ...sourceFiles,
@@ -4013,7 +4093,9 @@ function runRustExecutableConformance(
       useSerdeFeature
         ? "    let mut unknown_connection = serde_json::from_value::<FixtureConnection>(unknown_connection_input.clone()).unwrap();"
         : "    let mut unknown_connection = FixtureConnection::load_from_value(&unknown_connection_input, &load_ctx);",
-      "    let canonical_unknown_connection = FixtureConnection::load_from_value(&unknown_connection_input, &load_ctx);",
+      useSerdeFeature
+        ? "    let canonical_unknown_connection = FixtureConnection::load_from_value(&unknown_connection_input, &load_ctx);"
+        : "",
       '    assert_eq!(unknown_connection.kind_str(), "future-auth");',
       '    assert!(matches!(&unknown_connection.kind, FixtureConnectionKind::Custom { raw, .. } if raw.get("endpoint") == Some(&json!("https://future.test")) && raw.get("providerOptions") == unknown_connection_input.get("providerOptions")));',
       useSerdeFeature
@@ -4038,7 +4120,9 @@ function runRustExecutableConformance(
       useSerdeFeature
         ? "    let known_connection = serde_json::from_value::<FixtureConnection>(known_connection_input.clone()).unwrap();"
         : "    let known_connection = FixtureConnection::load_from_value(&known_connection_input, &load_ctx);",
-      "    let canonical_known_connection = FixtureConnection::load_from_value(&known_connection_input, &load_ctx);",
+      useSerdeFeature
+        ? "    let canonical_known_connection = FixtureConnection::load_from_value(&known_connection_input, &load_ctx);"
+        : "",
       "    assert!(matches!(&known_connection.kind, FixtureConnectionKind::FixtureCustomConnection { .. }));",
       useSerdeFeature
         ? "    assert_eq!(serde_json::to_value(&known_connection).unwrap(), canonical_known_connection.to_value(&save_ctx));"
@@ -4059,7 +4143,9 @@ function runRustExecutableConformance(
       useSerdeFeature
         ? "    let named_open = serde_json::from_value::<FixtureNamedOpenBase>(named_open_input.clone()).unwrap();"
         : "    let named_open = FixtureNamedOpenBase::load_from_value(&named_open_input, &load_ctx);",
-      "    let canonical_named_open = FixtureNamedOpenBase::load_from_value(&named_open_input, &load_ctx);",
+      useSerdeFeature
+        ? "    let canonical_named_open = FixtureNamedOpenBase::load_from_value(&named_open_input, &load_ctx);"
+        : "",
       '    assert_eq!(named_open.kind_str(), "vendor-specific");',
       useSerdeFeature
         ? "    assert_eq!(serde_json::to_value(&named_open).unwrap(), canonical_named_open.to_value(&save_ctx));"
@@ -4075,7 +4161,9 @@ function runRustExecutableConformance(
       useSerdeFeature
         ? "    let unclaimed = serde_json::from_value::<FixtureUnclaimedBase>(unclaimed_input.clone()).unwrap();"
         : "    let unclaimed = FixtureUnclaimedBase::load_from_value(&unclaimed_input, &load_ctx);",
-      "    let canonical_unclaimed = FixtureUnclaimedBase::load_from_value(&unclaimed_input, &load_ctx);",
+      useSerdeFeature
+        ? "    let canonical_unclaimed = FixtureUnclaimedBase::load_from_value(&unclaimed_input, &load_ctx);"
+        : "",
       '    assert!(matches!(&unclaimed.kind, FixtureUnclaimedBaseKind::Custom { kind_name, .. } if kind_name == "plain"), "unclaimed closed discriminator value did not load as the base type");',
       useSerdeFeature
         ? "    assert_eq!(serde_json::to_value(&unclaimed).unwrap(), canonical_unclaimed.to_value(&save_ctx));"
@@ -4123,7 +4211,9 @@ function runRustExecutableConformance(
       useSerdeFeature
         ? "    let wildcard_tool = serde_json::from_value::<FixtureTool>(wildcard_tool_input.clone()).unwrap();"
         : "    let wildcard_tool = FixtureTool::load_from_value(&wildcard_tool_input, &load_ctx);",
-      "    let canonical_wildcard_tool = FixtureTool::load_from_value(&wildcard_tool_input, &load_ctx);",
+      useSerdeFeature
+        ? "    let canonical_wildcard_tool = FixtureTool::load_from_value(&wildcard_tool_input, &load_ctx);"
+        : "",
       '    assert!(matches!(&wildcard_tool.kind, FixtureToolKind::FixtureCustomTool { .. }), "declared wildcard subtype did not own unknown tool kind");',
       useSerdeFeature
         ? "    assert_eq!(serde_json::to_value(&wildcard_tool).unwrap(), canonical_wildcard_tool.to_value(&save_ctx));"
@@ -4216,7 +4306,7 @@ function runRustExecutableConformance(
         cwd: sourceDir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+        env: { ...process.env, CARGO_TARGET_DIR: targetDir, RUSTFLAGS: "-D warnings" },
       },
     ).trim();
     assertConformanceResult(target, output);
@@ -4363,7 +4453,7 @@ function runRustUnknownAbstractConformance() {
     execFileSync("cargo", ["run", "--quiet", "--bin", "unknown_validate"], {
       cwd: sourceDir,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+      env: { ...process.env, CARGO_TARGET_DIR: targetDir, RUSTFLAGS: "-D warnings" },
     });
   } catch (error) {
     const output =
@@ -4401,7 +4491,7 @@ function runCSharpExecutableConformance() {
       "    <OutputType>Exe</OutputType>",
       `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
       "    <Nullable>enable</Nullable>",
-      "    <WarningsAsErrors>nullable</WarningsAsErrors>",
+      "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>",
       "    <ImplicitUsings>enable</ImplicitUsings>",
       "  </PropertyGroup>",
       "  <ItemGroup>",
@@ -5132,6 +5222,8 @@ final class ConformanceValidateTests: XCTestCase {
         sourceDir,
         "--scratch-path",
         buildDir,
+        "-Xswiftc",
+        "-warnings-as-errors",
         "--filter",
         "ConformanceValidateTests",
       ],
@@ -6039,12 +6131,7 @@ function assertActualGeneratedSurface() {
     "package fixtures",
   );
   assertIncludes(
-    path.join(
-      "generated",
-      "fixtures",
-      "typescript",
-      "event-sink.ts",
-    ),
+    path.join("generated", "fixtures", "typescript", "event-sink.ts"),
     "emit(event: unknown, signal?: AbortSignal): Promise<void>;",
   );
   assertIncludes(
@@ -6120,6 +6207,8 @@ function runDeclaredValidationStages() {
       ["typescript-zod.compile", runGeneratedTypeScriptZodCompile],
       ["python.compile", () => runPythonCompile()],
       ["python_pydantic.compile", () => runPythonCompile("python_pydantic")],
+      ["python.lint", () => runPythonRuffCheck()],
+      ["python_pydantic.lint", () => runPythonRuffCheck("python_pydantic")],
       ["typescript.generated-tests", runTypeScriptGeneratedTests],
       ["python.generated-tests", () => runPythonGeneratedTests()],
       [

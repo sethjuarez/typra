@@ -207,7 +207,7 @@ describe("transport-contract IR", () => {
                 description: "",
                 params: {
                   petId: "string",
-                  includeDetails: "boolean",
+                  includeDetails: "boolean?",
                   sessionId: "string",
                 },
                 optional: false,
@@ -255,7 +255,7 @@ describe("transport-contract IR", () => {
                 description: "",
                 params: {
                   petId: "string",
-                  includeDetails: "boolean",
+                  includeDetails: "boolean?",
                   sessionId: "string",
                 },
                 optional: false,

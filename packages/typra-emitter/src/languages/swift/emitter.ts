@@ -630,7 +630,7 @@ function emitNamedCollectionSaveHelper(
   lines.push(
     `  private static func ${methodName}(_ items: [${elementType}], context: SaveContext) throws -> Any {`,
   );
-  lines.push("    var serialized = try items.map { try $0.save(context) }");
+  lines.push("    let serialized = try items.map { try $0.save(context) }");
   lines.push('    if context.collectionFormat == "array" {');
   lines.push("      return serialized");
   lines.push("    }");
@@ -643,7 +643,7 @@ function emitNamedCollectionSaveHelper(
   lines.push("      }");
   lines.push("    }");
   lines.push("    var result: [String: Any] = [:]");
-  lines.push("    for (item, originalData) in zip(items, serialized) {");
+  lines.push("    for (_, originalData) in zip(items, serialized) {");
   lines.push("      var itemData = originalData");
   lines.push(
     '      let name = itemData.removeValue(forKey: "name") as! String',

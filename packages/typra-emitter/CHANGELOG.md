@@ -6,6 +6,21 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## Unreleased
+
+### Bug Fixes
+
+- **emitter:** carry optionality and `T | null` returns through the TypeSpec-native
+  operation seam. Optional op parameters (`p?: T`) and nullable returns (`T | null`)
+  now lower to the seam's trailing-`?` nullability encoding, so every backend renders
+  the correct nullable type (Rust `Option<T>`, Go `*T`, C# `T?`, Python `T | None`)
+  instead of dropping the `Option` on params or leaking raw `T | null` union text
+  (which also synthesized a phantom `null` type import) on returns.
+- **rust:** stop emitting a type-incorrect `None` default body for an
+  `@optionalOperation @sync` op whose return is a required value. Such ops now diverge
+  with `unimplemented!(...)` — the sync analogue of the async default's `Err(...)` —
+  while optional and unit returns keep their `None`/`()` defaults.
+
 ## [0.6.2](https://github.com/sethjuarez/typra/compare/v0.6.1...v0.6.2) (2026-08-13)
 
 ### Features

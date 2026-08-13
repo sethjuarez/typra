@@ -8,6 +8,7 @@ import {
   Operation,
   Program,
   Type,
+  Union,
 } from "@typespec/compiler";
 import { getStateScalar, OperationEffectEntry } from "../decorators.js";
 import { StateKeys } from "../lib.js";
@@ -221,14 +222,42 @@ function lowerTypeSpecCallableOperation(
 function lowerOperationParameters(operation: Operation): Record<string, string> {
   const params: Record<string, string> = {};
   for (const [name, property] of operation.parameters.properties) {
-    params[name] = typeToCallableName(property.type);
+    const typeName = typeToCallableName(property.type);
+    // Encode optionality with the trailing "?" the callable seam already uses for
+    // nullability across every backend (Rust Option<T>, Go *T, C# T?, Python T | None,
+    // TS T | undefined). Guard against double-suffixing when the type is already
+    // nullable (e.g. an optional `T | null` parameter).
+    params[name] =
+      property.optional && !typeName.endsWith("?") ? `${typeName}?` : typeName;
   }
   return params;
+}
+
+/** Strip a `null` variant from a union, returning the remaining variant types. */
+function nonNullUnionVariants(union: Union): Type[] {
+  return Array.from(union.variants.values())
+    .map((variant) => variant.type)
+    .filter(
+      (variant) => !(variant.kind === "Intrinsic" && variant.name === "null"),
+    );
 }
 
 function typeToCallableName(type: Type): string {
   if (type.kind === "Intrinsic" && type.name === "void") {
     return "void";
+  }
+
+  if (type.kind === "Union") {
+    const nonNull = nonNullUnionVariants(type);
+    // `T | null` is the blessed nullable spelling on the operation seam: fold it to the
+    // trailing-"?" encoding so backends render Option<T>/*T/T? instead of leaking raw
+    // union text (and synthesizing a phantom `null` type import). Only a single non-null
+    // variant collapses; genuine multi-variant unions fall through to getTypeName so the
+    // existing unsupported-union diagnostics still surface downstream.
+    if (nonNull.length === 1 && nonNull.length < type.variants.size) {
+      const inner = typeToCallableName(nonNull[0]);
+      return inner.endsWith("?") ? inner : `${inner}?`;
+    }
   }
 
   if (type.kind === "Model" && type.name === "Array") {
