@@ -409,6 +409,42 @@ interface EventSink {
 }
 ```
 
+### JSON-string vector sets for keyword-named and opaque wire inputs
+
+Vector `input`/`expected` values are opaque conformance evidence — Typra
+serializes them into the vector snapshot and compares them structurally; they
+are not type-checked against the operation's parameters. TypeSpec object-value
+literals (`#{ ... }`) require keys to be bare, non-keyword identifiers, so they
+cannot express inputs whose domain models carry TypeSpec-keyword field names
+(such as `model`) or that replay opaque provider wire payloads with arbitrary
+keys. Quoting the key (`#{ "model": ... }`) is also rejected by the TypeSpec
+grammar.
+
+For those cases, author the vector set as a JSON string — typically a
+triple-quoted string constant — which Typra parses into entries. The escape is
+whole-set: mix native and JSON-string sets by stacking `@vector` decorators.
+
+```typespec
+const WireVectors = """
+[
+  {
+    "name": "wire-replay",
+    "stage": "callable",
+    "input": {
+      "request": { "model": { "provider": "openai" } },
+      "response": { "id": "resp-1", "model": "gpt-4o-mini", "choices": [] }
+    },
+    "expected": "Hello!"
+  }
+]
+""";
+
+interface Processor {
+  @vector(WireVectors)
+  process(request: CallRequest, response: unknown): unknown;
+}
+```
+
 Operation decorators apply only to TypeSpec-native operations:
 
 | Decorator | Runtime meaning |

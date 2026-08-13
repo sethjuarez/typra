@@ -1278,6 +1278,11 @@ function assertFocusedFeatureFixtures() {
         "file-backed-success",
         "file-backed-error",
         "expectedError",
+        // JSON-string vector set carrying a keyword `model` field name and an
+        // opaque provider wire payload (see fixtures/features/vectors).
+        "wire-payload-model-key",
+        '"model":{"id":"cfg-1"',
+        '"model":"demo-model"',
       ]) {
         if (!serialized.includes(expected)) {
           fail(

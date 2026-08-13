@@ -415,7 +415,8 @@ export function $vector(
   target: Operation,
   vector: object,
 ) {
-  const raw = deserializeValue(vector);
+  const raw = readVectorArgument(context, target, deserializeValue(vector));
+  if (raw === undefined) return;
   const entries = Array.isArray(raw) ? raw : [raw];
   const valid: VectorEntry[] = [];
 
@@ -472,6 +473,38 @@ export function $vector(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Resolves the marshalled `@vector` argument into vector entries.
+ *
+ * TypeSpec object-value literals (`#{ ... }`) require keys to be bare,
+ * non-keyword identifiers, so they cannot express vector inputs whose domain
+ * models carry TypeSpec-keyword field names (e.g. `model`) or that embed opaque
+ * provider wire payloads with arbitrary keys. To keep such behavior authorable
+ * as first-class evidence, a vector set may instead be supplied as a JSON
+ * string (typically a triple-quoted TypeSpec string constant), which Typra
+ * parses into the entries. Returns `undefined` when a supplied JSON string
+ * fails to parse (a diagnostic is reported), so the caller stops processing.
+ */
+function readVectorArgument(
+  context: DecoratorContext,
+  target: Operation,
+  raw: unknown,
+): unknown {
+  if (typeof raw !== "string") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    reportVectorDiagnostic(
+      context,
+      target,
+      `Vector JSON literal could not be parsed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return undefined;
+  }
 }
 
 function reportVectorDiagnostic(

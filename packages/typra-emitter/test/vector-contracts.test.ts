@@ -191,4 +191,74 @@ describe("@vector callable behavior contracts", () => {
       },
     ]);
   });
+
+  it("parses a JSON-string vector set carrying keyword field names and opaque wire payloads", () => {
+    const { context, program, diagnostics } = testContext();
+    const op = operation();
+
+    // TypeSpec object-value literals (`#{ ... }`) cannot express a `model` key
+    // (reserved keyword) or embed provider wire JSON with arbitrary keys. The
+    // JSON-string form is the blessed escape hatch for such evidence.
+    $vector(
+      context,
+      op,
+      JSON.stringify([
+        {
+          name: "wire-payload",
+          input: {
+            request: { model: { provider: "openai", apiType: "chat" } },
+            response: { id: "resp-1", model: "gpt-4o-mini", choices: [] },
+          },
+          expected: "Hello!",
+        },
+      ]) as unknown as object,
+    );
+
+    assert.deepEqual(diagnostics, []);
+    assert.deepEqual(lowerOperationVectors(program, op), [
+      {
+        name: "wire-payload",
+        stage: "callable",
+        operation: "render",
+        input: {
+          request: { model: { provider: "openai", apiType: "chat" } },
+          response: { id: "resp-1", model: "gpt-4o-mini", choices: [] },
+        },
+        expected: "Hello!",
+      },
+    ]);
+  });
+
+  it("accepts a JSON-string that encodes a single vector object", () => {
+    const { context, program, diagnostics } = testContext();
+    const op = operation();
+
+    $vector(
+      context,
+      op,
+      JSON.stringify({
+        name: "single",
+        input: { request: { model: "gpt-4o-mini" } },
+        expected: "ok",
+      }) as unknown as object,
+    );
+
+    assert.deepEqual(diagnostics, []);
+    assert.deepEqual(
+      lowerOperationVectors(program, op).map((vector) => vector.name),
+      ["single"],
+    );
+  });
+
+  it("reports a diagnostic when a JSON-string vector set cannot be parsed", () => {
+    const { context, program, diagnostics } = testContext();
+    const op = operation();
+
+    $vector(context, op, "[ { not valid json } ]" as unknown as object);
+
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].code, "typra-emitter-vector-shape");
+    assert.match(diagnostics[0].message, /Vector JSON literal could not be parsed/);
+    assert.deepEqual(lowerOperationVectors(program, op), []);
+  });
 });
