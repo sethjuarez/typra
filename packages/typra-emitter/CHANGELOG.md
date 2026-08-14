@@ -65,6 +65,13 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   preserved, reported as `preserved-foreign-target` in `report.json`, and a warning is
   emitted, while within-target reconciliation (renamed/removed types) is unchanged.
 
+## [0.8.3](https://github.com/sethjuarez/typra/compare/v0.8.2...v0.8.3) (2026-08-14)
+
+
+### Bug Fixes
+
+* scope stale-file pruning to output roots the current run emitted ([#211](https://github.com/sethjuarez/typra/issues/211)) ([4592ee0](https://github.com/sethjuarez/typra/commit/4592ee07a1d8a019b8383bed0070b4078934e407))
+
 ## [0.8.2](https://github.com/sethjuarez/typra/compare/v0.8.1...v0.8.2) (2026-08-13)
 
 
