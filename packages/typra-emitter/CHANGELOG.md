@@ -22,7 +22,22 @@ PR #36 has since been merged and `main` is once again the source of truth for re
 
 ### Bug Fixes
 
-- **emitter:** stop generating a model-typed `load(x).save() == x` round-trip in
+- **emitter:** make a structural namespace projection authoritative over the source
+  folder for a type's emitted module sub-path. Two independent mechanisms feed a
+  type's group: the namespace-relative path (from a nested TypeSpec `namespace`
+  under the semantic root, multi-level) and a folder-derived group (the one folder
+  segment after `schema/model/`, single-level). These were concatenated, so a model
+  declared in `App.Contracts.Tracing` whose source lived under `model/tracing/`
+  emitted a doubled `contracts/tracing/tracing/…` path (root-relative targets:
+  TypeScript, Python, Rust, C#, Swift), and a `model/contracts/…` folder emitted
+  `contracts/tracing/contracts/…`. The namespace projection now fully determines the
+  sub-path when it is non-empty (nested namespace) — the folder-derived group is
+  discarded — so the module path tracks the declared namespace regardless of source
+  file layout. Flat-namespace schemas (namespace at the semantic root, empty
+  projection) are unaffected and keep folder-based grouping. Regression:
+  `test/namespace-projection.test.ts` (`applyNamespaceGroups` authoritative-projection
+  contract).
+
   the TypeScript and Python vector-conformance tests. Vector `input`/`expected`
   are opaque conformance evidence (not typed against the operation's parameters),
   yet these two targets alone typed each model-shaped param/return and asserted a

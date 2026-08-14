@@ -98,6 +98,16 @@ Two projection details are worth calling out explicitly:
 - **Operations emit at the package root.** TypeSpec-native interfaces /
   operations are always generated at the target root regardless of the namespace
   they are declared in; only models follow the namespace-derived folder layout.
+- **The declared namespace — not the source folder — drives module layout.** For
+  targets that nest, a type's output sub-path is derived from its nested TypeSpec
+  `namespace` relative to the semantic root (e.g. `App.Contracts.Core` under root
+  `App` → `contracts/core/`), and this is authoritative: the source `.tsp` file may
+  live anywhere. To get multi-level nesting (e.g. `model/contracts/<domain>/<Type>`),
+  declare the nested namespace — do **not** rely on nesting source folders under
+  `schema/model/`. A source subfolder only contributes one grouping level and only
+  for types whose namespace is flat at the semantic root; when a nested namespace is
+  present the folder is ignored, so folder layout and namespace can never disagree or
+  produce doubled path segments.
 
 ## Target options
 

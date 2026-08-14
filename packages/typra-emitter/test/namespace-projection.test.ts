@@ -1,12 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { Model } from "@typespec/compiler";
 import {
+  applyNamespaceGroups,
   goPackageNameFromNamespace,
   javaPackageName,
   projectNamespace,
   relativeNamespaceSegments,
   swiftModuleName,
 } from "../src/ir/namespace.js";
+import { TypeNode } from "../src/ir/ast.js";
 
 describe("namespace projection", () => {
   it("computes relative namespace segments from the semantic root", () => {
@@ -244,5 +247,56 @@ describe("namespace projection", () => {
     });
     assert.equal(projection.isOutsideSemanticRoot, true);
     assert.deepEqual(projection.relativeNamespace, ["External", "Contracts"]);
+  });
+});
+
+// Regression: how the module sub-path (`node.group`) is derived when a *nested*
+// TypeSpec namespace and a source-folder-derived group (from `schema/model/<sub>/`)
+// are BOTH present. A structural namespace projection is authoritative — it fully
+// determines the sub-path and the folder-derived group is discarded, so the two
+// never concatenate into doubled/junk segments. Before this contract, namespace
+// `App.Contracts.Tracing` + source folder `tracing` emitted `contracts/tracing/tracing`,
+// and a `contracts` folder emitted `contracts/tracing/contracts`.
+describe("applyNamespaceGroups: namespace projection is authoritative over folder groups", () => {
+  const ROOT = "App";
+
+  function makeNode(namespace: string, folderGroup: string): TypeNode {
+    const node = new TypeNode({} as Model, `Test ${namespace}`);
+    node.typeName = { namespace, name: "Thing" };
+    node.group = folderGroup;
+    return node;
+  }
+
+  function groupAfter(namespace: string, folderGroup: string): string {
+    const node = makeNode(namespace, folderGroup);
+    applyNamespaceGroups([node], { target: "rust", semanticRoot: ROOT });
+    return node.group;
+  }
+
+  it("drops a folder group that duplicates a trailing namespace segment (no doubling)", () => {
+    // Probe B: source at `model/tracing/`, namespace `App.Contracts.Tracing`.
+    assert.equal(groupAfter("App.Contracts.Tracing", "tracing"), "contracts/tracing");
+  });
+
+  it("drops a folder group that duplicates a leading namespace segment (no doubling)", () => {
+    // Probe D: source at `model/contracts/tracing/` (collapses to folder `contracts`),
+    // namespace `App.Contracts.Tracing`.
+    assert.equal(groupAfter("App.Contracts.Tracing", "contracts"), "contracts/tracing");
+  });
+
+  it("drops a non-overlapping folder group in favor of the namespace path", () => {
+    // The namespace is the single source of truth: source folder layout is irrelevant.
+    assert.equal(groupAfter("App.Contracts.Tracing", "unrelated"), "contracts/tracing");
+  });
+
+  it("uses the namespace path when there is no folder group", () => {
+    // Probe E / MINE: file flat under `model/`, namespace `App.Contracts.Core`.
+    assert.equal(groupAfter("App.Contracts.Core", ""), "contracts/core");
+  });
+
+  it("preserves a folder group when the namespace is flat at the semantic root", () => {
+    // Flat-namespace schemas (e.g. Typra's own `schema/model/<group>/` layout) keep
+    // folder-based grouping: an empty namespace projection must not touch node.group.
+    assert.equal(groupAfter("App", "events"), "events");
   });
 });
