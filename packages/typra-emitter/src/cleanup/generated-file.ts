@@ -4,7 +4,7 @@ import {
   emitFile,
   resolvePath,
 } from "@typespec/compiler";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
 import { dirname, relative, resolve } from "path";
 import { TypraEmitterOptions } from "../lib.js";
 import { globToRegExp } from "../path-patterns.js";
@@ -217,6 +217,19 @@ export function pruneStaleGeneratedFiles(
 }
 
 /**
+ * True when two paths resolve to the same file on disk. On a case-insensitive filesystem this
+ * recognizes paths that differ only in case as the same physical file; on a case-sensitive one
+ * differently-cased paths resolve distinctly (or one does not exist) and this returns false.
+ */
+function isSameFileOnDisk(a: string, b: string): boolean {
+  try {
+    return realpathSync.native(a) === realpathSync.native(b);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Core of {@link pruneStaleGeneratedFiles}, with the current run's output passed in explicitly
  * so the ownership rules can be exercised directly.
  */
@@ -227,6 +240,16 @@ export function pruneStaleGeneratedFilesAgainst(
   const previous = readPreviousManifest(context);
   if (!previous) return;
 
+  // Case-insensitive-filesystem reconciliation for case-only renames. A case-insensitive
+  // filesystem (macOS, Windows) resolves paths that differ only in case to the same physical
+  // file, so a target that used to emit `pipeline/Foo.cs` and now emits `Pipeline/Foo.cs`
+  // records the old case in the previous manifest and the new case in this run. This index
+  // lets the loop recognize that collision; see the guard below.
+  const currentByLowerPath = new Map<string, string>();
+  for (const currentPath of current.paths) {
+    currentByLowerPath.set(currentPath.toLowerCase(), currentPath);
+  }
+
   for (const entry of previous.files) {
     // Only files Typra marked are candidates; unmarked output was never claimed.
     if (!entry.marker) continue;
@@ -234,6 +257,21 @@ export function pruneStaleGeneratedFilesAgainst(
 
     const absolutePath = resolve(entry.path);
     if (!existsSync(absolutePath)) continue;
+
+    // Case-only rename guard. On a case-insensitive filesystem the previous manifest's entry
+    // and this run's differently-cased output name the same file on disk, so the exact-string
+    // check above misses and this loop would unlink the file the run just wrote. Preserve it
+    // when a case-insensitive current-path match resolves to the same physical file. On a
+    // case-sensitive filesystem the two are genuinely distinct files, their real paths differ
+    // (or the current one does not exist), and the stale entry is still pruned.
+    const caseVariant = currentByLowerPath.get(entry.path.toLowerCase());
+    if (
+      caseVariant !== undefined &&
+      caseVariant !== entry.path &&
+      isSameFileOnDisk(absolutePath, resolve(caseVariant))
+    ) {
+      continue;
+    }
 
     // Cross-target collateral-deletion guard. When several emit-targets share one
     // emitter-output-dir they also share one manifest, so a run scoped to a subset of those

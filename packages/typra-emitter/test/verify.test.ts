@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { EmitContext, Program } from "@typespec/compiler";
@@ -920,4 +920,70 @@ describe("stale generated output pruning", () => {
       "a sibling target's output is preserved during a scoped run",
     );
   });
+
+  it("does not delete a file the current run re-emitted under a different case", () => {
+    // Casing-transition repro (drives the C# PascalCase-subfolder fix on real consumers). A
+    // target that used to emit `pipeline/Message.cs` now emits `Pipeline/Message.cs`. On a
+    // case-insensitive filesystem (macOS, Windows) both paths name the same physical file, so
+    // the previous manifest's lowercase entry collides with this run's PascalCase output. A
+    // naive exact-string "still emitted?" check misses the match and unlinks the very file the
+    // run just wrote, breaking the consumer's first regen after upgrading. On a case-sensitive
+    // filesystem the two are genuinely distinct files and the stale lowercase one is pruned.
+    const { root, context, written } = seedRun([
+      {
+        name: "Message.cs",
+        content: generated("public class Message {}"),
+        subdir: "pipeline",
+      },
+    ]);
+
+    const lowerAbsolute = written[0].absolute;
+    const pascalManifestPath = written[0].entry.path.replace(
+      "pipeline/",
+      "Pipeline/",
+    );
+    const pascalAbsolute = path.join(root, "Pipeline", "Message.cs");
+
+    // Simulate the current run emitting the PascalCase variant of the same file.
+    mkdirSync(path.dirname(pascalAbsolute), { recursive: true });
+    writeFileSync(pascalAbsolute, generated("public class Message {}"));
+
+    pruneStaleGeneratedFilesAgainst(context, {
+      paths: new Set([pascalManifestPath]),
+      roots: new Set([written[0].entry.outputRoot]),
+    });
+
+    if (isCaseInsensitiveFilesystem(root)) {
+      assert.equal(
+        existsSync(lowerAbsolute),
+        true,
+        "a case-only re-emit must not delete the file the run just wrote",
+      );
+    } else {
+      // Case-sensitive filesystem: the lowercase path is a genuinely distinct stale artifact,
+      // so existing pruning behavior is unchanged and it is removed.
+      assert.equal(
+        existsSync(lowerAbsolute),
+        false,
+        "a genuinely distinct differently-cased stale file is still pruned",
+      );
+      assert.equal(
+        existsSync(pascalAbsolute),
+        true,
+        "the current run's output must survive",
+      );
+    }
+  });
 });
+
+/** Detect whether `dir` lives on a case-insensitive filesystem (macOS, Windows). */
+function isCaseInsensitiveFilesystem(dir: string): boolean {
+  const upper = path.join(dir, "TYPRA_CASE_PROBE");
+  const lower = path.join(dir, "typra_case_probe");
+  writeFileSync(upper, "");
+  try {
+    return existsSync(lower);
+  } finally {
+    unlinkSync(upper);
+  }
+}
