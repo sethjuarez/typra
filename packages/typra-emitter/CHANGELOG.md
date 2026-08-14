@@ -97,6 +97,13 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   preserved, reported as `preserved-foreign-target` in `report.json`, and a warning is
   emitted, while within-target reconciliation (renamed/removed types) is unchanged.
 
+## [0.8.4](https://github.com/sethjuarez/typra/compare/v0.8.3...v0.8.4) (2026-08-14)
+
+
+### Bug Fixes
+
+* make nested TypeSpec namespaces authoritative for per-target module paths ([#213](https://github.com/sethjuarez/typra/issues/213)) ([866d4bf](https://github.com/sethjuarez/typra/commit/866d4bfd0ad7a12a5cbf5419d891928bf52f5c08))
+
 ## [0.8.3](https://github.com/sethjuarez/typra/compare/v0.8.2...v0.8.3) (2026-08-14)
 
 
