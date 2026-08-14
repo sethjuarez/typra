@@ -22,7 +22,39 @@ PR #36 has since been merged and `main` is once again the source of truth for re
 
 ### Bug Fixes
 
-- **emitter:** stop generating a model-typed `load(x).save() == x` round-trip in
+- **emitter:** make a structural namespace projection authoritative over the source
+  folder for a type's emitted module sub-path. Two independent mechanisms feed a
+  type's group: the namespace-relative path (from a nested TypeSpec `namespace`
+  under the semantic root, multi-level) and a folder-derived group (the one folder
+  segment after `schema/model/`, single-level). These were concatenated, so a model
+  declared in `App.Contracts.Tracing` whose source lived under `model/tracing/`
+  emitted a doubled `contracts/tracing/tracing/…` path (root-relative targets:
+  TypeScript, Python, Rust, C#, Swift), and a `model/contracts/…` folder emitted
+  `contracts/tracing/contracts/…`. The namespace projection now fully determines the
+  sub-path when it is non-empty (nested namespace) — the folder-derived group is
+  discarded — so the module path tracks the declared namespace regardless of source
+  file layout. Flat-namespace schemas (namespace at the semantic root, empty
+  projection) are unaffected and keep folder-based grouping. Regression:
+  `test/namespace-projection.test.ts` (`applyNamespaceGroups` authoritative-projection
+  contract).
+
+- **emitter:** apply structural namespace projection to _all_ discovered models, not
+  just those reachable from `root-object`. Language drivers ran `applyNamespaceGroups`
+  over `enumerateTypes(root)` (the root-object-reachable subgraph) _before_
+  `filterNodes` appended the namespace-discovered `additionalModels` — types found by
+  scanning the root namespace but never referenced from the root object. Those
+  additional models therefore bypassed namespace projection entirely and were laid out
+  by their source folder only, so a model declared in `App.Contracts.Tracing` but not
+  reachable from the root emitted flat at the target root instead of under
+  `contracts/tracing/…` (root-relative targets: TypeScript, Python, Rust, C#, Swift).
+  The drivers now run `filterNodes` first and project the full emitted set, so a nested
+  TypeSpec `namespace` drives the module sub-path for every emitted type regardless of
+  root-object reachability. Interfaces/operations (protocol nodes) are excluded from the
+  projection and continue to emit at the target root regardless of their namespace — only
+  models nest. Flat-namespace schemas are unaffected (empty projection leaves the
+  folder-derived group intact). Regression: `test/generate.test.ts` (nests
+  namespace-discovered models not reachable from the root object; ops stay at root).
+
   the TypeScript and Python vector-conformance tests. Vector `input`/`expected`
   are opaque conformance evidence (not typed against the operation's parameters),
   yet these two targets alone typed each model-shaped param/return and asserted a

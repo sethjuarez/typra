@@ -42,13 +42,16 @@ export const generateSwift = async (
   options?: GeneratorOptions,
 ): Promise<void> => {
   const allTypes = Array.from(enumerateTypes(node));
-  const namespaceGroupSnapshots = applyNamespaceGroups(allTypes, {
+  // filterNodes appends namespace-discovered `additionalModels` (types not
+  // reachable from the root object). Run it first so namespace projection also
+  // covers those additional models, not just the root-reachable subgraph.
+  const nodes = filterNodes(allTypes, options);
+  const namespaceGroupSnapshots = applyNamespaceGroups(nodes, {
     target: "swift",
     semanticRoot: options?.rootNamespace,
     emitTarget,
     namespaceOutput: options?.namespaceOutput,
   });
-  const nodes = filterNodes(allTypes, options);
   const registry = TypeRegistry.fromTypeGraph(allTypes);
   const visitor = new SwiftExprVisitor(registry);
   const moduleName = projectNamespace({

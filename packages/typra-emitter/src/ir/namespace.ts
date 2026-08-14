@@ -196,6 +196,10 @@ export function applyNamespaceGroups(
 
   const snapshots: NamespaceGroupSnapshot[] = [];
   for (const node of nodes) {
+    // Interfaces/operations (protocol nodes) always emit at the target root,
+    // regardless of the namespace they are declared in — only models follow the
+    // namespace-derived folder layout. Never project a protocol node's group.
+    if (node.isProtocol) continue;
     snapshots.push({ node, group: node.group });
     const projection = projectNamespace({
       target: options.target,
@@ -204,7 +208,18 @@ export function applyNamespaceGroups(
       emitTarget: options.emitTarget,
     });
     if (projection.filesystemPathKind !== "root-relative") continue;
-    node.group = joinPathSegments([...projection.filesystemPath, node.group]);
+    // A structural namespace projection is authoritative for module placement: the
+    // relative namespace path fully determines the type's sub-path. We must NOT also
+    // append the folder-derived `node.group` (from the TSP source subfolder), because
+    // when the two overlap they concatenate into doubled/junk segments (e.g. namespace
+    // `App.Contracts.Tracing` + source folder `model/tracing/` previously produced
+    // `contracts/tracing/tracing`, and a `model/contracts/` folder produced
+    // `contracts/tracing/contracts`). When the projection is empty (flat namespace at
+    // the semantic root) we leave the folder-derived group untouched so folder-based
+    // grouping still works for flat-namespace schemas.
+    if (projection.filesystemPath.length > 0) {
+      node.group = joinPathSegments(projection.filesystemPath);
+    }
   }
 
   return snapshots;

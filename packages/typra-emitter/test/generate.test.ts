@@ -473,6 +473,167 @@ describe("generate", () => {
     }
   });
 
+  it("nests namespace-discovered models that are not reachable from the root object", () => {
+    // Regression: models discovered via the root namespace but NOT reachable
+    // from `root-object` are appended as `additionalModels` by filterNodes.
+    // Namespace projection must cover them too, so a nested TSP namespace like
+    // `Contracts.Tracing` drives `contracts/tracing/...` output paths rather
+    // than collapsing to the source folder / target root.
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-orphan-namespace-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      writeFileSync(
+        source,
+        [
+          'import "@typra/emitter";',
+          "",
+          "namespace Typra.OrphanProbe {",
+          "  model Root {",
+          "    id: string;",
+          "  }",
+          "}",
+          "",
+          // Declared in a nested namespace and NEVER referenced by Root, so it
+          // only reaches the emitters as a namespace-discovered additional model.
+          "namespace Typra.OrphanProbe.Contracts.Tracing {",
+          "  model TraceFile {",
+          "    path: string;",
+          "  }",
+          "}",
+          "",
+          // Interfaces/operations always emit at the target root regardless of
+          // the namespace they are declared in — only models nest.
+          "namespace Typra.OrphanProbe.Operations.Pipeline {",
+          "  interface ProbeRenderer {",
+          "    render(file: Typra.OrphanProbe.Contracts.Tracing.TraceFile): string;",
+          "  }",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.OrphanProbe.Root"',
+          '    root-namespace: "Typra.OrphanProbe"',
+          "    deterministic-output: true",
+          "    emit-targets:",
+          "      - type: Rust",
+          `        output-dir: ${yamlString(path.join(output, "generated", "rust"))}`,
+          '        import-path: "orphan::model"',
+          "        format: false",
+          '        protocol-scaffolds: "compile-only"',
+          "      - type: TypeScript",
+          `        output-dir: ${yamlString(path.join(output, "generated", "typescript"))}`,
+          "        format: false",
+          "      - type: Python",
+          `        output-dir: ${yamlString(path.join(output, "generated", "python"))}`,
+          '        package-name: "orphan"',
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(
+        process.execPath,
+        [tspCli, "compile", source, "--config", config],
+        {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      const rustRoot = path.join(output, "generated", "rust");
+      assert.equal(
+        existsSync(path.join(rustRoot, "contracts", "tracing", "trace_file.rs")),
+        true,
+        "Rust: orphan model should nest under contracts/tracing/",
+      );
+      assert.equal(
+        existsSync(path.join(rustRoot, "trace_file.rs")),
+        false,
+        "Rust: orphan model should not be emitted flat at the crate root",
+      );
+
+      const tsRoot = path.join(output, "generated", "typescript");
+      assert.equal(
+        existsSync(path.join(tsRoot, "contracts", "tracing", "trace-file.ts")),
+        true,
+        "TypeScript: orphan model should nest under contracts/tracing/",
+      );
+      assert.equal(
+        existsSync(path.join(tsRoot, "trace-file.ts")),
+        false,
+        "TypeScript: orphan model should not be emitted flat at the module root",
+      );
+
+      const pyRoot = path.join(output, "generated", "python");
+      assert.equal(
+        existsSync(
+          path.join(pyRoot, "contracts", "tracing", "_TraceFile.py"),
+        ),
+        true,
+        "Python: orphan model should nest under contracts/tracing/",
+      );
+      assert.equal(
+        existsSync(path.join(pyRoot, "_TraceFile.py")),
+        false,
+        "Python: orphan model should not be emitted flat at the package root",
+      );
+
+      // Interfaces/operations stay at the target root even when declared in a
+      // nested namespace (`Operations.Pipeline`) — only models nest.
+      assert.equal(
+        existsSync(path.join(rustRoot, "probe_renderer.rs")),
+        true,
+        "Rust: op should emit at the crate root, not under operations/pipeline/",
+      );
+      assert.equal(
+        existsSync(
+          path.join(rustRoot, "operations", "pipeline", "probe_renderer.rs"),
+        ),
+        false,
+        "Rust: op should not nest under operations/pipeline/",
+      );
+      assert.equal(
+        existsSync(path.join(tsRoot, "probe-renderer.ts")),
+        true,
+        "TypeScript: op should emit at the module root, not under operations/pipeline/",
+      );
+      assert.equal(
+        existsSync(
+          path.join(tsRoot, "operations", "pipeline", "probe-renderer.ts"),
+        ),
+        false,
+        "TypeScript: op should not nest under operations/pipeline/",
+      );
+      assert.equal(
+        existsSync(path.join(pyRoot, "_ProbeRenderer.py")),
+        true,
+        "Python: op should emit at the package root, not under operations/pipeline/",
+      );
+      assert.equal(
+        existsSync(
+          path.join(pyRoot, "operations", "pipeline", "_ProbeRenderer.py"),
+        ),
+        false,
+        "Python: op should not nest under operations/pipeline/",
+      );
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
   it("keeps legacy @protocol/@method and TypeSpec interface/op projections equivalent", () => {
     const output = mkdtempSync(path.join(process.cwd(), "tmp-callable-equiv-"));
     const compilerEntry = require.resolve("@typespec/compiler");

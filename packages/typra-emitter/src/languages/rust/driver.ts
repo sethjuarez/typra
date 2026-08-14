@@ -114,13 +114,16 @@ export const generateRust = async (
   options?: GeneratorOptions,
 ): Promise<void> => {
   const allTypes = Array.from(enumerateTypes(node));
-  const namespaceGroupSnapshots = applyNamespaceGroups(allTypes, {
+  // filterNodes appends namespace-discovered `additionalModels` (types not
+  // reachable from the root object). Run it first so namespace projection also
+  // covers those additional models, not just the root-reachable subgraph.
+  const nodes = filterNodes(allTypes, options);
+  const namespaceGroupSnapshots = applyNamespaceGroups(nodes, {
     target: "rust",
     semanticRoot: options?.rootNamespace,
     emitTarget,
     namespaceOutput: options?.namespaceOutput,
   });
-  const nodes = filterNodes(allTypes, options);
   const requestedNativeSerialization = emitTarget["native-serialization"];
   const nativeSerialization =
     requestedNativeSerialization === "none" ? "none" : "serde";
