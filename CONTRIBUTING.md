@@ -24,6 +24,24 @@ Filing an issue? The [Emitter drift](.github/ISSUE_TEMPLATE/emitter-drift.yml) t
 inputs that become the fixture: a `.tsp` shape, an expected-vs-actual (a would-be vector), and the offending
 generated snippet.
 
+## Commit messages
+
+Commit messages and PR titles follow [Conventional Commits](https://www.conventionalcommits.org/):
+`type(scope): summary`. This is not just style — release-please reads these commits from `main` to decide the
+next version and to **autogenerate** [`packages/typra-emitter/CHANGELOG.md`](packages/typra-emitter/CHANGELOG.md).
+Your commit summaries are what ships in the changelog, so make them specific.
+
+- **Types:** `feat` (new capability → minor bump), `fix` (bug fix → patch bump), and `refactor` / `perf` /
+  `docs` / `test` / `build` / `ci` / `chore` (no release on their own). A breaking change is `type!:` or a
+  `BREAKING CHANGE:` footer, which forces a major bump.
+- **Example:** `fix(emitter): carry optional/nullable through the native operation seam`.
+- This repo **squash-merges**, so your PR title becomes the commit release-please parses — the CI
+  `Conventional PR title` check enforces the format. Put additional `fix:`/`feat:` lines (or a
+  `BREAKING CHANGE:` footer) in the squash body when one PR should produce more than one changelog entry.
+
+Do **not** hand-edit the package version, the release manifest, or `CHANGELOG.md` — release-please owns all
+three, and a manual changelog block will simply be regenerated away.
+
 ## Before you open a PR
 
 Run, from `packages/typra-emitter/`:
@@ -33,10 +51,6 @@ npm test
 npm run validate:fixtures
 npm run lint
 ```
-
-Then add a `## Unreleased` entry to `packages/typra-emitter/CHANGELOG.md`. Versions and tags are managed by
-release-please — **do not** hand-edit the package version or the release manifest. Use conventional-commit
-messages and PR titles (e.g. `fix(emitter): carry optional/nullable through the native operation seam`).
 
 ## Design questions vs. bugs
 
