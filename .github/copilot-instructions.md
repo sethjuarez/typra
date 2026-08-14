@@ -1,7 +1,23 @@
 # Typra project instructions
 
 - Use `uv run --python 3.12 --with pydantic --with pytest --with PyYAML python` for Python validation, generated Python tests, and executable conformance. Do not invoke `python3` or `python` directly in project scripts or validation notes.
-- Use conventional-commit format for PR titles, for example `refactor: extract optional absence field policy`, so the repository's PR title lint check passes.
+
+## Conventional commits & the changelog
+
+Commit messages and PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/):
+`type(scope): summary`. release-please reads these from `main` to compute the next version and to
+**autogenerate `packages/typra-emitter/CHANGELOG.md`** — so the commit history _is_ the changelog source.
+
+- Common types: `feat` (→ minor bump), `fix` (→ patch bump), plus `refactor`, `perf`, `docs`, `test`,
+  `build`, `ci`, `chore` (no release on their own). A breaking change — `type!:` or a `BREAKING CHANGE:`
+  footer — forces a major bump.
+- Write a real, specific summary — it is what users read in the changelog, e.g.
+  `fix(emitter): carry optional/nullable through the native operation seam`.
+- This repository **squash-merges**, so the PR title becomes the commit subject release-please parses.
+  Keep the PR title conventional (the `Conventional PR title` check lints it); the squashed body may carry
+  extra `fix:`/`feat:` lines or a `BREAKING CHANGE:` footer when a single PR warrants multiple entries.
+- Do **not** hand-edit `CHANGELOG.md`, the package version, or the release manifest — release-please owns
+  all three. A manual `## Unreleased` block is unnecessary and will be ignored by the generated changelog.
 
 ## Reproduce-before-fix contract
 
@@ -23,6 +39,7 @@ Reported issues should arrive with the same three pieces (see `.github/ISSUE_TEM
 `.tsp` shape, an expected-vs-actual (a would-be vector), and — ideally — the offending generated snippet. Turn
 the report's `.tsp` into the fixture; do not hand-fix without one.
 
-Before finishing an emitter change, run `npm test`, `npm run validate:fixtures`, and `npm run lint`, and add a
-`## Unreleased` entry to `packages/typra-emitter/CHANGELOG.md` (release-please manages versions/tags — never
-hand-edit the version or manifest).
+Before finishing an emitter change, run `npm test`, `npm run validate:fixtures`, and `npm run lint`. Commit
+messages and PR titles must be Conventional Commits (`type(scope): summary`) — release-please reads them to
+compute the next version and to autogenerate the CHANGELOG, so never hand-edit the version, the manifest, or
+`CHANGELOG.md`.

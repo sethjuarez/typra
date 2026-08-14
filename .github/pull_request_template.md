@@ -13,7 +13,7 @@ behavior or generated output, confirm:
 - [ ] A **test asserts the fix** — a `validate-fixtures.mjs` assertion, a golden under `generated/fixtures/<lang>`, and/or a unit test that fails on `main` and passes here.
 - [ ] Where behavior is runtime-observable, an executable **`@vector`/`@sample`** encodes input → expected/expectedError.
 - [ ] `npm test`, `npm run validate:fixtures`, and `npm run lint` pass.
-- [ ] `CHANGELOG.md` updated under `## Unreleased`.
+- [ ] The PR title is a Conventional Commit (`type(scope): summary`) — it becomes the squash commit and the CHANGELOG entry release-please generates.
 
 ## Notes
 
