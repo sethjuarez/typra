@@ -75,16 +75,29 @@ layout while preserving semantic namespace metadata.
 | --- | --- |
 | TypeScript | Uses the TypeSpec namespace as target metadata, trimming a trailing `.Core`; nested namespaces emit nested ESM folders and generated tests default to `../src/index`. |
 | Python | Lowercase dotted package/import path, overrideable with `package-name` or `import-path`; nested namespaces emit nested packages. |
-| C# | Preserves the TypeSpec namespace unless `namespace` is configured; nested namespaces emit nested folders. |
-| Java | Lowercase dotted package, sanitized for Java package syntax; `package-name` wins over `namespace`. |
-| Go | Flat lowercase package name because Go has one package per directory; `package-name` or `import-path` can override ergonomics. |
+| C# | Emits a single flat `namespace` — the configured `namespace`, otherwise the semantic-root namespace — for **every** type; nested TypeSpec namespaces change only the output folder layout, not the emitted `namespace` declaration (an `IDE0130` suppression is emitted so the folder-vs-namespace analyzer stays quiet). |
+| Java | Lowercase dotted package, sanitized for Java package syntax; `package-name` wins over `namespace`. The package is a single flat value — nested namespaces do not add package segments. |
+| Go | Flat lowercase package name because Go has one package per directory; `package-name` or `import-path` can override ergonomics. Nested namespaces do not create subpackages. |
 | Rust | Root crate import path defaults to `crate`; nested namespaces emit nested Rust modules. |
-| Swift | Root namespace becomes a PascalCase module name, overrideable with `package-name`; nested namespaces emit nested source folders. |
+| Swift | Root namespace becomes a PascalCase module name, overrideable with `package-name`; nested namespaces emit nested source folders but remain in the one flat module (Swift has no per-directory namespaces). |
 
 The rule of thumb is: TypeSpec namespaces express contract ownership, while
 target options express runtime packaging. Prefer target overrides when a
 language ecosystem needs a different package name, not when changing the
 contract identity.
+
+Two projection details are worth calling out explicitly:
+
+- **Declaration identifiers stay flat.** The emitted C# `namespace` and the Go,
+  Java, and Swift-module identifiers are a single flat value. Nested TypeSpec
+  namespaces only influence the folder / module *layout* for targets that nest
+  (TypeScript, Python, Rust, Swift folders, and C# folders); they never append
+  segments to the declared namespace/package. Targets that nest also emit flat
+  re-export barrels (TypeScript `index.ts`, Python `__init__.py`, Rust
+  `pub use ...::*`) so the public surface stays reachable from the package root.
+- **Operations emit at the package root.** TypeSpec-native interfaces /
+  operations are always generated at the target root regardless of the namespace
+  they are declared in; only models follow the namespace-derived folder layout.
 
 ## Target options
 

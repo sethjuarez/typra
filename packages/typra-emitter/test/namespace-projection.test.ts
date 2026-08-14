@@ -129,6 +129,113 @@ describe("namespace projection", () => {
     );
   });
 
+  // Regression contract for how a *nested* TypeSpec namespace projects across
+  // every target when the consumer configures a flat target namespace/package.
+  //
+  // Probe shape: `model App.Contracts.Core.Thing` with `root-namespace: "App"`.
+  // The invariant this locks: the emitted *declaration identifier* (C# `namespace`,
+  // Go/Java package name) is the single flat configured value and never gains the
+  // `Contracts.Core` segments. Only targets that support module/folder nesting
+  // reflect the nested namespace in `filesystemPath` (folders) and, for Rust,
+  // `moduleName`. This is intentional — see the `## Namespace projection` table in
+  // docs/reference/configuration and the systemic C# `IDE0130` suppression that
+  // deliberately silences the folder-vs-namespace analyzer.
+  const NESTED = "App.Contracts.Core";
+  const ROOT = "App";
+
+  it("keeps the C# namespace flat while nesting only the folder path", () => {
+    const projection = projectNamespace({
+      target: "csharp",
+      sourceNamespace: NESTED,
+      semanticRoot: ROOT,
+      emitTarget: { namespace: "Prompty.Core" },
+    });
+    // Declaration identifier stays flat...
+    assert.equal(projection.targetNamespace, "Prompty.Core");
+    // ...while the file lands in a namespace-derived nested folder.
+    assert.deepEqual(projection.filesystemPath, ["Contracts", "Core"]);
+    assert.equal(projection.filesystemPathKind, "root-relative");
+  });
+
+  it("keeps Go a single flat package with no nested directories", () => {
+    const projection = projectNamespace({
+      target: "go",
+      sourceNamespace: NESTED,
+      semanticRoot: ROOT,
+      emitTarget: { "package-name": "prompty", "import-path": "prompty/model" },
+    });
+    assert.equal(projection.packageName, "prompty");
+    assert.equal(projection.importPath, "prompty/model");
+    assert.deepEqual(projection.filesystemPath, []);
+    assert.equal(projection.filesystemPathKind, "flat");
+  });
+
+  it("keeps the Java package flat, mapping only the package to a directory path", () => {
+    const projection = projectNamespace({
+      target: "java",
+      sourceNamespace: NESTED,
+      semanticRoot: ROOT,
+      emitTarget: { "package-name": "com.prompty.core" },
+    });
+    // Package name does not absorb the nested `Contracts.Core` segments...
+    assert.equal(projection.packageName, "com.prompty.core");
+    // ...and the directory path mirrors the flat package, not the namespace.
+    assert.deepEqual(projection.filesystemPath, ["com", "prompty", "core"]);
+    assert.equal(projection.filesystemPathKind, "package");
+  });
+
+  it("nests Rust modules and folders for the nested namespace", () => {
+    const projection = projectNamespace({
+      target: "rust",
+      sourceNamespace: NESTED,
+      semanticRoot: ROOT,
+      emitTarget: { "import-path": "prompty::model" },
+    });
+    assert.equal(projection.moduleName, "contracts::core");
+    assert.equal(projection.importPath, "prompty::model");
+    assert.deepEqual(projection.filesystemPath, ["contracts", "core"]);
+    assert.equal(projection.filesystemPathKind, "root-relative");
+  });
+
+  it("nests Python subpackage folders while the import path stays the configured root", () => {
+    const projection = projectNamespace({
+      target: "python",
+      sourceNamespace: NESTED,
+      semanticRoot: ROOT,
+      emitTarget: { "import-path": "prompty" },
+    });
+    assert.equal(projection.importPath, "prompty");
+    assert.equal(projection.moduleName, "contracts.core");
+    assert.deepEqual(projection.filesystemPath, ["contracts", "core"]);
+    assert.equal(projection.filesystemPathKind, "root-relative");
+  });
+
+  it("nests Swift source folders but keeps a single flat module", () => {
+    const projection = projectNamespace({
+      target: "swift",
+      sourceNamespace: NESTED,
+      semanticRoot: ROOT,
+      emitTarget: { "package-name": "PromptyCore" },
+    });
+    // Swift has no per-directory namespaces: the module is flat...
+    assert.equal(projection.moduleName, "PromptyCore");
+    // ...even though the source file is nested for organization.
+    assert.deepEqual(projection.filesystemPath, ["Contracts", "Core"]);
+    assert.equal(projection.filesystemPathKind, "root-relative");
+  });
+
+  it("nests TypeScript ESM folders for the nested namespace", () => {
+    const projection = projectNamespace({
+      target: "typescript",
+      sourceNamespace: NESTED,
+      semanticRoot: ROOT,
+      emitTarget: { "import-path": "../index" },
+    });
+    assert.equal(projection.moduleName, "contracts/core");
+    assert.deepEqual(projection.filesystemPath, ["contracts", "core"]);
+    assert.equal(projection.filesystemPathKind, "root-relative");
+  });
+
   it("signals namespaces outside the semantic root", () => {
     const projection = projectNamespace({
       target: "python",
