@@ -714,19 +714,26 @@ describe("stale generated output pruning", () => {
     path.relative(process.cwd(), file).replace(/\\/g, "/");
 
   function seedRun(
-    files: Array<{ name: string; content: string; marker?: boolean }>,
+    files: Array<{
+      name: string;
+      content: string;
+      marker?: boolean;
+      subdir?: string;
+    }>,
   ) {
     const root = mkdtempSync(path.join(tmpdir(), "typra-prune-"));
     mkdirSync(path.join(root, ".typra-generated"), { recursive: true });
 
     const written = files.map((file) => {
-      const absolute = path.join(root, file.name);
+      const outputDir = file.subdir ? path.join(root, file.subdir) : root;
+      mkdirSync(outputDir, { recursive: true });
+      const absolute = path.join(outputDir, file.name);
       writeFileSync(absolute, file.content);
       return {
         absolute,
         entry: {
           path: asManifestPath(absolute),
-          outputRoot: asManifestPath(root),
+          outputRoot: asManifestPath(outputDir),
           marker: file.marker ?? true,
         },
       };
@@ -762,7 +769,12 @@ describe("stale generated output pruning", () => {
       },
     ]);
 
-    pruneStaleGeneratedFilesAgainst(context, new Set());
+    // The target still ran (it owns its output root); this specific file just stopped being
+    // emitted, so it is reconciled away.
+    pruneStaleGeneratedFilesAgainst(context, {
+      paths: new Set(),
+      roots: new Set([written[0].entry.outputRoot]),
+    });
 
     assert.equal(
       existsSync(written[0].absolute),
@@ -781,7 +793,10 @@ describe("stale generated output pruning", () => {
       },
     ]);
 
-    pruneStaleGeneratedFilesAgainst(context, new Set([written[0].entry.path]));
+    pruneStaleGeneratedFilesAgainst(context, {
+      paths: new Set([written[0].entry.path]),
+      roots: new Set([written[0].entry.outputRoot]),
+    });
 
     assert.equal(
       existsSync(written[0].absolute),
@@ -800,7 +815,10 @@ describe("stale generated output pruning", () => {
       { name: "replaced.ts", content: handWritten },
     ]);
 
-    pruneStaleGeneratedFilesAgainst(context, new Set());
+    pruneStaleGeneratedFilesAgainst(context, {
+      paths: new Set(),
+      roots: new Set([written[0].entry.outputRoot]),
+    });
 
     assert.equal(
       readFileSync(written[0].absolute, "utf8"),
@@ -820,12 +838,86 @@ describe("stale generated output pruning", () => {
       { name: "data.json", content: "{}\n", marker: false },
     ]);
 
-    pruneStaleGeneratedFilesAgainst(context, new Set());
+    pruneStaleGeneratedFilesAgainst(context, {
+      paths: new Set(),
+      roots: new Set([written[0].entry.outputRoot]),
+    });
 
     assert.equal(
       existsSync(written[0].absolute),
       true,
       "unmarked manifest entry must not be deleted",
+    );
+  });
+
+  it("preserves sibling-target output when a scoped subset run shares the emitter output dir", () => {
+    // Downstream repro of cross-target collateral deletion. A full run emits several targets
+    // into one emitter-output-dir, so one shared manifest tracks all of them. A later run
+    // scoped to a single target (e.g. regenerating just Rust for a quick check) must NOT treat
+    // the other targets' files as stale and delete them: the author believed the run was
+    // scoped to one target, but the manifest's cross-target reconciliation would wipe five.
+    const { context, written } = seedRun([
+      {
+        name: "renderer.ts",
+        content: generated("export class Renderer {}"),
+        subdir: "typescript",
+      },
+      {
+        name: "renderer.rs",
+        content: generated("pub struct Renderer;"),
+        subdir: "rust",
+      },
+    ]);
+
+    // Rust-scoped run: it owns only the rust output root and re-emits its own file.
+    pruneStaleGeneratedFilesAgainst(context, {
+      paths: new Set([written[1].entry.path]),
+      roots: new Set([written[1].entry.outputRoot]),
+    });
+
+    assert.equal(
+      existsSync(written[0].absolute),
+      true,
+      "TypeScript sibling-target output must survive a Rust-scoped run into a shared output dir",
+    );
+    assert.equal(
+      existsSync(written[1].absolute),
+      true,
+      "the scoped target's own regenerated file must survive",
+    );
+  });
+
+  it("still reconciles within the scoped target while preserving siblings", () => {
+    // Scoping must not disable within-target pruning: a file the scoped target no longer emits
+    // is still removed, while sibling targets absent from the run stay untouched.
+    const { context, written } = seedRun([
+      {
+        name: "old-renderer.rs",
+        content: generated("pub struct OldRenderer;"),
+        subdir: "rust",
+      },
+      {
+        name: "renderer.ts",
+        content: generated("export class Renderer {}"),
+        subdir: "typescript",
+      },
+    ]);
+
+    // Rust-scoped run that owns the rust root but no longer emits old-renderer.rs.
+    pruneStaleGeneratedFilesAgainst(context, {
+      paths: new Set(),
+      roots: new Set([written[0].entry.outputRoot]),
+    });
+
+    assert.equal(
+      existsSync(written[0].absolute),
+      false,
+      "a stale file within the scoped target's own output root is still removed",
+    );
+    assert.equal(
+      existsSync(written[1].absolute),
+      true,
+      "a sibling target's output is preserved during a scoped run",
     );
   });
 });

@@ -29,17 +29,20 @@ export interface SkippedGeneratedFileEntry {
     | "none"
     | "removed-marker-owned"
     | "preserved-unmarked"
-    | "preserved-editable-seam";
+    | "preserved-editable-seam"
+    | "preserved-foreign-target";
   ownership:
     | "not-present"
     | "marker-owned"
     | "unmarked-existing"
-    | "editable-seam-owned";
+    | "editable-seam-owned"
+    | "foreign-target-owned";
   status:
     | "skipped-empty"
     | "removed-stale-marker-owned"
     | "preserved-unmarked"
-    | "preserved-editable-seam";
+    | "preserved-editable-seam"
+    | "preserved-foreign-target";
   nextAction: string;
 }
 
@@ -177,6 +180,17 @@ export function manifestPath(
 }
 
 /**
+ * The output the current run produced, used to scope stale-file reconciliation. `paths` are the
+ * files emitted this run; `roots` are the output roots those files were emitted into. Pruning is
+ * confined to `roots` so a run scoped to a subset of targets never reconciles — and never deletes
+ * — files owned by a target it did not emit.
+ */
+export interface CurrentRunOutputs {
+  paths: Set<string>;
+  roots: Set<string>;
+}
+
+/**
  * Delete files a previous run generated that this run no longer produces.
  *
  * When a type is renamed or removed its generated source stops being emitted, but the file
@@ -195,19 +209,20 @@ export function manifestPath(
 export function pruneStaleGeneratedFiles(
   context: EmitContext<TypraEmitterOptions>,
 ): void {
-  pruneStaleGeneratedFilesAgainst(
-    context,
-    new Set(buildGeneratedManifest(context).files.map((entry) => entry.path)),
-  );
+  const entries = buildGeneratedManifest(context).files;
+  pruneStaleGeneratedFilesAgainst(context, {
+    paths: new Set(entries.map((entry) => entry.path)),
+    roots: new Set(entries.map((entry) => entry.outputRoot)),
+  });
 }
 
 /**
- * Core of {@link pruneStaleGeneratedFiles}, with the set of paths emitted by the current run
- * passed in explicitly so the ownership rules can be exercised directly.
+ * Core of {@link pruneStaleGeneratedFiles}, with the current run's output passed in explicitly
+ * so the ownership rules can be exercised directly.
  */
 export function pruneStaleGeneratedFilesAgainst(
   context: EmitContext<TypraEmitterOptions>,
-  emittedNow: Set<string>,
+  current: CurrentRunOutputs,
 ): void {
   const previous = readPreviousManifest(context);
   if (!previous) return;
@@ -215,10 +230,29 @@ export function pruneStaleGeneratedFilesAgainst(
   for (const entry of previous.files) {
     // Only files Typra marked are candidates; unmarked output was never claimed.
     if (!entry.marker) continue;
-    if (emittedNow.has(entry.path)) continue;
+    if (current.paths.has(entry.path)) continue;
 
     const absolutePath = resolve(entry.path);
     if (!existsSync(absolutePath)) continue;
+
+    // Cross-target collateral-deletion guard. When several emit-targets share one
+    // emitter-output-dir they also share one manifest, so a run scoped to a subset of those
+    // targets sees every sibling target's file as "not emitted this run". Deleting on that
+    // basis silently wipes targets the author never intended to touch. A file is only stale
+    // relative to the output roots this run actually emitted into; anything owned by a target
+    // absent from this run is preserved and reported, never deleted.
+    if (!current.roots.has(entry.outputRoot)) {
+      const warning = `Warning: preserved generated file owned by a target not in this run (output root ${entry.outputRoot}); scoped emit did not reconcile it: ${entry.path}`;
+      console.warn(warning);
+      recordWarning(context.program, warning);
+      recordSkippedFile(
+        context.program,
+        absolutePath,
+        "preserved-foreign-target",
+        "not-regenerated",
+      );
+      continue;
+    }
 
     const existingContent = readFileSync(absolutePath, "utf8");
 
@@ -329,6 +363,9 @@ export function buildGeneratedOutputReport(
   const preservedEditableSeamFiles = skippedFiles
     .filter((entry) => entry.action === "preserved-editable-seam")
     .map((entry) => entry.path);
+  const preservedForeignTargetFiles = skippedFiles
+    .filter((entry) => entry.action === "preserved-foreign-target")
+    .map((entry) => entry.path);
   const protectedPathPatterns = [
     ...(context.options["protected-paths"] ?? []),
   ].sort((left, right) => left.localeCompare(right));
@@ -339,6 +376,7 @@ export function buildGeneratedOutputReport(
   const cleanupSuggestions = buildCleanupSuggestions(
     staleMarkerOwnedRemovals,
     preservedUnmarkedSkippedFiles,
+    preservedForeignTargetFiles,
   );
   return {
     emitter: "typra-emitter",
@@ -647,6 +685,14 @@ function skippedFileGuidance(
         "No action needed; this file carries the Typra editable-seam marker and is owned by the consumer.",
     };
   }
+  if (action === "preserved-foreign-target") {
+    return {
+      ownership: "foreign-target-owned",
+      status: "preserved-foreign-target",
+      nextAction:
+        "No action needed; this file belongs to an emit target not included in this run. It was preserved because the run was scoped to a subset of targets sharing the emitter output dir. Re-run with the full emit-targets set to reconcile it.",
+    };
+  }
   if (action === "preserved-unmarked") {
     return {
       ownership: "unmarked-existing",
@@ -684,6 +730,7 @@ function findProtectedPathTouches(
 function buildCleanupSuggestions(
   staleMarkerOwnedRemovals: string[],
   preservedUnmarkedSkippedFiles: string[],
+  preservedForeignTargetFiles: string[] = [],
 ): string[] {
   const suggestions: string[] = [];
   if (staleMarkerOwnedRemovals.length > 0) {
@@ -694,6 +741,11 @@ function buildCleanupSuggestions(
   if (preservedUnmarkedSkippedFiles.length > 0) {
     suggestions.push(
       "Inspect preserved unmarked files before accepting drift; Typra will not delete files it does not own.",
+    );
+  }
+  if (preservedForeignTargetFiles.length > 0) {
+    suggestions.push(
+      "This run was scoped to a subset of emit-targets sharing the emitter output dir; files owned by the absent targets were preserved, not reconciled. Re-run with the full emit-targets set to reconcile them.",
     );
   }
   return suggestions;

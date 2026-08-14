@@ -54,6 +54,16 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   the wire fields the fixture actually carries; a model whose wire fields are all
   optional-and-omitted emits no `ToWire` test at all. Populating an optional wire field
   via `@sample` opts it back into the fixture and its assertion.
+- **emitter:** stop a scoped emit run from deleting sibling targets' generated output
+  when multiple `emit-targets` share one `emitter-output-dir`. Those targets also share
+  one `.typra-generated/manifest.json`, so a run scoped to a subset of targets (e.g.
+  regenerating only Rust) saw every other target's files as "not emitted this run" and
+  deleted them as stale — silently wiping five targets' output from a run the author
+  believed was scoped to one. Stale-file reconciliation is now confined to the output
+  roots the current run actually emitted into (using the per-file `outputRoot` ownership
+  already recorded in the manifest): files owned by a target absent from the run are
+  preserved, reported as `preserved-foreign-target` in `report.json`, and a warning is
+  emitted, while within-target reconciliation (renamed/removed types) is unchanged.
 
 ## [0.8.2](https://github.com/sethjuarez/typra/compare/v0.8.1...v0.8.2) (2026-08-13)
 
