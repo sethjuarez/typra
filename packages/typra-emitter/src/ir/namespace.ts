@@ -196,6 +196,10 @@ export function applyNamespaceGroups(
 
   const snapshots: NamespaceGroupSnapshot[] = [];
   for (const node of nodes) {
+    // Interfaces/operations (protocol nodes) always emit at the target root,
+    // regardless of the namespace they are declared in — only models follow the
+    // namespace-derived folder layout. Never project a protocol node's group.
+    if (node.isProtocol) continue;
     snapshots.push({ node, group: node.group });
     const projection = projectNamespace({
       target: options.target,

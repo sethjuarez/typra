@@ -38,6 +38,23 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   `test/namespace-projection.test.ts` (`applyNamespaceGroups` authoritative-projection
   contract).
 
+- **emitter:** apply structural namespace projection to _all_ discovered models, not
+  just those reachable from `root-object`. Language drivers ran `applyNamespaceGroups`
+  over `enumerateTypes(root)` (the root-object-reachable subgraph) _before_
+  `filterNodes` appended the namespace-discovered `additionalModels` — types found by
+  scanning the root namespace but never referenced from the root object. Those
+  additional models therefore bypassed namespace projection entirely and were laid out
+  by their source folder only, so a model declared in `App.Contracts.Tracing` but not
+  reachable from the root emitted flat at the target root instead of under
+  `contracts/tracing/…` (root-relative targets: TypeScript, Python, Rust, C#, Swift).
+  The drivers now run `filterNodes` first and project the full emitted set, so a nested
+  TypeSpec `namespace` drives the module sub-path for every emitted type regardless of
+  root-object reachability. Interfaces/operations (protocol nodes) are excluded from the
+  projection and continue to emit at the target root regardless of their namespace — only
+  models nest. Flat-namespace schemas are unaffected (empty projection leaves the
+  folder-derived group intact). Regression: `test/generate.test.ts` (nests
+  namespace-discovered models not reachable from the root object; ops stay at root).
+
   the TypeScript and Python vector-conformance tests. Vector `input`/`expected`
   are opaque conformance evidence (not typed against the operation's parameters),
   yet these two targets alone typed each model-shaped param/return and asserted a

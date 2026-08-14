@@ -108,6 +108,13 @@ Two projection details are worth calling out explicitly:
   for types whose namespace is flat at the semantic root; when a nested namespace is
   present the folder is ignored, so folder layout and namespace can never disagree or
   produce doubled path segments.
+- **Namespace nesting applies to every discovered model.** Typra emits both the types
+  reachable from `root-object` and any additional models found by scanning
+  `root-namespace` (types declared in that namespace tree but never referenced from the
+  root object). Both sets are projected the same way, so a model in a nested namespace
+  nests by that namespace whether or not it is reachable from `root-object` — you do not
+  need to reference a type from the root object for its declared namespace to drive the
+  layout.
 
 ## Target options
 
