@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -14,6 +15,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 
 import { generate, SUPPORTED_TARGET_LANGUAGES } from "../src/generate.js";
+import { csharpGroupFolder } from "../src/languages/csharp/driver.js";
 import { validateNativeSerializationTargets } from "../src/native-serialization.js";
 import {
   findContributor,
@@ -628,6 +630,146 @@ describe("generate", () => {
         ),
         false,
         "Python: op should not nest under operations/pipeline/",
+      );
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("PascalCases every segment of a C# group folder path", () => {
+    // Unit-level guard for the helper behind the folder-casing fix: each
+    // `/`-split segment must be PascalCased, blanks trimmed away, and
+    // already-PascalCase namespace projections must pass through unchanged.
+    assert.equal(csharpGroupFolder("connection"), "Connection");
+    assert.equal(csharpGroupFolder("tools"), "Tools");
+    assert.equal(csharpGroupFolder("mcp"), "Mcp");
+    assert.equal(csharpGroupFolder("http2"), "Http2");
+    assert.equal(csharpGroupFolder("model_options"), "ModelOptions");
+    assert.equal(csharpGroupFolder("contracts/core"), "Contracts/Core");
+    assert.equal(csharpGroupFolder("Contracts/Core"), "Contracts/Core");
+    assert.equal(csharpGroupFolder("a/b/c"), "A/B/C");
+    assert.equal(csharpGroupFolder("contracts//core"), "Contracts/Core");
+    assert.equal(csharpGroupFolder(""), "");
+  });
+
+  it("emits PascalCase C# subfolders for lowercase TSP source groups", () => {
+    // Regression: C# uses `node.group` verbatim as the emitted subfolder. For a
+    // flat-namespace schema whose models live in lowercase source subfolders
+    // (`schema/model/connection/`, `schema/model/tools/`), the folder-derived
+    // group is the lowercase folder name, so C# emitted `connection/Connection.cs`
+    // — non-idiomatic and inconsistent with namespace-projected groups (which are
+    // PascalCase). C# folders must be PascalCase regardless of the group's source.
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-csharp-folder-case-"));
+    const modelRoot = path.join(output, "schema", "model");
+    const source = path.join(modelRoot, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      mkdirSync(path.join(modelRoot, "connection"), { recursive: true });
+      mkdirSync(path.join(modelRoot, "tools"), { recursive: true });
+      // Flat namespace on purpose: the sub-path must come from the source folder,
+      // exercising the folder-derived group (not a namespace projection).
+      writeFileSync(
+        source,
+        [
+          'import "@typra/emitter";',
+          'import "./connection/connection.tsp";',
+          'import "./tools/tool.tsp";',
+          "",
+          "namespace Typra.CsFolderCase;",
+          "",
+          "model Root {",
+          "  conn: Connection;",
+          "  tool: Tool;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        path.join(modelRoot, "connection", "connection.tsp"),
+        [
+          "namespace Typra.CsFolderCase;",
+          "",
+          "model Connection {",
+          "  id: string;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        path.join(modelRoot, "tools", "tool.tsp"),
+        [
+          "namespace Typra.CsFolderCase;",
+          "",
+          "model Tool {",
+          "  kind: string;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.CsFolderCase.Root"',
+          '    root-namespace: "Typra.CsFolderCase"',
+          "    deterministic-output: true",
+          "    emit-targets:",
+          "      - type: CSharp",
+          `        output-dir: ${yamlString(path.join(output, "generated", "csharp"))}`,
+          '        namespace: "Typra.CsFolderCase"',
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(
+        process.execPath,
+        [tspCli, "compile", source, "--config", config],
+        {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      const csRoot = path.join(output, "generated", "csharp");
+      // Read on-disk directory names directly: existsSync is case-insensitive on
+      // Windows/macOS and would ignore the very casing this test guards.
+      const groupDirs = readdirSync(csRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+      assert.ok(
+        groupDirs.includes("Connection"),
+        `C#: expected PascalCase Connection/ folder, got ${JSON.stringify(groupDirs)}`,
+      );
+      assert.ok(
+        !groupDirs.includes("connection"),
+        `C#: model should not emit under lowercase connection/ folder, got ${JSON.stringify(groupDirs)}`,
+      );
+      assert.ok(
+        groupDirs.includes("Tools"),
+        `C#: expected PascalCase Tools/ folder, got ${JSON.stringify(groupDirs)}`,
+      );
+      assert.ok(
+        !groupDirs.includes("tools"),
+        `C#: model should not emit under lowercase tools/ folder, got ${JSON.stringify(groupDirs)}`,
+      );
+      assert.equal(
+        existsSync(path.join(csRoot, "Connection", "Connection.cs")),
+        true,
+        "C#: Connection model should emit inside its group folder",
+      );
+      assert.equal(
+        existsSync(path.join(csRoot, "Tools", "Tool.cs")),
+        true,
+        "C#: Tool model should emit inside its group folder",
       );
     } finally {
       rmSync(output, { recursive: true, force: true });

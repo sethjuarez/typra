@@ -1057,7 +1057,13 @@ function assertGeneratedStructuredLoadCoverage() {
           generatedRoot,
           "csharp",
           "tests",
-          group || "",
+          // C# folders mirror PascalCase namespaces, so the emitter PascalCases
+          // every group segment (see csharpGroupFolder in the C# driver). Mirror
+          // that here or this check fails on case-sensitive filesystems (Linux CI)
+          // while silently passing on case-insensitive Windows/macOS.
+          group
+            ? group.split("/").filter(Boolean).map(pascalCase).join("/")
+            : "",
           `${name}ConversionTests.cs`,
         ),
       hasStructuredLoad: (content) => /\bLoadJsonInput1?\(/.test(content),
