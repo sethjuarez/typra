@@ -44,6 +44,23 @@ function cleanupGeneratedCSharpFiles(relDir: string | undefined): void {
   return;
 }
 
+/**
+ * Render a type's group as an idiomatic C# subfolder path. C# folders (like the
+ * namespaces they mirror) are PascalCase, so every segment is PascalCased —
+ * whether the group came from a namespace projection (already PascalCase) or from
+ * a lowercase TSP source subfolder (e.g. `connection`, `tools`). Without this a
+ * flat-namespace schema emits lowercase `connection/Connection.cs` while a nested
+ * one emits `Contracts/Core/Thing.cs`, so folder casing is inconsistent.
+ */
+export function csharpGroupFolder(group: string): string {
+  return group
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .map((segment) => toPascalCase(segment))
+    .join("/");
+}
+
 export const generateCsharp = async (
   context: EmitContext<TypraEmitterOptions>,
   node: TypeNode,
@@ -136,8 +153,9 @@ export const generateCsharp = async (
         const csEnumName =
           field.enumName.charAt(0).toUpperCase() + field.enumName.slice(1);
         const grp = enumGroup.get(field.enumName) || "";
-        const enumOutDir = grp
-          ? `${emitTarget["output-dir"]}/${grp}`
+        const enumFolder = csharpGroupFolder(grp);
+        const enumOutDir = enumFolder
+          ? `${emitTarget["output-dir"]}/${enumFolder}`
           : emitTarget["output-dir"];
         await emitCsharpFile(
           context,
@@ -161,8 +179,9 @@ export const generateCsharp = async (
       findTypeDecl,
     );
     // Emit into group subfolder (C# uses namespaces, no re-export files needed)
-    const outDir = n.group
-      ? `${emitTarget["output-dir"]}/${n.group}`
+    const groupFolder = csharpGroupFolder(n.group);
+    const outDir = groupFolder
+      ? `${emitTarget["output-dir"]}/${groupFolder}`
       : emitTarget["output-dir"];
     await emitCsharpFile(
       context,
@@ -173,8 +192,8 @@ export const generateCsharp = async (
       emitTarget["output-dir"],
     );
     if (emitTarget["test-dir"] && !n.isProtocol) {
-      const testDir = n.group
-        ? `${emitTarget["test-dir"]}/${n.group}`
+      const testDir = groupFolder
+        ? `${emitTarget["test-dir"]}/${groupFolder}`
         : emitTarget["test-dir"];
       await emitCsharpFile(
         context,
