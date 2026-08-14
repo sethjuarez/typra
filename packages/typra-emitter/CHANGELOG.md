@@ -97,6 +97,14 @@ PR #36 has since been merged and `main` is once again the source of truth for re
   preserved, reported as `preserved-foreign-target` in `report.json`, and a warning is
   emitted, while within-target reconciliation (renamed/removed types) is unchanged.
 
+## [0.8.5](https://github.com/sethjuarez/typra/compare/v0.8.4...v0.8.5) (2026-08-14)
+
+
+### Bug Fixes
+
+* **cleanup:** preserve files re-emitted under a different case on case-insensitive filesystems ([#217](https://github.com/sethjuarez/typra/issues/217)) ([c80d46d](https://github.com/sethjuarez/typra/commit/c80d46d2dced492729aab41bae48d8320d525ebd))
+* **csharp:** emit PascalCase subfolders for lowercase TSP source groups ([#216](https://github.com/sethjuarez/typra/issues/216)) ([30d02eb](https://github.com/sethjuarez/typra/commit/30d02eb268a04ecbab4bc672a8b07f0840ee2a85))
+
 ## [0.8.4](https://github.com/sethjuarez/typra/compare/v0.8.3...v0.8.4) (2026-08-14)
 
 
