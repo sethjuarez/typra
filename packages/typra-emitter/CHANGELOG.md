@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.8.6](https://github.com/sethjuarez/typra/compare/v0.8.5...v0.8.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **emitter:** elide dead LoadContext guard for leaf Go loaders ([#220](https://github.com/sethjuarez/typra/issues/220)) ([21e4155](https://github.com/sethjuarez/typra/commit/21e4155c3970ffcb16aed967e44358ea551cfeda))
+
 ## [0.8.5](https://github.com/sethjuarez/typra/compare/v0.8.4...v0.8.5) (2026-08-14)
 
 
