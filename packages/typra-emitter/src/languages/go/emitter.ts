@@ -630,8 +630,13 @@ function emitLoadFunction(
     body.push("\treturn result, nil");
   }
 
-  // Dead-store elimination: only emit the guard when the body actually reads `ctx`.
-  if (body.some((line) => /\bctx\b/.test(line))) {
+  // Dead-store elimination: only emit the guard when the body actually reads the
+  // `ctx` variable. String literals are stripped first so a field whose wire name is
+  // literally "ctx" (emitted as `m["ctx"]`) can't spuriously keep the guard alive.
+  const usesCtx = body.some((line) =>
+    /\bctx\b/.test(line.replace(/"(?:[^"\\]|\\.)*"/g, '""')),
+  );
+  if (usesCtx) {
     lines.push("\tif ctx == nil {");
     lines.push("\t\tctx = NewLoadContext()");
     lines.push("\t}");

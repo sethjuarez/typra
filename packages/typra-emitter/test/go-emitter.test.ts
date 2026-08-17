@@ -349,4 +349,30 @@ describe("Go emitter LoadContext guard dead-store elimination", () => {
       "nested loader threads ctx into the nested load",
     );
   });
+
+  it("omits the ctx guard even when a leaf field's wire name is literally \"ctx\"", () => {
+    // Regression guard: the usage check strips string literals, so `m["ctx"]` for a
+    // field named ctx must not be mistaken for a read of the ctx variable.
+    const out = emitLoader(
+      loaderType("CtxNamedFieldModel", [scalarField("ctx", "string")]),
+    );
+    const body = loaderBody(out, "CtxNamedFieldModel");
+
+    assert.ok(
+      body.includes("ctx *LoadContext"),
+      "loader keeps the ctx *LoadContext parameter",
+    );
+    assert.ok(
+      body.includes('m["ctx"]') || body.includes('"ctx"'),
+      "the leaf field named ctx is still read from the map by its wire name",
+    );
+    assert.ok(
+      !body.includes("ctx = NewLoadContext()"),
+      "a field literally named ctx must not resurrect the dead guard",
+    );
+    assert.ok(
+      !body.includes("if ctx == nil {"),
+      "a field literally named ctx must not resurrect the ctx == nil guard block",
+    );
+  });
 });
