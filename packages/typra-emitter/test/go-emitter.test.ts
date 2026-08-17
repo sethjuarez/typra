@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import type {
   CoercionDecl,
   CollectionHelperDecl,
+  FieldDecl,
+  LoadAssignment,
   TypeDecl,
 } from "../src/ir/declarations.js";
 import { emitGoFileContent } from "../src/languages/go/emitter.js";
@@ -201,6 +203,150 @@ describe("Go emitter entry-shorthand math import", () => {
     assert.ok(
       out.includes('"math"'),
       "expected the math import to be plumbed through",
+    );
+  });
+});
+
+// ============================================================================
+// Dead-store elimination for the LoadContext guard
+// ============================================================================
+//
+// Go's LoadContext has no ProcessInput hook, so a loader only reads `ctx` when it
+// threads it into a nested load or calls `ctx.At(...)` for a required-field path.
+// Leaf loaders touch neither, which made the unconditional
+// `if ctx == nil { ctx = NewLoadContext() }` prologue a dead store that CodeQL flags
+// (go/useless-assignment-to-local). The guard must now be elided for leaf loaders
+// while the `ctx *LoadContext` parameter stays on every loader for a uniform API.
+
+function scalarField(name: string, scalarType: string): FieldDecl {
+  return {
+    name,
+    typeName: { namespace: "Test", name: scalarType },
+    category: { kind: "scalar", scalarType },
+    isOptional: false,
+    defaultValue: null,
+    allowedValues: [],
+    parseAliases: {},
+    enumName: null,
+    isOpenEnum: false,
+    description: "",
+    knownAs: {},
+  };
+}
+
+function complexField(name: string, typeName: string): FieldDecl {
+  return {
+    name,
+    typeName: { namespace: "Test", name: typeName },
+    category: { kind: "complex", typeName },
+    isOptional: false,
+    defaultValue: null,
+    allowedValues: [],
+    parseAliases: {},
+    enumName: null,
+    isOpenEnum: false,
+    description: "",
+    knownAs: {},
+  };
+}
+
+function assignmentFor(
+  field: FieldDecl,
+  parentTypeName: string,
+): LoadAssignment {
+  return {
+    sourceName: field.name,
+    fieldName: field.name,
+    category: field.category,
+    isOptional: field.isOptional,
+    parentTypeName,
+    enumName: null,
+    allowedValues: [],
+    parseAliases: {},
+    defaultValue: null,
+    isOpenEnum: false,
+  };
+}
+
+function loaderType(name: string, fields: FieldDecl[]): TypeDecl {
+  const base = typeWith([]);
+  return {
+    ...base,
+    typeName: { namespace: "Test", name },
+    fields,
+    load: {
+      ...base.load,
+      assignments: fields.map((field) => assignmentFor(field, name)),
+    },
+  } as TypeDecl;
+}
+
+function emitLoader(type: TypeDecl): string {
+  return emitGoFileContent(
+    [type],
+    "model",
+    new GoExprVisitor(),
+    new Set<string>(),
+  );
+}
+
+/** Extract the body of a single `func Load<Name>(...) { ... }` from the emitted file. */
+function loaderBody(out: string, name: string): string {
+  const marker = `func Load${name}(`;
+  const start = out.indexOf(marker);
+  assert.ok(start >= 0, `expected a Load${name} function`);
+  // Match the closing brace at column 0 that terminates the function.
+  const rest = out.slice(start);
+  const end = rest.indexOf("\n}\n");
+  assert.ok(end >= 0, `expected Load${name} to be terminated`);
+  return rest.slice(0, end);
+}
+
+describe("Go emitter LoadContext guard dead-store elimination", () => {
+  it("omits the ctx guard for a leaf loader that never uses ctx", () => {
+    const out = emitLoader(
+      loaderType("LeafModel", [scalarField("label", "string")]),
+    );
+    const body = loaderBody(out, "LeafModel");
+
+    // The parameter stays for a uniform loader API across all generated types.
+    assert.ok(
+      body.includes("ctx *LoadContext"),
+      "leaf loader must keep the ctx *LoadContext parameter",
+    );
+    // ...but the dead guard assignment must be gone.
+    assert.ok(
+      !body.includes("ctx = NewLoadContext()"),
+      "leaf loader must not emit the dead ctx = NewLoadContext() guard",
+    );
+    assert.ok(
+      !body.includes("if ctx == nil {"),
+      "leaf loader must not emit the ctx == nil guard block",
+    );
+  });
+
+  it("retains the ctx guard for a loader that threads ctx into a nested load", () => {
+    const out = emitLoader(
+      loaderType("NestedModel", [complexField("child", "LeafModel")]),
+    );
+    const body = loaderBody(out, "NestedModel");
+
+    assert.ok(
+      body.includes("ctx *LoadContext"),
+      "nested loader keeps the ctx *LoadContext parameter",
+    );
+    // The required-field guard and the nested load both read ctx, so the guard is needed.
+    assert.ok(
+      body.includes("if ctx == nil {"),
+      "nested loader must retain the ctx == nil guard block",
+    );
+    assert.ok(
+      body.includes("ctx = NewLoadContext()"),
+      "nested loader must retain the ctx = NewLoadContext() assignment",
+    );
+    assert.ok(
+      body.includes('ctx.At("child")'),
+      "nested loader threads ctx into the nested load",
     );
   });
 });

@@ -5457,6 +5457,25 @@ function assertStaticFixtureCoverage() {
     "[]FixtureOwner{}",
     'json:"defaultOwners" yaml:"defaultOwners"',
   );
+  // Dead-store elimination for the Go LoadContext guard (CodeQL
+  // go/useless-assignment-to-local). A leaf loader that never threads `ctx` into a
+  // nested load keeps the `ctx *LoadContext` parameter for a uniform API but must not
+  // emit the dead `if ctx == nil { ctx = NewLoadContext() }` prologue.
+  assertIncludes(
+    path.join("generated", "fixtures", "go", "fixture_owner.go"),
+    "func LoadFixtureOwner(data interface{}, ctx *LoadContext) (FixtureOwner, error) {",
+  );
+  assertExcludes(
+    path.join("generated", "fixtures", "go", "fixture_owner.go"),
+    "ctx = NewLoadContext()",
+    "if ctx == nil {",
+  );
+  // A nested loader that threads `ctx` into a nested load still needs the guard.
+  assertIncludes(
+    path.join("generated", "fixtures", "go", "model_info.go"),
+    "if ctx == nil {",
+    "ctx = NewLoadContext()",
+  );
   assertIncludes(
     path.join("generated", "fixtures", "java", "ModelInfo.java"),
     "public List<String> inputModalities = null;",
