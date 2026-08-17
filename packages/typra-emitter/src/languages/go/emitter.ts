@@ -541,86 +541,107 @@ function emitLoadFunction(
   lines.push(
     `func Load${typeName}(data interface{}, ctx *LoadContext) (${returnType}, error) {`,
   );
-  lines.push("\tif ctx == nil {");
-  lines.push("\t\tctx = NewLoadContext()");
-  lines.push("\t}");
+
+  // The body is assembled into a separate buffer so the `ctx == nil` guard can be
+  // elided for leaf loaders that never touch `ctx`. Go's LoadContext has no
+  // ProcessInput hook (unlike the other targets), so when the body neither threads
+  // `ctx` into a nested load nor calls `ctx.At(...)` for a required-field path, the
+  // `ctx = NewLoadContext()` assignment is a dead store that CodeQL flags
+  // (go/useless-assignment-to-local). The `ctx *LoadContext` parameter is always
+  // retained so the loader API stays uniform across every generated type.
+  const body: string[] = [];
+
   if (!hasTerminalDispatch) {
     const explicitCollectionDefaults = type.fields.filter((field) =>
       shouldMaterializeCollectionDefault(field, "explicit-only"),
     );
     if (explicitCollectionDefaults.length === 0) {
-      lines.push(`\tresult := ${typeName}{}`);
+      body.push(`\tresult := ${typeName}{}`);
     } else {
-      lines.push(`\tresult := ${typeName}{`);
+      body.push(`\tresult := ${typeName}{`);
       for (const field of explicitCollectionDefaults) {
-        lines.push(
+        body.push(
           `\t\t${goFieldName(field.name)}: ${getGoFieldType(field.category, field.isOptional, polymorphicTypeNames, field.enumName)}{},`,
         );
       }
-      lines.push("\t}");
+      body.push("\t}");
     }
-    lines.push("");
+    body.push("");
   }
 
   // 1. Coercions
   if (hasCoercions) {
-    emitCoercions(type.load.coercions, typeName, lines);
+    emitCoercions(type.load.coercions, typeName, body);
   }
 
   // 2. Polymorphic dispatch
+  let terminated = false;
   if (type.polymorphicDispatch) {
-    emitPolymorphicDispatch(typeName, type.polymorphicDispatch, lines);
+    emitPolymorphicDispatch(typeName, type.polymorphicDispatch, body);
     if (hasTerminalDispatch) {
-      lines.push("}");
-      lines.push("");
-      return;
+      terminated = true;
     }
   }
 
-  // 3. Map loading
-  lines.push("\t// Load from map");
-  lines.push("\tif m, ok := data.(map[string]interface{}); ok {");
+  if (!terminated) {
+    // 3. Map loading
+    body.push("\t// Load from map");
+    body.push("\tif m, ok := data.(map[string]interface{}); ok {");
 
-  for (const assign of type.load.assignments) {
-    const field = type.fields.find(
-      (candidate) => candidate.name === assign.fieldName,
-    );
-    if (!shouldGuardMissingRequiredField(field)) continue;
-    lines.push(
-      `\t\tif requiredValue, exists := m["${assign.sourceName}"]; !exists || requiredValue == nil {`,
-    );
-    lines.push(
-      `\t\t\treturn result, fmt.Errorf("%s: missing required field", ctx.At("${assign.sourceName}").Path)`,
-    );
-    lines.push("\t\t}");
-  }
-
-  for (const assign of type.load.assignments) {
-    const helper = type.collectionHelpers.find(
-      (candidate) => candidate.propertyName === assign.sourceName,
-    );
-    emitLoadAssignment(
-      assign,
-      helper,
-      polymorphicTypeNames,
-      scalarCoercibleTypeNames,
-      fieldNames,
-      lines,
-    );
-  }
-  if (absorbsUnknownIntoBase(type.polymorphicDispatch)) {
-    lines.push("\t\tresult.raw = make(map[string]interface{}, len(m))");
-    lines.push("\t\tfor key, value := range m {");
-    lines.push(`\t\t\tresult.raw[key] = clone${typeName}RawValue(value)`);
-    lines.push("\t\t}");
-    for (const field of type.fields) {
-      lines.push(`\t\tdelete(result.raw, "${field.name}")`);
+    for (const assign of type.load.assignments) {
+      const field = type.fields.find(
+        (candidate) => candidate.name === assign.fieldName,
+      );
+      if (!shouldGuardMissingRequiredField(field)) continue;
+      body.push(
+        `\t\tif requiredValue, exists := m["${assign.sourceName}"]; !exists || requiredValue == nil {`,
+      );
+      body.push(
+        `\t\t\treturn result, fmt.Errorf("%s: missing required field", ctx.At("${assign.sourceName}").Path)`,
+      );
+      body.push("\t\t}");
     }
+
+    for (const assign of type.load.assignments) {
+      const helper = type.collectionHelpers.find(
+        (candidate) => candidate.propertyName === assign.sourceName,
+      );
+      emitLoadAssignment(
+        assign,
+        helper,
+        polymorphicTypeNames,
+        scalarCoercibleTypeNames,
+        fieldNames,
+        body,
+      );
+    }
+    if (absorbsUnknownIntoBase(type.polymorphicDispatch)) {
+      body.push("\t\tresult.raw = make(map[string]interface{}, len(m))");
+      body.push("\t\tfor key, value := range m {");
+      body.push(`\t\t\tresult.raw[key] = clone${typeName}RawValue(value)`);
+      body.push("\t\t}");
+      for (const field of type.fields) {
+        body.push(`\t\tdelete(result.raw, "${field.name}")`);
+      }
+    }
+
+    body.push("\t}");
+    body.push("");
+    body.push("\treturn result, nil");
   }
 
-  lines.push("\t}");
-  lines.push("");
-  lines.push("\treturn result, nil");
+  // Dead-store elimination: only emit the guard when the body actually reads the
+  // `ctx` variable. String literals are stripped first so a field whose wire name is
+  // literally "ctx" (emitted as `m["ctx"]`) can't spuriously keep the guard alive.
+  const usesCtx = body.some((line) =>
+    /\bctx\b/.test(line.replace(/"(?:[^"\\]|\\.)*"/g, '""')),
+  );
+  if (usesCtx) {
+    lines.push("\tif ctx == nil {");
+    lines.push("\t\tctx = NewLoadContext()");
+    lines.push("\t}");
+  }
+  lines.push(...body);
   lines.push("}");
   lines.push("");
 }
