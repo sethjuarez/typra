@@ -47,23 +47,23 @@
     "fixtures/tspconfig.yaml"
   ],
   "peerDependencies": {
-    "@typespec/compiler": "1.10.0",
-    "@typespec/http": "1.10.0",
-    "@typespec/json-schema": "1.10.0"
+    "@typespec/compiler": "1.15.0",
+    "@typespec/http": "1.15.0",
+    "@typespec/json-schema": "1.15.0"
   },
   "devDependencies": {
-    "@types/node": "^24.7.0",
-    "@typescript-eslint/eslint-plugin": "^8.15.0",
+    "@types/node": "^26.2.0",
+    "@typescript-eslint/eslint-plugin": "^8.67.0",
     "@typescript-eslint/parser": "^8.15.0",
-    "@typespec/compiler": "1.10.0",
-    "@typespec/http": "1.10.0",
-    "@typespec/json-schema": "1.10.0",
-    "eslint": "^9.15.0",
+    "@typespec/compiler": "1.15.0",
+    "@typespec/http": "1.15.0",
+    "@typespec/json-schema": "1.15.0",
+    "eslint": "^10.8.1",
     "markdownlint-cli": "^0.49.1",
     "prettier": "^3.3.3",
-    "typescript": "^5.3.3",
-    "typescript-eslint": "^8.54.0",
-    "zod": "^3.25.76"
+    "typescript": "^7.0.2",
+    "typescript-eslint": "^8.67.0",
+    "zod": "^4.4.3"
   },
   "scripts": {
     "build": "tsc",
@@ -85,6 +85,6 @@
   "packageManager": "npm@11.5.1+sha512.232e6f5d9e799bcb486920b3e9ba907fdf96e576cf7e8c9446c8162e33a416096a1d37a9e910d9a918f6b1f606791c99bc6bb61ee2569b496ec74af13d0dbd95",
   "dependencies": {
     "xml-formatter": "^3.6.7",
-    "yaml": "^2.8.1"
+    "yaml": "^2.9.0"
   }
 }
