@@ -66,12 +66,13 @@ retry after challenges, or interpret provider-specific identity policy.
 ## Install
 
 ```powershell
-npm install --save-dev @typra/emitter @typespec/compiler@1.10.0 @typespec/json-schema@1.10.0
+npm install --save-dev @typra/emitter @typespec/compiler@1 @typespec/json-schema@1
 ```
 
-Typra currently validates against TypeSpec compiler and JSON schema emitter
-`1.10.0`. Unvalidated TypeSpec versions report a clear diagnostic during emit;
-set `allow-unsupported-typespec-version: true` only when you intentionally accept
+Typra supports TypeSpec compiler and JSON schema emitter across the
+`>=1.10.0 <2.0.0` range (validated in CI against 1.10.0 and 1.15.0). TypeSpec
+versions outside that range report a clear diagnostic during emit; set
+`allow-unsupported-typespec-version: true` only when you intentionally accept
 possible generated output churn.
 
 ## Current release highlights

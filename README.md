@@ -34,13 +34,14 @@ and adapters. Typra keeps the reusable emitter behavior.
 ## Install
 
 ```powershell
-npm install --save-dev @typra/emitter @typespec/compiler@1.10.0 @typespec/json-schema@1.10.0
+npm install --save-dev @typra/emitter @typespec/compiler@1 @typespec/json-schema@1
 ```
 
-Typra currently validates against `@typespec/compiler` and
-`@typespec/json-schema` `1.10.0`. Unsupported TypeSpec toolchains produce a
-diagnostic during emit; use `allow-unsupported-typespec-version: true` only when
-you intentionally accept possible generated output churn.
+Typra supports `@typespec/compiler` and `@typespec/json-schema` across the
+`>=1.10.0 <2.0.0` range (validated in CI against 1.10.0 and 1.15.0). TypeSpec
+versions outside that range produce a diagnostic during emit; use
+`allow-unsupported-typespec-version: true` only when you intentionally accept
+possible generated output churn.
 
 ## Quick start
 
@@ -325,8 +326,9 @@ npm run pack:dry-run
 ```
 
 CI also runs a TypeSpec compatibility matrix for each explicitly supported
-`@typespec/compiler` and `@typespec/json-schema` version pair. Add a matrix row
-before widening the package peer range.
+`@typespec/compiler`, `@typespec/http`, and `@typespec/json-schema` version pair
+(currently 1.10.0 and 1.15.0). Add a matrix row when validating a new TypeSpec
+version, and keep the package peer range (`>=1.10.0 <2.0.0`) in sync.
 
 `npm run check:toolchain` reports the local tools needed by
 `validate:fixtures`: Node.js, npm, `uv run --python 3.12 --with pydantic

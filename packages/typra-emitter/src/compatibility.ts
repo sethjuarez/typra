@@ -3,10 +3,11 @@ import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { EmitContext, NoTarget } from "@typespec/compiler";
+import { satisfies as semverSatisfies } from "semver";
 import { TypraEmitterOptions } from "./lib.js";
 
-export const SUPPORTED_TYPESPEC_COMPILER_VERSION = "1.10.0";
-export const SUPPORTED_TYPESPEC_JSON_SCHEMA_VERSION = "1.10.0";
+export const SUPPORTED_TYPESPEC_COMPILER_VERSION = ">=1.10.0 <2.0.0";
+export const SUPPORTED_TYPESPEC_JSON_SCHEMA_VERSION = ">=1.10.0 <2.0.0";
 
 const require = createRequire(import.meta.url);
 
@@ -145,7 +146,7 @@ export function formatUnsupportedTypeSpecVersionMessage(
 }
 
 function isSupportedVersion(version: string, supportedRange: string): boolean {
-  return version === supportedRange;
+  return semverSatisfies(version, supportedRange, { includePrerelease: true });
 }
 
 function resolveInstalledPackageVersion(packageName: string): string {
