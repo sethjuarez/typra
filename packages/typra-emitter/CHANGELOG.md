@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.9.2](https://github.com/sethjuarez/typra/compare/v0.9.1...v0.9.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **java:** render enum values as typed literals in scalar-coercion load tests ([6d4bde8](https://github.com/sethjuarez/typra/commit/6d4bde80a7875f1058ffde9fb4c3862e3318842c))
+
 ## [0.9.1](https://github.com/sethjuarez/typra/compare/v0.9.0...v0.9.1) (2026-08-18)
 
 
