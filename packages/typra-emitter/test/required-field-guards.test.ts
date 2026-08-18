@@ -177,20 +177,15 @@ describe("shared missing-required-field policy", () => {
     assert.equal(shouldGuardMissingRequiredField(kind), false);
   });
 
-  it("keeps Swift's inherited scalar/dict guard decision explicit", () => {
+  it("does not guard a subtype's own required scalar field (parity with Rust)", () => {
     const base = file.types.find(
       (candidate) => candidate.typeName.name === "GuardTool",
     )!;
     const kind = base.fields.find((field) => field.name === "kind");
 
+    // A discriminated-union subtype's required scalar defaults to its zero value on load
+    // (Rust `.unwrap_or_default()`); only required complex fields guard-then-fail.
     assert.equal(shouldGuardMissingRequiredField(kind), false);
-    assert.equal(
-      shouldGuardMissingRequiredField(kind, {
-        includeInheritedScalarAndDict: true,
-        hasBase: true,
-      }),
-      true,
-    );
   });
 });
 
