@@ -5,16 +5,6 @@ import {
   SaveAssignment,
 } from "./declarations.js";
 
-export interface RequiredFieldGuardOptions {
-  /**
-   * Swift value types cannot distinguish inherited required scalar/dict fields from absence once
-   * the default initializer has run, so the existing Swift backend guards those inherited fields
-   * alongside required complex fields. Other backends currently guard required complex fields only.
-   */
-  includeInheritedScalarAndDict?: boolean;
-  hasBase?: boolean;
-}
-
 export type LoadFieldPresencePolicy = "guard-then-fail" | "load-when-present";
 export type SaveFieldEmissionPolicy = "emit-always" | "omit-when-absent";
 export type OptionalFieldAbsencePolicy =
@@ -41,16 +31,8 @@ function isRequiredWithoutDefault(field: {
   );
 }
 
-function isGuardedCategory(
-  category: PropertyCategory,
-  options: RequiredFieldGuardOptions,
-): boolean {
-  if (category.kind === "complex") return true;
-  return (
-    options.includeInheritedScalarAndDict === true &&
-    options.hasBase === true &&
-    (category.kind === "scalar" || category.kind === "dict")
-  );
+function isGuardedCategory(category: PropertyCategory): boolean {
+  return category.kind === "complex";
 }
 
 function isCollectionCategory(category: PropertyCategory): boolean {
@@ -69,20 +51,18 @@ function isCollectionCategory(category: PropertyCategory): boolean {
  */
 export function loadFieldPresencePolicy(
   field: FieldDecl | LoadAssignment | undefined,
-  options: RequiredFieldGuardOptions = {},
 ): LoadFieldPresencePolicy {
   if (!field) return "load-when-present";
   if (!isRequiredWithoutDefault(field)) return "load-when-present";
-  return isGuardedCategory(field.category, options)
+  return isGuardedCategory(field.category)
     ? "guard-then-fail"
     : "load-when-present";
 }
 
 export function shouldGuardMissingRequiredField(
   field: FieldDecl | LoadAssignment | undefined,
-  options: RequiredFieldGuardOptions = {},
 ): boolean {
-  return loadFieldPresencePolicy(field, options) === "guard-then-fail";
+  return loadFieldPresencePolicy(field) === "guard-then-fail";
 }
 
 export function saveFieldEmissionPolicy(

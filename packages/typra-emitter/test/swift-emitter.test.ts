@@ -474,6 +474,32 @@ describe("Swift inherited model fields", () => {
     );
   });
 
+  it("defaults an absent required scalar on a discriminated-union subtype instead of throwing (BUG 1 parity with Rust)", () => {
+    const property = typeDecl("Property");
+    addStringField(property, "kind");
+    addStringField(property, "name", true);
+
+    const union = typeDecl("UnionProperty");
+    union.base = property.typeName;
+    addStringField(union, "kind", false, "union");
+    addStringField(union, "anyOf");
+
+    const file = fileDecl(property);
+    file.types.push(union);
+    const source = emitSwiftFile(file, new SwiftExprVisitor(), new Set());
+
+    // A subtype's own required scalar must NOT emit a "missing required field" throw guard;
+    // when absent it keeps the struct-init zero value ("") — mirroring Rust `.unwrap_or_default()`.
+    assert.doesNotMatch(
+      source,
+      /context\.at\("anyOf"\)\.path \+ ": missing required field"/,
+    );
+    assert.match(
+      source,
+      /if let value = object\["anyOf"\] \{\s+instance\.anyOf = try TypraRuntime\.string\(value, field: "anyOf"\)/,
+    );
+  });
+
   describe("Swift Codable native serialization", () => {
     it("preserves default output unless codable is explicitly enabled", () => {
       const model = typeDecl("Model");

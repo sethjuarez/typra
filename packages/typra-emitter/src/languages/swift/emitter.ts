@@ -542,12 +542,7 @@ function emitLoad(
         helper.propertyName === assignment.fieldName &&
         supportsNamedCollectionHelper(helper, polymorphicTypeNames),
     );
-    if (
-      shouldGuardMissingRequiredField(field, {
-        includeInheritedScalarAndDict: true,
-        hasBase: type.base !== null,
-      })
-    ) {
+    if (shouldGuardMissingRequiredField(field)) {
       lines.push(
         `    if object[${swiftStringLiteral(assignment.sourceName)}] == nil || object[${swiftStringLiteral(assignment.sourceName)}] is NSNull {`,
       );
