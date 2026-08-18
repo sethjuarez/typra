@@ -31,7 +31,10 @@ import {
   getUnsupportedTypeSpecPackages,
   reportToolchainCompatibility,
   shouldBlockUnsupportedTypeSpecToolchain,
+  SUPPORTED_TYPESPEC_COMPILER_VERSION,
+  SUPPORTED_TYPESPEC_JSON_SCHEMA_VERSION,
 } from "../src/compatibility.js";
+import { satisfies as semverSatisfies } from "semver";
 
 function makeType(
   name: string,
@@ -644,17 +647,80 @@ describe("TypeSpec compatibility guard", () => {
       toolchain.packages.map((entry) => entry.name),
       ["@typespec/compiler", "@typespec/json-schema", "@typra/emitter"],
     );
-    assert.equal(
-      toolchain.packages.find((entry) => entry.name === "@typespec/compiler")
-        ?.version,
-      "1.10.0",
+
+    const compiler = toolchain.packages.find(
+      (entry) => entry.name === "@typespec/compiler",
     );
-    assert.equal(
-      toolchain.packages.find((entry) => entry.name === "@typespec/json-schema")
-        ?.version,
-      "1.10.0",
+    const jsonSchema = toolchain.packages.find(
+      (entry) => entry.name === "@typespec/json-schema",
     );
+
+    assert.ok(
+      compiler &&
+        semverSatisfies(compiler.version, SUPPORTED_TYPESPEC_COMPILER_VERSION, {
+          includePrerelease: true,
+        }),
+      `installed @typespec/compiler ${compiler?.version} should satisfy ${SUPPORTED_TYPESPEC_COMPILER_VERSION}`,
+    );
+    assert.equal(compiler?.supported, true);
+    assert.ok(
+      jsonSchema &&
+        semverSatisfies(
+          jsonSchema.version,
+          SUPPORTED_TYPESPEC_JSON_SCHEMA_VERSION,
+          { includePrerelease: true },
+        ),
+      `installed @typespec/json-schema ${jsonSchema?.version} should satisfy ${SUPPORTED_TYPESPEC_JSON_SCHEMA_VERSION}`,
+    );
+    assert.equal(jsonSchema?.supported, true);
+
     assert.equal(getUnsupportedTypeSpecPackages(toolchain).length, 0);
+  });
+
+  it("accepts every validated TypeSpec version across the supported range", () => {
+    for (const version of ["1.10.0", "1.13.0", "1.15.0", "1.16.0-dev.0"]) {
+      const toolchain = buildToolchainMetadata([
+        {
+          name: "@typespec/compiler",
+          version,
+          supportedRange: SUPPORTED_TYPESPEC_COMPILER_VERSION,
+        },
+        {
+          name: "@typespec/json-schema",
+          version,
+          supportedRange: SUPPORTED_TYPESPEC_JSON_SCHEMA_VERSION,
+        },
+      ]);
+
+      assert.deepEqual(
+        getUnsupportedTypeSpecPackages(toolchain),
+        [],
+        `expected TypeSpec ${version} to be treated as supported`,
+      );
+    }
+  });
+
+  it("rejects TypeSpec versions outside the supported range", () => {
+    for (const version of ["1.9.0", "2.0.0"]) {
+      const toolchain = buildToolchainMetadata([
+        {
+          name: "@typespec/compiler",
+          version,
+          supportedRange: SUPPORTED_TYPESPEC_COMPILER_VERSION,
+        },
+        {
+          name: "@typespec/json-schema",
+          version,
+          supportedRange: SUPPORTED_TYPESPEC_JSON_SCHEMA_VERSION,
+        },
+      ]);
+
+      assert.deepEqual(
+        getUnsupportedTypeSpecPackages(toolchain).map((entry) => entry.name),
+        ["@typespec/compiler", "@typespec/json-schema"],
+        `expected TypeSpec ${version} to be treated as unsupported`,
+      );
+    }
   });
 
   it("formats a clear diagnostic for unvalidated TypeSpec toolchain versions", () => {

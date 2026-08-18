@@ -68,7 +68,7 @@ jobs:
         run: npm run pack:dry-run
 
   typespec-compatibility:
-    name: TypeSpec ${{ matrix.compiler }} / json-schema ${{ matrix.json_schema }}
+    name: TypeSpec ${{ matrix.compiler }} / json-schema ${{ matrix.json_schema }} / http ${{ matrix.http }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -76,6 +76,10 @@ jobs:
         include:
           - compiler: "1.10.0"
             json_schema: "1.10.0"
+            http: "1.10.0"
+          - compiler: "1.15.0"
+            json_schema: "1.15.0"
+            http: "1.15.0"
 
     steps:
       - name: Checkout
@@ -108,14 +112,18 @@ jobs:
         env:
           TYPESPEC_COMPILER_VERSION: ${{ matrix.compiler }}
           TYPESPEC_JSON_SCHEMA_VERSION: ${{ matrix.json_schema }}
+          TYPESPEC_HTTP_VERSION: ${{ matrix.http }}
         run: |
           npm pkg set "devDependencies.@typespec/compiler=$TYPESPEC_COMPILER_VERSION"
           npm pkg set "devDependencies.@typespec/json-schema=$TYPESPEC_JSON_SCHEMA_VERSION"
           npm pkg set "overrides.@typespec/compiler=$TYPESPEC_COMPILER_VERSION"
           npm pkg set "overrides.@typespec/json-schema=$TYPESPEC_JSON_SCHEMA_VERSION"
+          npm pkg set "overrides.@typespec/http=$TYPESPEC_HTTP_VERSION"
           npm pkg set --workspace @typra/emitter "peerDependencies.@typespec/compiler=$TYPESPEC_COMPILER_VERSION"
+          npm pkg set --workspace @typra/emitter "peerDependencies.@typespec/http=$TYPESPEC_HTTP_VERSION"
           npm pkg set --workspace @typra/emitter "peerDependencies.@typespec/json-schema=$TYPESPEC_JSON_SCHEMA_VERSION"
           npm pkg set --workspace @typra/emitter "devDependencies.@typespec/compiler=$TYPESPEC_COMPILER_VERSION"
+          npm pkg set --workspace @typra/emitter "devDependencies.@typespec/http=$TYPESPEC_HTTP_VERSION"
           npm pkg set --workspace @typra/emitter "devDependencies.@typespec/json-schema=$TYPESPEC_JSON_SCHEMA_VERSION"
 
       - name: Install dependencies
@@ -125,8 +133,9 @@ jobs:
         env:
           EXPECTED_COMPILER: ${{ matrix.compiler }}
           EXPECTED_JSON_SCHEMA: ${{ matrix.json_schema }}
+          EXPECTED_HTTP: ${{ matrix.http }}
         run: |
-          node -e 'const compiler = require("./node_modules/@typespec/compiler/package.json").version; const schema = require("./node_modules/@typespec/json-schema/package.json").version; if (compiler !== process.env.EXPECTED_COMPILER || schema !== process.env.EXPECTED_JSON_SCHEMA) { console.error(`Expected TypeSpec ${process.env.EXPECTED_COMPILER} / json-schema ${process.env.EXPECTED_JSON_SCHEMA}, got ${compiler} / ${schema}`); process.exit(1); }'
+          node -e 'const compiler = require("./node_modules/@typespec/compiler/package.json").version; const schema = require("./node_modules/@typespec/json-schema/package.json").version; const http = require("./node_modules/@typespec/http/package.json").version; if (compiler !== process.env.EXPECTED_COMPILER || schema !== process.env.EXPECTED_JSON_SCHEMA || http !== process.env.EXPECTED_HTTP) { console.error(`Expected TypeSpec ${process.env.EXPECTED_COMPILER} / json-schema ${process.env.EXPECTED_JSON_SCHEMA} / http ${process.env.EXPECTED_HTTP}, got ${compiler} / ${schema} / ${http}`); process.exit(1); }'
 
       - name: Build
         run: npm run build
