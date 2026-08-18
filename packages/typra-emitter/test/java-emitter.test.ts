@@ -18,6 +18,7 @@ import {
   emitJavaYaml,
 } from "../src/languages/java/scaffolding.js";
 import { emitJavaTest } from "../src/languages/java/test-emitter.js";
+import { buildBaseTestContext } from "../src/testing/test-context.js";
 import {
   javaEnumTypeName,
   javaIdentifier,
@@ -1336,6 +1337,42 @@ describe("Java emitter runtime semantics", () => {
     );
     assert.match(source, /GeneratedExamples\.fromJson\(/);
     assert.match(source, /GeneratedExamples\.fromYaml\(/);
+  });
+
+  it("uses typed enum values in direct scalar-coercion load assertions", () => {
+    const node = new TypeNode({ name: "McpApprovalMode" } as Model, "");
+    node.typeName = { namespace: "Test", name: "McpApprovalMode" };
+    node.coercions = [
+      { scalar: "string", expansion: { kind: "{value}" }, example: "never" },
+    ];
+    const kind = new PropertyNode({ name: "kind" } as ModelProperty, "");
+    kind.name = "kind";
+    kind.typeName = { namespace: "TypeSpec", name: "string" };
+    kind.isScalar = true;
+    kind.enumName = "mcpApprovalModeKind";
+    kind.allowedValues = ["never", "always"];
+    node.properties = [kind];
+
+    const source = emitJavaTest(
+      buildBaseTestContext(node, "test", javaTestOptions),
+    );
+
+    // The fromJson/fromYaml coercion assertions already wrap in the enum type.
+    assert.match(
+      source,
+      /assertEquals\(McpApprovalModeKind\.fromValue\("never"\), coercedJson1\.kind,/,
+    );
+    // The direct load(<scalar>) coercion assertion must ALSO use the typed enum,
+    // not a bare String literal that can never .equals() the enum instance.
+    assert.match(
+      source,
+      /McpApprovalMode\.load\("never", new LoadContext\(\)\)/,
+    );
+    assert.match(
+      source,
+      /assertEquals\(McpApprovalModeKind\.fromValue\("never"\), coerced1_1\.kind,/,
+    );
+    assert.doesNotMatch(source, /assertEquals\("never", coerced1_1\.kind,/);
   });
 
   it("preserves optional defaults and initializes required enums", () => {
