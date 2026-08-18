@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.9.0](https://github.com/sethjuarez/typra/compare/v0.8.7...v0.9.0) (2026-08-18)
+
+
+### Features
+
+* **deps:** support [@typespec](https://github.com/typespec) 1.15.x via peer range widening ([#228](https://github.com/sethjuarez/typra/issues/228)) ([69f5ddf](https://github.com/sethjuarez/typra/commit/69f5ddff9a5142aebbd1dddf878649d5979a1350))
+
 ## [0.8.7](https://github.com/sethjuarez/typra/compare/v0.8.6...v0.8.7) (2026-08-17)
 
 
