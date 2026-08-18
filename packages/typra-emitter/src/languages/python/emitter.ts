@@ -99,6 +99,35 @@ function returnType(typeStr: string): string {
 // ============================================================================
 
 /**
+ * Render the cancellation-token import line for a `@runtimeCancellable` file.
+ *
+ * `path` is a dotted `module.symbol` reference. Absolute paths (no leading dot)
+ * are emitted unchanged. Relative paths (leading dots) are written relative to
+ * the model output root, so the leading-dot count is scaled by the file's group
+ * depth — mirroring `relativePythonImport` — to resolve correctly from any
+ * subfolder.
+ */
+export function pythonCancellationTokenImport(
+  path: string,
+  group: string = "",
+): string {
+  const separator = path.lastIndexOf(".");
+  if (separator < 1 || separator === path.length - 1) {
+    throw new Error(`Invalid Python cancellation-token-path: ${path}`);
+  }
+  let moduleName = path.slice(0, separator);
+  const symbolName = path.slice(separator + 1);
+  const leadingDots = moduleName.length - moduleName.replace(/^\.+/, "").length;
+  if (leadingDots > 0) {
+    const depth = group ? group.split("/").filter(Boolean).length : 0;
+    moduleName = ".".repeat(depth) + moduleName;
+  }
+  const alias =
+    symbolName === "CancellationToken" ? "" : " as CancellationToken";
+  return `from ${moduleName} import ${symbolName}${alias}`;
+}
+
+/**
  * Emit a complete Python file from a FileDecl.
  */
 export interface PythonEmitterOptions {
@@ -172,20 +201,9 @@ export function emitPythonFile(
       pythonCancellationTokenImport(
         options.cancellationTokenPath ??
           "prompty.core.cancellation.CancellationToken",
+        group,
       ),
     );
-  }
-
-  function pythonCancellationTokenImport(path: string): string {
-    const separator = path.lastIndexOf(".");
-    if (separator < 1 || separator === path.length - 1) {
-      throw new Error(`Invalid Python cancellation-token-path: ${path}`);
-    }
-    const moduleName = path.slice(0, separator);
-    const symbolName = path.slice(separator + 1);
-    const alias =
-      symbolName === "CancellationToken" ? "" : " as CancellationToken";
-    return `from ${moduleName} import ${symbolName}${alias}`;
   }
 
   // Context import — go up one level when inside a group subfolder

@@ -3,6 +3,7 @@ import { toKebabCase, toSnakeCase } from "./ir/utilities.js";
 import { toPascalCase } from "./ir/visitor.js";
 import { EmitTarget } from "./lib.js";
 import { csharpIdentifier } from "./languages/csharp/identifiers.js";
+import { pythonCancellationTokenImport } from "./languages/python/emitter.js";
 
 const SCALAR_TYPES = new Set([
   "any",
@@ -140,17 +141,7 @@ export function emitPythonProtocolScaffolds(
       protocol.methods.some((method) => method.runtimeCancellable),
     )
   ) {
-    const separator = cancellationTokenPath.lastIndexOf(".");
-    if (separator < 1 || separator === cancellationTokenPath.length - 1) {
-      throw new Error(
-        `Invalid Python cancellation-token-path: ${cancellationTokenPath}`,
-      );
-    }
-    const moduleName = cancellationTokenPath.slice(0, separator);
-    const symbolName = cancellationTokenPath.slice(separator + 1);
-    const alias =
-      symbolName === "CancellationToken" ? "" : " as CancellationToken";
-    lines.push(`from ${moduleName} import ${symbolName}${alias}`);
+    lines.push(pythonCancellationTokenImport(cancellationTokenPath));
     lines.push("");
   }
   lines.push(`from ${importPath} import ${importedNames.join(", ")}`);

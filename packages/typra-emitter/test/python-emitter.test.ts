@@ -383,3 +383,82 @@ describe("Python abstract open polymorphic dispatch", () => {
     );
   });
 });
+
+describe("Python cancellation-token import", () => {
+  function cancellableType(): TypeDecl {
+    const type = typeDecl([]);
+    type.methods = [
+      {
+        name: "save",
+        returns: "void",
+        description: "",
+        params: {},
+        optional: false,
+        sync: false,
+        runtimeCancellable: true,
+      },
+    ];
+    return type;
+  }
+
+  it("emits an absolute path unchanged regardless of group depth", () => {
+    for (const group of ["", "sub", "a/b"]) {
+      const source = emitPythonFile(
+        fileDecl(cancellableType()),
+        new PythonExprVisitor(),
+        group,
+      );
+      assert.match(
+        source,
+        /from prompty\.core\.cancellation import CancellationToken/,
+      );
+    }
+  });
+
+  it("scales a relative path by the file's group depth", () => {
+    const relative = "..core.cancellation.CancellationToken";
+
+    const root = emitPythonFile(
+      fileDecl(cancellableType()),
+      new PythonExprVisitor(),
+      "",
+      { cancellationTokenPath: relative },
+    );
+    assert.match(root, /from \.\.core\.cancellation import CancellationToken/);
+
+    const oneDeep = emitPythonFile(
+      fileDecl(cancellableType()),
+      new PythonExprVisitor(),
+      "sub",
+      { cancellationTokenPath: relative },
+    );
+    assert.match(
+      oneDeep,
+      /from \.\.\.core\.cancellation import CancellationToken/,
+    );
+
+    const twoDeep = emitPythonFile(
+      fileDecl(cancellableType()),
+      new PythonExprVisitor(),
+      "a/b",
+      { cancellationTokenPath: relative },
+    );
+    assert.match(
+      twoDeep,
+      /from \.\.\.\.core\.cancellation import CancellationToken/,
+    );
+  });
+
+  it("aliases a non-CancellationToken symbol name", () => {
+    const source = emitPythonFile(
+      fileDecl(cancellableType()),
+      new PythonExprVisitor(),
+      "sub",
+      { cancellationTokenPath: "..core.cancellation.CancelToken" },
+    );
+    assert.match(
+      source,
+      /from \.\.\.core\.cancellation import CancelToken as CancellationToken/,
+    );
+  });
+});
