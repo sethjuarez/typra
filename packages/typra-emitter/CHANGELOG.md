@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.9.3](https://github.com/sethjuarez/typra/compare/v0.9.2...v0.9.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* **emitter:** scale relative Python cancellation-token import by file group depth ([#235](https://github.com/sethjuarez/typra/issues/235)) ([333fb0f](https://github.com/sethjuarez/typra/commit/333fb0fb224cf39dfaa504607ff2475065cf911e))
+
 ## [0.9.2](https://github.com/sethjuarez/typra/compare/v0.9.1...v0.9.2) (2026-08-18)
 
 
