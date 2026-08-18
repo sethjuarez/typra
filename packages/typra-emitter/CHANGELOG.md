@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.9.1](https://github.com/sethjuarez/typra/compare/v0.9.0...v0.9.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **swift:** default absent required scalar/dict on union subtypes ([2f0e5f8](https://github.com/sethjuarez/typra/commit/2f0e5f8dc62178d732551227c24b10442c1a3dad))
+
 ## [0.9.0](https://github.com/sethjuarez/typra/compare/v0.8.7...v0.9.0) (2026-08-18)
 
 
