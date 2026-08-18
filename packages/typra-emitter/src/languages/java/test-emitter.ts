@@ -212,7 +212,8 @@ function emitCoercionTest(
       emitValidation(
         lines,
         coerced,
-        expansion?.[validation.sourceKey ?? validation.key] === "{value}"
+        testCase.overrideExpected &&
+          expansion?.[validation.sourceKey ?? validation.key] === "{value}"
           ? { ...validation, value: testCase.expected, delimiter: "" }
           : validation,
       );
@@ -238,15 +239,19 @@ function emitCoercionTest(
 
 function javaDirectCoercionCases(
   coercion: CoercionTest,
-): Array<{ literal: string; expected: string | number | boolean }> {
+): Array<{
+  literal: string;
+  expected: string | number | boolean;
+  overrideExpected: boolean;
+}> {
   switch (coercion.scalarType.toLowerCase()) {
     case "int32":
     case "int64":
     case "integer":
     case "long":
       return [
-        { literal: "42", expected: 42 },
-        { literal: "42L", expected: 42 },
+        { literal: "42", expected: 42, overrideExpected: true },
+        { literal: "42L", expected: 42, overrideExpected: true },
       ];
     case "float":
     case "float32":
@@ -255,11 +260,17 @@ function javaDirectCoercionCases(
     case "number":
     case "numeric":
       return [
-        { literal: "3.14", expected: 3.14 },
-        { literal: "3.14f", expected: 3.14 },
+        { literal: "3.14", expected: 3.14, overrideExpected: true },
+        { literal: "3.14f", expected: 3.14, overrideExpected: true },
       ];
     default:
-      return [{ literal: String(coercion.value), expected: coercion.value }];
+      return [
+        {
+          literal: String(coercion.value),
+          expected: coercion.value,
+          overrideExpected: false,
+        },
+      ];
   }
 }
 
