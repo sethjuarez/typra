@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.10.0](https://github.com/sethjuarez/typra/compare/v0.9.4...v0.10.0) (2026-08-19)
+
+
+### Features
+
+* **emitter:** add formatter-idempotency guard for native output ([#240](https://github.com/sethjuarez/typra/issues/240)) ([2696775](https://github.com/sethjuarez/typra/commit/26967751dc3aa19a1269873d64d6adf4127df8b5))
+
 ## [0.9.4](https://github.com/sethjuarez/typra/compare/v0.9.3...v0.9.4) (2026-08-19)
 
 
