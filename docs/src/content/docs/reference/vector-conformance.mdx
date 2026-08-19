@@ -260,6 +260,37 @@ The support types (`VectorAdapter`, `VectorContext`, `VectorException`, and the
 canonicalizes with; a missing adapter class is a **compile error**, never a skip.
 
 </TabItem>
+<TabItem label="Swift">
+
+```swift
+// Tests/.../Adapters.swift  (hand-authored, outside the generated files)
+import Foundation
+
+enum VectorAdapters {
+    static func adapters() -> [String: VectorAdapter] {
+        var m: [String: VectorAdapter] = [:]
+        m["Renderer.render"] = VectorAdapter { input, ctx in
+            try Renderer.render(input, ctx.doubles)
+        }
+        return m
+    }
+
+    // Optional: `Contract.operation` -> reason (embed an issue link).
+    static func waivers() -> [String: String] { return [:] }
+
+    static func doubles() -> Any? { return nil }
+}
+```
+
+The support types (`VectorAdapter`, `VectorContext`, `VectorError`) are declared in
+the generated `VectorConformanceTests.swift`, so the adapter enum is authored as a
+sibling **non-generated** file in the same XCTest target and needs no import. An
+`invoke` closure returns `Any?`; for an error vector throw a `VectorError` whose
+`payload` (an `Any?`) carries the expected error. The harness parses and compares
+with Foundation's `JSONSerialization`, so it is emitted regardless of serialization
+mode; a missing adapter enum is a **compile error** under `swift test`, never a skip.
+
+</TabItem>
 </Tabs>
 
 ### Adapter shape
@@ -277,8 +308,8 @@ For an error vector (one that declares `expectedError` instead of `expected`), t
 adapter must **raise/throw**. The harness compares the failure against
 `expectedError` canonically: attach the expected payload as `typraVector`
 (TypeScript) / `typra_vector` (Python) on the thrown error, `TypraVector()`
-(Go), `VectorError.payload` (Rust), `VectorException.Payload` (C#), or
-`VectorException.payload` (Java) — or return
+(Go), `VectorError.payload` (Rust), `VectorException.Payload` (C#),
+`VectorException.payload` (Java), or `VectorError.payload` (Swift) — or return
 it from a `normalize` hook. An adapter that returns a value where an error was
 expected is a failure.
 
