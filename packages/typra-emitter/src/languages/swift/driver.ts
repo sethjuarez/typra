@@ -15,6 +15,7 @@ import {
   shouldEmitCompileOnlyProtocolScaffolds,
 } from "../../protocol-scaffolds.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
+import { warnFormatterUnavailable } from "../formatter-warning.js";
 import {
   applyNamespaceGroups,
   projectNamespace,
@@ -200,8 +201,11 @@ function formatSwiftFiles(outputDir: string): void {
         encoding: "utf-8",
       },
     );
-  } catch {
+  } catch (error) {
     // swift-format is optional; deterministic emitter formatting is the fallback.
+    // Warn loudly so the presence-dependent output drift is attributable rather
+    // than silently swallowed.
+    warnFormatterUnavailable("swift-format", outputDir, error);
   }
 }
 
