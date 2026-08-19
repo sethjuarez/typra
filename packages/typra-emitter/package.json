@@ -52,19 +52,19 @@
     "@typespec/json-schema": ">=1.10.0 <2.0.0"
   },
   "devDependencies": {
-    "@types/node": "^24.7.0",
+    "@types/node": "^26.2.0",
     "@types/semver": "^7.5.8",
-    "@typescript-eslint/eslint-plugin": "^8.15.0",
+    "@typescript-eslint/eslint-plugin": "^8.67.0",
     "@typescript-eslint/parser": "^8.15.0",
     "@typespec/compiler": "^1.15.0",
     "@typespec/http": "^1.15.0",
     "@typespec/json-schema": "^1.15.0",
-    "eslint": "^9.15.0",
+    "eslint": "^10.8.1",
     "markdownlint-cli": "^0.49.1",
     "prettier": "^3.3.3",
-    "typescript": "^5.3.3",
-    "typescript-eslint": "^8.54.0",
-    "zod": "^3.25.76"
+    "typescript": "^7.0.2",
+    "typescript-eslint": "^8.67.0",
+    "zod": "^4.4.3"
   },
   "scripts": {
     "build": "tsc",
@@ -87,6 +87,6 @@
   "dependencies": {
     "semver": "^7.7.0",
     "xml-formatter": "^3.6.7",
-    "yaml": "^2.8.1"
+    "yaml": "^2.9.0"
   }
 }
