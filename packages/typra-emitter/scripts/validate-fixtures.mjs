@@ -68,6 +68,19 @@ const scratchEntries = new Set([
   "obj",
   "target",
 ]);
+// Path segments (dir names / file basenames) for the runtime-authored reference
+// vector adapters. They are consumer-supplied, not emitter output, so the
+// formatter-idempotency guard must ignore them — otherwise a non-idempotent
+// adapter file would be mis-attributed as emitter drift. See authorVectorAdapters.
+const AUTHORED_VECTOR_ADAPTER_SEGMENTS = new Set([
+  "vector-adapters.ts",
+  "vector_adapters.py",
+  "vectoradapters",
+  "vector_adapters.rs",
+  "VectorAdapters.cs",
+  "VectorAdapters.java",
+  "VectorAdapters.swift",
+]);
 cpSync(sourceGeneratedRoot, generatedRoot, {
   recursive: true,
   filter: (source) => !scratchEntries.has(path.basename(source)),
@@ -99,6 +112,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "actual-generated-surface",
   "typra-verify",
   "consumer-smoke",
+  "vector-adapters.author",
   "typescript.compile",
   "typescript-zod.compile",
   "typescript.generated-tests",
@@ -1159,6 +1173,7 @@ function assertGeneratedStructuredLoadCoverage() {
       return (
         suite.testFile(file) &&
         !normalized.includes("protocolscaffolds") &&
+        !normalized.includes("vectorconformance") &&
         lower !== "test_context.py" &&
         lower !== "conformancetests.swift"
       );
@@ -1620,6 +1635,24 @@ function runTypeScriptGeneratedTests() {
   }
 }
 
+// Operation keys the integration fixture's reference vector adapters register.
+// The @vector coverage gate in `typra verify` checks the runtime's declared
+// adapters against the vectors snapshot; the fixture's runtime is the reference
+// adapter set authored by `authorVectorAdapters`, so declare the same keys here.
+const FIXTURE_VECTOR_ADAPTER_KEYS = [
+  "CanonicalEnginePort.authorize",
+  "CanonicalEnginePort.format",
+];
+
+function writeFixtureVerifyConfig() {
+  const configPath = path.join(generatedRoot, "typra-verify.validate.json");
+  writeFileSync(
+    configPath,
+    JSON.stringify({ vectorAdapters: FIXTURE_VECTOR_ADAPTER_KEYS }, null, 2),
+  );
+  return configPath;
+}
+
 function runTypraVerify() {
   const cliPath = path.join(packageRoot, "dist", "src", "verify-cli.js");
   if (!existsSync(cliPath)) {
@@ -1630,9 +1663,18 @@ function runTypraVerify() {
   }
 
   try {
+    const verifyConfigPath = writeFixtureVerifyConfig();
     const output = execFileSync(
       process.execPath,
-      [cliPath, "--baseline", generatedRoot, "--current", generatedRoot],
+      [
+        cliPath,
+        "--baseline",
+        generatedRoot,
+        "--current",
+        generatedRoot,
+        "--config",
+        verifyConfigPath,
+      ],
       { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
     for (const expected of [
@@ -1657,6 +1699,8 @@ function runTypraVerify() {
         generatedRoot,
         "--current",
         generatedRoot,
+        "--config",
+        verifyConfigPath,
         "--json",
       ],
       { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
@@ -1692,6 +1736,7 @@ function runTypraConsumerSmoke() {
   }
 
   const configPath = path.join(generatedRoot, "typra-smoke.validate.json");
+  const verifyConfigPath = writeFixtureVerifyConfig();
   writeFileSync(
     configPath,
     JSON.stringify(
@@ -1699,6 +1744,7 @@ function runTypraConsumerSmoke() {
         verify: {
           baseline: generatedRoot,
           current: generatedRoot,
+          config: verifyConfigPath,
         },
       },
       null,
@@ -1943,10 +1989,16 @@ function runGoogleJavaFormatOverTree(dir) {
  */
 function measureFormatterDrift(sourceDir, extension, formatCopy) {
   const copyDir = mkdtempSync(path.join(tmpdir(), "typra-idempotency-"));
+  // Exclude build scratch and the consumer-authored vector adapters: neither is
+  // emitter output, so neither should count toward native formatter drift.
+  const ignore = new Set([
+    ...scratchEntries,
+    ...AUTHORED_VECTOR_ADAPTER_SEGMENTS,
+  ]);
   try {
     cpSync(sourceDir, copyDir, {
       recursive: true,
-      filter: (source) => !scratchEntries.has(path.basename(source)),
+      filter: (source) => !ignore.has(path.basename(source)),
     });
     formatCopy(copyDir);
     return computeTreeDiff({
@@ -1956,7 +2008,7 @@ function measureFormatterDrift(sourceDir, extension, formatCopy) {
       walkFiles,
       readFileSync,
       existsSync,
-      ignoreSegments: scratchEntries,
+      ignoreSegments: ignore,
     });
   } finally {
     rmSync(copyDir, { recursive: true, force: true });
@@ -2287,7 +2339,11 @@ function runRustTests(target = "rust", packageName = "fixtures") {
           cwd: sourceDir,
           encoding: "utf8",
           stdio: ["ignore", "pipe", "pipe"],
-          env: { ...process.env, CARGO_TARGET_DIR: targetDir, RUSTFLAGS: "-D warnings" },
+          env: {
+            ...process.env,
+            CARGO_TARGET_DIR: targetDir,
+            RUSTFLAGS: "-D warnings",
+          },
         },
       );
     } catch (error) {
@@ -2642,7 +2698,15 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
     try {
       output = execFileSync(
         "swift",
-        ["test", "--package-path", sourceDir, "--scratch-path", buildDir, "-Xswiftc", "-warnings-as-errors"],
+        [
+          "test",
+          "--package-path",
+          sourceDir,
+          "--scratch-path",
+          buildDir,
+          "-Xswiftc",
+          "-warnings-as-errors",
+        ],
         {
           cwd: sourceDir,
           encoding: "utf8",
@@ -3139,7 +3203,14 @@ function runJavaTargetBuild(targetDir, label, classpath = "") {
     runCommand(
       label,
       "javac",
-      [...javaClasspathArgs(classpath), "-Xlint:all", "-Werror", "-d", classesDir, ...sourceFiles],
+      [
+        ...javaClasspathArgs(classpath),
+        "-Xlint:all",
+        "-Werror",
+        "-d",
+        classesDir,
+        ...sourceFiles,
+      ],
       { cwd: sourceDir },
     );
   } finally {
@@ -3184,6 +3255,15 @@ function runJavaTargetGeneratedTests(targetDir, label, classpath = "") {
     fail("No generated Java test classes found to run.");
     return;
   }
+  // The @vector conformance suite (VectorConformanceTests) also exposes a static
+  // run() but does not end in GeneratedTest, so include it explicitly when the
+  // target emitted it (and its reference adapter has been authored).
+  const runClasses = [...generatedTestClasses];
+  if (
+    existsSync(path.join(sourceDir, "tests", "VectorConformanceTests.java"))
+  ) {
+    runClasses.push("VectorConformanceTests");
+  }
   writeFileSync(
     runnerPath,
     [
@@ -3193,7 +3273,7 @@ function runJavaTargetGeneratedTests(targetDir, label, classpath = "") {
       "  private TypraGeneratedTestsValidation() { }",
       "  public static void main(String[] args) {",
       "    int failed = 0;",
-      ...generatedTestClasses.flatMap((name) => [
+      ...runClasses.flatMap((name) => [
         "    try {",
         `      ${name}.run();`,
         `      System.out.println("PASS ${name}");`,
@@ -4565,7 +4645,11 @@ function runRustExecutableConformance(
         cwd: sourceDir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, CARGO_TARGET_DIR: targetDir, RUSTFLAGS: "-D warnings" },
+        env: {
+          ...process.env,
+          CARGO_TARGET_DIR: targetDir,
+          RUSTFLAGS: "-D warnings",
+        },
       },
     ).trim();
     assertConformanceResult(target, output);
@@ -4712,7 +4796,11 @@ function runRustUnknownAbstractConformance() {
     execFileSync("cargo", ["run", "--quiet", "--bin", "unknown_validate"], {
       cwd: sourceDir,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, CARGO_TARGET_DIR: targetDir, RUSTFLAGS: "-D warnings" },
+      env: {
+        ...process.env,
+        CARGO_TARGET_DIR: targetDir,
+        RUSTFLAGS: "-D warnings",
+      },
     });
   } catch (error) {
     const output =
@@ -6463,6 +6551,90 @@ function assertNoEmptyTargetDirs() {
   }
 }
 
+function authorVectorAdapters() {
+  const adapterSourceRoot = path.join(
+    packageRoot,
+    "fixtures",
+    "integration",
+    "vector-adapters",
+  );
+  // Reference adapter source -> the targets that consume it (variant targets
+  // reuse their base language's adapter). Dest is relative to the target's
+  // generated tree and must match the location the emitted suite imports from.
+  const adapterCopyPlan = [
+    {
+      src: "typescript/vector-adapters.ts",
+      targets: [
+        { dir: "typescript", dest: "tests/vector-adapters.ts" },
+        { dir: "typescript-zod", dest: "tests/vector-adapters.ts" },
+      ],
+    },
+    {
+      src: "python/vector_adapters.py",
+      targets: [
+        { dir: "python", dest: "tests/vector_adapters.py" },
+        { dir: "python_pydantic", dest: "tests/vector_adapters.py" },
+      ],
+    },
+    {
+      src: "go/adapters.go",
+      targets: [{ dir: "go", dest: "vectoradapters/adapters.go" }],
+    },
+    {
+      src: "rust/vector_adapters.rs",
+      targets: [
+        { dir: "rust", dest: "tests/vector_adapters.rs" },
+        { dir: "rust-serde", dest: "tests/vector_adapters.rs" },
+      ],
+    },
+    {
+      src: "csharp/VectorAdapters.cs",
+      targets: [{ dir: "csharp", dest: "tests/VectorAdapters.cs" }],
+    },
+    {
+      src: "java/VectorAdapters.java",
+      targets: [{ dir: "java-jackson", dest: "tests/VectorAdapters.java" }],
+    },
+    {
+      src: "swift/VectorAdapters.swift",
+      targets: [
+        { dir: "swift", dest: "Tests/TypraFixturesTests/VectorAdapters.swift" },
+        {
+          dir: "swift-codable",
+          dest: "Tests/TypraFixturesTests/VectorAdapters.swift",
+        },
+      ],
+    },
+  ];
+
+  let authored = 0;
+  for (const entry of adapterCopyPlan) {
+    const sourcePath = path.join(adapterSourceRoot, entry.src);
+    if (!existsSync(sourcePath)) {
+      fail(`Missing reference vector adapter source: ${entry.src}`);
+      continue;
+    }
+    // Normalize to LF so authored files stay gofmt/hygiene clean regardless of
+    // how the committed source was checked out on the host.
+    const contents = readFileSync(sourcePath, "utf8").replace(/\r\n/g, "\n");
+    for (const target of entry.targets) {
+      const targetRoot = path.join(generatedRoot, target.dir);
+      if (!existsSync(targetRoot)) {
+        // Target was not emitted (e.g. filtered run) — nothing to author into.
+        continue;
+      }
+      const destPath = path.join(targetRoot, target.dest);
+      mkdirSync(path.dirname(destPath), { recursive: true });
+      writeFileSync(destPath, contents);
+      authored += 1;
+    }
+  }
+
+  if (authored === 0) {
+    fail("Vector adapter authoring copied no files; generated tree missing.");
+  }
+}
+
 function runDeclaredValidationStages() {
   runExpectedExecutionPlan({
     label: "Fixture validation",
@@ -6481,6 +6653,7 @@ function runDeclaredValidationStages() {
       ["actual-generated-surface", assertActualGeneratedSurface],
       ["typra-verify", runTypraVerify],
       ["consumer-smoke", runTypraConsumerSmoke],
+      ["vector-adapters.author", authorVectorAdapters],
       ["typescript.compile", runGeneratedTypeScriptCompile],
       ["typescript-zod.compile", runGeneratedTypeScriptZodCompile],
       ["python.compile", () => runPythonCompile()],
