@@ -231,6 +231,29 @@ adapter nor an enumerated waiver, so a missing adapter is caught ahead of the ru
 Adding a vector without a corresponding adapter (and without a waiver) cannot
 merge.
 
+`typra-verify` wires this gate in: declare the runtime's implemented operations
+in the verifier config and the gate runs against the current `vectors.json`
+snapshot as part of metadata verification.
+
+```json
+// typra-verify.config.json
+{
+  "vectorAdapters": ["Renderer.render", "Processor.process"],
+  "vectorWaivers": ["Ignorer.ignore"]
+}
+```
+
+An operation carrying a vector but absent from both lists raises a blocking
+`vector-adapter-coverage` failure (`ok: false`); a wildcard waiver is rejected
+outright (both when the config is loaded and by the gate itself). The verify
+summary reports `vector coverage: <covered>/<operations> covered, <waived>
+waived, <missing> missing`.
+
+The config declares the runtime's *intent* — it is a consistency check, not proof
+that the named adapters exist. The generated conformance suite remains the real
+runtime enforcement (a declared-but-unimplemented adapter still fails there), so
+keep that suite in CI alongside `typra-verify`.
+
 ## Doctrine
 
 Any interface documented as "not expected to be implemented by any runtime" is

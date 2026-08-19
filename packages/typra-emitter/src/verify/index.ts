@@ -12,17 +12,31 @@ import {
 } from "../cleanup/generated-file.js";
 import { HydrationBoundarySnapshot } from "../hydration-seams.js";
 import { globToRegExp } from "../path-patterns.js";
+import type { CallableVectorSnapshot } from "../ir/vector.js";
+import {
+  evaluateVectorAdapterCoverage,
+  formatVectorAdapterCoverageFailure,
+} from "../ir/vector-coverage.js";
 
 export interface TypraMetadataSet {
   exportSurface: ExportSurfaceSnapshot;
   manifest: GeneratedManifest;
   model?: SchemaNode;
   hydration?: HydrationBoundarySnapshot;
+  vectors?: CallableVectorSnapshot;
 }
 
 export interface TypraVerifyConfig {
   protectedPaths?: string[];
   hydrationZones?: string[];
+  /**
+   * Operation keys (`Contract.operation` or bare `operation`) the runtime
+   * declares it implements with a vector adapter. Used to enforce @vector
+   * coverage against the current `vectors.json` snapshot.
+   */
+  vectorAdapters?: string[];
+  /** Operation keys the runtime declares as tracked waivers; wildcards rejected. */
+  vectorWaivers?: string[];
 }
 
 export interface TypraVerifyFailure {
@@ -72,6 +86,13 @@ export interface TypraVerifySummary {
     wireNamesChanged: number;
     discriminatorsChanged: number;
     enumValuesChanged: number;
+  };
+  vectorCoverage: {
+    operations: number;
+    covered: number;
+    waived: number;
+    missing: number;
+    wildcardWaivers: number;
   };
 }
 
@@ -195,6 +216,13 @@ const EMPTY_SUMMARY: TypraVerifySummary = {
     discriminatorsChanged: 0,
     enumValuesChanged: 0,
   },
+  vectorCoverage: {
+    operations: 0,
+    covered: 0,
+    waived: 0,
+    missing: 0,
+    wildcardWaivers: 0,
+  },
 };
 
 export function verifyTypraMetadata(options: {
@@ -218,6 +246,9 @@ export function loadTypraMetadata(root: string): TypraMetadataSet {
     model: readOptionalJson<SchemaNode>(modelFile(root)),
     hydration: readOptionalJson<HydrationBoundarySnapshot>(
       metadataFile(root, "hydration-seams.json"),
+    ),
+    vectors: readOptionalJson<CallableVectorSnapshot>(
+      metadataFile(root, "vectors.json"),
     ),
   };
 }
@@ -248,6 +279,28 @@ export function loadVerifyConfig(configPath: string): TypraVerifyConfig {
   if (config.hydrationZones?.some((entry) => typeof entry !== "string")) {
     throw new Error(
       `Invalid Typra verifier config: hydrationZones entries must be strings.`,
+    );
+  }
+  for (const field of ["vectorAdapters", "vectorWaivers"] as const) {
+    const value = config[field];
+    if (value !== undefined && !Array.isArray(value)) {
+      throw new Error(
+        `Invalid Typra verifier config: ${field} must be an array.`,
+      );
+    }
+    if (value?.some((entry) => typeof entry !== "string")) {
+      throw new Error(
+        `Invalid Typra verifier config: ${field} entries must be strings.`,
+      );
+    }
+  }
+  // Wildcard waivers would let a runtime silently drop whole contracts from the
+  // enforced tier, so they are rejected outright — independent of whether the
+  // current snapshot happens to carry any vectors.
+  if (config.vectorWaivers?.some((entry) => entry.includes("*"))) {
+    throw new Error(
+      "Invalid Typra verifier config: vectorWaivers must enumerate concrete " +
+        "operations; wildcard waivers are not allowed.",
     );
   }
   return config;
@@ -308,6 +361,7 @@ export function compareTypraMetadata(
     summary,
     failures,
   );
+  compareVectorCoverage(current.vectors, config, summary, failures);
   const conformanceMap = buildConformanceMap(current.exportSurface);
   const staleCleanupDryRun = buildStaleCleanupDryRun(
     baseline.manifest,
@@ -354,6 +408,7 @@ export function formatVerifySummary(result: TypraVerifyResult): string {
     `hydration zone touches: ${result.summary.hydrationZoneTouches}`,
     `stale cleanup dry-run candidates: ${result.summary.staleCleanupCandidates}`,
     `schema: types +${result.summary.schema.addedTypes} / -${result.summary.schema.removedTypes}, required fields +${result.summary.schema.addedRequiredProperties}, optional fields +${result.summary.schema.addedOptionalProperties}, requiredness changed ${result.summary.schema.requirednessChanged}, property types changed ${result.summary.schema.propertyTypesChanged}, wire names changed ${result.summary.schema.wireNamesChanged}, discriminators changed ${result.summary.schema.discriminatorsChanged}, enum values changed ${result.summary.schema.enumValuesChanged}`,
+    `vector coverage: ${result.summary.vectorCoverage.covered}/${result.summary.vectorCoverage.operations} covered, ${result.summary.vectorCoverage.waived} waived, ${result.summary.vectorCoverage.missing} missing`,
     `breaking change classification: ${result.breakingChange}`,
     `next action: ${formatNextAction(result)}`,
   ];
@@ -428,6 +483,36 @@ function formatAdditionalGuidance(result: TypraVerifyResult): string[] {
     );
   }
   return guidance;
+}
+
+function compareVectorCoverage(
+  current: CallableVectorSnapshot | undefined,
+  config: TypraVerifyConfig,
+  summary: TypraVerifySummary,
+  failures: TypraVerifyFailure[],
+): void {
+  if (!current || !Array.isArray(current.vectors) || current.vectors.length === 0) {
+    return;
+  }
+  const result = evaluateVectorAdapterCoverage({
+    snapshot: current,
+    adapterKeys: config.vectorAdapters ?? [],
+    waiverKeys: config.vectorWaivers ?? [],
+  });
+  summary.vectorCoverage = {
+    operations: result.operations.length,
+    covered: result.covered.length,
+    waived: result.waived.length,
+    missing: result.missing.length,
+    wildcardWaivers: result.wildcardWaivers.length,
+  };
+  if (!result.ok) {
+    addFailure(
+      failures,
+      "vector-adapter-coverage",
+      formatVectorAdapterCoverageFailure(result),
+    );
+  }
 }
 
 function compareSnapshotIdentity(

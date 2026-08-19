@@ -12,7 +12,8 @@ Usage:
 Options:
   --baseline <dir>  Baseline output root or .typra-generated directory (required)
   --current <dir>   Current output root or .typra-generated directory (required)
-  --config <file>   Optional verifier config JSON with protectedPaths
+  --config <file>   Optional verifier config JSON (protectedPaths, hydrationZones,
+                    vectorAdapters, vectorWaivers)
   --json            Print machine-readable JSON result
   -h, --help        Show this help message
 `;
