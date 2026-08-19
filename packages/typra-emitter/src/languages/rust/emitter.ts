@@ -948,6 +948,9 @@ function emitImpl(
   // from_yaml()
   emitFromYaml(name, type, lines);
 
+  // try_load_from_value() — fallible sibling of load_from_value (#210)
+  emitTryLoadFromValue(name, type, lines);
+
   // load_from_value()
   emitLoadFromValue(
     name,
@@ -1061,6 +1064,40 @@ function emitFromYaml(name: string, type: TypeDecl, lines: string[]): void {
     "            .map_err(|message| <serde_yaml::Error as serde::de::Error>::custom(message))?;",
   );
   lines.push("        Ok(Self::load_from_value(&value, ctx))");
+  lines.push("    }");
+  lines.push("");
+}
+
+// Fallible sibling of `load_from_value` for callers that already hold a
+// `serde_json::Value` and want `Result` ergonomics instead of the panicking
+// infallible path. Routes through the same `validate_input_at` policy as
+// `from_json`, so validation semantics (and error messages) are identical —
+// only the input shape (a parsed value vs a string) differs. See issue #210.
+function emitTryLoadFromValue(
+  name: string,
+  type: TypeDecl,
+  lines: string[],
+): void {
+  lines.push(
+    `    /// Load ${name} from an already-parsed JSON value, returning an error`,
+  );
+  lines.push(
+    "    /// instead of panicking on invalid input. Fallible companion to",
+  );
+  lines.push(
+    "    /// `load_from_value` with the same validation policy as `from_json`.",
+  );
+  lines.push(
+    "    pub fn try_load_from_value(",
+  );
+  lines.push("        value: &serde_json::Value,");
+  lines.push("        ctx: &LoadContext,");
+  lines.push("    ) -> Result<Self, serde_json::Error> {");
+  lines.push('        Self::validate_input_at(value, "")');
+  lines.push(
+    "            .map_err(|message| <serde_json::Error as serde::de::Error>::custom(message))?;",
+  );
+  lines.push("        Ok(Self::load_from_value(value, ctx))");
   lines.push("    }");
   lines.push("");
 }

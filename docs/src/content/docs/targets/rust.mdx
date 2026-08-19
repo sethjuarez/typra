@@ -26,7 +26,7 @@ emit-targets:
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
 | `native-serialization` | `"serde"` emits feature-gated `Serialize`/`Deserialize` impls; `"none"` opts out. Omission keeps the default cfg-gated serde surface for compatibility. |
 
-Generated Rust surfaces include serde-oriented model structures, `from_json`/`to_json` and `from_yaml`/`to_yaml` helpers, provider wire mapping, and optional case-insensitive enum parsing.
+Generated Rust surfaces include serde-oriented model structures, `from_json`/`to_json` and `from_yaml`/`to_yaml` helpers, a fallible `try_load_from_value` for already-parsed values, provider wire mapping, and optional case-insensitive enum parsing.
 
 ## Typical usage shape
 
@@ -38,6 +38,12 @@ let saved = root.to_json(&SaveContext::default())?;
 ```
 
 The `from_yaml` and `to_yaml` helpers provide the same round-trip against YAML. JSON and YAML helpers return `Result`, so callers propagate serde errors with `?`.
+
+When you already hold a parsed `serde_json::Value`, use `try_load_from_value` to validate and load without re-serializing. It is the fallible companion to `load_from_value`: it applies the same validation policy as `from_json` and returns `Result<Self, serde_json::Error>`, so a missing required field surfaces an `Err` instead of panicking.
+
+```rust
+let root = FixtureRoot::try_load_from_value(&value, &LoadContext::default())?;
+```
 
 Choose `enum-parsing` deliberately. Default behavior is case-sensitive unless configured otherwise.
 

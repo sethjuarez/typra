@@ -509,4 +509,27 @@ describe("missing required complex fields always fail load", () => {
       /Invalid GuardTool discriminator field 'kind': expected non-blank string/,
     );
   });
+
+  it("Rust exposes a fallible try_load_from_value routed through validate_input_at (#210)", () => {
+    const code = emitRustFile(
+      file,
+      new RustExprVisitor(registry),
+      polymorphicNames,
+    );
+
+    // Fallible sibling of load_from_value: takes a parsed value, returns Result.
+    assert.match(
+      code,
+      /pub fn try_load_from_value\(\s*value: &serde_json::Value,\s*ctx: &LoadContext,\s*\) -> Result<Self, serde_json::Error> \{/,
+    );
+    // Identical validation policy to from_json: same validate_input_at routing
+    // and the same serde custom-error mapping, so a missing required field
+    // surfaces the same "missing required field" Err instead of panicking.
+    assert.match(
+      code,
+      /pub fn try_load_from_value\([\s\S]*?Self::validate_input_at\(value, ""\)\s*\.map_err\(\|message\| <serde_json::Error as serde::de::Error>::custom\(message\)\)\?;\s*Ok\(Self::load_from_value\(value, ctx\)\)\s*\}/,
+    );
+    // The infallible internal entry point is unchanged and still present.
+    assert.match(code, /pub fn load_from_value\(/);
+  });
 });
