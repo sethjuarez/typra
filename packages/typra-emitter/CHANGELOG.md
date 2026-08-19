@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.11.0](https://github.com/sethjuarez/typra/compare/v0.10.0...v0.11.0) (2026-08-19)
+
+
+### Features
+
+* **emitter:** add fallible try_load_from_value for Rust value loading ([#210](https://github.com/sethjuarez/typra/issues/210)) ([#242](https://github.com/sethjuarez/typra/issues/242)) ([d8a51fb](https://github.com/sethjuarez/typra/commit/d8a51fb1d547b81789e3f2b8cf99092d52b9002d))
+
 ## [0.10.0](https://github.com/sethjuarez/typra/compare/v0.9.4...v0.10.0) (2026-08-19)
 
 
