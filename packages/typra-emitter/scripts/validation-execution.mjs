@@ -84,8 +84,11 @@ export function compareExpectedExecution({
 
   const allowedSkippedExpected = allowedSkippedIds.sort();
   if (allowedSkippedExpected.length > 0) {
+    const annotated = allowedSkippedExpected.map(
+      (id) => `${id} (${skippedById.get(id)})`,
+    );
     warnings.push(
-      `${label} skipped declared targets/stages because the local toolchain is unavailable:\n${formatList(allowedSkippedExpected)}`,
+      `${label} skipped declared targets/stages via an allowed skip declaration:\n${formatList(annotated)}`,
     );
   }
 
