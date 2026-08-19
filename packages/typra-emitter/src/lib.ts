@@ -184,7 +184,7 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             type: "string",
             nullable: true,
             description:
-              "Import path to the runtime-authored vector adapter registry consumed by the generated @vector conformance harness. Lives outside the regenerated/pruned output tree. Defaults to './vector-adapters' (TypeScript), 'vector_adapters' (Python), 'vectoradapters' (Go), 'vector_adapters.rs' (Rust), and '<root-namespace>.Conformance' (C#).",
+              "Import path to the runtime-authored vector adapter registry consumed by the generated @vector conformance harness. Lives outside the regenerated/pruned output tree. Defaults to './vector-adapters' (TypeScript), 'vector_adapters' (Python), 'vectoradapters' (Go), 'vector_adapters.rs' (Rust), '<root-namespace>.Conformance' (C#), and '<package-name>.VectorAdapters' (Java, jackson serialization only).",
           },
         },
         required: ["type"],

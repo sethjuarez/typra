@@ -221,6 +221,45 @@ whose `Payload` (a `JsonNode?`) carries the expected error. The generated
 adapter namespace is a **compile error** under `dotnet test`, never a skip.
 
 </TabItem>
+<TabItem label="Java">
+
+```java
+// typra/proof/adapters/VectorAdapters.java  (hand-authored, outside the generated tree)
+package typra.proof.adapters;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import java.util.HashMap;
+import java.util.Map;
+import typra.proof.VectorConformanceTests.VectorAdapter;
+import typra.proof.VectorConformanceTests.VectorContext;
+import typra.proof.VectorConformanceTests.VectorException;
+
+public final class VectorAdapters {
+    private VectorAdapters() { }
+
+    public static Map<String, VectorAdapter> adapters() {
+        Map<String, VectorAdapter> m = new HashMap<>();
+        m.put("Renderer.render", new VectorAdapter(Renderer::render));
+        return m;
+    }
+
+    // Optional: `Contract.operation` -> reason (embed an issue link).
+    public static Map<String, String> waivers() { return new HashMap<>(); }
+
+    public static JsonNode doubles() { return null; }
+}
+```
+
+The support types (`VectorAdapter`, `VectorContext`, `VectorException`, and the
+`Invoke`/`Normalizer` functional interfaces) are **nested** inside the generated
+`VectorConformanceTests`, so import them as
+`<package-name>.VectorConformanceTests.VectorAdapter` etc. `invoke` returns a
+`JsonNode`; for an error vector throw a `VectorException` whose `payload` (a
+`JsonNode`) carries the expected error. The Java harness is only emitted for the
+**jackson** serialization mode, which supplies the JSON runtime it parses and
+canonicalizes with; a missing adapter class is a **compile error**, never a skip.
+
+</TabItem>
 </Tabs>
 
 ### Adapter shape
@@ -238,7 +277,8 @@ For an error vector (one that declares `expectedError` instead of `expected`), t
 adapter must **raise/throw**. The harness compares the failure against
 `expectedError` canonically: attach the expected payload as `typraVector`
 (TypeScript) / `typra_vector` (Python) on the thrown error, `TypraVector()`
-(Go), `VectorError.payload` (Rust), or `VectorException.Payload` (C#) — or return
+(Go), `VectorError.payload` (Rust), `VectorException.Payload` (C#), or
+`VectorException.payload` (Java) — or return
 it from a `normalize` hook. An adapter that returns a value where an error was
 expected is a failure.
 
