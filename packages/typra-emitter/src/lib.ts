@@ -14,6 +14,7 @@ export interface EmitTarget {
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
   "protocol-scaffolds"?: "none" | "compile-only";
   "cancellation-token-path"?: string;
+  "vector-adapter-path"?: string;
   "native-serialization"?:
     | "none"
     | "pydantic"
@@ -178,6 +179,12 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             nullable: true,
             description:
               "Full runtime-native cancellation token symbol path. Rust uses :: separators; Python uses dotted module.symbol syntax. For Python, a leading-dot (relative) path is resolved relative to the model output root and its dot count is scaled by each generated file's group depth, so it resolves correctly from any subfolder; a path without a leading dot is emitted as an absolute import unchanged.",
+          },
+          "vector-adapter-path": {
+            type: "string",
+            nullable: true,
+            description:
+              "Import path to the runtime-authored vector adapter registry consumed by the generated @vector conformance harness. Lives outside the regenerated/pruned output tree. Defaults to './vector-adapters' (TypeScript) and 'vector_adapters' (Python).",
           },
         },
         required: ["type"],

@@ -92,7 +92,12 @@ interface Renderer {
 ```
 
 Typra lowers vectors into language-neutral conformance records. Generated tests
-compare each target's observable transcript against the vector. Vector
+obtain a runtime-supplied adapter for each operation, invoke it with the vector
+`input`, and compare each target's observable transcript against the vector.
+Every `@vector`-bound operation must be implemented by a thin adapter or carry a
+tracked waiver — a missing adapter hard-fails the generated suite rather than
+skipping silently. See [Vector conformance adapters](/reference/vector-conformance/)
+for the registration contract. Vector
 `input`/`expected` are opaque evidence, compared structurally rather than typed
 against the operation's parameters or round-tripped through model `load()/save()`,
 so authored inputs may be sparse (omitting required-with-default fields the

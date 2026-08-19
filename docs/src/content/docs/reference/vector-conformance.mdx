@@ -1,0 +1,242 @@
+---
+title: Vector conformance adapters
+description: The runtime adapter registration contract that turns @vector behavior into enforced, generated conformance tests.
+draft: false
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+Typra emits two tiers of generated tests. Both start from the same raw
+ingredients — a declared surface plus example data — but historically only one
+was enforced:
+
+| Tier | Declared surface | Example data | Generated test | Enforced? |
+| --- | --- | --- | --- | --- |
+| Structural (types) | `model` | `@sample` | Serialization round-trip | **Yes** — mandatory, must pass |
+| Behavioral (operations) | `interface` / `op` | `@vector` | *(none — data only)* | No |
+
+Structural parity is automatic because the guarantee is a generated,
+mandatory, must-pass test — not a convention anyone has to remember. Behavioral
+vectors used to stop at data: Typra emitted the interface and the vector
+payloads, but the generated "test" only compared the vector data to itself, so a
+runtime could be fully green while implementing none of the operations. Absent
+tests cannot fail, so behavioral parity drifted silently.
+
+This page is the contract that **closes the operation loop the same way the type
+loop is closed**. Per target language, Typra emits a mandatory, runnable
+conformance suite driven entirely by the single `vectors.json`. Each vector
+resolves a runtime-supplied **adapter** through a required registration hook,
+invokes it with the vector `input`, canonically compares the result against
+`expected`, and reports per-vector pass/fail. A missing adapter is a build or
+hard failure — never a silent skip — unless the operation is on an explicit,
+tracked waiver list.
+
+Author adapters against this contract; it is the **only** runtime-authored
+surface. No runtime hand-writes vector iteration, input resolution, or
+comparison logic.
+
+## Where adapters live
+
+The generated conformance suite is emitted into each target's `test-dir` and is
+regenerated (and pruned) on every emit, so runtime code must **not** live inside
+`output-dir` or `test-dir`. Instead, the runtime authors one adapter module
+outside the generated tree and points the target at it:
+
+```yaml
+emit-targets:
+  - type: TypeScript
+    output-dir: "generated/typescript"
+    test-dir: "generated/typescript/tests"
+    import-path: "../index"
+    # Module the generated conformance suite imports its adapters from.
+    vector-adapter-path: "../../../runtime/vector-adapters"
+  - type: Python
+    output-dir: "generated/python"
+    test-dir: "generated/python/tests"
+    import-path: "todo_contracts"
+    vector-adapter-path: "todo_runtime.vector_adapters"
+```
+
+If `vector-adapter-path` is omitted, the generated suite falls back to a
+conventional sibling module (`vector-adapters` / `vector_adapters`). Either way,
+**if the module cannot be imported the suite fails to compile or collect** — a
+missing adapter surface is a hard failure, not a skip.
+
+## The registration contract
+
+Each adapter is conceptually `adapter(inputJson, context) -> resultJson`: it maps
+the vector's JSON `input` to the real implementation call (matching the
+operation's declared signature) and returns a value the harness canonicalizes.
+Adapters are keyed by the operation id `Contract.operation` (for example
+`Renderer.render`). The runtime registers exactly one adapter per operation it
+implements.
+
+<Tabs>
+<TabItem label="TypeScript">
+
+```ts
+// runtime/vector-adapters.ts  (hand-authored, outside the generated tree)
+import { Renderer } from "../src/renderer";
+
+// Optional: deterministic stand-ins the harness exposes as `context.doubles`.
+export const vectorDoubles = { clock: () => 0 };
+
+export const vectorAdapters = {
+  // Real protocol interface: thin JSON -> implementation -> JSON mapping.
+  "Renderer.render": {
+    invoke: (input, ctx) => {
+      const renderer = new Renderer({ clock: ctx.doubles.clock });
+      return renderer.render(input.request);
+    },
+  },
+
+  // Conformance-only interface: still required, still a thin adapter.
+  "Processor.process": {
+    invoke: (input) => Processor.process(input.request, input.response),
+  },
+};
+
+// Optional: operations Typra treats as tracked-skipped for THIS runtime.
+// A map of `Contract.operation` -> reason (embed an issue link in the reason).
+export const vectorWaivers = {
+  "Ignorer.ignore": "Not yet implemented (org/repo#123)",
+};
+```
+
+The generated `vector-conformance.test.ts` imports the adapter module by path, so
+in a typed downstream build a missing module is a **module-not-found compile
+error**; at runtime a missing module is an import failure. Either way it is a hard
+failure, never a silent skip.
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# todo_runtime/vector_adapters.py  (hand-authored, outside the generated tree)
+from todo_runtime.renderer import Renderer
+
+VECTOR_ADAPTERS = {
+    "Renderer.render": {
+        "invoke": lambda input, ctx: Renderer(clock=ctx["doubles"]["clock"]).render(input["request"]),
+    },
+    "Processor.process": {
+        "invoke": lambda input, ctx: process(input["request"], input["response"]),
+    },
+}
+
+# Optional: operations Typra treats as tracked-skipped for THIS runtime.
+# A dict of `Contract.operation` -> reason (embed an issue link in the reason).
+VECTOR_WAIVERS = {
+    "Ignorer.ignore": "Not yet implemented (org/repo#123)",
+}
+```
+
+The generated `test_vector_conformance.py` imports `VECTOR_ADAPTERS`, so a
+missing module is a **collection-time ImportError** (hard failure).
+
+</TabItem>
+</Tabs>
+
+### Adapter shape
+
+| Field | Required | Purpose |
+| --- | --- | --- |
+| `invoke(input, context)` | Yes | Maps opaque JSON `input` to the real call; returns a JSON-able result (sync or async). |
+| `normalize(result, context)` | No | Per-operation normalizer for inherently nondeterministic output (see [Normalization](#normalization)). |
+
+`input` and `expected` stay opaque and are compared canonically, never by typed
+equality. The adapter maps JSON ↔ real implementation; it must not force the
+runtime to expose internals beyond what the call needs.
+
+For an error vector (one that declares `expectedError` instead of `expected`), the
+adapter must **raise/throw**. The harness compares the failure against
+`expectedError` canonically: attach the expected payload as `typraVector`
+(TypeScript) / `typra_vector` (Python) on the thrown error, or return it from a
+`normalize` hook. An adapter that returns a value where an error was expected is a
+failure.
+
+## Collaborator injection seams
+
+Some operations do not run in isolation — they select a strategy per
+backend/variant, or depend on something nondeterministic (a clock, an id
+generator, a remote service). The `context` passed to every adapter carries the
+seams that keep results reproducible:
+
+| `context` member | Purpose |
+| --- | --- |
+| `operation` / `contract` | The operation being exercised and its contract. |
+| `vector` | The full vector entry (`name`, `stage`, and any metadata). |
+| `provider` / `targetApi` | The vector-indicated variant, so one adapter can dispatch to the right backend. |
+| `doubles` | Deterministic stand-ins from the module's optional `vectorDoubles` / `VECTOR_DOUBLES` export (fixed clock, fixed id generator, mock responders). |
+| `baseDir` | Directory external input references resolve against (the generated test directory). |
+| `resolveInput(value)` | Resolves external input references (see below). |
+
+The runtime supplies deterministic doubles either by closing over them directly in
+the adapter or by exporting `vectorDoubles` / `VECTOR_DOUBLES`, which the harness
+forwards as `context.doubles`. The harness passes the vector-indicated `provider`
+so a single adapter can behave differently per variant without the harness knowing
+anything about the runtime's internals.
+
+## Input resolution
+
+Vectors may reference external inputs instead of embedding them. A reference is a
+JSON object with a single resolver key; the harness resolves it (via
+`context.resolveInput`, applied automatically before `invoke`) relative to
+`context.baseDir` — the generated test directory by default, so external inputs
+are co-located deterministically with the suite:
+
+| Reference | Resolves to |
+| --- | --- |
+| `{ "$file": "fixtures/prompt.txt" }` | UTF-8 contents of the referenced file. |
+| `{ "$json": "fixtures/request.json" }` | Parsed JSON contents of the referenced file. |
+| `{ "$env": "OPENAI_BASE_URL" }` | The named environment variable's value (empty string when unset). |
+
+Resolution is centralized in the generated harness; runtimes never re-implement
+it.
+
+## Normalization
+
+Actual and expected results are compared in one canonical form, defined once in
+the generated harness so no runtime reinvents it:
+
+- object keys sorted;
+- numbers compared by value (no insignificant-digit or `-0` drift);
+- no insignificant whitespace;
+- array order is significant unless a per-operation normalizer sorts it.
+
+When an operation's output is inherently nondeterministic (timestamps, generated
+ids, map ordering), register a per-operation `normalize(result, context)` hook on
+the adapter. Prefer deterministic `doubles` first; use `normalize` only for
+output the runtime genuinely cannot pin.
+
+## Waivers and the skip ramp
+
+Every `@vector`-bound operation must be implemented **or** carry a tracked
+waiver. There is no blanket "skip all."
+
+- An operation with a registered adapter runs and must pass.
+- An operation with **no** adapter and **no** waiver makes the generated suite
+  hard-fail (or fail to compile/collect).
+- An operation whose key appears in the runtime's `vectorWaivers` /
+  `VECTOR_WAIVERS` map emits as a **visible tracked-skip** — a `SKIP` line in the
+  TypeScript suite and a real `pytest.skip` (an `s`) in the Python suite. Each
+  waiver maps a concrete `Contract.operation` to a reason string; wildcards are
+  rejected.
+
+Waivers keep CI green during migration while the map visibly shrinks toward zero.
+The same invariant is available as a static gate: `evaluateVectorAdapterCoverage`
+(in `src/ir/vector-coverage.ts`) checks a runtime's declared adapter/waiver keys
+against `vectors.json` and reports any operation that has a vector but neither an
+adapter nor an enumerated waiver, so a missing adapter is caught ahead of the run.
+Adding a vector without a corresponding adapter (and without a waiver) cannot
+merge.
+
+## Doctrine
+
+Any interface documented as "not expected to be implemented by any runtime" is
+inverted by this contract: **every target must implement each `@vector`-bound
+operation or declare a tracked waiver.** Conformance-only interfaces are still
+required — they simply tend to have the thinnest adapters. See
+[Interfaces, operations, and transport](/mappings/operations/) and
+[Typra contracts](/concepts/contracts/) for how vectors lower into the callable
+IR that this contract consumes.
