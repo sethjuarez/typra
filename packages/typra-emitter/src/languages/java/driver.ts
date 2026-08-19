@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { emitFile, EmitContext, resolvePath } from "@typespec/compiler";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
+import { warnFormatterUnavailable } from "../formatter-warning.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { TypeRegistry } from "../../ir/expansion.js";
@@ -311,7 +312,10 @@ function formatJavaFiles(outputDir: string, excludedFiles: Set<string>): void {
       stdio: "pipe",
       encoding: "utf-8",
     });
-  } catch {
+  } catch (error) {
     // google-java-format is optional; javac validation enforces correctness.
+    // Warn loudly so the presence-dependent output drift is attributable rather
+    // than silently swallowed.
+    warnFormatterUnavailable("google-java-format", outputDir, error);
   }
 }
