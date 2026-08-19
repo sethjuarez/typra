@@ -58,8 +58,9 @@ emit-targets:
 ```
 
 If `vector-adapter-path` is omitted, the generated suite falls back to a
-conventional sibling module (`vector-adapters` / `vector_adapters`). Either way,
-**if the module cannot be imported the suite fails to compile or collect** — a
+conventional sibling module (`vector-adapters` / `vector_adapters` /
+`vectoradapters` / `vector_adapters.rs` / `<root-namespace>.Conformance`). Either
+way, **if the module cannot be imported the suite fails to compile or collect** — a
 missing adapter surface is a hard failure, not a skip.
 
 ## The registration contract
@@ -135,6 +136,91 @@ The generated `test_vector_conformance.py` imports `VECTOR_ADAPTERS`, so a
 missing module is a **collection-time ImportError** (hard failure).
 
 </TabItem>
+<TabItem label="Go">
+
+```go
+// vectoradapters/adapters.go  (hand-authored, outside the generated tree)
+package vectoradapters
+
+// VectorError carriers attach the expected payload via TypraVector().
+func Adapters() map[string]VectorAdapter {
+	return map[string]VectorAdapter{
+		"Renderer.render": {Invoke: func(input any, ctx VectorContext) (any, error) {
+			return NewRenderer(ctx.Doubles).Render(input)
+		}},
+	}
+}
+
+// Optional: `Contract.operation` -> reason (embed an issue link).
+func Waivers() map[string]string {
+	return map[string]string{"Ignorer.ignore": "Not yet implemented (org/repo#123)"}
+}
+```
+
+The generated `vector_conformance_test.go` imports the `vectoradapters` package,
+so a missing package is a **compile error** (`go test` never runs), never a skip.
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// tests/vector_adapters.rs  (hand-authored, outside the generated tree)
+#![allow(dead_code)]
+use std::collections::HashMap;
+use serde_json::Value;
+
+pub fn adapters() -> HashMap<&'static str, Adapter> {
+    let mut m = HashMap::new();
+    m.insert("Renderer.render", Adapter {
+        invoke: |input, ctx| Ok(render(input, &ctx.doubles)),
+        normalize: None,
+    });
+    m
+}
+
+// Optional: `Contract.operation` -> reason (embed an issue link).
+pub fn waivers() -> HashMap<&'static str, &'static str> {
+    HashMap::new()
+}
+```
+
+`Adapter.invoke` returns `Result<Value, VectorError>`; for an error vector attach
+the expected payload as `VectorError.payload`. The generated integration-test
+crate declares the adapter module via `#[path = ...]`, so a missing module is a
+**compile error** under `cargo test`, never a skip.
+
+</TabItem>
+<TabItem label="C#">
+
+```csharp
+// Conformance/VectorAdapters.cs  (hand-authored, outside the generated tree)
+namespace Todo.Contracts.Conformance;
+
+using System.Text.Json.Nodes;
+
+public static class VectorAdapters
+{
+    public static Dictionary<string, VectorAdapter> Adapters() => new()
+    {
+        ["Renderer.render"] = new VectorAdapter
+        {
+            Invoke = (input, ctx) => Renderer.Render(input, ctx.Doubles),
+        },
+    };
+
+    // Optional: `Contract.operation` -> reason (embed an issue link).
+    public static Dictionary<string, string> Waivers() => new();
+
+    public static JsonNode? Doubles() => null;
+}
+```
+
+`Invoke` returns a `JsonNode?`; for an error vector throw a `VectorException`
+whose `Payload` (a `JsonNode?`) carries the expected error. The generated
+`VectorConformanceTests.cs` has `using <vector-adapter-path>;`, so a missing
+adapter namespace is a **compile error** under `dotnet test`, never a skip.
+
+</TabItem>
 </Tabs>
 
 ### Adapter shape
@@ -151,9 +237,10 @@ runtime to expose internals beyond what the call needs.
 For an error vector (one that declares `expectedError` instead of `expected`), the
 adapter must **raise/throw**. The harness compares the failure against
 `expectedError` canonically: attach the expected payload as `typraVector`
-(TypeScript) / `typra_vector` (Python) on the thrown error, or return it from a
-`normalize` hook. An adapter that returns a value where an error was expected is a
-failure.
+(TypeScript) / `typra_vector` (Python) on the thrown error, `TypraVector()`
+(Go), `VectorError.payload` (Rust), or `VectorException.Payload` (C#) — or return
+it from a `normalize` hook. An adapter that returns a value where an error was
+expected is a failure.
 
 ## Collaborator injection seams
 
