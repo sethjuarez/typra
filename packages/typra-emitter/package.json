@@ -87,6 +87,6 @@
   "dependencies": {
     "semver": "^7.7.0",
     "xml-formatter": "^3.6.7",
-    "yaml": "^2.8.1"
+    "yaml": "^2.9.0"
   }
 }
