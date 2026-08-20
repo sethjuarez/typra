@@ -453,4 +453,182 @@ describe("@vector conformance is an enforced closed loop", () => {
       rmSync(output, { recursive: true, force: true });
     }
   });
+
+  // Executable RED negative for @sync classification enforcement. The SAME
+  // generated suite drives two registries: one that honors @sync (Tag.tag wired
+  // synchronously) and one that violates it (Tag.tag wired async). The violation
+  // must be a hard, distinct failure, while the async-default op (Note.note)
+  // stays green in both — proving @sync is enforced, not advisory, and that
+  // async-default remains permissive.
+  it("enforces @sync: a @sync op wired async fails hard; async-default stays green", () => {
+    const SYNC_SPEC = [
+      'import "@typra/emitter";',
+      "",
+      "namespace Typra.SyncProof;",
+      "",
+      "model Root {",
+      "  id: string;",
+      "}",
+      "",
+      "const TagVectors = #[",
+      '  #{ name: "basic", input: #{ label: "x" }, expected: "TAG:x" }',
+      "];",
+      "",
+      "const NoteVectors = #[",
+      '  #{ name: "basic", input: #{ text: "hi" }, expected: "hi!" }',
+      "];",
+      "",
+      "interface Tag {",
+      "  @sync",
+      "  @vector(TagVectors)",
+      "  tag(label: string): string;",
+      "}",
+      "",
+      "interface Note {",
+      "  @vector(NoteVectors)",
+      "  note(text: string): string;",
+      "}",
+      "",
+    ].join("\n");
+
+    const TS_SYNC_OK = [
+      "export const vectorAdapters = {",
+      '  "Tag.tag": { invoke(input) { return "TAG:" + input.label; } },',
+      '  "Note.note": { async invoke(input) { return input.text + "!"; } },',
+      "};",
+      "",
+    ].join("\n");
+
+    const TS_SYNC_VIOLATION = [
+      "export const vectorAdapters = {",
+      '  "Tag.tag": { async invoke(input) { return "TAG:" + input.label; } },',
+      '  "Note.note": { async invoke(input) { return input.text + "!"; } },',
+      "};",
+      "",
+    ].join("\n");
+
+    const PY_SYNC_OK = [
+      "class _Tag:",
+      "    def invoke(self, payload, context):",
+      '        return "TAG:" + payload["label"]',
+      "",
+      "",
+      "class _Note:",
+      "    async def invoke(self, payload, context):",
+      '        return payload["text"] + "!"',
+      "",
+      "",
+      'VECTOR_ADAPTERS = {"Tag.tag": _Tag(), "Note.note": _Note()}',
+      "",
+    ].join("\n");
+
+    const PY_SYNC_VIOLATION = [
+      "class _Tag:",
+      "    async def invoke(self, payload, context):",
+      '        return "TAG:" + payload["label"]',
+      "",
+      "",
+      "class _Note:",
+      "    async def invoke(self, payload, context):",
+      '        return payload["text"] + "!"',
+      "",
+      "",
+      'VECTOR_ADAPTERS = {"Tag.tag": _Tag(), "Note.note": _Note()}',
+      "",
+    ].join("\n");
+
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-vector-sync-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const tsDir = path.join(output, "generated", "typescript-tests");
+    const pyDir = path.join(output, "generated", "python-tests");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+
+    try {
+      writeFileSync(source, SYNC_SPEC);
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.SyncProof.Root"',
+          '    root-namespace: "Typra.SyncProof"',
+          "    emit-targets:",
+          "      - type: TypeScript",
+          `        output-dir: ${yamlString(path.join(output, "generated", "typescript"))}`,
+          `        test-dir: ${yamlString(tsDir)}`,
+          "        format: false",
+          "      - type: Python",
+          `        output-dir: ${yamlString(path.join(output, "generated", "python"))}`,
+          `        test-dir: ${yamlString(pyDir)}`,
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(
+        process.execPath,
+        [tspCli, "compile", source, "--config", config],
+        { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+
+      const tsSuite = readFileSync(
+        path.join(tsDir, "vector-conformance.test.ts"),
+        "utf8",
+      );
+      // The generated suite must carry the @sync flag and the enforcement guard.
+      assert.match(tsSuite, /entry\.sync && isAwaitable/);
+      writeFileSync(
+        path.join(tsDir, "vector-conformance.test.js"),
+        transpile(tsSuite),
+      );
+      writeFileSync(path.join(tsDir, "runner.js"), TS_RUNNER);
+      writeFileSync(
+        path.join(tsDir, "package.json"),
+        JSON.stringify({ type: "commonjs" }, null, 2),
+      );
+
+      const writeTsAdapter = (source_: string): void => {
+        writeFileSync(path.join(tsDir, "vector-adapters.js"), transpile(source_));
+      };
+      const writePyAdapter = (source_: string): void => {
+        writeFileSync(path.join(pyDir, "vector_adapters.py"), source_);
+      };
+
+      // -- honoring @sync: Tag.tag sync, Note.note async => all green ----------
+      writeTsAdapter(TS_SYNC_OK);
+      const tsOk = runNode(tsDir);
+      assert.equal(tsOk.status, 0, `@sync-honoring TS suite should pass:\n${tsOk.output}`);
+      assert.match(tsOk.output, /PASS callable vector conformance > Tag\.tag:basic/);
+      assert.match(tsOk.output, /PASS callable vector conformance > Note\.note:basic/);
+      assert.doesNotMatch(tsOk.output, /FAIL/);
+
+      writePyAdapter(PY_SYNC_OK);
+      const pyOk = runPytest(pyDir);
+      assert.equal(pyOk.status, 0, `@sync-honoring Python suite should pass:\n${pyOk.output}`);
+      assert.match(pyOk.output, /2 passed/);
+
+      // -- violating @sync: Tag.tag wired async => hard, distinct failure ------
+      // Note.note (async-default) stays green, proving permissive async-default.
+      writeTsAdapter(TS_SYNC_VIOLATION);
+      const tsBad = runNode(tsDir);
+      assert.equal(tsBad.status, 1, `@sync-violating TS suite must fail:\n${tsBad.output}`);
+      assert.match(tsBad.output, /FAIL callable vector conformance > Tag\.tag:basic/);
+      assert.match(tsBad.output, /operation is @sync but its adapter returned an/);
+      assert.match(tsBad.output, /PASS callable vector conformance > Note\.note:basic/);
+
+      writePyAdapter(PY_SYNC_VIOLATION);
+      const pyBad = runPytest(pyDir);
+      assert.notEqual(pyBad.status, 0, `@sync-violating Python suite must fail:\n${pyBad.output}`);
+      assert.match(pyBad.output, /operation is @sync but its adapter/);
+      assert.match(pyBad.output, /1 failed, 1 passed/);
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
 });

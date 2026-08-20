@@ -268,7 +268,7 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
       assert.match(javaSuite, /typra\.proof\.adapters\.VectorAdapters\.adapters\(\)/);
       assert.match(javaSuite, /No vector adapter registered for/);
       assert.match(javaSuite, /Object apply\(JsonNode input, VectorContext ctx\)/);
-      assert.match(javaSuite, /awaitIfAwaitable\(adapter\.invoke\.apply\(input, ctx\)\)/);
+      assert.match(javaSuite, /invokeAdapter\(adapter, input, ctx, sync, vectorId\)/);
       // The bidi control (U+202E) is embedded as an ASCII JSON escape, never raw.
       assert.match(javaSuite, /\\\\u202e/);
       assert.doesNotMatch(javaSuite, /\u202e/);

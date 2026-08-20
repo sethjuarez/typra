@@ -356,6 +356,35 @@ The adapter contract is: **perform exactly one awaited invocation per vector and
 spawn no adapter-managed concurrency of your own**, so conformance stays
 deterministic.
 
+### `@sync` is enforced, not advisory
+
+Operations are **async-capable by default**. The default is permissive: an
+adapter may return a plain value *or* an awaitable, and both pass. Marking an
+operation [`@sync`](/mappings/decorators/) turns synchronous resolution into a
+**hard behavioral guarantee** — the harness rejects a `@sync` adapter that hands
+back an awaitable, because a `@sync` operation must resolve without a runtime
+hop. This keeps the classification honest across every runtime instead of
+letting one target quietly wire an async body behind a sync signature.
+
+The check runs *before* the `expectedError` comparison and raises a **distinct**
+failure (never swallowed as an observed error), keyed off each language's native
+awaitable shape:
+
+| Target | `@sync` violation is… |
+| --- | --- |
+| TypeScript / JS | a returned `Promise`/thenable |
+| Python | an `inspect.isawaitable` result |
+| C# | a returned `Task`/`ValueTask` |
+| Rust | registering the adapter `Adapter::asynchronous(...)` (the enum tag is the classification) |
+| Swift | registering the adapter with the `asynchronous:` initializer |
+| Java | a returned `Future`/`CompletableFuture` |
+| Go | **not enforced** — Go has no awaitable type, so a sync signature is the only shape a value can take |
+
+The reverse is deliberately **not** enforced: an async-default operation whose
+adapter happens to resolve synchronously still passes, so no discovery adapter
+needs a rewrite. To make a `@sync` operation async-capable, drop `@sync`; to keep
+`@sync`, make the adapter resolve synchronously.
+
 ## Collaborator injection seams
 
 Some operations do not run in isolation — they select a strategy per

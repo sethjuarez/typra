@@ -125,9 +125,9 @@ function swiftAdapter(registrations: string[], waivers: string): string {
 function swiftReferenceAdapter(): string {
   return swiftAdapter(
     [
-      '    m["Echo.echo"] = VectorAdapter(echoInvoke)',
-      '    m["Sum.sum"] = VectorAdapter(sumInvoke)',
-      '    m["Note.note"] = VectorAdapter(noteInvoke)',
+      '    m["Echo.echo"] = VectorAdapter(asynchronous: echoInvoke)',
+      '    m["Sum.sum"] = VectorAdapter(sync: sumInvoke)',
+      '    m["Note.note"] = VectorAdapter(sync: noteInvoke)',
     ],
     "[:]",
   );
@@ -137,8 +137,8 @@ function swiftReferenceAdapter(): string {
 function swiftEchoOnlyAdapter(waivers: string): string {
   return swiftAdapter(
     [
-      '    m["Echo.echo"] = VectorAdapter(echoInvoke)',
-      '    m["Note.note"] = VectorAdapter(noteInvoke)',
+      '    m["Echo.echo"] = VectorAdapter(asynchronous: echoInvoke)',
+      '    m["Note.note"] = VectorAdapter(sync: noteInvoke)',
     ],
     waivers,
   );
@@ -202,7 +202,7 @@ describe("@vector conformance is an enforced closed loop (Swift)", () => {
       assert.match(swiftSuite, /VectorAdapters\.adapters\(\)/);
       assert.match(swiftSuite, /No vector adapter registered for/);
       assert.match(swiftSuite, /func testVectorConformance\(\) async throws/);
-      assert.match(swiftSuite, /try await adapter\.invoke\(input, ctx\)/);
+      assert.match(swiftSuite, /invokeAdapter\(adapter, input, ctx, sync: sync/);
       // The bidi control (U+202E) is embedded as an ASCII escape, never raw.
       assert.match(swiftSuite, /\\u\{202e\}/);
       assert.doesNotMatch(swiftSuite, /\u202e/);

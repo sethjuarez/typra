@@ -6,8 +6,8 @@ import Foundation
 enum VectorAdapters {
   static func adapters() -> [String: VectorAdapter] {
     var m: [String: VectorAdapter] = [:]
-    m["CanonicalEnginePort.authorize"] = VectorAdapter(authorizeInvoke)
-    m["CanonicalEnginePort.format"] = VectorAdapter(formatInvoke)
+    m["CanonicalEnginePort.authorize"] = VectorAdapter(sync: authorizeInvoke)
+    m["CanonicalEnginePort.format"] = VectorAdapter(sync: formatInvoke)
     return m
   }
 

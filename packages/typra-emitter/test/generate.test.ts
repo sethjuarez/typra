@@ -429,6 +429,7 @@ describe("generate", () => {
           operation: "render",
           params: { request: "RenderRequest", context: "RenderContext" },
           returns: "RenderResult",
+          sync: false,
           vector: {
             name: "basic",
             stage: "callable",
@@ -442,6 +443,7 @@ describe("generate", () => {
           operation: "summarize",
           params: { scores: "int32[]" },
           returns: "int32[]",
+          sync: false,
           vector: {
             stage: "callable",
             operation: "summarize",
