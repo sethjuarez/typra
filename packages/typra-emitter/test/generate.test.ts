@@ -41,6 +41,19 @@ function assertGeneratedTypeScriptTestsTypeCheck(output: string): void {
       "",
     ].join("\n"),
   );
+  // The @vector conformance harness imports its runtime adapter registry from
+  // the module referenced by `vector-adapter-path` (default `./vector-adapters`),
+  // which lives outside the regenerated tree. Provide a stub so the generated
+  // suite type-checks standalone.
+  writeFileSync(
+    path.join(output, "generated", "typescript-tests", "vector-adapters.ts"),
+    [
+      "export const vectorAdapters = {};",
+      "export const vectorWaivers = {};",
+      "export const vectorDoubles = {};",
+      "",
+    ].join("\n"),
+  );
   writeFileSync(
     tsconfig,
     JSON.stringify(
@@ -462,8 +475,10 @@ describe("generate", () => {
         ),
         "utf8",
       );
-      assert.match(pyVectorTest, /test_callable_vector_payloads_roundtrip/);
-      assert.match(pyVectorTest, /assert observed_transcript == expected_transcript/);
+      assert.match(pyVectorTest, /_ADAPTER_MODULE = importlib\.import_module/);
+      assert.match(pyVectorTest, /VECTOR_ADAPTERS\.get\(operation_key\)/);
+      assert.match(pyVectorTest, /def test_vector_0_/);
+      assert.match(pyVectorTest, /@vector conformance never skips silently/);
       assert.doesNotMatch(pyVectorTest, /assert_vector_model_roundtrips/);
       assert.doesNotMatch(pyVectorTest, /RenderRequest\.load/);
       assert.equal(
@@ -1309,7 +1324,11 @@ describe("generate", () => {
       // remains.
       assert.doesNotMatch(pythonVectorConformance, /\.load\(value\)\.save\(\) == value/);
       assert.doesNotMatch(pythonVectorConformance, /assert_vector_model_roundtrips/);
-      assert.match(pythonVectorConformance, /assert observed_transcript == expected_transcript/);
+      // The vector conformance harness now replays each vector through a
+      // runtime adapter registry rather than comparing a payload to itself.
+      assert.doesNotMatch(pythonVectorConformance, /assert observed_transcript == expected_transcript/);
+      assert.match(pythonVectorConformance, /_ADAPTER_MODULE = importlib\.import_module/);
+      assert.match(pythonVectorConformance, /_run_vector\(VECTORS\[/);
 
       const tsClient = readFileSync(
         path.join(output, "generated", "typescript", "transport-client.ts"),

@@ -478,7 +478,7 @@
       "evidence": {
         "typescript": [
           {
-            "path": "scripts/validate-fixtures.mjs",
+            "path": "scripts/fixtures/targets/typescript.mjs",
             "snippets": [
               "FixtureConnection.load(invalidConnectionInput as any);",
               "invalid FixtureConnection discriminator was accepted"
@@ -487,7 +487,7 @@
         ],
         "python": [
           {
-            "path": "scripts/validate-fixtures.mjs",
+            "path": "scripts/fixtures/targets/python.mjs",
             "snippets": [
               "for invalid_connection_input in ({}, {\"kind\": \"\"}, {\"kind\": None}, {\"kind\": 42}):",
               "invalid FixtureConnection discriminator was accepted"
@@ -496,7 +496,7 @@
         ],
         "csharp": [
           {
-            "path": "scripts/validate-fixtures.mjs",
+            "path": "scripts/fixtures/targets/csharp.mjs",
             "snippets": [
               "FixtureConnection.Load(invalidConnectionInput);",
               "invalid FixtureConnection discriminator was accepted"
@@ -505,7 +505,7 @@
         ],
         "go": [
           {
-            "path": "scripts/validate-fixtures.mjs",
+            "path": "scripts/fixtures/targets/go.mjs",
             "snippets": [
               "invalidConnectionErr := fixtures.LoadFixtureConnection(invalidConnectionInput, loadCtx)",
               "invalid FixtureConnection discriminator was accepted"
@@ -514,7 +514,7 @@
         ],
         "java": [
           {
-            "path": "scripts/validate-fixtures.mjs",
+            "path": "scripts/fixtures/targets/java.mjs",
             "snippets": [
               "FixtureConnection.load(invalidConnectionInput, new LoadContext());",
               "invalid FixtureConnection discriminator was accepted"
@@ -523,7 +523,7 @@
         ],
         "rust": [
           {
-            "path": "scripts/validate-fixtures.mjs",
+            "path": "scripts/fixtures/targets/rust.mjs",
             "snippets": [
               "FixtureConnection::from_json(&invalid_connection_input.to_string(), &load_ctx).expect_err",
               "invalid FixtureConnection discriminator"
@@ -532,7 +532,7 @@
         ],
         "swift": [
           {
-            "path": "scripts/validate-fixtures.mjs",
+            "path": "scripts/fixtures/targets/swift.mjs",
             "snippets": [
               "testInvalidDiscriminatorStatesDoNotUseUnknownFallback",
               "invalid FixtureConnection discriminator diagnostic lost field context"

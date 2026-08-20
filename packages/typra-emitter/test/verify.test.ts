@@ -19,9 +19,11 @@ import { TypraEmitterOptions } from "../src/lib.js";
 import {
   compareTypraMetadata,
   formatVerifySummary,
+  loadVerifyConfig,
   SchemaNode,
   TypraMetadataSet,
 } from "../src/verify/index.js";
+import type { CallableVectorSnapshot } from "../src/ir/vector.js";
 
 describe("typra verifier", () => {
   it("passes clean metadata and formats deterministic zero-drift summaries", () => {
@@ -42,6 +44,7 @@ describe("typra verifier", () => {
         "hydration zone touches: 0",
         "stale cleanup dry-run candidates: 0",
         "schema: types +0 / -0, required fields +0, optional fields +0, requiredness changed 0, property types changed 0, wire names changed 0, discriminators changed 0, enum values changed 0",
+        "vector coverage: 0/0 covered, 0 waived, 0 missing",
         "breaking change classification: patch",
         "next action: no baseline update needed.",
         "",
@@ -448,6 +451,113 @@ describe("typra verifier", () => {
   });
 });
 
+describe("typra verifier vector coverage", () => {
+  it("passes and counts coverage when every vectored operation has an adapter", () => {
+    const current = makeMetadata();
+    current.vectors = makeVectorSnapshot();
+
+    const result = compareTypraMetadata(makeMetadata(), current, {
+      vectorAdapters: ["Renderer.render", "Processor.process"],
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.summary.vectorCoverage.operations, 2);
+    assert.equal(result.summary.vectorCoverage.covered, 2);
+    assert.equal(result.summary.vectorCoverage.missing, 0);
+    assert.equal(
+      result.failures.some((f) => f.code === "vector-adapter-coverage"),
+      false,
+    );
+  });
+
+  it("blocks when a vectored operation has neither adapter nor waiver", () => {
+    const current = makeMetadata();
+    current.vectors = makeVectorSnapshot();
+
+    const result = compareTypraMetadata(makeMetadata(), current, {
+      vectorAdapters: ["Renderer.render"],
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.summary.vectorCoverage.missing, 1);
+    const failure = result.failures.find(
+      (f) => f.code === "vector-adapter-coverage",
+    );
+    assert.ok(failure, "expected a vector-adapter-coverage failure");
+    assert.equal(failure?.blocking, true);
+    assert.match(failure!.message, /Processor\.process/);
+  });
+
+  it("treats an enumerated waiver as covered (tracked skip)", () => {
+    const current = makeMetadata();
+    current.vectors = makeVectorSnapshot();
+
+    const result = compareTypraMetadata(makeMetadata(), current, {
+      vectorAdapters: ["Renderer.render"],
+      vectorWaivers: ["Processor.process"],
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.summary.vectorCoverage.waived, 1);
+    assert.equal(result.summary.vectorCoverage.missing, 0);
+  });
+
+  it("rejects wildcard waivers even when they would cover every gap", () => {
+    const current = makeMetadata();
+    current.vectors = makeVectorSnapshot();
+
+    const result = compareTypraMetadata(makeMetadata(), current, {
+      vectorWaivers: ["*"],
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.summary.vectorCoverage.wildcardWaivers, 1);
+    const failure = result.failures.find(
+      (f) => f.code === "vector-adapter-coverage",
+    );
+    assert.ok(failure, "expected a vector-adapter-coverage failure");
+    assert.match(failure!.message, /Wildcard waivers are not allowed/);
+  });
+
+  it("no-ops when the current snapshot has no vectors", () => {
+    const result = compareTypraMetadata(makeMetadata(), makeMetadata());
+
+    assert.equal(result.ok, true);
+    assert.equal(result.summary.vectorCoverage.operations, 0);
+  });
+
+  it("no-ops (never throws) on a malformed non-array vectors snapshot", () => {
+    const current = makeMetadata();
+    // Simulate a corrupt vectors.json where `vectors` is not an array.
+    (current as unknown as { vectors: unknown }).vectors = {
+      emitter: "typra-emitter",
+      version: 1,
+      vectors: "oops",
+    };
+
+    const result = compareTypraMetadata(makeMetadata(), current, {
+      vectorAdapters: [],
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.summary.vectorCoverage.operations, 0);
+  });
+
+  it("rejects wildcard waivers at config load time", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "typra-verify-config-"));
+    const configPath = path.join(dir, "config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ vectorWaivers: ["Renderer.*"] }),
+    );
+
+    assert.throws(
+      () => loadVerifyConfig(configPath),
+      /wildcard waivers are not allowed/,
+    );
+  });
+});
+
 describe("generated output report", () => {
   it("records protected-path matches and skipped cleanup guidance", async () => {
     const tempRoot = mkdtempSync(path.join(tmpdir(), "typra-report-"));
@@ -547,6 +657,41 @@ function makeMetadata(): TypraMetadataSet {
     manifest: makeManifest(),
     model: makeModel(),
     hydration: makeHydration(),
+  };
+}
+
+function makeVectorSnapshot(): CallableVectorSnapshot {
+  return {
+    emitter: "typra-emitter",
+    version: 1,
+    vectors: [
+      {
+        contract: "Renderer",
+        operation: "render",
+        params: { input: "RenderRequest" },
+        returns: "RenderResult",
+        vector: {
+          name: "renders",
+          stage: "callable",
+          operation: "render",
+          input: { prompt: "hi" },
+          expected: { text: "hi" },
+        },
+      },
+      {
+        contract: "Processor",
+        operation: "process",
+        params: { input: "ProcessRequest" },
+        returns: "ProcessResult",
+        vector: {
+          name: "processes",
+          stage: "callable",
+          operation: "process",
+          input: { value: 2 },
+          expected: { value: 4 },
+        },
+      },
+    ],
   };
 }
 

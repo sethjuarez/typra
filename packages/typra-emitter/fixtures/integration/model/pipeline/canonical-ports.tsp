@@ -25,6 +25,12 @@ model Message {
 
 interface CanonicalEnginePort {
   @runtimeCancellable
+  @vector(#{
+    name: "authorize-grants",
+    stage: "callable",
+    input: #{ request: #{ id: "req-1" } },
+    expected: #{ approved: true }
+  })
   @doc("Authorize a request.")
   authorize(request: Request): Decision;
 
@@ -41,6 +47,12 @@ interface CanonicalEnginePort {
   afterCommit(effectId: string, commit: Commit): void;
 
   @sync
+  @vector(#{
+    name: "format-passthrough",
+    stage: "callable",
+    input: #{ messages: #[#{ text: "alpha" }, #{ text: "beta" }] },
+    expected: #[#{ text: "alpha" }, #{ text: "beta" }]
+  })
   @doc("Format messages.")
   format(messages: Message[]): Message[];
 }

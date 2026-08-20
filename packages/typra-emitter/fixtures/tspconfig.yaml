@@ -41,6 +41,11 @@ options:
         package-name: "fixtures"
         format: true
         protocol-scaffolds: "compile-only"
+        # Module-relative so the emitted `vectoradapters "fixtures/vectoradapters"`
+        # import resolves inside the `module fixtures` test module. The reference
+        # package is placed at generated/fixtures/go/vectoradapters by
+        # validate-fixtures. See fixtures/integration/vector-adapters.
+        vector-adapter-path: "fixtures/vectoradapters"
       - type: Java
         output-dir: "generated/fixtures/java"
         test-dir: "generated/fixtures/java/tests"

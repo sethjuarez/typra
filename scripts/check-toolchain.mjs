@@ -79,8 +79,8 @@ const checks = [
     name: "Swift",
     command: "swift",
     args: ["--version"],
-    required: process.env.CI_SWIFT_REQUIRED === "1",
-    expected: "6.0 in CI; used for generated Swift package tests/conformance when Swift validation is required.",
+    required: true,
+    expected: "6.0 in CI; used for generated Swift package tests/conformance.",
   },
   {
     name: "Rust",

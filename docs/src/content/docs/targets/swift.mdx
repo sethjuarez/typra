@@ -111,7 +111,7 @@ behavior in the consuming app.
 
 ## Validation coverage
 
-Swift generation is part of the fixture suite. When a Swift toolchain is available, fixture validation runs `swift build` and `swift test` against the generated package. If Swift is unavailable, the Swift checks skip with a warning unless `CI_SWIFT_REQUIRED=1` is set, which promotes a missing toolchain to a hard failure.
+Swift generation is part of the fixture suite. Fixture validation runs `swift build` and `swift test` against the generated package, and a Swift toolchain is required just like the other targets' toolchains — a missing `swift` is a hard failure, not a skip.
 
 ```powershell
 npm run generate:fixtures --workspace @typra/emitter
