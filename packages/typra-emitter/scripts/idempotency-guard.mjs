@@ -64,7 +64,7 @@ export const IDEMPOTENCY_TARGETS = [
     extension: ".ts",
     tool: "prettier",
     status: "deferred",
-    native: "135/147",
+    native: "136/148",
     reason:
       "prettier reflows the emitter's single-line class members, imports, and call chains; " +
       "reproducing its line width in the templates is deferred (#238).",
@@ -76,7 +76,7 @@ export const IDEMPOTENCY_TARGETS = [
     extension: ".ts",
     tool: "prettier",
     status: "deferred",
-    native: "141/147",
+    native: "142/148",
     reason:
       "prettier reflows the emitter's single-line class members, imports, and zod schema chains; " +
       "reproducing its line width in the templates is deferred (#238).",
@@ -88,7 +88,7 @@ export const IDEMPOTENCY_TARGETS = [
     extension: ".py",
     tool: "ruff format",
     status: "deferred",
-    native: "145/148",
+    native: "145/149",
     reason:
       "ruff collapses the emitter's blank-line padding between members and inside method bodies; " +
       "matching ruff's blank-line normalization in the templates is deferred (#238).",
@@ -100,7 +100,7 @@ export const IDEMPOTENCY_TARGETS = [
     extension: ".py",
     tool: "ruff format",
     status: "deferred",
-    native: "145/148",
+    native: "145/149",
     reason:
       "ruff collapses the emitter's blank-line padding between members and inside method bodies; " +
       "matching ruff's blank-line normalization in the templates is deferred (#238).",
@@ -136,7 +136,7 @@ export const IDEMPOTENCY_TARGETS = [
     extension: ".swift",
     tool: "swift-format",
     status: "deferred",
-    native: "122/125",
+    native: "123/126",
     reason:
       "swift-format applies 100-column line-wrapping (long signatures, switch arms, call chains, " +
       "multi-arg inits) plus multiline trailing commas that the emitter emits as single long " +
@@ -149,7 +149,7 @@ export const IDEMPOTENCY_TARGETS = [
     extension: ".swift",
     tool: "swift-format",
     status: "deferred",
-    native: "122/125",
+    native: "123/126",
     reason:
       "swift-format applies 100-column line-wrapping plus multiline trailing commas that the " +
       "emitter emits as single long lines; reproducing its pretty-printer is deferred (#238).",
