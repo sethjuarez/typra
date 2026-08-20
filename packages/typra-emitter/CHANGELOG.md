@@ -6,6 +6,19 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.13.0](https://github.com/sethjuarez/typra/compare/v0.12.0...v0.13.0) (2026-08-20)
+
+
+### Features
+
+* **emitter:** let consumers declare a custom formatter command ([#256](https://github.com/sethjuarez/typra/issues/256)) ([379a643](https://github.com/sethjuarez/typra/commit/379a64397d58bac6b219973027a9d4a3965cfd3c))
+* **emitter:** make [@vector](https://github.com/vector) conformance harnesses async-capable across targets ([#257](https://github.com/sethjuarez/typra/issues/257)) ([235bd6e](https://github.com/sethjuarez/typra/commit/235bd6e18a3615839aeeca365160a655196cd3a2))
+
+
+### Bug Fixes
+
+* **emitter:** indent Python root __init__ child-type imports with 4 spaces ([#253](https://github.com/sethjuarez/typra/issues/253)) ([cc7ab69](https://github.com/sethjuarez/typra/commit/cc7ab69d95eb4852e82097bf8cd0976a4b9c5787))
+
 ## [0.12.0](https://github.com/sethjuarez/typra/compare/v0.11.0...v0.12.0) (2026-08-20)
 
 
