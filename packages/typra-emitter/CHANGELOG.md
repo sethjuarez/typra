@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [0.12.0](https://github.com/sethjuarez/typra/compare/v0.11.0...v0.12.0) (2026-08-20)
+
+
+### Features
+
+* **fixtures:** enforce [@vector](https://github.com/vector) behavioral conformance across the full target matrix ([#248](https://github.com/sethjuarez/typra/issues/248)) ([a85a99b](https://github.com/sethjuarez/typra/commit/a85a99b1abb501ef354fff5e68c80e5eaf1f45d9))
+
 ## [0.11.0](https://github.com/sethjuarez/typra/compare/v0.10.0...v0.11.0) (2026-08-19)
 
 
