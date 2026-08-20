@@ -670,6 +670,7 @@ function makeVectorSnapshot(): CallableVectorSnapshot {
         operation: "render",
         params: { input: "RenderRequest" },
         returns: "RenderResult",
+        sync: false,
         vector: {
           name: "renders",
           stage: "callable",
@@ -683,6 +684,7 @@ function makeVectorSnapshot(): CallableVectorSnapshot {
         operation: "process",
         params: { input: "ProcessRequest" },
         returns: "ProcessResult",
+        sync: false,
         vector: {
           name: "processes",
           stage: "callable",

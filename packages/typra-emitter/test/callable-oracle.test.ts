@@ -14,6 +14,7 @@ function vectorEntry(): CallableVectorSnapshotEntry {
     operation: "render",
     params: { request: "RenderRequest" },
     returns: "RenderResult",
+    sync: false,
     vector: {
       name: "basic",
       stage: "callable",

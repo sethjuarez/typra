@@ -28,7 +28,7 @@ public sealed class VectorException : Exception
 
 public sealed class VectorAdapter
 {
-    public required Func<JsonNode?, VectorContext, JsonNode?> Invoke { get; init; }
+    public required Func<JsonNode?, VectorContext, object?> Invoke { get; init; }
     public Func<JsonNode?, VectorContext, JsonNode?>? Normalize { get; init; }
 }
 

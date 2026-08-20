@@ -32,6 +32,15 @@ export interface CallableVectorSnapshotEntry {
   operation: string;
   params: Record<string, string>;
   returns: string;
+  /**
+   * Operation classification carried from `@sync`. `false` (the default) marks
+   * an async-capable operation; `true` marks a synchronously-callable one. The
+   * generated conformance harness reads this to ENFORCE the classification: a
+   * `@sync` operation's adapter must resolve synchronously (returning an
+   * awaitable is a hard failure), while an async-capable operation stays
+   * permissive under the await-if-awaitable contract.
+   */
+  sync: boolean;
   vector: CallableVector;
 }
 
@@ -73,6 +82,7 @@ export function buildCallableVectorSnapshot(
             operation: operation.name,
             params: operation.params,
             returns: operation.returns,
+            sync: operation.sync,
             vector,
           })),
         ),

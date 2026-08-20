@@ -15,7 +15,7 @@ Typra includes decorators for runtime concerns TypeSpec does not model by defaul
 | `@@coerce` | Expands scalar input into an object during load. |
 | `@@factory` | Generates factory constructors for a model. |
 | `@runtimeCancellable` | Adds runtime-native cancellation to an operation without serializing it. |
-| `@sync` | Marks an operation as synchronously callable where targets support sync surfaces. |
+| `@sync` | Marks an operation as synchronously callable where targets support sync surfaces. In `@vector` conformance it is an enforced guarantee: a `@sync` adapter must resolve synchronously. |
 | `@effect` | Records operation effect metadata such as `atomic` and `nonFatal`. |
 | `@optionalOperation` | Marks an operation as optional on generated callable surfaces. |
 | `@vector` | Attaches callable behavior expectations to TypeSpec operations. |
@@ -450,7 +450,7 @@ Operation decorators apply only to TypeSpec-native operations:
 | Decorator | Runtime meaning |
 | --- | --- |
 | `@runtimeCancellable` | Projects a host-owned cancellation parameter such as `AbortSignal`, `CancellationToken`, Go `context.Context`, or a configured runtime token path. It never becomes a model field, vector input, or serialized transport binding. |
-| `@sync` | Emits a synchronous signature in targets that distinguish sync and async callable surfaces. |
+| `@sync` | Emits a synchronous signature in targets that distinguish sync and async callable surfaces. Operations are async-capable by default; `@sync` is also enforced in `@vector` conformance — a `@sync` adapter that returns an awaitable is a hard failure (every runtime except Go, which has no awaitable type). See [vector conformance](/reference/vector-conformance/). |
 | `@effect(#{ atomic: true })` | Marks the operation as an atomic effect boundary for generated metadata, docs, and conformance evidence. Typra does not implement transactions. |
 | `@effect(#{ nonFatal: true })` | Marks a post-commit or side-effect operation whose failures are non-fatal metadata. Host apps own error policy. |
 | `@optionalOperation` | Allows an optional/default implementation shape. Prefer smaller capability interfaces unless compatibility requires optional methods. |

@@ -171,10 +171,15 @@ use serde_json::Value;
 
 pub fn adapters() -> HashMap<&'static str, Adapter> {
     let mut m = HashMap::new();
-    m.insert("Renderer.render", Adapter {
-        invoke: |input, ctx| Ok(render(input, &ctx.doubles)),
-        normalize: None,
-    });
+    // Sync adapter: a bare `fn` returning a plain value — no boxing, no bridge.
+    m.insert("Renderer.render", Adapter::sync(render_adapter));
+    // Async adapter: `Adapter::asynchronous` boxes the future for you, so the
+    // body is a plain `async move`. Own your inputs inside it (the future is
+    // `'static`): clone from the borrowed `&Value`/`&Context` as needed.
+    m.insert("Processor.process", Adapter::asynchronous(|input, ctx| {
+        let input = input.clone();
+        async move { Ok(process(&input.request).await) }
+    }));
     m
 }
 
@@ -184,10 +189,16 @@ pub fn waivers() -> HashMap<&'static str, &'static str> {
 }
 ```
 
-`Adapter.invoke` returns `Result<Value, VectorError>`; for an error vector attach
-the expected payload as `VectorError.payload`. The generated integration-test
-crate declares the adapter module via `#[path = ...]`, so a missing module is a
-**compile error** under `cargo test`, never a skip.
+An adapter is registered as either `Adapter::sync(fn)` (a synchronous `fn` that
+returns `Result<Value, VectorError>`) or `Adapter::asynchronous(closure)` (a
+closure returning any future resolving to the same). The `#[tokio::test]`
+harness awaits it exactly once on a **current-thread** runtime; a sync adapter
+resolves without ever touching the runtime. For an error vector attach the
+expected payload as `VectorError.payload`. The generated integration-test crate
+declares the adapter module via `#[path = ...]`, so a missing module is a
+**compile error** under `cargo test`, never a skip. Add a dev-dependency on
+`tokio` (with the `macros` and `rt` features) so the async test attribute
+resolves. The future is not required to be `Send`.
 
 </TabItem>
 <TabItem label="C#">
@@ -312,6 +323,67 @@ adapter must **raise/throw**. The harness compares the failure against
 `VectorException.payload` (Java), or `VectorError.payload` (Swift) — or return
 it from a `normalize` hook. An adapter that returns a value where an error was
 expected is a failure.
+
+### Async adapters
+
+`invoke` may return either a plain value **or** a language-native awaitable, and
+the harness awaits (unwraps) the result before normalizing and comparing. This
+lets an adapter drive the runtime's real async code path directly on the test
+framework's own event loop, instead of forcing a synchronous blocking bridge
+(`asyncio.run` / `block_on` / `.GetAwaiter().GetResult()` / a semaphore) that
+tests the runtime in a context users never hit.
+
+The generated suites use each framework's native async test form and apply an
+"await-if-awaitable" unwrap:
+
+| Target | Test form | Unwrap |
+| --- | --- | --- |
+| TypeScript / JS | `it(name, async () => …)` | `await adapter.invoke(...)` (a no-op on a non-Promise) |
+| Python | `async def test_…` under `pytest-asyncio` | `if inspect.isawaitable(r): r = await r` |
+| C# | `async Task` (xUnit) | await if the result is a `Task`/`ValueTask` |
+| Rust | `#[tokio::test] async fn` | `Adapter::sync(fn)` or `Adapter::asynchronous(closure)`; the harness awaits once |
+| Swift | `func … () async throws` (XCTest) | `try await adapter.invoke(...)` |
+| Go | plain function call | none — Go has no awaitable type |
+| Java | JUnit method | join if the result is a `Future`/`CompletableFuture` |
+
+A **synchronous adapter needs no changes**: awaiting or unwrapping a non-awaitable
+degrades to the plain value in every target, so existing discovery adapters stay
+green untouched. Error-path parity is preserved — an awaitable that rejects or
+completes exceptionally is compared against `expectedError` exactly as a
+synchronous throw is.
+
+The adapter contract is: **perform exactly one awaited invocation per vector and
+spawn no adapter-managed concurrency of your own**, so conformance stays
+deterministic.
+
+### `@sync` is enforced, not advisory
+
+Operations are **async-capable by default**. The default is permissive: an
+adapter may return a plain value *or* an awaitable, and both pass. Marking an
+operation [`@sync`](/mappings/decorators/) turns synchronous resolution into a
+**hard behavioral guarantee** — the harness rejects a `@sync` adapter that hands
+back an awaitable, because a `@sync` operation must resolve without a runtime
+hop. This keeps the classification honest across every runtime instead of
+letting one target quietly wire an async body behind a sync signature.
+
+The check runs *before* the `expectedError` comparison and raises a **distinct**
+failure (never swallowed as an observed error), keyed off each language's native
+awaitable shape:
+
+| Target | `@sync` violation is… |
+| --- | --- |
+| TypeScript / JS | a returned `Promise`/thenable |
+| Python | an `inspect.isawaitable` result |
+| C# | a returned `Task`/`ValueTask` |
+| Rust | registering the adapter `Adapter::asynchronous(...)` (the enum tag is the classification) |
+| Swift | registering the adapter with the `asynchronous:` initializer |
+| Java | a returned `Future`/`CompletableFuture` |
+| Go | **not enforced** — Go has no awaitable type, so a sync signature is the only shape a value can take |
+
+The reverse is deliberately **not** enforced: an async-default operation whose
+adapter happens to resolve synchronously still passes, so no discovery adapter
+needs a rewrite. To make a `@sync` operation async-capable, drop `@sync`; to keep
+`@sync`, make the adapter resolve synchronously.
 
 ## Collaborator injection seams
 

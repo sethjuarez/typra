@@ -88,6 +88,7 @@ const CS_COMMON = [
   "using System;",
   "using System.Collections.Generic;",
   "using System.Text.Json.Nodes;",
+  "using System.Threading.Tasks;",
   "",
   `namespace ${ADAPTER_NAMESPACE};`,
   "",
@@ -111,7 +112,7 @@ const CS_COMMON = [
   "",
   "public sealed class VectorAdapter",
   "{",
-  "    public required Func<JsonNode?, VectorContext, JsonNode?> Invoke { get; init; }",
+  "    public required Func<JsonNode?, VectorContext, object?> Invoke { get; init; }",
   "    public Func<JsonNode?, VectorContext, JsonNode?>? Normalize { get; init; }",
   "}",
   "",
@@ -146,6 +147,55 @@ function csReferenceAdapter(): string {
     '        if (input?["values"] is JsonArray arr)',
     "            foreach (var v in arr) total += (long?)v ?? 0;",
     "        return JsonValue.Create(total);",
+    "    }",
+    "",
+    "    public static IReadOnlyDictionary<string, VectorAdapter> Adapters() =>",
+    "        new Dictionary<string, VectorAdapter>",
+    "        {",
+    '            ["Echo.echo"] = new VectorAdapter { Invoke = EchoInvoke },',
+    '            ["Sum.sum"] = new VectorAdapter { Invoke = SumInvoke },',
+    '            ["Note.note"] = new VectorAdapter { Invoke = NoteInvoke },',
+    "        };",
+    "",
+    "    public static IReadOnlyDictionary<string, string> Waivers() =>",
+    "        new Dictionary<string, string>();",
+    "",
+    "    public static JsonNode? Doubles() => new JsonObject();",
+    "}",
+    "",
+  ].join("\n");
+}
+
+// Async adapters: Invoke returns Task<JsonNode?>. The value path resolves and the
+// error path (Echo.echo:empty) faults with a VectorException the harness awaits.
+function csAsyncReferenceAdapter(): string {
+  return [
+    ...CS_COMMON,
+    "public static class VectorAdapters",
+    "{",
+    "    private static async Task<JsonNode?> EchoInvoke(JsonNode? input, VectorContext ctx)",
+    "    {",
+    "        await Task.Yield();",
+    '        var payload = (string?)input?["payload"] ?? "";',
+    "        if (payload.Length == 0)",
+    '            throw new VectorException("empty", new JsonObject { ["code"] = "empty" });',
+    "        return JsonValue.Create(payload.ToUpperInvariant());",
+    "    }",
+    "",
+    "    private static async Task<JsonNode?> SumInvoke(JsonNode? input, VectorContext ctx)",
+    "    {",
+    "        await Task.Yield();",
+    "        long total = 0;",
+    '        if (input?["values"] is JsonArray arr)',
+    "            foreach (var v in arr) total += (long?)v ?? 0;",
+    "        return JsonValue.Create(total);",
+    "    }",
+    "",
+    "    private static async Task<JsonNode?> NoteInvoke(JsonNode? input, VectorContext ctx)",
+    "    {",
+    "        await Task.Yield();",
+    '        var text = (string?)input?["text"] ?? "";',
+    '        return JsonValue.Create(text + "!");',
     "    }",
     "",
     "    public static IReadOnlyDictionary<string, VectorAdapter> Adapters() =>",
@@ -277,9 +327,9 @@ describe("@vector conformance is an enforced closed loop (C#)", () => {
       assert.match(csSuite, /using Typra\.Proof\.Adapters;/);
       assert.match(csSuite, /VectorAdapters\.Adapters\(\)/);
       assert.match(csSuite, /No vector adapter registered for/);
-      assert.match(csSuite, /public void Vector\d+EchoEchoShout\(\)/);
-      assert.match(csSuite, /public void Vector\d+SumSumBasic\(\)/);
-      assert.match(csSuite, /public void Vector\d+NoteNoteBidi\(\)/);
+      assert.match(csSuite, /public async Task Vector\d+EchoEchoShout\(\)/);
+      assert.match(csSuite, /public async Task Vector\d+SumSumBasic\(\)/);
+      assert.match(csSuite, /public async Task Vector\d+NoteNoteBidi\(\)/);
       // The bidi control (U+202E) is embedded as an ASCII escape, never raw.
       assert.match(csSuite, /\\u202e/);
       assert.doesNotMatch(csSuite, /\u202e/);
@@ -354,6 +404,17 @@ describe("@vector conformance is an enforced closed loop (C#)", () => {
       assert.match(red.output, /Failed:\s+1/);
       assert.match(red.output, /No vector adapter registered for Sum\.sum/);
       assert.doesNotMatch(red.output, /SKIP Sum\.sum/);
+
+      // -- scenario 4: async adapters (Task<JsonNode?>) => everything green ------
+      writeAdapter(csAsyncReferenceAdapter());
+      const asyncGreen = runDotnetTest(projectPath, artifacts);
+      assert.equal(
+        asyncGreen.status,
+        0,
+        `async C# adapter suite should pass:\n${asyncGreen.output}`,
+      );
+      assert.match(asyncGreen.output, /Passed:\s+4/);
+      assert.doesNotMatch(asyncGreen.output, /Failed:/);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }

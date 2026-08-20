@@ -19,6 +19,7 @@ function snapshot(): CallableVectorSnapshot {
         operation: "echo",
         params: { payload: "string" },
         returns: "string",
+        sync: false,
         vector: { operation: "echo", stage: "callable", input: {}, expected: "" },
       },
       {
@@ -26,6 +27,7 @@ function snapshot(): CallableVectorSnapshot {
         operation: "echo",
         params: { payload: "string" },
         returns: "string",
+        sync: false,
         vector: {
           operation: "echo",
           stage: "callable",
@@ -39,6 +41,7 @@ function snapshot(): CallableVectorSnapshot {
         operation: "sum",
         params: { values: "int32[]" },
         returns: "int32",
+        sync: false,
         vector: { operation: "sum", stage: "callable", input: {}, expected: 0 },
       },
     ],

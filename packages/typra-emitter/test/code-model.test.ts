@@ -21,6 +21,7 @@ describe("structural CodeModel", () => {
             tags: "string[]",
           },
           returns: "RenderResult",
+          sync: false,
           vector: {
             name: "basic",
             stage: "callable",
@@ -40,6 +41,7 @@ describe("structural CodeModel", () => {
           operation: "parse",
           params: { value: "string" },
           returns: "unknown",
+          sync: false,
           vector: {
             stage: "callable",
             operation: "parse",
