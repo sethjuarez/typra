@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import { coerce, eq, satisfies, validRange } from "semver";
+import { coerce, eq, satisfies, valid, validRange } from "semver";
 import { FormatterCommand, FormatterOption } from "../lib.js";
 import {
   warnFormatterUnavailable,
@@ -52,13 +52,16 @@ function probeVersion(command: string, versionArgs: string[]): string | null {
 }
 
 function satisfiesVersion(actual: string, expected: string): boolean {
-  const coerced = coerce(actual);
-  if (!coerced) return false;
+  // Prefer the version verbatim when it is already valid semver so prerelease
+  // identifiers survive (coerce would strip `-beta.1`, silently widening an
+  // exact pin and dropping prerelease precision).
+  const actualVersion = valid(actual) ?? coerce(actual)?.version ?? null;
+  if (!actualVersion) return false;
   if (validRange(expected)) {
-    return satisfies(coerced, expected);
+    return satisfies(actualVersion, expected);
   }
-  const expectedCoerced = coerce(expected);
-  return expectedCoerced ? eq(coerced, expectedCoerced) : false;
+  const expectedVersion = valid(expected) ?? coerce(expected)?.version ?? null;
+  return expectedVersion ? eq(actualVersion, expectedVersion) : false;
 }
 
 /**

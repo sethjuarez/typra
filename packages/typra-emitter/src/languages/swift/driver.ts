@@ -191,7 +191,10 @@ export const generateSwift = async (
     const resolvedOutput = resolve(process.cwd(), outputDir);
     const custom = resolveCustomFormatters(emitTarget.format);
     if (custom) {
-      runCustomFormatters(custom, { dir: resolvedOutput });
+      const testDir = testRoot
+        ? resolve(process.cwd(), testRoot)
+        : undefined;
+      runCustomFormatters(custom, { dir: resolvedOutput, testDir });
     } else {
       formatSwiftFiles(resolvedOutput);
     }

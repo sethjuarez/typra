@@ -38,6 +38,14 @@ export interface EmitTargetOutput {
  * generated test directory, when the target emits one) placeholders; an
  * argument that references `{testDir}` is dropped when no test directory
  * exists. When `args` is omitted the command is invoked as `command {dir}`.
+ *
+ * Because a `{testDir}` argument is dropped wholesale when no test directory
+ * exists, prefer a self-contained combined form (e.g. `--include={testDir}`)
+ * over a separate flag/value pair (`["--include", "{testDir}"]`) so no dangling
+ * flag is left behind. A custom command also replaces the built-in formatter
+ * entirely and runs over the whole output tree, so any per-file exclusions the
+ * built-in applied (e.g. create-once editable helpers) are the consumer's
+ * responsibility to reproduce in their own command's ignore configuration.
  */
 export interface FormatterCommand {
   command: string;
@@ -183,7 +191,7 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             anyOf: [
               { type: "boolean" },
               formatterCommandSchema,
-              { type: "array", items: formatterCommandSchema },
+              { type: "array", items: formatterCommandSchema, minItems: 1 },
             ],
             // Widened past the strict JSONSchemaType boolean slot; ajv validates
             // the anyOf branches at runtime. No `{ type: "null" }` branch: the

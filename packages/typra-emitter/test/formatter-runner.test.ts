@@ -146,4 +146,31 @@ describe("runCustomFormatters", () => {
     assert.deepEqual(warnings, []);
     assert.ok(existsSync(join(dir, "marker.txt")));
   });
+
+  it("matches an exact prerelease pin without stripping the prerelease tag", () => {
+    // The tool reports a prerelease version; an exact prerelease pin must match.
+    // Coercing the reported version would drop `-beta.1` and wrongly warn.
+    const spec = markerWriter();
+    const warnings = captureWarnings(() => {
+      runCustomFormatters(
+        [
+          {
+            ...spec,
+            version: "1.2.3-beta.1",
+            "version-args": [
+              "-e",
+              "process.stdout.write('formatter 1.2.3-beta.1')",
+            ],
+          },
+        ],
+        { dir },
+      );
+    });
+    assert.deepEqual(
+      warnings,
+      [],
+      "an exact prerelease pin that matches the reported version must not warn",
+    );
+    assert.ok(existsSync(join(dir, "marker.txt")));
+  });
 });

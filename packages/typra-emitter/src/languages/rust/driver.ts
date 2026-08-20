@@ -351,7 +351,10 @@ export const generateRust = async (
       : context.emitterOutputDir;
     const custom = resolveCustomFormatters(emitTarget.format);
     if (custom) {
-      runCustomFormatters(custom, { dir: outputDir });
+      const testDir = emitTarget["test-dir"]
+        ? resolve(process.cwd(), emitTarget["test-dir"])
+        : undefined;
+      runCustomFormatters(custom, { dir: outputDir, testDir });
     } else {
       formatRustFiles(outputDir);
     }
