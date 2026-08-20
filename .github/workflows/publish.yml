@@ -45,6 +45,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: 1.22.x
+          cache: false
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -59,6 +60,8 @@ jobs:
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
 
       - name: Install dependencies
         run: npm ci
