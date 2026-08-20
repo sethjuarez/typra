@@ -152,6 +152,20 @@ describe("export surface scaffolding", () => {
     assert.match(init, /"CheckpointStore",/);
   });
 
+  it("indents root-level child-type __init__ imports with 4 spaces (PEP8, ruff-idempotent)", () => {
+    // A root-level (ungrouped) type with child types renders a multi-line
+    // `from ._Name import ( ... )` group. It must use 4-space continuation
+    // indentation like every other import group, not 2 spaces — otherwise ruff
+    // rewrites it and native (format:false) output is not formatter-idempotent
+    // (#238).
+    const rootLeaf = makeType("RootLeaf", "");
+    const rootUnion = makeType("RootUnion", "", [rootLeaf]);
+    const init = emitPythonInit([rootUnion], [rootUnion, rootLeaf]);
+
+    assert.match(init, /from \._RootUnion import \(\n    RootUnion,\n    RootLeaf,\n\)/);
+    assert.doesNotMatch(init, /^ {2}\w+,$/m);
+  });
+
   it("keeps Rust root and group modules re-exported", () => {
     const rootMod = emitRustLib(["context", "prompty"], ["events", "pipeline"]);
     const eventsMod = emitRustGroupMod(["checkpoint", "host_tool_request"]);

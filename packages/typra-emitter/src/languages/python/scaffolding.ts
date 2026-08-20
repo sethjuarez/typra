@@ -218,7 +218,7 @@ export function emitPythonInit(
           lines.push("");
           lines.push(`from ._${type.typeName.name} import (`);
           for (const name of names) {
-            lines.push(`  ${name},`);
+            lines.push(`    ${name},`);
           }
           lines.push(")");
         } else {
@@ -234,7 +234,7 @@ export function emitPythonInit(
           } else {
             lines.push(`from ._${type.typeName.name} import (`);
             for (const name of names) {
-              lines.push(`  ${name},`);
+              lines.push(`    ${name},`);
             }
             lines.push(")");
           }
