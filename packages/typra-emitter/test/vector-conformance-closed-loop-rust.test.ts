@@ -208,6 +208,146 @@ function rustEchoOnlyAdapter(waiverInsert: string): string {
   ].join("\n");
 }
 
+// -- @sync enforcement: a second spec with a @sync op and an async-default op --
+
+const SYNC_SPEC = [
+  'import "@typra/emitter";',
+  "",
+  "namespace Typra.SyncProof;",
+  "",
+  "model Root {",
+  "  id: string;",
+  "}",
+  "",
+  "const TagVectors = #[",
+  '  #{ name: "basic", input: #{ label: "x" }, expected: "TAG:x" }',
+  "];",
+  "",
+  "const NoteVectors = #[",
+  '  #{ name: "basic", input: #{ text: "hi" }, expected: "hi!" }',
+  "];",
+  "",
+  "interface Tag {",
+  "  @sync",
+  "  @vector(TagVectors)",
+  "  tag(label: string): string;",
+  "}",
+  "",
+  "interface Note {",
+  "  @vector(NoteVectors)",
+  "  note(text: string): string;",
+  "}",
+  "",
+].join("\n");
+
+const RUST_SYNC_COMMON = [
+  "#![allow(dead_code, unused_variables, clippy::all)]",
+  "",
+  "use serde_json::{json, Value};",
+  "use std::collections::HashMap;",
+  "use std::future::Future;",
+  "use std::pin::Pin;",
+  "",
+  "#[derive(Clone)]",
+  "pub struct Context {",
+  "    pub contract: String,",
+  "    pub operation: String,",
+  "    pub vector: Value,",
+  "    pub provider: Option<String>,",
+  "    pub target_api: Option<String>,",
+  "    pub doubles: Value,",
+  "    pub base_dir: String,",
+  "}",
+  "",
+  "pub struct VectorError {",
+  "    pub message: String,",
+  "    pub payload: Option<Value>,",
+  "}",
+  "",
+  "pub type BoxFuture = Pin<Box<dyn Future<Output = Result<Value, VectorError>>>>;",
+  "",
+  "pub enum Invoke {",
+  "    Sync(fn(&Value, &Context) -> Result<Value, VectorError>),",
+  "    Async(Box<dyn Fn(&Value, &Context) -> BoxFuture>),",
+  "}",
+  "",
+  "pub struct Adapter {",
+  "    pub invoke: Invoke,",
+  "    pub normalize: Option<fn(&Value, &Context) -> Value>,",
+  "}",
+  "",
+  "impl Adapter {",
+  "    pub fn sync(invoke: fn(&Value, &Context) -> Result<Value, VectorError>) -> Self {",
+  "        Self { invoke: Invoke::Sync(invoke), normalize: None }",
+  "    }",
+  "    pub fn asynchronous<F, Fut>(invoke: F) -> Self",
+  "    where",
+  "        F: Fn(&Value, &Context) -> Fut + 'static,",
+  "        Fut: Future<Output = Result<Value, VectorError>> + 'static,",
+  "    {",
+  "        Self {",
+  "            invoke: Invoke::Async(Box::new(move |input, ctx| Box::pin(invoke(input, ctx)))),",
+  "            normalize: None,",
+  "        }",
+  "    }",
+  "}",
+  "",
+  "// A @sync op wired synchronously: a bare `fn`.",
+  "fn tag_sync(input: &Value, _ctx: &Context) -> Result<Value, VectorError> {",
+  '    let label = input.get("label").and_then(|v| v.as_str()).unwrap_or("");',
+  '    Ok(Value::String(format!("TAG:{}", label)))',
+  "}",
+  "",
+  "// The same op wired asynchronously — the classification violation under test.",
+  "async fn tag_async(input: Value, _ctx: Context) -> Result<Value, VectorError> {",
+  "    tokio::task::yield_now().await;",
+  '    let label = input.get("label").and_then(|v| v.as_str()).unwrap_or("");',
+  '    Ok(Value::String(format!("TAG:{}", label)))',
+  "}",
+  "",
+  "// An async-default op wired asynchronously — permissive, must stay green.",
+  "async fn note_async(input: Value, _ctx: Context) -> Result<Value, VectorError> {",
+  "    tokio::task::yield_now().await;",
+  '    let text = input.get("text").and_then(|v| v.as_str()).unwrap_or("");',
+  '    Ok(Value::String(format!("{}!", text)))',
+  "}",
+  "",
+  "pub fn doubles() -> Value {",
+  "    json!({})",
+  "}",
+  "",
+  "pub fn waivers() -> HashMap<&'static str, &'static str> {",
+  "    HashMap::new()",
+  "}",
+  "",
+];
+
+// @sync honored: Tag.tag sync, Note.note async => all green.
+const RUST_SYNC_OK_ADAPTER = [
+  ...RUST_SYNC_COMMON,
+  "pub fn adapters() -> HashMap<&'static str, Adapter> {",
+  "    let mut map = HashMap::new();",
+  '    map.insert("Tag.tag", Adapter::sync(tag_sync));',
+  '    map.insert("Note.note", Adapter::asynchronous(|input, ctx| note_async(input.clone(), ctx.clone())));',
+  "    let _ = tag_async;",
+  "    map",
+  "}",
+  "",
+].join("\n");
+
+// @sync violated: Tag.tag registered Invoke::Async => hard classification failure.
+const RUST_SYNC_VIOLATION_ADAPTER = [
+  ...RUST_SYNC_COMMON,
+  "pub fn adapters() -> HashMap<&'static str, Adapter> {",
+  "    let mut map = HashMap::new();",
+  '    map.insert("Tag.tag", Adapter::asynchronous(|input, ctx| tag_async(input.clone(), ctx.clone())));',
+  '    map.insert("Note.note", Adapter::asynchronous(|input, ctx| note_async(input.clone(), ctx.clone())));',
+  "    let _ = tag_sync;",
+  "    map",
+  "}",
+  "",
+].join("\n");
+
 type RunResult = { status: number; output: string };
 
 function runCargoTest(moduleDir: string, targetDir: string): RunResult {
@@ -372,6 +512,111 @@ describe("@vector conformance is an enforced closed loop (Rust)", () => {
       assert.notEqual(red.status, 0, `unwaived Rust suite must fail:\n${red.output}`);
       assert.match(red.output, /test test_vector_\d+_sum_sum_basic \.\.\. FAILED/);
       assert.match(red.output, /No vector adapter registered for Sum\.sum/);
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  // Executable RED negative for @sync enforcement on the Rust target. The same
+  // generated suite drives two registries: one that honors @sync (Tag.tag wired
+  // Invoke::Sync) and one that violates it (Tag.tag wired Invoke::Async). The
+  // violation must be a hard, distinct failure carrying the classification
+  // message, while the async-default op (Note.note) stays green in both.
+  it("enforces @sync: a @sync op wired async fails hard; async-default stays green", (t) => {
+    if (!cargoAvailable()) {
+      t.skip("cargo toolchain not available");
+      return;
+    }
+
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-vector-rust-sync-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const rustOut = path.join(output, "generated", "rust");
+    const rustTestDir = path.join(output, "generated", "rust-tests");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+
+    try {
+      writeFileSync(source, SYNC_SPEC);
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.SyncProof.Root"',
+          '    root-namespace: "Typra.SyncProof"',
+          "    emit-targets:",
+          "      - type: Rust",
+          `        output-dir: ${yamlString(rustOut)}`,
+          `        test-dir: ${yamlString(rustTestDir)}`,
+          '        vector-adapter-path: "vector_adapters.rs"',
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(
+        process.execPath,
+        [tspCli, "compile", source, "--config", config],
+        { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+
+      const rustSuite = readFileSync(
+        path.join(rustTestDir, "vector_conformance_test.rs"),
+        "utf8",
+      );
+      // The suite must carry the enum-tag classification guard.
+      assert.match(rustSuite, /vector_adapters::Invoke::Async\(_\) = adapter\.invoke/);
+
+      const moduleDir = path.join(output, "module");
+      const testsDir = path.join(moduleDir, "tests");
+      const targetDir = path.join(output, "cargo-target");
+      mkdirSync(testsDir, { recursive: true });
+      writeFileSync(
+        path.join(moduleDir, "Cargo.toml"),
+        [
+          "[package]",
+          'name = "typrasyncproof"',
+          'version = "0.0.0"',
+          'edition = "2021"',
+          "",
+          "[lib]",
+          'path = "lib.rs"',
+          "",
+          "[dependencies]",
+          'serde_json = "1"',
+          "",
+          "[dev-dependencies]",
+          'tokio = { version = "1", features = ["macros", "rt"] }',
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(path.join(moduleDir, "lib.rs"), "");
+      writeFileSync(path.join(testsDir, "vector_conformance_test.rs"), rustSuite);
+
+      const writeAdapter = (src: string): void => {
+        writeFileSync(path.join(testsDir, "vector_adapters.rs"), src);
+      };
+
+      // -- honoring @sync: Tag.tag sync, Note.note async => all green ----------
+      writeAdapter(RUST_SYNC_OK_ADAPTER);
+      const ok = runCargoTest(moduleDir, targetDir);
+      assert.equal(ok.status, 0, `@sync-honoring Rust suite should pass:\n${ok.output}`);
+      assert.match(ok.output, /test test_vector_\d+_tag_tag_basic \.\.\. ok/);
+      assert.match(ok.output, /test test_vector_\d+_note_note_basic \.\.\. ok/);
+      assert.doesNotMatch(ok.output, /\bFAILED\b/);
+
+      // -- violating @sync: Tag.tag wired async => hard, distinct failure ------
+      writeAdapter(RUST_SYNC_VIOLATION_ADAPTER);
+      const red = runCargoTest(moduleDir, targetDir);
+      assert.notEqual(red.status, 0, `@sync-violating Rust suite must fail:\n${red.output}`);
+      assert.match(red.output, /test test_vector_\d+_tag_tag_basic \.\.\. FAILED/);
+      assert.match(red.output, /operation is @sync but its adapter is registered Invoke::Async/);
+      assert.match(red.output, /test test_vector_\d+_note_note_basic \.\.\. ok/);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }

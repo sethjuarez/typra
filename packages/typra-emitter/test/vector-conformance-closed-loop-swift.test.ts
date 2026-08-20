@@ -144,6 +144,81 @@ function swiftEchoOnlyAdapter(waivers: string): string {
   );
 }
 
+// -- @sync enforcement: a second spec with a @sync op and an async-default op --
+
+const SYNC_SPEC = [
+  'import "@typra/emitter";',
+  "",
+  "namespace Typra.SyncProof;",
+  "",
+  "model Root {",
+  "  id: string;",
+  "}",
+  "",
+  "const TagVectors = #[",
+  '  #{ name: "basic", input: #{ label: "x" }, expected: "TAG:x" }',
+  "];",
+  "",
+  "const NoteVectors = #[",
+  '  #{ name: "basic", input: #{ text: "hi" }, expected: "hi!" }',
+  "];",
+  "",
+  "interface Tag {",
+  "  @sync",
+  "  @vector(TagVectors)",
+  "  tag(label: string): string;",
+  "}",
+  "",
+  "interface Note {",
+  "  @vector(NoteVectors)",
+  "  note(text: string): string;",
+  "}",
+  "",
+].join("\n");
+
+const SWIFT_SYNC_INVOKES = [
+  "  // A @sync op wired synchronously.",
+  "  static func tagSync(_ input: Any?, _ ctx: VectorContext) throws -> Any? {",
+  '    let label = (input as? [String: Any])?["label"] as? String ?? ""',
+  '    return "TAG:" + label',
+  "  }",
+  "",
+  "  // The same op wired asynchronously — the classification violation under test.",
+  "  static func tagAsync(_ input: Any?, _ ctx: VectorContext) async throws -> Any? {",
+  "    await Task.yield()",
+  '    let label = (input as? [String: Any])?["label"] as? String ?? ""',
+  '    return "TAG:" + label',
+  "  }",
+  "",
+  "  // An async-default op wired asynchronously — permissive, must stay green.",
+  "  static func noteAsync(_ input: Any?, _ ctx: VectorContext) async throws -> Any? {",
+  "    await Task.yield()",
+  '    let text = (input as? [String: Any])?["text"] as? String ?? ""',
+  '    return text + "!"',
+  "  }",
+  "",
+];
+
+function swiftSyncAdapter(registrations: string[]): string {
+  return [
+    "import Foundation",
+    "",
+    "enum VectorAdapters {",
+    "  static func adapters() -> [String: VectorAdapter] {",
+    "    var m: [String: VectorAdapter] = [:]",
+    ...registrations,
+    "    return m",
+    "  }",
+    "",
+    "  static func waivers() -> [String: String] { return [:] }",
+    "  static func doubles() -> Any? { return nil }",
+    "",
+    ...SWIFT_SYNC_INVOKES,
+    "}",
+    "",
+  ].join("\n");
+}
+
 type RunResult = { status: number; output: string };
 
 describe("@vector conformance is an enforced closed loop (Swift)", () => {
@@ -281,6 +356,138 @@ describe("@vector conformance is an enforced closed loop (Swift)", () => {
         /FAIL Sum\.sum:basic: No vector adapter registered for Sum\.sum/,
       );
       assert.doesNotMatch(red.output, /SKIP Sum\.sum/);
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  // Executable RED negative for @sync enforcement on the Swift target. The same
+  // generated suite drives two registries: one that honors @sync (Tag.tag wired
+  // with the `sync:` initializer) and one that violates it (Tag.tag wired
+  // `asynchronous:`). The violation must be a hard, distinct failure carrying the
+  // classification message, while the async-default op (Note.note) stays green.
+  it("enforces @sync: a @sync op wired async fails hard; async-default stays green", (t) => {
+    if (!swiftAvailable()) {
+      t.skip("swift toolchain not available");
+      return;
+    }
+
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-vector-swift-sync-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const swiftOut = path.join(output, "generated", "swift");
+    const swiftTestDir = path.join(swiftOut, "Tests", "TypraSyncProofTests");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+
+    try {
+      writeFileSync(source, SYNC_SPEC);
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.SyncProof.Root"',
+          '    root-namespace: "Typra.SyncProof"',
+          "    emit-targets:",
+          "      - type: Swift",
+          `        output-dir: ${yamlString(swiftOut)}`,
+          `        test-dir: ${yamlString(swiftTestDir)}`,
+          '        package-name: "TypraSyncProof"',
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(
+        process.execPath,
+        [tspCli, "compile", source, "--config", config],
+        { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+
+      const swiftSuite = readFileSync(
+        path.join(swiftTestDir, "VectorConformanceTests.swift"),
+        "utf8",
+      );
+      // The suite must carry the enum-tag classification guard.
+      assert.match(swiftSuite, /if sync, case \.asynchronous = adapter\.invoke/);
+
+      const pkgDir = path.join(output, "pkg");
+      const testTargetDir = path.join(pkgDir, "Tests", "ProofTests");
+      const libDir = path.join(pkgDir, "Sources", "Proof");
+      mkdirSync(testTargetDir, { recursive: true });
+      mkdirSync(libDir, { recursive: true });
+      writeFileSync(
+        path.join(pkgDir, "Package.swift"),
+        [
+          "// swift-tools-version: 5.9",
+          "import PackageDescription",
+          "",
+          "let package = Package(",
+          '  name: "Proof",',
+          "  targets: [",
+          '    .target(name: "Proof", path: "Sources/Proof"),',
+          '    .testTarget(name: "ProofTests", dependencies: ["Proof"], path: "Tests/ProofTests"),',
+          "  ]",
+          ")",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        path.join(libDir, "Anchor.swift"),
+        "public func typraSyncProofAnchor() {}\n",
+      );
+      writeFileSync(
+        path.join(testTargetDir, "VectorConformanceTests.swift"),
+        swiftSuite,
+      );
+
+      const adapterPath = path.join(testTargetDir, "Adapters.swift");
+      const run = (adapterSrc: string): RunResult => {
+        writeFileSync(adapterPath, adapterSrc);
+        try {
+          const out = execFileSync("swift", ["test"], {
+            cwd: pkgDir,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+          return { status: 0, output: out };
+        } catch (error) {
+          const err = error as { status?: number; stdout?: string; stderr?: string };
+          return {
+            status: err.status ?? 1,
+            output: `${err.stdout ?? ""}${err.stderr ?? ""}`,
+          };
+        }
+      };
+
+      // -- honoring @sync: Tag.tag sync, Note.note async => all green ----------
+      const ok = run(
+        swiftSyncAdapter([
+          '    m["Tag.tag"] = VectorAdapter(sync: tagSync)',
+          '    m["Note.note"] = VectorAdapter(asynchronous: noteAsync)',
+        ]),
+      );
+      assert.equal(ok.status, 0, `@sync-honoring Swift suite should pass:\n${ok.output}`);
+      assert.match(ok.output, /PASS Tag\.tag:basic/);
+      assert.match(ok.output, /PASS Note\.note:basic/);
+      assert.doesNotMatch(ok.output, /FAIL /);
+
+      // -- violating @sync: Tag.tag wired async => hard, distinct failure ------
+      const red = run(
+        swiftSyncAdapter([
+          '    m["Tag.tag"] = VectorAdapter(asynchronous: tagAsync)',
+          '    m["Note.note"] = VectorAdapter(asynchronous: noteAsync)',
+        ]),
+      );
+      assert.notEqual(red.status, 0, `@sync-violating Swift suite must fail:\n${red.output}`);
+      assert.match(red.output, /FAIL Tag\.tag:basic/);
+      assert.match(red.output, /operation is @sync but its adapter is registered/);
+      assert.match(red.output, /PASS Note\.note:basic/);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }
