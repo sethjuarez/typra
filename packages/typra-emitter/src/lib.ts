@@ -7,7 +7,7 @@ export interface EmitTarget {
   "namespace-output"?: "structural" | "flat";
   outputs?: EmitTargetOutput[];
   alias?: { [key: string]: any };
-  format?: boolean;
+  format?: FormatterOption;
   namespace?: string;
   "import-path"?: string;
   "package-name"?: string;
@@ -28,6 +28,30 @@ export interface EmitTargetOutput {
   kind: string;
   provider?: string;
 }
+/**
+ * A single consumer-declared formatter invocation for a target's post-emit
+ * pass. Supplying one (or an array) as {@link EmitTarget.format} replaces the
+ * built-in per-language formatter with the consumer's own command, turning the
+ * previously implicit host-tool dependency into an explicit, declared one.
+ *
+ * `args` support `{dir}` (the emitted output directory) and `{testDir}` (the
+ * generated test directory, when the target emits one) placeholders; an
+ * argument that references `{testDir}` is dropped when no test directory
+ * exists. When `args` is omitted the command is invoked as `command {dir}`.
+ */
+export interface FormatterCommand {
+  command: string;
+  args?: string[];
+  version?: string;
+  "version-args"?: string[];
+}
+/**
+ * Formatter selection for a target's post-emit pass: `true`/unset runs the
+ * built-in per-language formatter, `false` disables formatting entirely, and a
+ * {@link FormatterCommand} (or array of them) runs consumer-declared commands
+ * instead.
+ */
+export type FormatterOption = boolean | FormatterCommand | FormatterCommand[];
 export interface TypraEmitterOptions {
   "root-object": string;
   "emit-targets"?: EmitTarget[];
@@ -42,6 +66,38 @@ export interface TypraEmitterOptions {
   "hydration-zones"?: string[];
   "deterministic-output"?: boolean;
 }
+
+const formatterCommandSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["command"],
+  properties: {
+    command: {
+      type: "string",
+      description: "Formatter executable to run over the emitted tree.",
+    },
+    args: {
+      type: "array",
+      items: { type: "string" },
+      nullable: true,
+      description:
+        "Arguments for the formatter. Supports {dir} and {testDir} placeholders; defaults to ['{dir}'] when omitted.",
+    },
+    version: {
+      type: "string",
+      nullable: true,
+      description:
+        "Optional pinned version or semver range. A mismatch with the installed tool emits a loud, non-fatal warning.",
+    },
+    "version-args": {
+      type: "array",
+      items: { type: "string" },
+      nullable: true,
+      description:
+        "Arguments used to probe the tool's version; defaults to ['--version'].",
+    },
+  },
+};
 
 const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
   type: "object",
@@ -121,11 +177,19 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             nullable: true,
           },
           format: {
-            type: "boolean",
-            nullable: true,
+            description:
+              "Formatter selection for the post-emit pass: true/unset runs the built-in per-language formatter, false disables formatting, or supply a formatter command object (or array of them) with { command, args, version, version-args } to run consumer-declared formatters instead. Command args support {dir} and {testDir} placeholders.",
             default: true,
-            description: "Run formatters on emitted files",
-          },
+            anyOf: [
+              { type: "boolean" },
+              formatterCommandSchema,
+              { type: "array", items: formatterCommandSchema },
+            ],
+            // Widened past the strict JSONSchemaType boolean slot; ajv validates
+            // the anyOf branches at runtime. No `{ type: "null" }` branch: the
+            // compiler validates with coerceTypes, which would rewrite a literal
+            // `false` into `null` to satisfy a leading null branch.
+          } as any,
           namespace: {
             type: "string",
             nullable: true,

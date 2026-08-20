@@ -4,6 +4,10 @@ import { resolve } from "path";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import { BaseTestContext, enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
+import {
+  resolveCustomFormatters,
+  runCustomFormatters,
+} from "../formatter-runner.js";
 
 import {
   buildBaseTestContext,
@@ -196,7 +200,12 @@ export const generateGo = async (
       ? resolve(process.cwd(), emitTarget["test-dir"])
       : undefined;
 
-    formatGoFiles(outputDir, testDir);
+    const custom = resolveCustomFormatters(emitTarget.format);
+    if (custom) {
+      runCustomFormatters(custom, { dir: outputDir, testDir });
+    } else {
+      formatGoFiles(outputDir, testDir);
+    }
   }
 };
 

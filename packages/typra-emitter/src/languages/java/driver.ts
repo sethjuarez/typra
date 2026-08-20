@@ -4,6 +4,10 @@ import { resolve } from "path";
 import { emitFile, EmitContext, resolvePath } from "@typespec/compiler";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import { warnFormatterUnavailable } from "../formatter-warning.js";
+import {
+  resolveCustomFormatters,
+  runCustomFormatters,
+} from "../formatter-runner.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { TypeRegistry } from "../../ir/expansion.js";
@@ -267,13 +271,16 @@ export const generateJava = async (
   }
 
   if (emitTarget.format !== false) {
-    formatJavaFiles(
-      resolve(
-        process.cwd(),
-        emitTarget["output-dir"] ?? context.emitterOutputDir,
-      ),
-      helperFiles,
+    const outputDir = resolve(
+      process.cwd(),
+      emitTarget["output-dir"] ?? context.emitterOutputDir,
     );
+    const custom = resolveCustomFormatters(emitTarget.format);
+    if (custom) {
+      runCustomFormatters(custom, { dir: outputDir });
+    } else {
+      formatJavaFiles(outputDir, helperFiles);
+    }
   }
 };
 
