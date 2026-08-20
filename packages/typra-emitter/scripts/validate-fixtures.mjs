@@ -70,7 +70,6 @@ import {
   runSwiftTests,
 } from "./fixtures/targets/swift.mjs";
 import { runIdempotencyGuard } from "./fixtures/idempotency-runner.mjs";
-import { TOOLCHAIN_UNAVAILABLE } from "./validation-execution.mjs";
 import {
   IDEMPOTENCY_TARGETS,
   idempotencyAllowedSkips,
@@ -892,13 +891,9 @@ function runExecutableConformance() {
       ["rust-unknown", runRustUnknownAbstractConformance],
       ["csharp", runCSharpExecutableConformance],
       ["java", runJavaExecutableConformance],
-      ["swift", runSwiftExecutableConformance],
-      ["swift-codable", runSwiftCodableExecutableConformance],
+      ["swift", () => runSwiftExecutableConformance()],
+      ["swift-codable", () => runSwiftCodableExecutableConformance()],
     ]),
-    allowedSkips: {
-      swift: TOOLCHAIN_UNAVAILABLE,
-      "swift-codable": TOOLCHAIN_UNAVAILABLE,
-    },
   });
   assertExecutableConformanceCoverage();
   assertExecutableConformanceAgreement();
@@ -1935,8 +1930,8 @@ function runDeclaredValidationStages() {
         "rust-serde.generated-tests",
         () => runRustTests("rust-serde", "fixtures_serde"),
       ],
-      ["swift.generated-tests", runSwiftTests],
-      ["swift-codable.generated-tests", runSwiftCodableTests],
+      ["swift.generated-tests", () => runSwiftTests()],
+      ["swift-codable.generated-tests", () => runSwiftCodableTests()],
       ["csharp.build", runCSharpBuild],
       ["csharp.consumer-nullability-build", runCSharpConsumerNullabilityBuild],
       ["csharp.generated-tests", runCSharpGeneratedTests],
@@ -1952,8 +1947,6 @@ function runDeclaredValidationStages() {
       ["executable-conformance", runExecutableConformance],
     ]),
     allowedSkips: {
-      "swift.generated-tests": TOOLCHAIN_UNAVAILABLE,
-      "swift-codable.generated-tests": TOOLCHAIN_UNAVAILABLE,
       ...idempotencyAllowedSkips(),
     },
   });

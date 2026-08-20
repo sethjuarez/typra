@@ -20,12 +20,9 @@ import {
   assertConformanceResult,
   fixtureRootSampleJsonLiteral,
   propertyCorpusJsonLiteral,
-  recordConformanceSkip,
 } from "../conformance.mjs";
-import { TOOLCHAIN_UNAVAILABLE } from "../../validation-execution.mjs";
 
 export function runSwiftTests(
-  context = {},
   targetDir = "swift",
   label = "Swift",
 ) {
@@ -37,16 +34,9 @@ export function runSwiftTests(
   }
 
   if (!commandExists("swift")) {
-    if (process.env.CI_SWIFT_REQUIRED === "1") {
-      fail(
-        `Generated ${label} validation cannot run because swift is not available.`,
-      );
-    } else {
-      console.warn(
-        `Warning: swift is not available. Skipping generated ${label} compile/test validation.`,
-      );
-      context.skip?.(TOOLCHAIN_UNAVAILABLE);
-    }
+    fail(
+      `Generated ${label} validation cannot run because swift is not available.`,
+    );
     return;
   }
 
@@ -394,8 +384,8 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
   }
 }
 
-export function runSwiftCodableTests(context = {}) {
-  runSwiftTests(context, "swift-codable", "Swift Codable");
+export function runSwiftCodableTests() {
+  runSwiftTests("swift-codable", "Swift Codable");
 }
 
 /**
@@ -410,7 +400,6 @@ export function runSwiftCodableTests(context = {}) {
  * a sentinel and extracted rather than read off the last line.
  */
 export function runSwiftExecutableConformance(
-  context = {},
   targetDir = "swift",
   useCodable = false,
 ) {
@@ -422,20 +411,9 @@ export function runSwiftExecutableConformance(
   }
 
   if (!commandExists("swift")) {
-    if (process.env.CI_SWIFT_REQUIRED === "1") {
-      fail(
-        `Generated ${targetDir} executable conformance cannot run because swift is not available.`,
-      );
-    } else {
-      console.warn(
-        `Warning: swift is not available. Skipping generated ${targetDir} executable conformance.`,
-      );
-      context.skip?.(TOOLCHAIN_UNAVAILABLE);
-      recordConformanceSkip(
-        targetDir,
-        "swift toolchain is not available locally",
-      );
-    }
+    fail(
+      `Generated ${targetDir} executable conformance cannot run because swift is not available.`,
+    );
     return;
   }
 
@@ -664,6 +642,6 @@ final class ConformanceValidateTests: XCTestCase {
   }
 }
 
-export function runSwiftCodableExecutableConformance(context = {}) {
-  runSwiftExecutableConformance(context, "swift-codable", true);
+export function runSwiftCodableExecutableConformance() {
+  runSwiftExecutableConformance("swift-codable", true);
 }

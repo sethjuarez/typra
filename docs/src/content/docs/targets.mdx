@@ -87,7 +87,7 @@ Target support is intentionally evidence-driven. The fixture suite validates gen
 
 ## Confidence model
 
-The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust, Swift, Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture validation also exercises generated metadata, verifier CLI output, consumer smoke wiring, native-interop variants (`typescript-zod`, `python_pydantic`, `java-jackson`, `rust-serde`, and `swift-codable`), and cross-language generated-code compile/test surfaces. For Go, that includes `gofmt`, `go vet`, `go test`, scalar coercion helper coverage, and executable conformance. Swift build and test run when a Swift toolchain is available, and are gated to a hard requirement with `CI_SWIFT_REQUIRED=1`.
+The Typra fixture slice validates TypeScript, Python, C#, Go, Java, Rust, Swift, Markdown, and JSON AST generation from synthetic TypeSpec shapes. Fixture validation also exercises generated metadata, verifier CLI output, consumer smoke wiring, native-interop variants (`typescript-zod`, `python_pydantic`, `java-jackson`, `rust-serde`, and `swift-codable`), and cross-language generated-code compile/test surfaces. For Go, that includes `gofmt`, `go vet`, `go test`, scalar coercion helper coverage, and executable conformance. Swift build and test require a Swift toolchain, which is a hard requirement like every other target's toolchain.
 
 The fixture source is the compact reference for supported shapes:
 

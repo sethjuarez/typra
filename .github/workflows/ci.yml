@@ -60,8 +60,6 @@ jobs:
         run: npm run generate:fixtures
 
       - name: Validate generated fixtures
-        env:
-          CI_SWIFT_REQUIRED: "1"
         run: npm run validate:fixtures
 
       - name: Validate npm package
@@ -104,6 +102,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v7
