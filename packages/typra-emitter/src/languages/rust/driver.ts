@@ -22,6 +22,10 @@ import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
 import { emitRustFile as emitRustFileDecl, RUST_ALLOW_ATTR } from "./emitter.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import {
+  resolveCustomFormatters,
+  runCustomFormatters,
+} from "../formatter-runner.js";
+import {
   applyNamespaceGroups,
   projectNamespace,
   restoreNamespaceGroups,
@@ -345,7 +349,15 @@ export const generateRust = async (
     const outputDir = emitTarget["output-dir"]
       ? resolve(process.cwd(), emitTarget["output-dir"])
       : context.emitterOutputDir;
-    formatRustFiles(outputDir);
+    const custom = resolveCustomFormatters(emitTarget.format);
+    if (custom) {
+      const testDir = emitTarget["test-dir"]
+        ? resolve(process.cwd(), emitTarget["test-dir"])
+        : undefined;
+      runCustomFormatters(custom, { dir: outputDir, testDir });
+    } else {
+      formatRustFiles(outputDir);
+    }
   }
   restoreNamespaceGroups(namespaceGroupSnapshots);
 };

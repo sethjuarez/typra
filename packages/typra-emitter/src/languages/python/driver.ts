@@ -4,6 +4,10 @@ import { existsSync } from "fs";
 import { dirname, resolve } from "path";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import {
+  resolveCustomFormatters,
+  runCustomFormatters,
+} from "../formatter-runner.js";
+import {
   buildVectorConformanceCodeModel,
 } from "../../ir/code-model.js";
 import { normalizeOutputRequests } from "../../output-contributors.js";
@@ -372,7 +376,12 @@ export const generatePython = async (
       ? resolve(process.cwd(), emitTarget["test-dir"])
       : undefined;
 
-    formatPythonFiles(outputDir, testDir);
+    const custom = resolveCustomFormatters(emitTarget.format);
+    if (custom) {
+      runCustomFormatters(custom, { dir: outputDir, testDir });
+    } else {
+      formatPythonFiles(outputDir, testDir);
+    }
   }
   restoreNamespaceGroups(namespaceGroupSnapshots);
 };

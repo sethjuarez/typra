@@ -17,6 +17,10 @@ import {
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import { warnFormatterUnavailable } from "../formatter-warning.js";
 import {
+  resolveCustomFormatters,
+  runCustomFormatters,
+} from "../formatter-runner.js";
+import {
   applyNamespaceGroups,
   projectNamespace,
   restoreNamespaceGroups,
@@ -185,7 +189,15 @@ export const generateSwift = async (
 
   if (emitTarget.format !== false) {
     const resolvedOutput = resolve(process.cwd(), outputDir);
-    formatSwiftFiles(resolvedOutput);
+    const custom = resolveCustomFormatters(emitTarget.format);
+    if (custom) {
+      const testDir = testRoot
+        ? resolve(process.cwd(), testRoot)
+        : undefined;
+      runCustomFormatters(custom, { dir: resolvedOutput, testDir });
+    } else {
+      formatSwiftFiles(resolvedOutput);
+    }
   }
   restoreNamespaceGroups(namespaceGroupSnapshots);
 };

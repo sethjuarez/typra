@@ -23,6 +23,10 @@ import { execFileSync } from "child_process";
 import { existsSync } from "fs";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import {
+  resolveCustomFormatters,
+  runCustomFormatters,
+} from "../formatter-runner.js";
+import {
   applyNamespaceGroups,
   projectNamespace,
   restoreNamespaceGroups,
@@ -283,7 +287,12 @@ export const generateTypeScript = async (
       ? resolve(process.cwd(), emitTarget["test-dir"])
       : undefined;
 
-    formatTypeScriptFiles(outputDir, testDir);
+    const custom = resolveCustomFormatters(emitTarget.format);
+    if (custom) {
+      runCustomFormatters(custom, { dir: outputDir, testDir });
+    } else {
+      formatTypeScriptFiles(outputDir, testDir);
+    }
   }
   restoreNamespaceGroups(namespaceGroupSnapshots);
 };

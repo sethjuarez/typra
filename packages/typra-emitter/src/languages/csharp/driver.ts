@@ -1,5 +1,9 @@
 import { EmitContext, resolvePath } from "@typespec/compiler";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
+import {
+  resolveCustomFormatters,
+  runCustomFormatters,
+} from "../formatter-runner.js";
 import { enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { scalarValue } from "../../ir/utilities.js";
@@ -254,7 +258,12 @@ export const generateCsharp = async (
       ? resolve(process.cwd(), emitTarget["test-dir"])
       : undefined;
 
-    formatCSharpFiles(outputDir, testDir);
+    const custom = resolveCustomFormatters(emitTarget.format);
+    if (custom) {
+      runCustomFormatters(custom, { dir: outputDir, testDir });
+    } else {
+      formatCSharpFiles(outputDir, testDir);
+    }
   }
   restoreNamespaceGroups(namespaceGroupSnapshots);
 };

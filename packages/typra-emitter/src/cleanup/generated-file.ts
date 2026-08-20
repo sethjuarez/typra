@@ -6,7 +6,7 @@ import {
 } from "@typespec/compiler";
 import { existsSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
 import { dirname, relative, resolve } from "path";
-import { TypraEmitterOptions } from "../lib.js";
+import { TypraEmitterOptions, FormatterOption } from "../lib.js";
 import { globToRegExp } from "../path-patterns.js";
 
 export interface GeneratedManifestEntry {
@@ -85,7 +85,7 @@ export interface GeneratedOutputReport {
       testDir?: string;
       packageName?: string;
       namespace?: string;
-      format?: boolean;
+      format?: FormatterOption;
       enumParsing?: "case-sensitive" | "case-insensitive";
       protocolScaffolds?: "none" | "compile-only";
     }>;

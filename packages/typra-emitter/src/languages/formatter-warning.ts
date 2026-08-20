@@ -27,3 +27,30 @@ export function warnFormatterUnavailable(
 ): void {
   console.warn(formatFormatterWarning(tool, dir, error));
 }
+
+/**
+ * Warning for a consumer-declared formatter whose installed version does not
+ * satisfy the pinned `version` in the target's `format` spec.
+ *
+ * Kept non-fatal and loud, matching {@link formatFormatterWarning}: a version
+ * skew still formats the tree, but the greppable warning makes any resulting
+ * byte drift attributable to the toolchain rather than the emitter.
+ */
+export function formatFormatterVersionMismatch(
+  tool: string,
+  expected: string,
+  actual: string | null,
+): string {
+  return `Warning: ${tool} version ${
+    actual ?? "unknown"
+  } does not satisfy pinned ${expected}; emitted output may drift from the pinned formatter.`;
+}
+
+/** Log {@link formatFormatterVersionMismatch} to stderr via `console.warn`. */
+export function warnFormatterVersionMismatch(
+  tool: string,
+  expected: string,
+  actual: string | null,
+): void {
+  console.warn(formatFormatterVersionMismatch(tool, expected, actual));
+}
