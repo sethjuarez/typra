@@ -421,13 +421,24 @@ function emitPythonVectorConformanceTest(
     "# runtime-authored adapter resolved from the module referenced by the target's",
     "# 'vector-adapter-path' option. A vector with no adapter and no explicit waiver",
     "# is a hard failure -- this suite never skips silently.",
+    "#",
+    "# Adapter contract: invoke() may return either a plain value or an awaitable.",
+    "# The harness awaits the result before normalizing, so an async runtime",
+    "# pipeline runs directly on pytest-asyncio's event loop. Each vector must",
+    "# perform exactly one awaited invocation and spawn no background concurrency,",
+    "# so conformance stays deterministic.",
     "# See docs: reference/vector-conformance.",
     "",
     "import importlib",
+    "import inspect",
     "import json",
     "import os",
     "",
     "import pytest",
+    "",
+    "# Run every generated test on pytest-asyncio's event loop so awaitable adapters",
+    "# are driven the way a real application invokes the runtime.",
+    "pytestmark = pytest.mark.asyncio",
     "",
     "VECTORS = json.loads(",
     `    ${JSON.stringify(payload)}`,
@@ -469,7 +480,7 @@ function emitPythonVectorConformanceTest(
     "    return getattr(adapter, name, None)",
     "",
     "",
-    "def _run_vector(entry):",
+    "async def _run_vector(entry):",
     "    operation_key = f\"{entry['contract']}.{entry['operation']}\"",
     '    vector = entry["vector"]',
     "    adapter = VECTOR_ADAPTERS.get(operation_key)",
@@ -510,7 +521,9 @@ function emitPythonVectorConformanceTest(
     '    resolved_input = _resolve_refs(vector["input"])',
     '    if "expectedError" in vector:',
     "        try:",
-    "            invoke(resolved_input, context)",
+    "            result = invoke(resolved_input, context)",
+    "            if inspect.isawaitable(result):",
+    "                await result",
     "        except Exception as error:  # noqa: BLE001",
     '            detail = getattr(error, "typra_vector", None)',
     "            observed = detail if detail is not None else {\"message\": str(error)}",
@@ -522,7 +535,10 @@ function emitPythonVectorConformanceTest(
     '            f"{operation_key}: expected the adapter to signal an error, "',
     '            "but it returned a value."',
     "        )",
-    "    observed = normalize(invoke(resolved_input, context), context)",
+    "    result = invoke(resolved_input, context)",
+    "    if inspect.isawaitable(result):",
+    "        result = await result",
+    "    observed = normalize(result, context)",
     '    assert _canonical(observed) == _canonical(vector["expected"]), json.dumps(',
     "        {",
     '            "vectorId": f"{operation_key}:{vector.get(\'name\', \'unnamed\')}",',
@@ -537,7 +553,7 @@ function emitPythonVectorConformanceTest(
   ];
   model.vectors.forEach((entry, index) => {
     const fn = pythonVectorSlug(index, entry);
-    lines.push("", `def ${fn}():`, `    _run_vector(VECTORS[${index}])`);
+    lines.push("", `async def ${fn}():`, `    await _run_vector(VECTORS[${index}])`);
   });
   lines.push("");
   return lines.join("\n");

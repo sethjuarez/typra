@@ -1318,6 +1318,14 @@ function emitRustVectorConformanceTest(
     "// runtime-authored adapter module included from the target's",
     "// 'vector-adapter-path' option. A vector with no adapter and no explicit",
     "// waiver is a hard failure — this suite never skips silently.",
+    "//",
+    "// Adapter contract: `invoke` is either `Invoke::Sync(fn)` (a bare synchronous",
+    "// fn — no boxing, no blocking bridge) or `Invoke::Async(..)` (a boxed future,",
+    "// registered via `Adapter::asynchronous`). The harness awaits it exactly once",
+    "// on this test's current-thread tokio runtime; a sync adapter resolves without",
+    "// touching the runtime. An async body owns its inputs (the future is `'static`),",
+    "// and no vector may spawn its own concurrency, so conformance stays",
+    "// deterministic.",
     "// See docs: reference/vector-conformance.",
     "",
     "#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, unexpected_cfgs, clippy::all)]",
@@ -1379,7 +1387,20 @@ function emitRustVectorConformanceTest(
     '        .unwrap_or_else(|| std::path::PathBuf::from("."))',
     "}",
     "",
-    "fn vc_run_vector(index: usize) {",
+    "async fn vc_invoke(",
+    "    adapter: &vector_adapters::Adapter,",
+    "    input: &Value,",
+    "    ctx: &vector_adapters::Context,",
+    ") -> Result<Value, vector_adapters::VectorError> {",
+    "    // Await exactly once, on this test's tokio runtime. A sync adapter resolves",
+    "    // immediately; an async adapter drives real async work on the live loop.",
+    "    match &adapter.invoke {",
+    "        vector_adapters::Invoke::Sync(f) => f(input, ctx),",
+    "        vector_adapters::Invoke::Async(f) => f(input, ctx).await,",
+    "    }",
+    "}",
+    "",
+    "async fn vc_run_vector(index: usize) {",
     "    let vectors = vc_load();",
     "    let entry = &vectors[index];",
     '    let contract = entry.get("contract").and_then(|v| v.as_str()).unwrap_or("");',
@@ -1434,7 +1455,7 @@ function emitRustVectorConformanceTest(
     "    };",
     "",
     '    if vector.get("expectedError").is_some() {',
-    "        match (adapter.invoke)(&input, &ctx) {",
+    "        match vc_invoke(adapter, &input, &ctx).await {",
     "            Ok(_) => panic!(",
     '                "{}: expected the adapter to signal an error, but it returned a value.",',
     "                vector_id",
@@ -1449,7 +1470,7 @@ function emitRustVectorConformanceTest(
     "            }",
     "        }",
     "    } else {",
-    "        match (adapter.invoke)(&input, &ctx) {",
+    "        match vc_invoke(adapter, &input, &ctx).await {",
     "            Ok(observed) => {",
     '                let expected = vector.get("expected").cloned().unwrap_or(Value::Null);',
     '                assert_eq!(normalize(observed), expected, "{} mismatch", vector_id);',
@@ -1465,9 +1486,9 @@ function emitRustVectorConformanceTest(
   ];
 
   model.vectors.forEach((entry, index) => {
-    lines.push("#[test]");
+    lines.push("#[tokio::test]");
     lines.push(
-      `fn ${rustVectorSlug(index, entry)}() { vc_run_vector(${index}); }`,
+      `async fn ${rustVectorSlug(index, entry)}() { vc_run_vector(${index}).await; }`,
     );
     lines.push("");
   });

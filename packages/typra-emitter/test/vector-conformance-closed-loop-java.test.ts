@@ -120,12 +120,17 @@ const ADAPTER_CLASS = "typra.proof.adapters.VectorAdapters";
 // -- runtime adapter registry authored the way a downstream runtime would ------
 
 const JAVA_INVOKES = [
-  "  private static JsonNode echoInvoke(JsonNode input, VectorContext ctx) {",
+  "  // Async adapter: returns a CompletableFuture the harness joins. Proves the",
+  "  // await-if-awaitable seam, including the failed-future error path.",
+  "  private static java.util.concurrent.CompletableFuture<JsonNode> echoInvoke(",
+  "      JsonNode input, VectorContext ctx) {",
   '    String payload = input.path("payload").asText("");',
   "    if (payload.isEmpty()) {",
-  '      throw new VectorException("empty", NF.objectNode().put("code", "empty"));',
+  '      return java.util.concurrent.CompletableFuture.failedFuture(',
+  '          new VectorException("empty", NF.objectNode().put("code", "empty")));',
   "    }",
-  "    return NF.textNode(payload.toUpperCase(Locale.ROOT));",
+  "    return java.util.concurrent.CompletableFuture.completedFuture(",
+  "        NF.textNode(payload.toUpperCase(Locale.ROOT)));",
   "  }",
   "",
   "  private static JsonNode noteInvoke(JsonNode input, VectorContext ctx) {",
@@ -262,6 +267,8 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
       assert.match(javaSuite, /package typra\.proof;/);
       assert.match(javaSuite, /typra\.proof\.adapters\.VectorAdapters\.adapters\(\)/);
       assert.match(javaSuite, /No vector adapter registered for/);
+      assert.match(javaSuite, /Object apply\(JsonNode input, VectorContext ctx\)/);
+      assert.match(javaSuite, /awaitIfAwaitable\(adapter\.invoke\.apply\(input, ctx\)\)/);
       // The bidi control (U+202E) is embedded as an ASCII JSON escape, never raw.
       assert.match(javaSuite, /\\\\u202e/);
       assert.doesNotMatch(javaSuite, /\u202e/);

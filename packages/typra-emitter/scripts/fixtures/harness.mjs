@@ -373,6 +373,8 @@ export function requirePythonRunner(label) {
       "--with",
       "pytest",
       "--with",
+      "pytest-asyncio",
+      "--with",
       "PyYAML",
       "python",
     ],

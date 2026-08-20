@@ -76,7 +76,9 @@ const SPEC = [
 // -- runtime adapter registry authored the way a downstream runtime would ------
 
 const SWIFT_INVOKES = [
-  "  static func echoInvoke(_ input: Any?, _ ctx: VectorContext) throws -> Any? {",
+  "  static func echoInvoke(_ input: Any?, _ ctx: VectorContext) async throws -> Any? {",
+  "    // Await on XCTest's runtime to prove an adapter may drive real async work.",
+  "    await Task.yield()",
   '    let payload = (input as? [String: Any])?["payload"] as? String ?? ""',
   "    if payload.isEmpty {",
   '      throw VectorError("empty", payload: ["code": "empty"])',
@@ -199,6 +201,8 @@ describe("@vector conformance is an enforced closed loop (Swift)", () => {
       );
       assert.match(swiftSuite, /VectorAdapters\.adapters\(\)/);
       assert.match(swiftSuite, /No vector adapter registered for/);
+      assert.match(swiftSuite, /func testVectorConformance\(\) async throws/);
+      assert.match(swiftSuite, /try await adapter\.invoke\(input, ctx\)/);
       // The bidi control (U+202E) is embedded as an ASCII escape, never raw.
       assert.match(swiftSuite, /\\u\{202e\}/);
       assert.doesNotMatch(swiftSuite, /\u202e/);

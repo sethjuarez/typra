@@ -86,7 +86,10 @@ const RUST_COMMON = [
   "",
   "use serde_json::{json, Value};",
   "use std::collections::HashMap;",
+  "use std::future::Future;",
+  "use std::pin::Pin;",
   "",
+  "#[derive(Clone)]",
   "pub struct Context {",
   "    pub contract: String,",
   "    pub operation: String,",
@@ -102,12 +105,38 @@ const RUST_COMMON = [
   "    pub payload: Option<Value>,",
   "}",
   "",
+  "pub type BoxFuture = Pin<Box<dyn Future<Output = Result<Value, VectorError>>>>;",
+  "",
+  "pub enum Invoke {",
+  "    Sync(fn(&Value, &Context) -> Result<Value, VectorError>),",
+  "    Async(Box<dyn Fn(&Value, &Context) -> BoxFuture>),",
+  "}",
+  "",
   "pub struct Adapter {",
-  "    pub invoke: fn(&Value, &Context) -> Result<Value, VectorError>,",
+  "    pub invoke: Invoke,",
   "    pub normalize: Option<fn(&Value, &Context) -> Value>,",
   "}",
   "",
-  "fn echo_invoke(input: &Value, _ctx: &Context) -> Result<Value, VectorError> {",
+  "impl Adapter {",
+  "    pub fn sync(invoke: fn(&Value, &Context) -> Result<Value, VectorError>) -> Self {",
+  "        Self { invoke: Invoke::Sync(invoke), normalize: None }",
+  "    }",
+  "    pub fn asynchronous<F, Fut>(invoke: F) -> Self",
+  "    where",
+  "        F: Fn(&Value, &Context) -> Fut + 'static,",
+  "        Fut: Future<Output = Result<Value, VectorError>> + 'static,",
+  "    {",
+  "        Self {",
+  "            invoke: Invoke::Async(Box::new(move |input, ctx| Box::pin(invoke(input, ctx)))),",
+  "            normalize: None,",
+  "        }",
+  "    }",
+  "}",
+  "",
+  "// Async adapter: an async fn that awaits inside the harness's live tokio",
+  "// runtime, proving the adapter may drive real async work, not just a ready value.",
+  "async fn echo_invoke(input: Value, _ctx: Context) -> Result<Value, VectorError> {",
+  "    tokio::task::yield_now().await;",
   '    let payload = input.get("payload").and_then(|v| v.as_str()).unwrap_or("");',
   "    if payload.is_empty() {",
   "        return Err(VectorError {",
@@ -118,6 +147,7 @@ const RUST_COMMON = [
   "    Ok(Value::String(payload.to_uppercase()))",
   "}",
   "",
+  "// Sync adapters: bare `fn`, no async ceremony, no boxing.",
   "fn sum_invoke(input: &Value, _ctx: &Context) -> Result<Value, VectorError> {",
   '    let values = input.get("values").and_then(|v| v.as_array()).cloned().unwrap_or_default();',
   "    let total: i64 = values.iter().filter_map(|v| v.as_i64()).sum();",
@@ -143,9 +173,9 @@ const RUST_REFERENCE_ADAPTER = [
   "",
   "pub fn adapters() -> HashMap<&'static str, Adapter> {",
   "    let mut map = HashMap::new();",
-  '    map.insert("Echo.echo", Adapter { invoke: echo_invoke, normalize: None });',
-  '    map.insert("Sum.sum", Adapter { invoke: sum_invoke, normalize: None });',
-  '    map.insert("Note.note", Adapter { invoke: note_invoke, normalize: None });',
+  '    map.insert("Echo.echo", Adapter::asynchronous(|input, ctx| echo_invoke(input.clone(), ctx.clone())));',
+  '    map.insert("Sum.sum", Adapter::sync(sum_invoke));',
+  '    map.insert("Note.note", Adapter::sync(note_invoke));',
   "    map",
   "}",
   "",
@@ -169,8 +199,8 @@ function rustEchoOnlyAdapter(waiverInsert: string): string {
     "",
     "pub fn adapters() -> HashMap<&'static str, Adapter> {",
     "    let mut map = HashMap::new();",
-    '    map.insert("Echo.echo", Adapter { invoke: echo_invoke, normalize: None });',
-    '    map.insert("Note.note", Adapter { invoke: note_invoke, normalize: None });',
+    '    map.insert("Echo.echo", Adapter::asynchronous(|input, ctx| echo_invoke(input.clone(), ctx.clone())));',
+    '    map.insert("Note.note", Adapter::sync(note_invoke));',
     "    let _ = sum_invoke;",
     "    map",
     "}",
@@ -263,9 +293,12 @@ describe("@vector conformance is an enforced closed loop (Rust)", () => {
       assert.match(rustSuite, /#\[path = "vector_adapters\.rs"\]/);
       assert.match(rustSuite, /mod vector_adapters;/);
       assert.match(rustSuite, /No vector adapter registered for/);
-      assert.match(rustSuite, /fn test_vector_\d+_echo_echo_shout/);
-      assert.match(rustSuite, /fn test_vector_\d+_sum_sum_basic/);
-      assert.match(rustSuite, /fn test_vector_\d+_note_note_bidi/);
+      assert.match(rustSuite, /#\[tokio::test\]/);
+      assert.match(rustSuite, /async fn test_vector_\d+_echo_echo_shout/);
+      assert.match(rustSuite, /async fn test_vector_\d+_sum_sum_basic/);
+      assert.match(rustSuite, /async fn test_vector_\d+_note_note_bidi/);
+      assert.match(rustSuite, /vc_invoke\(adapter, &input, &ctx\)\.await/);
+      assert.match(rustSuite, /vector_adapters::Invoke::Async\(f\) => f\(input, ctx\)\.await/);
       // The bidi control (U+202E) must be embedded as an ASCII escape, never a
       // raw codepoint — Rust denies bidi controls even inside raw strings.
       assert.match(rustSuite, /\\u\{202e\}/);
@@ -290,6 +323,9 @@ describe("@vector conformance is an enforced closed loop (Rust)", () => {
           "",
           "[dependencies]",
           'serde_json = "1"',
+          "",
+          "[dev-dependencies]",
+          'tokio = { version = "1", features = ["macros", "rt"] }',
           "",
         ].join("\n"),
       );
