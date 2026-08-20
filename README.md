@@ -337,7 +337,7 @@ Cargo. It intentionally gates fixture validation, not the TypeScript build or
 unit suite. Run it before interpreting fixture-validation failures so missing
 or outdated local toolchains do not look like emitter regressions.
 
-`validate:fixtures` also runs the save-side conformance oracle: each available
+`validate:fixtures` also runs the save-side conformance oracle: each target
 runtime loads the canonical fixture sample, saves it back to a normalized
 payload, and compares that output across the seven target backends. The
 conformance matrix in `packages/typra-emitter/fixtures/conformance-matrix.json`
