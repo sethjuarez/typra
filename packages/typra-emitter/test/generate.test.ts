@@ -683,6 +683,133 @@ describe("generate", () => {
     }
   });
 
+  it("disambiguates colliding leaf modules re-exported via sibling glob groups (Rust)", () => {
+    // Regression: two grouping namespaces (`Contracts` and `Operations`) each
+    // own a leaf named `Pipeline`. Rust's `model/mod.rs` glob-flattens both
+    // groups (`pub use contracts::*;` + `pub use operations::*;`), so the
+    // `pipeline` MODULE name arrives from both children -> rustc raises
+    // `ambiguous_glob_reexports` (a hard error under the fixture harness's
+    // `-D warnings`) and `crate::model::pipeline` becomes E0659 at every use
+    // site. The emitter must add a deterministic explicit re-export
+    // (`pub use contracts::pipeline;`, winner = lexicographically-first group)
+    // to shadow the glob ambiguity. Other targets namespace differently and
+    // never collide, so this guard is Rust-specific.
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-glob-collision-"));
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      writeFileSync(
+        source,
+        [
+          'import "@typra/emitter";',
+          "",
+          "namespace Typra.PipelineCollision {",
+          "  model Root {",
+          // Reference both leaves so they reach the emitters and land under
+          // their respective grouping folders (`contracts/pipeline`,
+          // `operations/pipeline`).
+          "    turn: Typra.PipelineCollision.Contracts.Pipeline.RunTurnRequest;",
+          "    segment: Typra.PipelineCollision.Operations.Pipeline.RenderSegment;",
+          "  }",
+          "}",
+          "",
+          "namespace Typra.PipelineCollision.Contracts.Pipeline {",
+          "  model RunTurnRequest {",
+          "    id: string;",
+          "  }",
+          "}",
+          "",
+          "namespace Typra.PipelineCollision.Operations.Pipeline {",
+          "  model RenderSegment {",
+          "    name: string;",
+          "  }",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.PipelineCollision.Root"',
+          '    root-namespace: "Typra.PipelineCollision"',
+          "    deterministic-output: true",
+          "    emit-targets:",
+          "      - type: Rust",
+          `        output-dir: ${yamlString(path.join(output, "generated", "rust"))}`,
+          '        import-path: "collision::model"',
+          "        format: false",
+          '        protocol-scaffolds: "compile-only"',
+          "",
+        ].join("\n"),
+      );
+
+      execFileSync(
+        process.execPath,
+        [tspCli, "compile", source, "--config", config],
+        {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      const rustRoot = path.join(output, "generated", "rust");
+      // Both leaves nest under their grouping folders.
+      assert.equal(
+        existsSync(
+          path.join(rustRoot, "contracts", "pipeline", "run_turn_request.rs"),
+        ),
+        true,
+        "Rust: contracts leaf should nest under contracts/pipeline/",
+      );
+      assert.equal(
+        existsSync(
+          path.join(rustRoot, "operations", "pipeline", "render_segment.rs"),
+        ),
+        true,
+        "Rust: operations leaf should nest under operations/pipeline/",
+      );
+
+      const modRs = readFileSync(path.join(rustRoot, "mod.rs"), "utf8");
+      // Both groups are still glob-flattened at the model root.
+      assert.match(modRs, /pub use contracts::\*;/);
+      assert.match(modRs, /pub use operations::\*;/);
+      // The fix: an explicit re-export of the colliding leaf shadows the
+      // ambiguous glob. Winner is the lexicographically-first group.
+      assert.match(
+        modRs,
+        /pub use contracts::pipeline;/,
+        "Rust: colliding leaf must be disambiguated to the first group",
+      );
+      // The losing group's leaf must NOT also be explicitly re-exported
+      // (that would re-introduce the ambiguity).
+      assert.equal(
+        /pub use operations::pipeline;/.test(modRs),
+        false,
+        "Rust: only the winning group's leaf should be re-exported",
+      );
+
+      // Each group's own mod.rs still glob-flattens its single pipeline leaf
+      // (no intra-group collision -> no disambiguation needed there).
+      const contractsMod = readFileSync(
+        path.join(rustRoot, "contracts", "mod.rs"),
+        "utf8",
+      );
+      assert.match(contractsMod, /pub mod pipeline;/);
+      assert.match(contractsMod, /pub use pipeline::\*;/);
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
   it("PascalCases every segment of a C# group folder path", () => {
     // Unit-level guard for the helper behind the folder-casing fix: each
     // `/`-split segment must be PascalCased, blanks trimmed away, and
