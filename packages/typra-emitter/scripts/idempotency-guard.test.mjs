@@ -242,14 +242,26 @@ describe("idempotency-guard: target registry", () => {
     assert.notEqual(go.measurable, false, "a locked target must be measurable");
   });
 
-  it("locks the ruff-, prettier-, and gofmt-idempotent runtimes — their native output is a no-op (#238)", () => {
+  it("locks C# (native output is dotnet-format-idempotent at 0/168, #238)", () => {
+    const csharp = IDEMPOTENCY_TARGETS.find((target) => target.id === "csharp");
+    assert.ok(csharp, "csharp idempotency target must exist");
+    assert.equal(csharp.status, "locked");
+    assert.equal(csharp.tool, "dotnet format");
+    assert.notEqual(
+      csharp.measurable,
+      false,
+      "a locked target must be measurable",
+    );
+  });
+
+  it("locks the ruff-, prettier-, gofmt-, and dotnet-format-idempotent runtimes — their native output is a no-op (#238)", () => {
     const locked = IDEMPOTENCY_TARGETS.filter(
       (target) => target.status === "locked",
     ).map((target) => target.id);
     assert.deepEqual(
       [...locked].sort(),
-      ["go", "python", "python_pydantic", "typescript"],
-      `expected the Go, Python, and TypeScript runtimes to be locked; got: ${locked.join(", ")}`,
+      ["csharp", "go", "python", "python_pydantic", "typescript"],
+      `expected the Go, Python, TypeScript, and C# runtimes to be locked; got: ${locked.join(", ")}`,
     );
     for (const id of ["python", "python_pydantic"]) {
       const target = IDEMPOTENCY_TARGETS.find((t) => t.id === id);
