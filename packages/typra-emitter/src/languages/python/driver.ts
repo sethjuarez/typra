@@ -48,6 +48,7 @@ import {
 } from "../../testing/test-context.js";
 import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
 import { emitPythonFile as emitPythonFileDecl } from "./emitter.js";
+import { formatPythonSource } from "./python-format.js";
 import {
   emitPythonContext,
   emitPythonInit,
@@ -472,7 +473,7 @@ function emitPythonVectorConformanceTest(
     "        return [_resolve_refs(item) for item in value]",
     "    if isinstance(value, dict):",
     "        if len(value) == 1:",
-    "            (key, raw), = value.items()",
+    "            ((key, raw),) = value.items()",
     '            if key == "$env" and isinstance(raw, str):',
     '                return os.environ.get(raw, "")',
     '            if key == "$file" and isinstance(raw, str):',
@@ -516,9 +517,7 @@ function emitPythonVectorConformanceTest(
     "        raise AssertionError(",
     '            f"Adapter for {operation_key} exposes no callable \'invoke\'."',
     "        )",
-    '    normalize = _adapter_member(adapter, "normalize") or (',
-    "        lambda value, context: value",
-    "    )",
+    '    normalize = _adapter_member(adapter, "normalize") or (lambda value, context: value)',
     "    context = {",
     '        "contract": entry["contract"],',
     '        "operation": entry["operation"],',
@@ -1731,7 +1730,7 @@ async function emitPythonFile(
   outputDir = outputDir || `${context.emitterOutputDir}/python`;
   const filePath = resolvePath(outputDir, filename);
 
-  await emitGeneratedFile(context, filePath, content, {
+  await emitGeneratedFile(context, filePath, formatPythonSource(content), {
     outputRoot: outputRoot || outputDir,
     allowEmpty: options.allowEmpty,
   });

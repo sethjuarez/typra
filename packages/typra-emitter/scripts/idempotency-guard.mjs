@@ -87,11 +87,7 @@ export const IDEMPOTENCY_TARGETS = [
     dir: "python",
     extension: ".py",
     tool: "ruff format",
-    status: "deferred",
-    native: "145/149",
-    reason:
-      "ruff collapses the emitter's blank-line padding between members and inside method bodies; " +
-      "matching ruff's blank-line normalization in the templates is deferred (#238).",
+    status: "locked",
   },
   {
     id: "python_pydantic",
@@ -99,11 +95,7 @@ export const IDEMPOTENCY_TARGETS = [
     dir: "python_pydantic",
     extension: ".py",
     tool: "ruff format",
-    status: "deferred",
-    native: "145/149",
-    reason:
-      "ruff collapses the emitter's blank-line padding between members and inside method bodies; " +
-      "matching ruff's blank-line normalization in the templates is deferred (#238).",
+    status: "locked",
   },
   {
     id: "rust",

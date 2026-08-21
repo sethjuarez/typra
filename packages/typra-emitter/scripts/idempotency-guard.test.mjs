@@ -242,17 +242,19 @@ describe("idempotency-guard: target registry", () => {
     assert.ok(go.reason, "go deferral must be documented");
   });
 
-  it("locks nothing yet — the native-output audit found every runtime drifts", () => {
+  it("locks the Python runtimes — their native output is ruff-idempotent (#238)", () => {
     const locked = IDEMPOTENCY_TARGETS.filter(
       (target) => target.status === "locked",
-    );
+    ).map((target) => target.id);
     assert.deepEqual(
-      locked,
-      [],
-      `no runtime is formatter-idempotent yet; unexpectedly locked: ${locked
-        .map((t) => t.id)
-        .join(", ")}`,
+      [...locked].sort(),
+      ["python", "python_pydantic"],
+      `expected the Python runtimes to be locked; got: ${locked.join(", ")}`,
     );
+    for (const id of ["python", "python_pydantic"]) {
+      const target = IDEMPOTENCY_TARGETS.find((t) => t.id === id);
+      assert.equal(target.tool, "ruff format", `${id} must format with ruff`);
+    }
   });
 
   it("rejects a locked target that is not measurable", () => {

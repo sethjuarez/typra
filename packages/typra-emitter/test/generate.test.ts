@@ -1224,8 +1224,8 @@ describe("generate", () => {
       assert.match(routes, /from typing import Any, Protocol/);
       assert.match(routes, /from fastapi import APIRouter, Body, Cookie, Header, Path, Query/);
       assert.match(routes, /AUTH_REQUIREMENTS = json\.loads/);
-      assert.match(routes, /\\"Pets\.read\\": \{/);
-      assert.match(routes, /\\"scheme\\": \\"Bearer\\"/);
+      assert.match(routes, /"Pets\.read": \{/);
+      assert.match(routes, /"scheme": "Bearer"/);
       assert.doesNotMatch(routes, /Authorization/);
       assert.match(routes, /class PetsHandler\(Protocol\):/);
       assert.match(routes, /async def read\(self, session_id: str, pet_id: str, include_details: bool \| None\):/);
@@ -1275,7 +1275,7 @@ describe("generate", () => {
       assert.match(starletteRoutes, /Route\("\/pets\/names\/\{pet_id\}", getName, methods=\["GET"\]\)/);
       assert.match(starletteRoutes, /pet_id = _coerce\(_request\.path_params\.get\("pet_id"\), "string"\)/);
       assert.match(starletteRoutes, /session_id = _coerce\(_required\(session_id_raw, "session_id"\), "string"\)/);
-      assert.match(starletteRoutes, /content_version = _coerce\(_required\(content_version_raw, "content-version"\), "string"\)/);
+      assert.match(starletteRoutes, /content_version = _coerce\(\n\s*_required\(content_version_raw, "content-version"\), "string"\n\s*\)/);
       assert.match(starletteRoutes, /include_details = _coerce\(include_details_raw, "boolean"\)/);
       assert.match(starletteRoutes, /result = result\.save\(\) if hasattr\(result, "save"\) else result/);
 
@@ -1298,10 +1298,10 @@ describe("generate", () => {
       assert.match(transportTest, /from fastapi.testclient import TestClient/);
       assert.match(transportTest, /def test_fastapi_transport_vectors_execute_routes/);
       assert.match(transportTest, /_assert_handler_received\(entry, handler\)/);
-      assert.match(transportTest, /\\"stage\\": \\"transport\\"/);
-      assert.match(transportTest, /\\"verb\\": \\"get\\"/);
-      assert.match(transportTest, /\\"verb\\": \\"post\\"/);
-      assert.match(transportTest, /\\"path\\": \\"\/pets\/\{petId\}\\"/);
+      assert.match(transportTest, /"stage": "transport"/);
+      assert.match(transportTest, /"verb": "get"/);
+      assert.match(transportTest, /"verb": "post"/);
+      assert.match(transportTest, /"path": "\/pets\/\{petId\}"/);
       const starletteTest = readFileSync(
         path.join(output, "generated", "python-tests", "test_starlette_transport.py"),
         "utf8",
@@ -1316,7 +1316,7 @@ describe("generate", () => {
       assert.match(httpxTest, /test_httpx_transport_errors_preserve_body/);
       assert.match(httpxTest, /import asyncio/);
       assert.match(httpxTest, /asyncio\.run\(_run_httpx_transport_vectors_execute_clients\(\)\)/);
-      assert.match(httpxTest, /\\"successStatus\\": 201/);
+      assert.match(httpxTest, /"successStatus": 201/);
       const pythonVectorConformance = readFileSync(
         path.join(output, "generated", "python-tests", "test_vector_conformance.py"),
         "utf8",
