@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [1.0.1](https://github.com/sethjuarez/typra/compare/v1.0.0...v1.0.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **emitter:** disambiguate colliding leaf modules in Rust glob re-exports ([#269](https://github.com/sethjuarez/typra/issues/269)) ([1ab72e3](https://github.com/sethjuarez/typra/commit/1ab72e3a1a95b2299f2a6102f84aef3889fecf14))
+
 ## [1.0.0](https://github.com/sethjuarez/typra/compare/v0.13.0...v1.0.0) (2026-08-21)
 
 
