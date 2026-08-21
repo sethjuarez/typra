@@ -462,8 +462,8 @@ describe("generate", () => {
         "utf8",
       );
       assert.match(tsVectorTest, /callable vector conformance/);
-      assert.match(tsVectorTest, /"contract": "Renderer"/);
-      assert.match(tsVectorTest, /"operation": "render"/);
+      assert.match(tsVectorTest, /contract: "Renderer"/);
+      assert.match(tsVectorTest, /operation: "render"/);
       // Vector inputs are opaque evidence: no model-typed load/save round-trip
       // is generated even though `render` takes a `RenderRequest` param.
       assert.doesNotMatch(tsVectorTest, /assertVectorModelRoundTrips/);
@@ -1050,13 +1050,13 @@ describe("generate", () => {
         ),
         "utf8",
       );
-      assert.match(vectorTest, /"contract": "Renderer"/);
-      assert.match(vectorTest, /"stage": "render"/);
-      assert.match(vectorTest, /"provider": "prompty"/);
-      assert.match(vectorTest, /"targetApi": "local"/);
-      assert.match(vectorTest, /"normalization": \{\s+"trailingNewline": "trim"/);
-      assert.match(vectorTest, /"contract": "Harness"/);
-      assert.match(vectorTest, /"expectedError": \{\s+"code": "replay-drift"/);
+      assert.match(vectorTest, /contract: "Renderer"/);
+      assert.match(vectorTest, /stage: "render"/);
+      assert.match(vectorTest, /provider: "prompty"/);
+      assert.match(vectorTest, /targetApi: "local"/);
+      assert.match(vectorTest, /normalization: \{\s+trailingNewline: "trim"/);
+      assert.match(vectorTest, /contract: "Harness"/);
+      assert.match(vectorTest, /expectedError: \{\s+code: "replay-drift"/);
       assert.doesNotMatch(vectorTest, /RenderRequest\.load\(value\)\.save\(\)/);
 
       const scaffold = readFileSync(
@@ -1353,13 +1353,13 @@ describe("generate", () => {
       assert.match(tsClient, /cookies\?: Record<string, string>/);
       assert.match(tsClient, /auth\?: TypraAuthRequirement/);
       assert.match(tsClient, /export interface TypraAuthRequirement/);
-      assert.match(tsClient, /auth: \{\n\s+\"options\": \[/);
-      assert.match(tsClient, /"scheme": "Bearer"/);
+      assert.match(tsClient, /auth: \{\n\s+options: \[/);
+      assert.match(tsClient, /scheme: "Bearer"/);
       assert.doesNotMatch(tsClient, /Authorization/);
       assert.match(tsClient, /export class TypraFetchResponseError extends Error/);
-      assert.match(tsClient, /async read\(input: \{ sessionId: string; petId: string; includeDetails\?: boolean \}\): Promise<Pet>/);
+      assert.match(tsClient, /async read\(\s*input: \{ sessionId: string; petId: string; includeDetails\?: boolean \},?\s*\): Promise<Pet>/);
       assert.match(tsClient, /let path = "\/pets\/\{petId\}";/);
-      assert.match(tsClient, /path = path\.replace\(pathParameterPattern\("petId"\), encodeURIComponent/);
+      assert.match(tsClient, /path = path\.replace\(\s*pathParameterPattern\("petId"\),\s*encodeURIComponent/);
       assert.match(tsClient, /query\.set\("includeDetails", value\)/);
       assert.match(tsClient, /cookies\["session_id"\] = value/);
       assert.match(tsClient, /headers\["content-version"\] = value/);
@@ -1377,11 +1377,11 @@ describe("generate", () => {
       assert.match(tsConsumerTest, /transport fetch consumer conformance/);
       assert.match(tsConsumerTest, /const client = new PetsClient/);
       assert.match(tsConsumerTest, /captured = request/);
-      assert.match(tsConsumerTest, /url": "https:\/\/example\.test\/pets\/p1\?includeDetails=true"/);
-      assert.match(tsConsumerTest, /"cookies": \{\n\s+"session_id": "s1"/);
-      assert.match(tsConsumerTest, /"auth": \{\n\s+"options": \[/);
-      assert.match(tsConsumerTest, /"body": undefined/);
-      assert.match(tsConsumerTest, /"body": \{\n\s+"name": "Fido"/);
+      assert.match(tsConsumerTest, /url: "https:\/\/example\.test\/pets\/p1\?includeDetails=true"/);
+      assert.match(tsConsumerTest, /cookies: \{\n\s+session_id: "s1"/);
+      assert.match(tsConsumerTest, /auth: \{\n\s+options: \[/);
+      assert.match(tsConsumerTest, /body: undefined/);
+      assert.match(tsConsumerTest, /body: \{\n\s+name: "Fido"/);
       assert.match(tsConsumerTest, /status: 201/);
       assert.match(tsConsumerTest, /non-success-response/);
       assert.match(tsConsumerTest, /TypraFetchResponseError/);

@@ -63,11 +63,7 @@ export const IDEMPOTENCY_TARGETS = [
     dir: "typescript",
     extension: ".ts",
     tool: "prettier",
-    status: "deferred",
-    native: "136/148",
-    reason:
-      "prettier reflows the emitter's single-line class members, imports, and call chains; " +
-      "reproducing its line width in the templates is deferred (#238).",
+    status: "locked",
   },
   {
     id: "typescript-zod",
@@ -76,10 +72,13 @@ export const IDEMPOTENCY_TARGETS = [
     extension: ".ts",
     tool: "prettier",
     status: "deferred",
-    native: "142/148",
+    native: "59/148",
     reason:
-      "prettier reflows the emitter's single-line class members, imports, and zod schema chains; " +
-      "reproducing its line width in the templates is deferred (#238).",
+      "the deterministic native reflow closes single-line drift (imports, quotes, trailing commas, " +
+      "long-statement wrapping) but prettier still reflows the emitter's multi-line zod schema " +
+      "chains — member-chain breaking of `z.object({…}).passthrough()`, single-array-argument " +
+      "hugging of `z.union([…])`, and the `z.any().transform(…).pipe(…)` / discriminated-union " +
+      "`.refine(…)` layout; reproducing that pretty-printer for the zod schema emit is deferred (#238).",
   },
   {
     id: "python",
