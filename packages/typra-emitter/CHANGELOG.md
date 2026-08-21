@@ -6,6 +6,22 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [1.0.0](https://github.com/sethjuarez/typra/compare/v0.13.0...v1.0.0) (2026-08-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **emitter:** An emit target other than Swift that sets test-resources or harness-test-dir now fails emission with the typra-emitter-target-option-scope diagnostic instead of silently ignoring the option. Configs relying on the previous silent no-op must remove those options from non-Swift targets. Swift targets and inert values (empty array / blank string) are unaffected.
+
+### Features
+
+* **emitter:** downstream drift fixes, per-vector waiver proofs, and fail-closed option scoping ([#267](https://github.com/sethjuarez/typra/issues/267)) ([df218c9](https://github.com/sethjuarez/typra/commit/df218c957f4b6afbcaac033b1347bdbc7902a08e))
+
+
+### Bug Fixes
+
+* **emitter:** lock formatter idempotency for Python/TypeScript/Go/C# and document deferrals ([#238](https://github.com/sethjuarez/typra/issues/238)) ([#263](https://github.com/sethjuarez/typra/issues/263)) ([705a447](https://github.com/sethjuarez/typra/commit/705a4477fbcf9f875e425400c3b26455b351dc2e))
+
 ## [0.13.0](https://github.com/sethjuarez/typra/compare/v0.12.0...v0.13.0) (2026-08-20)
 
 
