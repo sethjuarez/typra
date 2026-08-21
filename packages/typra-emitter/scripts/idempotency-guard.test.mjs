@@ -234,22 +234,22 @@ describe("idempotency-guard: target registry", () => {
     }
   });
 
-  it("defers Go (it ships format:true; native output is not gofmt-idempotent)", () => {
+  it("locks Go (its native output is gofmt+goimports-idempotent, #238)", () => {
     const go = IDEMPOTENCY_TARGETS.find((target) => target.id === "go");
     assert.ok(go, "go idempotency target must exist");
-    assert.equal(go.status, "deferred");
+    assert.equal(go.status, "locked");
     assert.equal(go.tool, "gofmt");
-    assert.ok(go.reason, "go deferral must be documented");
+    assert.notEqual(go.measurable, false, "a locked target must be measurable");
   });
 
-  it("locks the ruff- and prettier-idempotent runtimes — their native output is a no-op (#238)", () => {
+  it("locks the ruff-, prettier-, and gofmt-idempotent runtimes — their native output is a no-op (#238)", () => {
     const locked = IDEMPOTENCY_TARGETS.filter(
       (target) => target.status === "locked",
     ).map((target) => target.id);
     assert.deepEqual(
       [...locked].sort(),
-      ["python", "python_pydantic", "typescript"],
-      `expected the Python and TypeScript runtimes to be locked; got: ${locked.join(", ")}`,
+      ["go", "python", "python_pydantic", "typescript"],
+      `expected the Go, Python, and TypeScript runtimes to be locked; got: ${locked.join(", ")}`,
     );
     for (const id of ["python", "python_pydantic"]) {
       const target = IDEMPOTENCY_TARGETS.find((t) => t.id === id);
@@ -284,6 +284,7 @@ describe("idempotency-guard: target registry", () => {
       "typescript-zod",
       "python",
       "python_pydantic",
+      "go",
       "rust",
       "rust-serde",
       "swift",

@@ -23,13 +23,17 @@ import { TOOLCHAIN_UNAVAILABLE } from "./validation-execution.mjs";
  * rather than forcing a fragile one-shot template rewrite. Future language ports inherit the guard
  * by default so this class of latent determinism defect is caught at the source.
  *
- * NOTE: no runtime is `locked` today — an audit of native (`format:false`) output found every
- * target drifts under its default formatter (Go included: it ships `format:true`, and its native
- * output rewrites ~118/144 files under gofmt+goimports). The guard is therefore the enforcement
- * scaffold plus the audit of record; promoting a language to `locked` once its templates match its
- * formatter is a one-line status flip that then fails on any regression. A `locked` target must be
- * `measurable` (see `assertLockedTargetsMeasurable`): the harness can only enforce the invariant on
- * targets whose native drift it can actually measure.
+ * NOTE: Python (both native serializations), TypeScript, and Go are `locked` — their emitters
+ * reproduce their default formatter's layout so native (`format:false`) output is already a byte-level
+ * no-op under it (Go via the deterministic reflow in `languages/go/go-format.ts`, which reproduces
+ * gofmt's indentation, tabwriter alignment, blank-line collapsing, and composite tightening, plus
+ * goimports' already-emitted import grouping). The remaining targets stay `deferred`: an audit of
+ * their native output found real pretty-printer gaps (see each `reason`) — the zod schema-chain
+ * reflow, rustfmt/swift-format line-wrapping, google-java-format, and dotnet format — so the guard
+ * records the deferral rather than forcing a fragile one-shot template rewrite. Future language ports
+ * inherit the guard by default so this class of latent determinism defect is caught at the source. A
+ * `locked` target must be `measurable` (see `assertLockedTargetsMeasurable`): the harness can only
+ * enforce the invariant on targets whose native drift it can actually measure.
  */
 
 export const IDEMPOTENCY_DEFERRED = "idempotency-deferred";
@@ -47,15 +51,7 @@ export const IDEMPOTENCY_TARGETS = [
     dir: "go",
     extension: ".go",
     tool: "gofmt",
-    status: "deferred",
-    measurable: false,
-    native: "118/144",
-    reason:
-      "Go ships format:true, so its committed fixture tree is already gofmt-formatted; the guard " +
-      "cannot measure native idempotency from it. Emitting a format:false Go tree and running the " +
-      "driver pipeline (gofmt, then goimports) rewrites ~118/144 files, so native Go is not yet " +
-      "formatter-idempotent. Aligning the templates — and reproducing goimports' import grouping — " +
-      "is deferred (#238).",
+    status: "locked",
   },
   {
     id: "typescript",

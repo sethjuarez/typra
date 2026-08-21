@@ -39,7 +39,11 @@ options:
         test-dir: "generated/fixtures/go/tests"
         import-path: "fixtures"
         package-name: "fixtures"
-        format: true
+        # format:false: the emitter's native Go output is gofmt+goimports-idempotent (the
+        # deterministic reflow in languages/go/go-format.ts reproduces gofmt's indentation, tabwriter
+        # alignment, blank-line collapsing, and composite tightening), so the external formatter is a
+        # no-op. Locked by the idempotency guard (#238).
+        format: false
         protocol-scaffolds: "compile-only"
         # Module-relative so the emitted `vectoradapters "fixtures/vectoradapters"`
         # import resolves inside the `module fixtures` test module. The reference
