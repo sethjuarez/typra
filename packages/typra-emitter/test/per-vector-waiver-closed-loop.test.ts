@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft. All rights reserved.
 
 // Executable proof that the #265 PER-VECTOR waiver gate is a real xfail/xpass
-// mechanism on running targets — TypeScript, Python, Go, and Rust — not just
-// rendered text. (C# is covered by per-vector-waiver-closed-loop-csharp.ts.)
+// mechanism on running targets — TypeScript, Python, Go, Rust, Swift, and Java —
+// not just rendered text. (C# is covered by per-vector-waiver-closed-loop-csharp.)
 //
 // One spec: Echo with two vectors, "shout" (expects "HI") and "loud" (expects
 // "LO"). The adapter is REGISTERED in every scenario, so this exercises the
@@ -20,7 +20,14 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 import * as ts from "typescript";
@@ -35,9 +42,24 @@ function toolAvailable(cmd: string, arg: string): boolean {
   try {
     execFileSync(cmd, [arg], { stdio: ["ignore", "pipe", "pipe"] });
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    // Only a missing executable (ENOENT) counts as "unavailable" → skip. If the
+    // tool is installed but its version probe errors, that is a broken toolchain,
+    // not an absent one; surface it instead of masquerading as a skip and
+    // silently dropping the closed-loop proof (notably under CI).
+    if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      return false;
+    }
+    throw error;
   }
+}
+
+// Recursively collect every .java file under a root (the emitted model/runtime
+// tree, which carries the built-in TypraJson/TypraMaps the harness depends on).
+function collectJavaSources(root: string): string[] {
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".java"))
+    .map((entry) => path.join(entry.parentPath, entry.name));
 }
 
 const SPEC = [
@@ -632,6 +654,289 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Rust)", (
       assert.notEqual(red.status, 0, `unwaived divergence must fail:\n${red.output}`);
       assert.match(red.output, /test test_vector_\d+_echo_echo_shout \.\.\. FAILED/);
       assert.doesNotMatch(red.output, /XFAIL Echo\.echo:shout/);
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Swift
+// ---------------------------------------------------------------------------
+
+function swiftEchoAdapter(divergent: boolean, waivers: string): string {
+  const body = divergent
+    ? ['    if payload == "hi" { return payload }', "    return payload.uppercased()"]
+    : ["    return payload.uppercased()"];
+  return [
+    "import Foundation",
+    "",
+    "enum VectorAdapters {",
+    "  static func adapters() -> [String: VectorAdapter] {",
+    "    var m: [String: VectorAdapter] = [:]",
+    // Echo is async-default, so a sync adapter is permitted (permissive path).
+    '    m["Echo.echo"] = VectorAdapter(sync: echoInvoke)',
+    "    return m",
+    "  }",
+    "",
+    `  static func waivers() -> [String: String] { return ${waivers} }`,
+    "  static func doubles() -> Any? { return nil }",
+    "",
+    "  static func echoInvoke(_ input: Any?, _ ctx: VectorContext) throws -> Any? {",
+    '    let payload = (input as? [String: Any])?["payload"] as? String ?? ""',
+    ...body,
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+}
+
+describe("per-vector @vector waivers are an enforced xfail/xpass gate (Swift)", () => {
+  it("xfails a waived divergent vector, xpasses a stale waiver, fails an unwaived divergence", (t) => {
+    if (!toolAvailable("swift", "--version")) {
+      t.skip("swift toolchain not available");
+      return;
+    }
+
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-pv-swift-"));
+    const gen = path.join(output, "generated");
+    const swiftOut = path.join(gen, "swift");
+    const swiftTestDir = path.join(swiftOut, "Tests", "TypraProofTests");
+    try {
+      compile(
+        targetConfig(gen, "Swift", [
+          `        output-dir: ${yamlString(swiftOut)}`,
+          `        test-dir: ${yamlString(swiftTestDir)}`,
+          '        package-name: "TypraProof"',
+        ]),
+        path.join(output, "tspconfig.yaml"),
+        path.join(output, "main.tsp"),
+      );
+
+      const swiftSuite = readFileSync(
+        path.join(swiftTestDir, "VectorConformanceTests.swift"),
+        "utf8",
+      );
+
+      // Assemble a self-contained SwiftPM package: the generated suite plus the
+      // runtime adapter, compiled side by side with no external dependencies.
+      const pkgDir = path.join(output, "pkg");
+      const testTargetDir = path.join(pkgDir, "Tests", "ProofTests");
+      const libDir = path.join(pkgDir, "Sources", "Proof");
+      mkdirSync(testTargetDir, { recursive: true });
+      mkdirSync(libDir, { recursive: true });
+      writeFileSync(
+        path.join(pkgDir, "Package.swift"),
+        [
+          "// swift-tools-version: 5.9",
+          "import PackageDescription",
+          "",
+          "let package = Package(",
+          '  name: "Proof",',
+          "  targets: [",
+          '    .target(name: "Proof", path: "Sources/Proof"),',
+          '    .testTarget(name: "ProofTests", dependencies: ["Proof"], path: "Tests/ProofTests"),',
+          "  ]",
+          ")",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(path.join(libDir, "Anchor.swift"), "public func typraProofAnchor() {}\n");
+      writeFileSync(path.join(testTargetDir, "VectorConformanceTests.swift"), swiftSuite);
+
+      const adapterPath = path.join(testTargetDir, "Adapters.swift");
+      const run = (adapterSrc: string): RunResult => {
+        writeFileSync(adapterPath, adapterSrc);
+        try {
+          const out = execFileSync("swift", ["test"], {
+            cwd: pkgDir,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+          return { status: 0, output: out };
+        } catch (error) {
+          const err = error as { status?: number; stdout?: string; stderr?: string };
+          return { status: err.status ?? 1, output: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+        }
+      };
+
+      // 1: divergent for shout, shout waived => GREEN with XFAIL.
+      const xfail = run(swiftEchoAdapter(true, '["Echo.echo:shout": "known divergence"]'));
+      assert.equal(xfail.status, 0, `waived divergence should xfail green:\n${xfail.output}`);
+      assert.match(xfail.output, /XFAIL Echo\.echo:shout \(waived: known divergence\)/);
+      assert.match(xfail.output, /PASS Echo\.echo:loud/);
+      // XFAIL contains the substring "FAIL ", so match a FAIL only at line start.
+      assert.doesNotMatch(xfail.output, /^FAIL /m);
+
+      // 2: adapter correct, waiver stale => RED with XPASS.
+      const xpass = run(swiftEchoAdapter(false, '["Echo.echo:shout": "known divergence"]'));
+      assert.notEqual(xpass.status, 0, `stale waiver must xpass red:\n${xpass.output}`);
+      assert.match(xpass.output, /XPASS Echo\.echo:shout/);
+
+      // 3: divergent for shout, NO waiver => RED (hard mismatch).
+      const red = run(swiftEchoAdapter(true, "[:]"));
+      assert.notEqual(red.status, 0, `unwaived divergence must fail:\n${red.output}`);
+      assert.match(red.output, /^FAIL Echo\.echo:shout:/m);
+      assert.doesNotMatch(red.output, /XFAIL Echo\.echo:shout/);
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Java
+// ---------------------------------------------------------------------------
+
+function javaEchoAdapter(divergent: boolean, waiverEntries: string[]): string {
+  const body = divergent
+    ? [
+        '    if (payload.equals("hi")) { return payload; }',
+        "    return payload.toUpperCase(Locale.ROOT);",
+      ]
+    : ["    return payload.toUpperCase(Locale.ROOT);"];
+  return [
+    "package typra.proof.adapters;",
+    "",
+    "import java.util.HashMap;",
+    "import java.util.Locale;",
+    "import java.util.Map;",
+    "import typra.proof.VectorConformanceTests.VectorAdapter;",
+    "import typra.proof.VectorConformanceTests.VectorContext;",
+    "",
+    "public final class VectorAdapters {",
+    "  private VectorAdapters() { }",
+    "",
+    "  private static Object field(Object value, String key) {",
+    "    return value instanceof Map<?, ?> map ? map.get(key) : null;",
+    "  }",
+    "",
+    "  // Sync adapter (plain Object return): Echo is async-default, so a synchronous",
+    "  // adapter is permitted. Diverges only for the \"hi\" payload when `divergent`.",
+    "  private static Object echoInvoke(Object input, VectorContext ctx) {",
+    '    Object raw = field(input, "payload");',
+    '    String payload = raw instanceof String s ? s : "";',
+    ...body,
+    "  }",
+    "",
+    "  public static Map<String, VectorAdapter> adapters() {",
+    "    Map<String, VectorAdapter> m = new HashMap<>();",
+    '    m.put("Echo.echo", new VectorAdapter(VectorAdapters::echoInvoke));',
+    "    return m;",
+    "  }",
+    "",
+    "  public static Map<String, String> waivers() {",
+    "    Map<String, String> w = new HashMap<>();",
+    ...waiverEntries,
+    "    return w;",
+    "  }",
+    "",
+    "  public static Object doubles() { return null; }",
+    "}",
+    "",
+  ].join("\n");
+}
+
+describe("per-vector @vector waivers are an enforced xfail/xpass gate (Java)", () => {
+  it("xfails a waived divergent vector, xpasses a stale waiver, fails an unwaived divergence", (t) => {
+    if (!toolAvailable("javac", "-version") || !toolAvailable("java", "-version")) {
+      t.skip("java toolchain not available");
+      return;
+    }
+
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-pv-java-"));
+    const gen = path.join(output, "generated");
+    const javaOut = path.join(gen, "java");
+    const javaTestDir = path.join(gen, "java-tests");
+    try {
+      compile(
+        targetConfig(gen, "Java", [
+          `        output-dir: ${yamlString(javaOut)}`,
+          `        test-dir: ${yamlString(javaTestDir)}`,
+          '        package-name: "typra.proof"',
+          '        native-serialization: "none"',
+          `        vector-adapter-path: ${yamlString("typra.proof.adapters.VectorAdapters")}`,
+        ]),
+        path.join(output, "tspconfig.yaml"),
+        path.join(output, "main.tsp"),
+      );
+
+      // Compile the emitted model/runtime tree (built-in TypraJson/TypraMaps), the
+      // generated harness, the runtime adapter, and a tiny Main that drives run().
+      const modelSources = collectJavaSources(javaOut);
+      const harnessPath = path.join(javaTestDir, "VectorConformanceTests.java");
+      const srcDir = path.join(output, "src");
+      const classesDir = path.join(output, "classes");
+      mkdirSync(srcDir, { recursive: true });
+      const mainPath = path.join(srcDir, "Main.java");
+      writeFileSync(
+        mainPath,
+        [
+          "public final class Main {",
+          "  public static void main(String[] args) {",
+          "    try {",
+          "      typra.proof.VectorConformanceTests.run();",
+          '      System.out.println("SUITE OK");',
+          "    } catch (Throwable t) {",
+          '      System.out.println("SUITE FAILED: " + t.getMessage());',
+          "      System.exit(1);",
+          "    }",
+          "  }",
+          "}",
+          "",
+        ].join("\n"),
+      );
+
+      const adapterPath = path.join(srcDir, "VectorAdapters.java");
+      const run = (adapterSrc: string): RunResult => {
+        writeFileSync(adapterPath, adapterSrc);
+        rmSync(classesDir, { recursive: true, force: true });
+        mkdirSync(classesDir, { recursive: true });
+        const sources = [...modelSources, harnessPath, adapterPath, mainPath];
+        try {
+          execFileSync("javac", ["-Xlint:all", "-Werror", "-d", classesDir, ...sources], {
+            cwd: output,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+        } catch (error) {
+          const err = error as { stdout?: string; stderr?: string };
+          return { status: 1, output: `javac failed:\n${err.stdout ?? ""}${err.stderr ?? ""}` };
+        }
+        try {
+          const out = execFileSync("java", ["-cp", classesDir, "Main"], {
+            cwd: output,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+          return { status: 0, output: out };
+        } catch (error) {
+          const err = error as { status?: number; stdout?: string; stderr?: string };
+          return { status: err.status ?? 1, output: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+        }
+      };
+
+      // 1: divergent for shout, shout waived => GREEN with XFAIL.
+      const xfail = run(javaEchoAdapter(true, ['    w.put("Echo.echo:shout", "known divergence");']));
+      assert.equal(xfail.status, 0, `waived divergence should xfail green:\n${xfail.output}`);
+      assert.match(xfail.output, /SUITE OK/);
+      assert.match(xfail.output, /XFAIL Echo\.echo:shout \(waived: known divergence\)/);
+      assert.match(xfail.output, /PASS Echo\.echo:loud/);
+      // XFAIL contains the substring "FAIL ", so match a FAIL only at line start.
+      assert.doesNotMatch(xfail.output, /^FAIL /m);
+
+      // 2: adapter correct, waiver stale => RED with XPASS.
+      const xpass = run(javaEchoAdapter(false, ['    w.put("Echo.echo:shout", "known divergence");']));
+      assert.notEqual(xpass.status, 0, `stale waiver must xpass red:\n${xpass.output}`);
+      assert.match(xpass.output, /XPASS Echo\.echo:shout/);
+      assert.match(xpass.output, /SUITE FAILED/);
+
+      // 3: divergent for shout, NO waiver => RED (hard mismatch).
+      const red = run(javaEchoAdapter(true, []));
+      assert.notEqual(red.status, 0, `unwaived divergence must fail:\n${red.output}`);
+      assert.match(red.output, /^FAIL Echo\.echo:shout:/m);
+      assert.doesNotMatch(red.output, /XFAIL Echo\.echo:shout/);
+      assert.match(red.output, /SUITE FAILED/);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }
