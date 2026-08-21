@@ -158,7 +158,14 @@ export const generateSwift = async (
     );
   }
 
-  if (testRoot && (options?.callableVectors?.vectors.length ?? 0) > 0) {
+  const harnessRoot = emitTarget["harness-test-dir"] ?? testRoot;
+  if (harnessRoot && (options?.callableVectors?.vectors.length ?? 0) > 0) {
+    // A split-package runtime can point the harness at a separate SDK/aggregate
+    // package (via 'harness-test-dir') so every stage's adapter is reachable.
+    // The file is still owned by this Swift target's stable outputDir root, so
+    // cleanup reconciles it across config changes (a relocated, removed, or
+    // now-empty harness leaves no orphan) while only ever pruning marker-owned
+    // files — never the SDK's hand-written tests.
     await emitSwiftGeneratedFile(
       context,
       "VectorConformanceTests.swift",
@@ -166,7 +173,7 @@ export const generateSwift = async (
         options!.callableVectors!,
         emitTarget["vector-adapter-path"] ?? "VectorAdapters",
       ),
-      testRoot,
+      harnessRoot,
       outputDir,
     );
   }

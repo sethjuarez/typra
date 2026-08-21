@@ -16,6 +16,7 @@ export interface EmitTarget {
   "cancellation-token-path"?: string;
   "vector-adapter-path"?: string;
   "test-resources"?: string[];
+  "harness-test-dir"?: string;
   "native-serialization"?:
     | "none"
     | "pydantic"
@@ -265,6 +266,12 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             nullable: true,
             description:
               "Swift only. Resource directory/file names (relative to the generated test target) to declare as bundled test resources on the emitted Package.swift test target, e.g. ['Resources'] emits `resources: [.process(\"Resources\")]`. Keeps hand-added test resource wiring reproducible across regeneration instead of being dropped when Package.swift is regenerated.",
+          },
+          "harness-test-dir": {
+            type: "string",
+            nullable: true,
+            description:
+              "Swift only. Directory to emit the @vector conformance harness (VectorConformanceTests.swift) into, decoupled from the model target's 'test-dir'. For split-package runtimes where the model types live in one package and the provider/pipeline stages live in a separate SDK package, point this at the SDK package's test target so the harness can reach every stage's adapter (authored beside it via 'vector-adapter-path') instead of only the stages reachable from the model package. The 'VectorConformanceTests.swift' file in this directory is emitter-owned and regenerated each run (cleanup prunes it if the option is later removed/changed), but other files there are left untouched. Model tests, discovery ConformanceTests, and protocol scaffolds still land in 'test-dir'. Defaults to 'test-dir' when unset.",
           },
         },
         required: ["type"],
