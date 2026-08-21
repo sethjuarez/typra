@@ -15,6 +15,7 @@ export interface EmitTarget {
   "protocol-scaffolds"?: "none" | "compile-only";
   "cancellation-token-path"?: string;
   "vector-adapter-path"?: string;
+  "test-resources"?: string[];
   "native-serialization"?:
     | "none"
     | "pydantic"
@@ -257,6 +258,13 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             nullable: true,
             description:
               "Import path to the runtime-authored vector adapter registry consumed by the generated @vector conformance harness. Lives outside the regenerated/pruned output tree. Defaults to './vector-adapters' (TypeScript), 'vector_adapters' (Python), 'vectoradapters' (Go), 'vector_adapters.rs' (Rust), '<root-namespace>.Conformance' (C#), '<package-name>.VectorAdapters' (Java), and 'VectorAdapters' (Swift; the enum's name, authored beside the generated files in the same test target).",
+          },
+          "test-resources": {
+            type: "array",
+            items: { type: "string" },
+            nullable: true,
+            description:
+              "Swift only. Resource directory/file names (relative to the generated test target) to declare as bundled test resources on the emitted Package.swift test target, e.g. ['Resources'] emits `resources: [.process(\"Resources\")]`. Keeps hand-added test resource wiring reproducible across regeneration instead of being dropped when Package.swift is regenerated.",
           },
         },
         required: ["type"],
