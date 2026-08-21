@@ -1,11 +1,15 @@
 // Reference adapters for the integration fixture's @vector suite. Copied into
-// the java-jackson target's tests/ dir by validate-fixtures before the
-// generated conformance suite runs. See fixtures/integration/vector-adapters.
+// each Java target's tests/ dir by validate-fixtures before the generated
+// conformance suite runs. See fixtures/integration/vector-adapters.
+//
+// Serialization-agnostic: the generated harness drives the built-in JSON value
+// model (Map/List/String/Number/Boolean/null), so adapters receive and return
+// that Object tree — no Jackson required, regardless of the target's
+// native-serialization backend.
 package typra.fixtures;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import typra.fixtures.VectorConformanceTests.VectorAdapter;
 import typra.fixtures.VectorConformanceTests.VectorContext;
@@ -13,14 +17,14 @@ import typra.fixtures.VectorConformanceTests.VectorContext;
 public final class VectorAdapters {
   private VectorAdapters() { }
 
-  private static final JsonNodeFactory NF = JsonNodeFactory.instance;
-
-  private static JsonNode authorizeInvoke(JsonNode input, VectorContext ctx) {
-    return NF.objectNode().put("approved", true);
+  private static Object authorizeInvoke(Object input, VectorContext ctx) {
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("approved", true);
+    return result;
   }
 
-  private static JsonNode formatInvoke(JsonNode input, VectorContext ctx) {
-    return input.path("messages");
+  private static Object formatInvoke(Object input, VectorContext ctx) {
+    return input instanceof Map<?, ?> map ? map.get("messages") : null;
   }
 
   public static Map<String, VectorAdapter> adapters() {
@@ -34,7 +38,7 @@ public final class VectorAdapters {
     return new HashMap<>();
   }
 
-  public static JsonNode doubles() {
-    return NF.objectNode();
+  public static Object doubles() {
+    return new LinkedHashMap<String, Object>();
   }
 }

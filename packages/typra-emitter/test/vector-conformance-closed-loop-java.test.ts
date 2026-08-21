@@ -11,20 +11,24 @@
 //
 // If the loop were open (comparing vector data to itself), scenarios 2 and 3
 // could never diverge from scenario 1. They do, so the loop is closed.
+//
+// The target is emitted with native-serialization "none": the harness drives the
+// built-in JSON value model (TypraJson/TypraMaps), so it must emit and pass
+// regardless of serialization backend. This doubles as the #259 regression lock —
+// on the pre-fix emitter the harness was gated on Jackson and never emitted here.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 const require = createRequire(import.meta.url);
@@ -42,35 +46,12 @@ function toolAvailable(tool: string): boolean {
   }
 }
 
-const JACKSON_VERSION = "2.17.2";
-const JACKSON_ARTIFACTS = [
-  "jackson-annotations",
-  "jackson-core",
-  "jackson-databind",
-];
-
-// Resolve the Jackson runtime the way validate-fixtures does, but cached in a
-// stable location so repeated local runs reuse the jars. Returns null offline.
-function jacksonClasspath(): string | null {
-  const cacheDir = path.join(os.tmpdir(), "typra-jackson-cache");
-  mkdirSync(cacheDir, { recursive: true });
-  const jars: string[] = [];
-  for (const artifact of JACKSON_ARTIFACTS) {
-    const jar = path.join(cacheDir, `${artifact}-${JACKSON_VERSION}.jar`);
-    jars.push(jar);
-    if (existsSync(jar)) continue;
-    const url =
-      `https://repo1.maven.org/maven2/com/fasterxml/jackson/core/` +
-      `${artifact}/${JACKSON_VERSION}/${artifact}-${JACKSON_VERSION}.jar`;
-    try {
-      execFileSync("curl", ["-fsSL", url, "-o", jar], {
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch {
-      return null;
-    }
-  }
-  return jars.join(path.delimiter);
+// Recursively collect every .java file under a root (the emitted model/runtime
+// tree, which includes the built-in TypraJson/TypraMaps the harness depends on).
+function collectJavaSources(root: string): string[] {
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".java"))
+    .map((entry) => path.join(entry.parentPath, entry.name));
 }
 
 const BIG_TEXT = "x".repeat(70000);
@@ -120,27 +101,40 @@ const ADAPTER_CLASS = "typra.proof.adapters.VectorAdapters";
 // -- runtime adapter registry authored the way a downstream runtime would ------
 
 const JAVA_INVOKES = [
+  "  private static Object field(Object value, String key) {",
+  "    return value instanceof Map<?, ?> map ? map.get(key) : null;",
+  "  }",
+  "",
   "  // Async adapter: returns a CompletableFuture the harness joins. Proves the",
   "  // await-if-awaitable seam, including the failed-future error path.",
-  "  private static java.util.concurrent.CompletableFuture<JsonNode> echoInvoke(",
-  "      JsonNode input, VectorContext ctx) {",
-  '    String payload = input.path("payload").asText("");',
+  "  private static java.util.concurrent.CompletableFuture<Object> echoInvoke(",
+  "      Object input, VectorContext ctx) {",
+  '    Object raw = field(input, "payload");',
+  '    String payload = raw instanceof String s ? s : "";',
   "    if (payload.isEmpty()) {",
-  '      return java.util.concurrent.CompletableFuture.failedFuture(',
-  '          new VectorException("empty", NF.objectNode().put("code", "empty")));',
+  "      Map<String, Object> err = new LinkedHashMap<>();",
+  '      err.put("code", "empty");',
+  "      return java.util.concurrent.CompletableFuture.failedFuture(",
+  '          new VectorException("empty", err));',
   "    }",
   "    return java.util.concurrent.CompletableFuture.completedFuture(",
-  "        NF.textNode(payload.toUpperCase(Locale.ROOT)));",
+  "        payload.toUpperCase(Locale.ROOT));",
   "  }",
   "",
-  "  private static JsonNode noteInvoke(JsonNode input, VectorContext ctx) {",
-  '    return NF.textNode(input.path("text").asText("") + "!");',
+  "  private static Object noteInvoke(Object input, VectorContext ctx) {",
+  '    Object raw = field(input, "text");',
+  '    return (raw instanceof String s ? s : "") + "!";',
   "  }",
   "",
-  "  private static JsonNode sumInvoke(JsonNode input, VectorContext ctx) {",
+  "  private static Object sumInvoke(Object input, VectorContext ctx) {",
   "    long total = 0;",
-  '    for (JsonNode v : input.path("values")) { total += v.asLong(); }',
-  "    return NF.numberNode(total);",
+  '    Object values = field(input, "values");',
+  "    if (values instanceof List<?> list) {",
+  "      for (Object v : list) {",
+  "        if (v instanceof Number n) { total += n.longValue(); }",
+  "      }",
+  "    }",
+  "    return total;",
   "  }",
   "",
 ];
@@ -152,9 +146,10 @@ function javaAdapter(
   return [
     "package typra.proof.adapters;",
     "",
-    "import com.fasterxml.jackson.databind.JsonNode;",
-    "import com.fasterxml.jackson.databind.node.JsonNodeFactory;",
+    "import java.util.ArrayList;",
     "import java.util.HashMap;",
+    "import java.util.LinkedHashMap;",
+    "import java.util.List;",
     "import java.util.Locale;",
     "import java.util.Map;",
     "import typra.proof.VectorConformanceTests.VectorAdapter;",
@@ -163,7 +158,6 @@ function javaAdapter(
     "",
     "public final class VectorAdapters {",
     "  private VectorAdapters() { }",
-    "  private static final JsonNodeFactory NF = JsonNodeFactory.instance;",
     "",
     ...JAVA_INVOKES,
     "  public static Map<String, VectorAdapter> adapters() {",
@@ -178,7 +172,7 @@ function javaAdapter(
     "    return w;",
     "  }",
     "",
-    "  public static JsonNode doubles() { return NF.objectNode(); }",
+    "  public static Object doubles() { return new LinkedHashMap<String, Object>(); }",
     "}",
     "",
   ].join("\n");
@@ -214,11 +208,6 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
       t.skip("java toolchain not available");
       return;
     }
-    const classpath = jacksonClasspath();
-    if (!classpath) {
-      t.skip("jackson runtime unavailable (offline)");
-      return;
-    }
 
     const output = mkdtempSync(path.join(process.cwd(), "tmp-vector-java-loop-"));
     const source = path.join(output, "main.tsp");
@@ -246,7 +235,7 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
           `        output-dir: ${yamlString(javaOut)}`,
           `        test-dir: ${yamlString(javaTestDir)}`,
           '        package-name: "typra.proof"',
-          '        native-serialization: "jackson"',
+          '        native-serialization: "none"',
           `        vector-adapter-path: ${yamlString(ADAPTER_CLASS)}`,
           "        format: false",
           "",
@@ -267,8 +256,12 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
       assert.match(javaSuite, /package typra\.proof;/);
       assert.match(javaSuite, /typra\.proof\.adapters\.VectorAdapters\.adapters\(\)/);
       assert.match(javaSuite, /No vector adapter registered for/);
-      assert.match(javaSuite, /Object apply\(JsonNode input, VectorContext ctx\)/);
+      assert.match(javaSuite, /Object apply\(Object input, VectorContext ctx\)/);
       assert.match(javaSuite, /invokeAdapter\(adapter, input, ctx, sync, vectorId\)/);
+      // #259 regression lock: the harness must be serialization-agnostic — no
+      // Jackson types — since it is emitted for the native (none) backend too.
+      assert.doesNotMatch(javaSuite, /com\.fasterxml\.jackson/);
+      assert.match(javaSuite, /TypraJson\.parse\(/);
       // The bidi control (U+202E) is embedded as an ASCII JSON escape, never raw.
       assert.match(javaSuite, /\\\\u202e/);
       assert.doesNotMatch(javaSuite, /\u202e/);
@@ -280,18 +273,16 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
         "large payload should split into multiple appended chunks",
       );
 
-      // Assemble a self-contained source tree: the generated harness, the runtime
-      // adapter, and a tiny Main that drives run().
+      // Assemble a self-contained source tree: the emitted model/runtime files
+      // (which carry the built-in TypraJson/TypraMaps the harness depends on),
+      // the generated harness, the runtime adapter, and a tiny Main that drives
+      // run(). No external classpath is needed for the native (none) backend.
+      const modelSources = collectJavaSources(javaOut);
       const srcDir = path.join(output, "src");
-      const harnessDir = path.join(srcDir, "typra", "proof");
-      const adapterDir = path.join(harnessDir, "adapters");
       const classesDir = path.join(output, "classes");
-      mkdirSync(adapterDir, { recursive: true });
+      mkdirSync(srcDir, { recursive: true });
       mkdirSync(classesDir, { recursive: true });
-      writeFileSync(
-        path.join(harnessDir, "VectorConformanceTests.java"),
-        javaSuite,
-      );
+      const harnessPath = path.join(javaTestDir, "VectorConformanceTests.java");
       writeFileSync(
         path.join(srcDir, "Main.java"),
         [
@@ -310,21 +301,22 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
         ].join("\n"),
       );
 
-      const adapterPath = path.join(adapterDir, "VectorAdapters.java");
+      const adapterPath = path.join(srcDir, "VectorAdapters.java");
 
       const run = (adapterSrc: string): RunResult => {
         writeFileSync(adapterPath, adapterSrc);
         rmSync(classesDir, { recursive: true, force: true });
         mkdirSync(classesDir, { recursive: true });
         const sources = [
-          path.join(harnessDir, "VectorConformanceTests.java"),
+          ...modelSources,
+          harnessPath,
           adapterPath,
           path.join(srcDir, "Main.java"),
         ];
         try {
           execFileSync(
             "javac",
-            ["-cp", classpath, "-Xlint:all", "-Werror", "-d", classesDir, ...sources],
+            ["-Xlint:all", "-Werror", "-d", classesDir, ...sources],
             { cwd: output, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
           );
         } catch (error) {
@@ -337,7 +329,7 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
         try {
           const out = execFileSync(
             "java",
-            ["-cp", `${classesDir}${path.delimiter}${classpath}`, "Main"],
+            ["-cp", classesDir, "Main"],
             { cwd: output, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
           );
           return { status: 0, output: out };
