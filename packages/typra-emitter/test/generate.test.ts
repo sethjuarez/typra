@@ -462,8 +462,8 @@ describe("generate", () => {
         "utf8",
       );
       assert.match(tsVectorTest, /callable vector conformance/);
-      assert.match(tsVectorTest, /"contract": "Renderer"/);
-      assert.match(tsVectorTest, /"operation": "render"/);
+      assert.match(tsVectorTest, /contract: "Renderer"/);
+      assert.match(tsVectorTest, /operation: "render"/);
       // Vector inputs are opaque evidence: no model-typed load/save round-trip
       // is generated even though `render` takes a `RenderRequest` param.
       assert.doesNotMatch(tsVectorTest, /assertVectorModelRoundTrips/);
@@ -1050,13 +1050,13 @@ describe("generate", () => {
         ),
         "utf8",
       );
-      assert.match(vectorTest, /"contract": "Renderer"/);
-      assert.match(vectorTest, /"stage": "render"/);
-      assert.match(vectorTest, /"provider": "prompty"/);
-      assert.match(vectorTest, /"targetApi": "local"/);
-      assert.match(vectorTest, /"normalization": \{\s+"trailingNewline": "trim"/);
-      assert.match(vectorTest, /"contract": "Harness"/);
-      assert.match(vectorTest, /"expectedError": \{\s+"code": "replay-drift"/);
+      assert.match(vectorTest, /contract: "Renderer"/);
+      assert.match(vectorTest, /stage: "render"/);
+      assert.match(vectorTest, /provider: "prompty"/);
+      assert.match(vectorTest, /targetApi: "local"/);
+      assert.match(vectorTest, /normalization: \{\s+trailingNewline: "trim"/);
+      assert.match(vectorTest, /contract: "Harness"/);
+      assert.match(vectorTest, /expectedError: \{\s+code: "replay-drift"/);
       assert.doesNotMatch(vectorTest, /RenderRequest\.load\(value\)\.save\(\)/);
 
       const scaffold = readFileSync(
@@ -1224,8 +1224,8 @@ describe("generate", () => {
       assert.match(routes, /from typing import Any, Protocol/);
       assert.match(routes, /from fastapi import APIRouter, Body, Cookie, Header, Path, Query/);
       assert.match(routes, /AUTH_REQUIREMENTS = json\.loads/);
-      assert.match(routes, /\\"Pets\.read\\": \{/);
-      assert.match(routes, /\\"scheme\\": \\"Bearer\\"/);
+      assert.match(routes, /"Pets\.read": \{/);
+      assert.match(routes, /"scheme": "Bearer"/);
       assert.doesNotMatch(routes, /Authorization/);
       assert.match(routes, /class PetsHandler\(Protocol\):/);
       assert.match(routes, /async def read\(self, session_id: str, pet_id: str, include_details: bool \| None\):/);
@@ -1275,7 +1275,7 @@ describe("generate", () => {
       assert.match(starletteRoutes, /Route\("\/pets\/names\/\{pet_id\}", getName, methods=\["GET"\]\)/);
       assert.match(starletteRoutes, /pet_id = _coerce\(_request\.path_params\.get\("pet_id"\), "string"\)/);
       assert.match(starletteRoutes, /session_id = _coerce\(_required\(session_id_raw, "session_id"\), "string"\)/);
-      assert.match(starletteRoutes, /content_version = _coerce\(_required\(content_version_raw, "content-version"\), "string"\)/);
+      assert.match(starletteRoutes, /content_version = _coerce\(\n\s*_required\(content_version_raw, "content-version"\), "string"\n\s*\)/);
       assert.match(starletteRoutes, /include_details = _coerce\(include_details_raw, "boolean"\)/);
       assert.match(starletteRoutes, /result = result\.save\(\) if hasattr\(result, "save"\) else result/);
 
@@ -1298,10 +1298,10 @@ describe("generate", () => {
       assert.match(transportTest, /from fastapi.testclient import TestClient/);
       assert.match(transportTest, /def test_fastapi_transport_vectors_execute_routes/);
       assert.match(transportTest, /_assert_handler_received\(entry, handler\)/);
-      assert.match(transportTest, /\\"stage\\": \\"transport\\"/);
-      assert.match(transportTest, /\\"verb\\": \\"get\\"/);
-      assert.match(transportTest, /\\"verb\\": \\"post\\"/);
-      assert.match(transportTest, /\\"path\\": \\"\/pets\/\{petId\}\\"/);
+      assert.match(transportTest, /"stage": "transport"/);
+      assert.match(transportTest, /"verb": "get"/);
+      assert.match(transportTest, /"verb": "post"/);
+      assert.match(transportTest, /"path": "\/pets\/\{petId\}"/);
       const starletteTest = readFileSync(
         path.join(output, "generated", "python-tests", "test_starlette_transport.py"),
         "utf8",
@@ -1316,7 +1316,7 @@ describe("generate", () => {
       assert.match(httpxTest, /test_httpx_transport_errors_preserve_body/);
       assert.match(httpxTest, /import asyncio/);
       assert.match(httpxTest, /asyncio\.run\(_run_httpx_transport_vectors_execute_clients\(\)\)/);
-      assert.match(httpxTest, /\\"successStatus\\": 201/);
+      assert.match(httpxTest, /"successStatus": 201/);
       const pythonVectorConformance = readFileSync(
         path.join(output, "generated", "python-tests", "test_vector_conformance.py"),
         "utf8",
@@ -1353,13 +1353,13 @@ describe("generate", () => {
       assert.match(tsClient, /cookies\?: Record<string, string>/);
       assert.match(tsClient, /auth\?: TypraAuthRequirement/);
       assert.match(tsClient, /export interface TypraAuthRequirement/);
-      assert.match(tsClient, /auth: \{\n\s+\"options\": \[/);
-      assert.match(tsClient, /"scheme": "Bearer"/);
+      assert.match(tsClient, /auth: \{\n\s+options: \[/);
+      assert.match(tsClient, /scheme: "Bearer"/);
       assert.doesNotMatch(tsClient, /Authorization/);
       assert.match(tsClient, /export class TypraFetchResponseError extends Error/);
-      assert.match(tsClient, /async read\(input: \{ sessionId: string; petId: string; includeDetails\?: boolean \}\): Promise<Pet>/);
+      assert.match(tsClient, /async read\(\s*input: \{ sessionId: string; petId: string; includeDetails\?: boolean \},?\s*\): Promise<Pet>/);
       assert.match(tsClient, /let path = "\/pets\/\{petId\}";/);
-      assert.match(tsClient, /path = path\.replace\(pathParameterPattern\("petId"\), encodeURIComponent/);
+      assert.match(tsClient, /path = path\.replace\(\s*pathParameterPattern\("petId"\),\s*encodeURIComponent/);
       assert.match(tsClient, /query\.set\("includeDetails", value\)/);
       assert.match(tsClient, /cookies\["session_id"\] = value/);
       assert.match(tsClient, /headers\["content-version"\] = value/);
@@ -1377,11 +1377,11 @@ describe("generate", () => {
       assert.match(tsConsumerTest, /transport fetch consumer conformance/);
       assert.match(tsConsumerTest, /const client = new PetsClient/);
       assert.match(tsConsumerTest, /captured = request/);
-      assert.match(tsConsumerTest, /url": "https:\/\/example\.test\/pets\/p1\?includeDetails=true"/);
-      assert.match(tsConsumerTest, /"cookies": \{\n\s+"session_id": "s1"/);
-      assert.match(tsConsumerTest, /"auth": \{\n\s+"options": \[/);
-      assert.match(tsConsumerTest, /"body": undefined/);
-      assert.match(tsConsumerTest, /"body": \{\n\s+"name": "Fido"/);
+      assert.match(tsConsumerTest, /url: "https:\/\/example\.test\/pets\/p1\?includeDetails=true"/);
+      assert.match(tsConsumerTest, /cookies: \{\n\s+session_id: "s1"/);
+      assert.match(tsConsumerTest, /auth: \{\n\s+options: \[/);
+      assert.match(tsConsumerTest, /body: undefined/);
+      assert.match(tsConsumerTest, /body: \{\n\s+name: "Fido"/);
       assert.match(tsConsumerTest, /status: 201/);
       assert.match(tsConsumerTest, /non-success-response/);
       assert.match(tsConsumerTest, /TypraFetchResponseError/);

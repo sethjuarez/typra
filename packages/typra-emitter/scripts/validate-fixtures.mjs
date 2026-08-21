@@ -947,7 +947,8 @@ function assertStaticFixtureCoverage() {
     path.join("generated", "fixtures", "typescript-zod", "fixture-content.ts"),
     'import { z } from "zod";',
     "static readonly wireSchema",
-    'z.discriminatedUnion("kind"',
+    "z.discriminatedUnion(",
+    '"kind",',
     "static readonly schema",
   );
   assertIncludes(
@@ -1017,7 +1018,8 @@ function assertStaticFixtureCoverage() {
     "class ModelInfo(BaseModel):",
     "model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)",
     'input_modalities: list[str] | None = Field(default=None, alias="inputModalities")',
-    'output_modalities: list[str] | None = Field(default_factory=list, alias="outputModalities")',
+    "output_modalities: list[str] | None = Field(",
+    'default_factory=list, alias="outputModalities"',
     "def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:",
     "return self.save()",
   );

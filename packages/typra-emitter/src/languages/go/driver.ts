@@ -22,6 +22,7 @@ import {
   collectPolymorphicTypeNames,
 } from "../../ir/lower.js";
 import { emitGoFileContent } from "./emitter.js";
+import { formatGoSource } from "./go-format.js";
 import { emitGoContext } from "./scaffolding.js";
 import { emitGoTest } from "./test-emitter.js";
 import { buildGoFieldNames } from "./identifiers.js";
@@ -292,7 +293,7 @@ async function emitGoFile(
   outputDir = outputDir || `${context.emitterOutputDir}/go`;
   const filePath = resolvePath(outputDir, filename);
 
-  await emitGeneratedFile(context, filePath, content, {
+  await emitGeneratedFile(context, filePath, formatGoSource(content), {
     outputRoot: outputRoot || outputDir,
   });
 }

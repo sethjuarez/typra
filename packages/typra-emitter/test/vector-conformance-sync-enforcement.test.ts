@@ -195,15 +195,18 @@ describe("@sync classification is threaded and enforced across all targets", () 
         const suite = readFileSync(path.join(testDir, target.file), "utf8");
         const flat = flatten(suite);
 
-        // (a) the @sync op is classified sync:true, the async-default op sync:false
+        // (a) the @sync op is classified sync:true, the async-default op sync:false.
+        // TypeScript's payload is a real object literal, so prettier drops quotes
+        // from its identifier keys; the other targets embed it as a JSON string
+        // (quoted keys). Accept either so one assertion covers every target.
         assert.match(
           flat,
-          /"operation":"format",[^]*?"sync":true/,
+          /"?operation"?:"format",[^]*?"?sync"?:true/,
           `${target.type}: expected the @sync op 'format' to be classified sync:true`,
         );
         assert.match(
           flat,
-          /"operation":"authorize",[^]*?"sync":false/,
+          /"?operation"?:"authorize",[^]*?"?sync"?:false/,
           `${target.type}: expected async-default op 'authorize' to be classified sync:false`,
         );
 

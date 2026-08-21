@@ -1327,34 +1327,34 @@ function emitPolymorphicDispatch(
   );
   lines.push("    }");
   lines.push("    const discriminator = discriminatorValue;");
-  lines.push("      switch (discriminator) {");
+  lines.push("    switch (discriminator) {");
 
   for (const v of dispatch.variants) {
-    lines.push(`        case "${v.value}":`);
-    lines.push(`          return ${v.typeName.name}.load(data, context);`);
+    lines.push(`      case "${v.value}":`);
+    lines.push(`        return ${v.typeName.name}.load(data, context);`);
   }
 
   // Default handling
   if (dispatch.defaultVariant) {
-    lines.push("        default:");
+    lines.push("      default:");
     if (dispatch.defaultVariant.isSelfReference) {
-      lines.push(`          return new ${parentName}();`);
+      lines.push(`        return new ${parentName}();`);
     } else {
       lines.push(
-        `          return ${dispatch.defaultVariant.typeName.name}.load(data, context);`,
+        `        return ${dispatch.defaultVariant.typeName.name}.load(data, context);`,
       );
     }
   } else if (carrier) {
-    lines.push("        default:");
-    lines.push(`          return ${carrier}.load(data, context);`);
+    lines.push("      default:");
+    lines.push(`        return ${carrier}.load(data, context);`);
   } else {
-    lines.push("        default:");
+    lines.push("      default:");
     lines.push(
-      `          throw new Error(\`Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: \${discriminator}\`);`,
+      `        throw new Error(\`Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: \${discriminator}\`);`,
     );
   }
 
-  lines.push("      }");
+  lines.push("    }");
 
   lines.push("  }");
   lines.push("");

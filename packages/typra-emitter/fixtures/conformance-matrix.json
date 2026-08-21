@@ -550,8 +550,10 @@
             "path": "generated/fixtures/typescript/wire-options.ts",
             "snippets": [
               "toWire(provider: string)",
-              "\"maxOutputTokens\": { \"openai\": \"max_completion_tokens\", \"anthropic\": \"max_tokens\" }",
-              "\"temperature\": { \"openai\": \"temperature\" }",
+              "maxOutputTokens: {",
+              "openai: \"max_completion_tokens\"",
+              "anthropic: \"max_tokens\"",
+              "temperature: { openai: \"temperature\" }",
               "if (mapping?.[provider]) {",
               "result[mapping[provider]] = value"
             ]
@@ -842,7 +844,8 @@
             "snippets": [
               "counts: Record<string, number>",
               "owners: Record<string, FixtureOwner>",
-              "FixtureOwner.load(value as Record<string, unknown>",
+              "FixtureOwner.load(",
+              "value as Record<string, unknown>",
               "value.save(context)"
             ]
           }

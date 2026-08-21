@@ -234,24 +234,43 @@ describe("idempotency-guard: target registry", () => {
     }
   });
 
-  it("defers Go (it ships format:true; native output is not gofmt-idempotent)", () => {
+  it("locks Go (its native output is gofmt+goimports-idempotent, #238)", () => {
     const go = IDEMPOTENCY_TARGETS.find((target) => target.id === "go");
     assert.ok(go, "go idempotency target must exist");
-    assert.equal(go.status, "deferred");
+    assert.equal(go.status, "locked");
     assert.equal(go.tool, "gofmt");
-    assert.ok(go.reason, "go deferral must be documented");
+    assert.notEqual(go.measurable, false, "a locked target must be measurable");
   });
 
-  it("locks nothing yet — the native-output audit found every runtime drifts", () => {
+  it("locks C# (native output is dotnet-format-idempotent at 0/168, #238)", () => {
+    const csharp = IDEMPOTENCY_TARGETS.find((target) => target.id === "csharp");
+    assert.ok(csharp, "csharp idempotency target must exist");
+    assert.equal(csharp.status, "locked");
+    assert.equal(csharp.tool, "dotnet format");
+    assert.notEqual(
+      csharp.measurable,
+      false,
+      "a locked target must be measurable",
+    );
+  });
+
+  it("locks the ruff-, prettier-, gofmt-, and dotnet-format-idempotent runtimes — their native output is a no-op (#238)", () => {
     const locked = IDEMPOTENCY_TARGETS.filter(
       (target) => target.status === "locked",
-    );
+    ).map((target) => target.id);
     assert.deepEqual(
-      locked,
-      [],
-      `no runtime is formatter-idempotent yet; unexpectedly locked: ${locked
-        .map((t) => t.id)
-        .join(", ")}`,
+      [...locked].sort(),
+      ["csharp", "go", "python", "python_pydantic", "typescript"],
+      `expected the Go, Python, TypeScript, and C# runtimes to be locked; got: ${locked.join(", ")}`,
+    );
+    for (const id of ["python", "python_pydantic"]) {
+      const target = IDEMPOTENCY_TARGETS.find((t) => t.id === id);
+      assert.equal(target.tool, "ruff format", `${id} must format with ruff`);
+    }
+    assert.equal(
+      IDEMPOTENCY_TARGETS.find((t) => t.id === "typescript").tool,
+      "prettier",
+      "typescript must format with prettier",
     );
   });
 
@@ -277,6 +296,7 @@ describe("idempotency-guard: target registry", () => {
       "typescript-zod",
       "python",
       "python_pydantic",
+      "go",
       "rust",
       "rust-serde",
       "swift",
