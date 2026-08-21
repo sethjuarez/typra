@@ -668,7 +668,19 @@ export function emitGoTest(
     lines.push(``);
     lines.push(`"gopkg.in/yaml.v3"`);
     lines.push(``);
-    lines.push(`"${ctx.importPath}"`);
+    // Bind the import to the package's declared name. Go resolves an import to
+    // the imported package's declared name, not its path's last segment, so when
+    // they diverge (e.g. `package prompty` living in `.../model`) the call sites
+    // below qualify with `pkg.` while the bare path would bind the identifier to
+    // the path segment. goimports then judges the import unused and prunes it,
+    // breaking compilation. An explicit alias keeps the file self-consistent and
+    // survives goimports regardless of name/path divergence (see issue #262).
+    const importSegment = ctx.importPath.split("/").pop() ?? ctx.importPath;
+    lines.push(
+      pkg && pkg !== importSegment
+        ? `${pkg} "${ctx.importPath}"`
+        : `"${ctx.importPath}"`,
+    );
     lines.push(`)`);
   }
   lines.push(""); // {% endif %}\n (line 26)

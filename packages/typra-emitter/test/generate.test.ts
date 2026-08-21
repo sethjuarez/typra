@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { generate, SUPPORTED_TARGET_LANGUAGES } from "../src/generate.js";
 import { csharpGroupFolder } from "../src/languages/csharp/driver.js";
 import { validateNativeSerializationTargets } from "../src/native-serialization.js";
+import { validateTargetOptionScopes } from "../src/target-option-scopes.js";
 import {
   findContributor,
   normalizeOutputRequests,
@@ -214,6 +215,35 @@ describe("generate", () => {
         'Target "swift" does not support native-serialization "standard-schema". Supported values: "none", "codable".',
         'Target "typescript" does not support output contributor "server:fastapi".',
         'Target "python" does not support output contributor "consumer:fetch".',
+      ],
+    );
+  });
+
+  it("rejects Swift-only emit-target options on non-Swift targets", () => {
+    // Swift is the only target whose build manifest the emitter owns, so
+    // 'test-resources' (#260) and 'harness-test-dir' (#261) are honored only
+    // there. On any other target they must fail closed, not silently no-op.
+    assert.deepEqual(
+      validateTargetOptionScopes([
+        { type: "Swift", "test-resources": ["Resources"], "harness-test-dir": "Tests/Sdk" },
+        { type: "swift", "harness-test-dir": "Tests/Sdk" },
+        // Inert no-ops (empty array / blank string) are tolerated, not rejected.
+        { type: "java", "test-resources": [], "harness-test-dir": "   " },
+        { type: "typescript" },
+      ]),
+      [],
+    );
+    assert.deepEqual(
+      validateTargetOptionScopes([
+        { type: "Java", "harness-test-dir": "sdk/src/test/java" },
+        { type: "rust", "test-resources": ["fixtures"] },
+        { type: "go", "test-resources": ["data"], "harness-test-dir": "conformance" },
+      ]),
+      [
+        'Target "Java" does not support the swift-only option "harness-test-dir" (#261). It is honored only by the Swift target; remove it, or open an emitter-drift report with your layout so it can be generalized deliberately.',
+        'Target "rust" does not support the swift-only option "test-resources" (#260). It is honored only by the Swift target; remove it, or open an emitter-drift report with your layout so it can be generalized deliberately.',
+        'Target "go" does not support the swift-only option "test-resources" (#260). It is honored only by the Swift target; remove it, or open an emitter-drift report with your layout so it can be generalized deliberately.',
+        'Target "go" does not support the swift-only option "harness-test-dir" (#261). It is honored only by the Swift target; remove it, or open an emitter-drift report with your layout so it can be generalized deliberately.',
       ],
     );
   });
@@ -1721,6 +1751,80 @@ describe("generate", () => {
             /Target "Python" does not support native-serialization "jackson"/,
           );
           assert.match(output, /Supported values: "none", "pydantic"/);
+          return true;
+        },
+      );
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects the Swift-only harness-test-dir option on a non-Swift target", () => {
+    const output = mkdtempSync(
+      path.join(process.cwd(), "tmp-target-option-scope-"),
+    );
+    const source = path.join(output, "main.tsp");
+    const config = path.join(output, "tspconfig.yaml");
+    const compilerEntry = require.resolve("@typespec/compiler");
+    const compilerRoot = path.resolve(path.dirname(compilerEntry), "../..");
+    const tspCli = path.join(compilerRoot, "cmd", "tsp.js");
+    try {
+      writeFileSync(
+        source,
+        [
+          'import "@typra/emitter";',
+          "",
+          "namespace Typra.ScopeProbe;",
+          "",
+          "model Root {",
+          "  name: string;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        config,
+        [
+          "emit:",
+          '  - "@typra/emitter"',
+          "options:",
+          '  "@typra/emitter":',
+          `    emitter-output-dir: ${yamlString(path.join(output, "generated"))}`,
+          '    root-object: "Typra.ScopeProbe.Root"',
+          "    emit-targets:",
+          "      - type: Java",
+          `        output-dir: ${yamlString(path.join(output, "generated", "java"))}`,
+          '        package-name: "typra.scopeprobe"',
+          '        harness-test-dir: "sdk/src/test/java"',
+          "        format: false",
+          "",
+        ].join("\n"),
+      );
+
+      assert.throws(
+        () =>
+          execFileSync(
+            process.execPath,
+            [tspCli, "compile", source, "--config", config],
+            {
+              cwd: process.cwd(),
+              encoding: "utf8",
+              stdio: ["ignore", "pipe", "pipe"],
+            },
+          ),
+        (error: unknown) => {
+          const output =
+            error &&
+            typeof error === "object" &&
+            "stdout" in error &&
+            "stderr" in error
+              ? `${String((error as { stdout?: unknown }).stdout ?? "")}${String((error as { stderr?: unknown }).stderr ?? "")}`
+              : String(error);
+          assert.match(output, /typra-emitter-target-option-scope/);
+          assert.match(
+            output,
+            /Target "Java" does not support the swift-only option "harness-test-dir" \(#261\)/,
+          );
           return true;
         },
       );

@@ -29,7 +29,7 @@ One adapter per source language; variant targets reuse the base-language file:
 | `go/adapters.go`                | `go`                             |
 | `rust/vector_adapters.rs`       | `rust`, `rust-serde`             |
 | `csharp/VectorAdapters.cs`      | `csharp`                         |
-| `java/VectorAdapters.java`      | `java-jackson`                   |
+| `java/VectorAdapters.java`      | `java`, `java-jackson`           |
 | `swift/VectorAdapters.swift`    | `swift`, `swift-codable`         |
 
 The type definitions (`Context`/`Adapter`/`VectorError` etc.) mirror the shapes
@@ -39,5 +39,6 @@ the generated suites expect; keep them in sync with the emitter drivers under
 The vectors execute behaviorally on every target that runs its generated tests.
 `typescript-zod` uniquely has no test-execution stage (its generated tests are
 compile-only by existing convention), so its adapter provides compile coverage
-while the behavior is executed on the base `typescript` target. Plain `java`
-does not emit the suite, so only `java-jackson` carries a Java adapter.
+while the behavior is executed on the base `typescript` target. The `@vector`
+harness is serialization-agnostic, so both `java` (native) and `java-jackson`
+emit and run it, each with the same Java adapter.

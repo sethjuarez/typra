@@ -15,6 +15,8 @@ export interface EmitTarget {
   "protocol-scaffolds"?: "none" | "compile-only";
   "cancellation-token-path"?: string;
   "vector-adapter-path"?: string;
+  "test-resources"?: string[];
+  "harness-test-dir"?: string;
   "native-serialization"?:
     | "none"
     | "pydantic"
@@ -256,7 +258,20 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             type: "string",
             nullable: true,
             description:
-              "Import path to the runtime-authored vector adapter registry consumed by the generated @vector conformance harness. Lives outside the regenerated/pruned output tree. Defaults to './vector-adapters' (TypeScript), 'vector_adapters' (Python), 'vectoradapters' (Go), 'vector_adapters.rs' (Rust), '<root-namespace>.Conformance' (C#), '<package-name>.VectorAdapters' (Java, jackson serialization only), and 'VectorAdapters' (Swift; the enum's name, authored beside the generated files in the same test target).",
+              "Import path to the runtime-authored vector adapter registry consumed by the generated @vector conformance harness. Lives outside the regenerated/pruned output tree. Defaults to './vector-adapters' (TypeScript), 'vector_adapters' (Python), 'vectoradapters' (Go), 'vector_adapters.rs' (Rust), '<root-namespace>.Conformance' (C#), '<package-name>.VectorAdapters' (Java), and 'VectorAdapters' (Swift; the enum's name, authored beside the generated files in the same test target).",
+          },
+          "test-resources": {
+            type: "array",
+            items: { type: "string" },
+            nullable: true,
+            description:
+              "Swift only. Resource directory/file names (relative to the generated test target) to declare as bundled test resources on the emitted Package.swift test target, e.g. ['Resources'] emits `resources: [.process(\"Resources\")]`. Keeps hand-added test resource wiring reproducible across regeneration instead of being dropped when Package.swift is regenerated.",
+          },
+          "harness-test-dir": {
+            type: "string",
+            nullable: true,
+            description:
+              "Swift only. Directory to emit the @vector conformance harness (VectorConformanceTests.swift) into, decoupled from the model target's 'test-dir'. For split-package runtimes where the model types live in one package and the provider/pipeline stages live in a separate SDK package, point this at the SDK package's test target so the harness can reach every stage's adapter (authored beside it via 'vector-adapter-path') instead of only the stages reachable from the model package. The 'VectorConformanceTests.swift' file in this directory is emitter-owned and regenerated each run (cleanup prunes it if the option is later removed/changed), but other files there are left untouched. Model tests, discovery ConformanceTests, and protocol scaffolds still land in 'test-dir'. Defaults to 'test-dir' when unset.",
           },
         },
         required: ["type"],

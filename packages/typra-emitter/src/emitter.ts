@@ -35,6 +35,7 @@ import {
   emitHydrationBoundarySnapshot,
 } from "./hydration-seams.js";
 import { validateNativeSerializationTargets } from "./native-serialization.js";
+import { validateTargetOptionScopes } from "./target-option-scopes.js";
 import {
   callableContractToProtocolNode,
   lowerTypeSpecCallableContracts,
@@ -175,6 +176,9 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   ) {
     return;
   }
+  if (!validateTargetOptionScopeOptions(context, options["emit-targets"] || [])) {
+    return;
+  }
 
   // resolving top level model
   // this is the "Model" entry point for the emitter
@@ -192,6 +196,22 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     for (const message of errors) {
       context.program.reportDiagnostic({
         code: "typra-emitter-native-serialization-target",
+        message,
+        severity: "error",
+        target: NoTarget,
+      });
+    }
+    return errors.length === 0;
+  }
+
+  function validateTargetOptionScopeOptions(
+    context: EmitContext<TypraEmitterOptions>,
+    targets: EmitTarget[],
+  ): boolean {
+    const errors = validateTargetOptionScopes(targets);
+    for (const message of errors) {
+      context.program.reportDiagnostic({
+        code: "typra-emitter-target-option-scope",
         message,
         severity: "error",
         target: NoTarget,

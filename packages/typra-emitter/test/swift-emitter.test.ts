@@ -8,6 +8,7 @@ import { TypeRegistry } from "../src/ir/expansion.js";
 import { flattenInheritance } from "../src/ir/inheritance.js";
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import {
+  emitSwiftPackage,
   emitSwiftProtocolScaffolds,
   emitSwiftRuntime,
 } from "../src/languages/swift/scaffolding.js";
@@ -1485,5 +1486,40 @@ describe("Swift provider wire mapping", () => {
       /case "anthropic": wireNameMaxOutputTokens = "max_tokens"/,
     );
     assert.match(source, /case "openai": wireNameTemperature = "temperature"/);
+  });
+});
+
+describe("emitSwiftPackage test resources (#260)", () => {
+  it("omits the resources: stanza when no test resources are declared", () => {
+    const pkg = emitSwiftPackage("PromptyModel", "Tests/PromptyModelTests");
+    assert.match(pkg, /\.testTarget\(name: "PromptyModelTests"/);
+    assert.doesNotMatch(pkg, /resources:/);
+  });
+
+  it("emits a reproducible resources: stanza when test resources are declared", () => {
+    const pkg = emitSwiftPackage("PromptyModel", "Tests/PromptyModelTests", [
+      "Resources",
+    ]);
+    assert.match(
+      pkg,
+      /\.testTarget\(name: "PromptyModelTests", dependencies: \["PromptyModel"\], path: "Tests\/PromptyModelTests", resources: \[\.process\("Resources"\)\]\)/,
+    );
+  });
+
+  it("supports multiple declared test resource entries", () => {
+    const pkg = emitSwiftPackage("PromptyModel", "Tests/PromptyModelTests", [
+      "Resources",
+      "Fixtures",
+    ]);
+    assert.match(
+      pkg,
+      /resources: \[\.process\("Resources"\), \.process\("Fixtures"\)\]/,
+    );
+  });
+
+  it("never emits resources: without a test target", () => {
+    const pkg = emitSwiftPackage("PromptyModel", undefined, ["Resources"]);
+    assert.doesNotMatch(pkg, /resources:/);
+    assert.doesNotMatch(pkg, /\.testTarget/);
   });
 });

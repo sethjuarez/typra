@@ -1853,7 +1853,10 @@ function authorVectorAdapters() {
     },
     {
       src: "java/VectorAdapters.java",
-      targets: [{ dir: "java-jackson", dest: "tests/VectorAdapters.java" }],
+      targets: [
+        { dir: "java", dest: "tests/VectorAdapters.java" },
+        { dir: "java-jackson", dest: "tests/VectorAdapters.java" },
+      ],
     },
     {
       src: "swift/VectorAdapters.swift",

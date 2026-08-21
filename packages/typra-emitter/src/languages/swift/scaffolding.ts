@@ -308,12 +308,19 @@ function emitSwiftCodableValueRuntime(): string[] {
 export function emitSwiftPackage(
   moduleName: string,
   testPath?: string,
+  testResources?: readonly string[],
 ): string {
+  const resourcesArg =
+    testPath && testResources && testResources.length > 0
+      ? `, resources: [${testResources
+          .map((name) => `.process(${swiftStringLiteral(name)})`)
+          .join(", ")}]`
+      : "";
   const targets = [
     `    .target(name: ${swiftStringLiteral(moduleName)}, dependencies: [.product(name: "Yams", package: "Yams")], path: "Sources/${moduleName}")`,
     ...(testPath
       ? [
-          `    .testTarget(name: ${swiftStringLiteral(`${moduleName}Tests`)}, dependencies: [${swiftStringLiteral(moduleName)}], path: ${swiftStringLiteral(testPath)})`,
+          `    .testTarget(name: ${swiftStringLiteral(`${moduleName}Tests`)}, dependencies: [${swiftStringLiteral(moduleName)}], path: ${swiftStringLiteral(testPath)}${resourcesArg})`,
         ]
       : []),
   ];
