@@ -12,6 +12,7 @@ import { TypeRegistry } from "../src/ir/expansion.js";
 import { TypeNode, PropertyNode } from "../src/ir/ast.js";
 import { lowerFile } from "../src/ir/lower.js";
 import { emitRustFile } from "../src/languages/rust/emitter.js";
+import { disambiguateGlobReexports } from "../src/languages/rust/driver.js";
 import { RustExprVisitor } from "../src/languages/rust/visitor.js";
 
 interface PropOptions {
@@ -708,6 +709,78 @@ describe("rust emitter — named-collection entry shorthand", () => {
     assert.ok(
       !/is_i64\(\) \{/.test(code),
       "an undeclared collection gains no inference arms",
+    );
+  });
+});
+
+describe("disambiguateGlobReexports", () => {
+  it("emits nothing when no leaf name is exposed by two siblings", () => {
+    assert.deepEqual(
+      disambiguateGlobReexports([
+        { name: "contracts", exposes: ["pipeline", "events"] },
+        { name: "operations", exposes: ["render"] },
+      ]),
+      [],
+    );
+  });
+
+  it("disambiguates a leaf shared by two siblings to the first group", () => {
+    assert.deepEqual(
+      disambiguateGlobReexports([
+        { name: "operations", exposes: ["pipeline"] },
+        { name: "contracts", exposes: ["pipeline"] },
+      ]),
+      ["pub use contracts::pipeline;"],
+    );
+  });
+
+  it("picks the lexicographically-first exposer across three or more siblings", () => {
+    // Input order is intentionally non-sorted to prove the winner does not
+    // depend on iteration order — only on the lexicographic rule.
+    assert.deepEqual(
+      disambiguateGlobReexports([
+        { name: "operations", exposes: ["pipeline"] },
+        { name: "contracts", exposes: ["pipeline"] },
+        { name: "adapters", exposes: ["pipeline"] },
+      ]),
+      ["pub use adapters::pipeline;"],
+    );
+  });
+
+  it("does not treat a name owned by a single sibling as a collision", () => {
+    // `render_segment` is a TYPE module exposed only by `operations`; only the
+    // shared `pipeline` module name collides and must be disambiguated.
+    assert.deepEqual(
+      disambiguateGlobReexports([
+        { name: "contracts", exposes: ["pipeline"] },
+        { name: "operations", exposes: ["pipeline", "render_segment"] },
+      ]),
+      ["pub use contracts::pipeline;"],
+    );
+  });
+
+  it("disambiguates every distinct colliding name, sorted deterministically", () => {
+    // Two independent collisions (`events` and `pipeline`) with different
+    // winners; output is sorted by the colliding name for stable diffs.
+    assert.deepEqual(
+      disambiguateGlobReexports([
+        { name: "operations", exposes: ["pipeline", "events"] },
+        { name: "contracts", exposes: ["pipeline"] },
+        { name: "domain", exposes: ["events"] },
+      ]),
+      ["pub use domain::events;", "pub use contracts::pipeline;"],
+    );
+  });
+
+  it("collides a group-level leaf with a same-named sibling type module", () => {
+    // A type module and a sub-group folder can share a name across siblings;
+    // the winner rule still applies without special-casing the kind.
+    assert.deepEqual(
+      disambiguateGlobReexports([
+        { name: "contracts", exposes: ["pipeline"] },
+        { name: "aggregates", exposes: ["pipeline"] },
+      ]),
+      ["pub use aggregates::pipeline;"],
     );
   });
 });

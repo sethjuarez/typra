@@ -736,7 +736,7 @@ function immediateChildModules(group: string, groups: Iterable<string>): string[
  * lexicographically-first exposer wins, which is stable across runs and preserves
  * the pre-existing binding when a colliding leaf is newly introduced alongside it.
  */
-function disambiguateGlobReexports(
+export function disambiguateGlobReexports(
   children: Array<{ name: string; exposes: string[] }>,
 ): string[] {
   const exposers = new Map<string, string[]>();
