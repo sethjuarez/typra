@@ -492,8 +492,9 @@ describe("generate", () => {
         "utf8",
       );
       assert.match(tsVectorTest, /callable vector conformance/);
-      assert.match(tsVectorTest, /contract: "Renderer"/);
-      assert.match(tsVectorTest, /operation: "render"/);
+      // Contract + operation are threaded as emit-time call arguments to the
+      // shared runVector helper, not embedded as vector data fields.
+      assert.match(tsVectorTest, /runVector\("Renderer", "render", vector,/);
       // Vector inputs are opaque evidence: no model-typed load/save round-trip
       // is generated even though `render` takes a `RenderRequest` param.
       assert.doesNotMatch(tsVectorTest, /assertVectorModelRoundTrips/);
@@ -1207,13 +1208,15 @@ describe("generate", () => {
         ),
         "utf8",
       );
-      assert.match(vectorTest, /contract: "Renderer"/);
-      assert.match(vectorTest, /stage: "render"/);
-      assert.match(vectorTest, /provider: "prompty"/);
-      assert.match(vectorTest, /targetApi: "local"/);
-      assert.match(vectorTest, /normalization: \{\s+trailingNewline: "trim"/);
-      assert.match(vectorTest, /contract: "Harness"/);
-      assert.match(vectorTest, /expectedError: \{\s+code: "replay-drift"/);
+      // Contract is threaded as a runVector call argument; the remaining vector
+      // fields are inlined per-test as compact JSON (format: false → no spaces).
+      assert.match(vectorTest, /runVector\("Renderer",/);
+      assert.match(vectorTest, /"?stage"?:\s*"render"/);
+      assert.match(vectorTest, /"?provider"?:\s*"prompty"/);
+      assert.match(vectorTest, /"?targetApi"?:\s*"local"/);
+      assert.match(vectorTest, /"?normalization"?:\s*\{\s*"?trailingNewline"?:\s*"trim"/);
+      assert.match(vectorTest, /runVector\("Harness",/);
+      assert.match(vectorTest, /"?expectedError"?:\s*\{\s*"?code"?:\s*"replay-drift"/);
       assert.doesNotMatch(vectorTest, /RenderRequest\.load\(value\)\.save\(\)/);
 
       const scaffold = readFileSync(
@@ -1487,7 +1490,8 @@ describe("generate", () => {
       // runtime adapter registry rather than comparing a payload to itself.
       assert.doesNotMatch(pythonVectorConformance, /assert observed_transcript == expected_transcript/);
       assert.match(pythonVectorConformance, /_ADAPTER_MODULE = importlib\.import_module/);
-      assert.match(pythonVectorConformance, /_run_vector\(VECTORS\[/);
+      assert.match(pythonVectorConformance, /async def test_vector_\d+_/);
+      assert.match(pythonVectorConformance, /await _run_vector\(/);
 
       const tsClient = readFileSync(
         path.join(output, "generated", "typescript", "transport-client.ts"),

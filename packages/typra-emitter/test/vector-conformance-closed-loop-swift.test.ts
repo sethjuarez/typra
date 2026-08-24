@@ -276,7 +276,7 @@ describe("@vector conformance is an enforced closed loop (Swift)", () => {
       );
       assert.match(swiftSuite, /VectorAdapters\.adapters\(\)/);
       assert.match(swiftSuite, /No vector adapter registered for/);
-      assert.match(swiftSuite, /func testVectorConformance\(\) async throws/);
+      assert.match(swiftSuite, /func testVector\d+\w*\(\) async throws/);
       assert.match(swiftSuite, /invokeAdapter\(adapter, input, ctx, sync: sync/);
       // The bidi control (U+202E) is embedded as an ASCII escape, never raw.
       assert.match(swiftSuite, /\\u\{202e\}/);

@@ -333,11 +333,6 @@ function emitGoVectorConformanceTest(
   const hasRequires = model.vectors.some(
     (entry) => (entry.vector.requires?.length ?? 0) > 0,
   );
-  const payload = JSON.stringify(model.vectors, null, 2);
-  // JSON string escapes are a subset of Go interpreted-string-literal escapes,
-  // so JSON.stringify yields a valid Go double-quoted literal — except a raw
-  // U+FEFF (BOM), which Go rejects mid-source, so escape it explicitly.
-  const payloadLiteral = JSON.stringify(payload).replace(/\uFEFF/g, "\\ufeff");
 
   const lines: string[] = [
     "// Copyright (c) Microsoft. All rights reserved.",
@@ -370,8 +365,6 @@ function emitGoVectorConformanceTest(
     "",
     `\tvectoradapters ${JSON.stringify(adapterImportPath)}`,
     ")",
-    "",
-    `var vectorConformancePayload = []byte(${payloadLiteral})`,
     "",
     "// vcCanonical round-trips a value through generic JSON so map keys sort",
     "// regardless of whether the adapter returned a struct or a map.",
@@ -445,16 +438,8 @@ function emitGoVectorConformanceTest(
     "\t}",
     "}",
     "",
-    "func vcRunVector(t *testing.T, index int) {",
-    "\tvar vectors []map[string]any",
-    "\tif err := json.Unmarshal(vectorConformancePayload, &vectors); err != nil {",
-    '\t\tt.Fatalf("failed to decode embedded vectors: %v", err)',
-    "\t}",
-    "\tentry := vectors[index]",
-    '\tcontract, _ := entry["contract"].(string)',
-    '\toperation, _ := entry["operation"].(string)',
+    "func vcRunVector(t *testing.T, contract string, operation string, vector map[string]any) {",
     '\toperationKey := contract + "." + operation',
-    '\tvector, _ := entry["vector"].(map[string]any)',
     '\tvectorName := "unnamed"',
     '\tif name, ok := vector["name"].(string); ok {',
     "\t\tvectorName = name",
@@ -607,10 +592,20 @@ function emitGoVectorConformanceTest(
   ];
 
   model.vectors.forEach((entry, index) => {
+    const vectorJSON = JSON.stringify(entry.vector, null, 2);
     lines.push(
-      `func ${goVectorSlug(index, entry)}(t *testing.T) { vcRunVector(t, ${index}) }`,
+      `func ${goVectorSlug(index, entry)}(t *testing.T) {`,
+      `\tvectorJSON := \`${vectorJSON}\``,
+      "\tvar vector map[string]any",
+      "\tif err := json.Unmarshal([]byte(vectorJSON), &vector); err != nil {",
+      '\t\tt.Fatalf("failed to decode vector: %v", err)',
+      "\t}",
+      `\tvcRunVector(t, ${JSON.stringify(entry.contract)}, ${JSON.stringify(
+        entry.operation,
+      )}, vector)`,
+      "}",
+      "",
     );
   });
-  lines.push("");
   return lines.join("\n");
 }

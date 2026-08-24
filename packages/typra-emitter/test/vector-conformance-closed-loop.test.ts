@@ -582,7 +582,7 @@ describe("@vector conformance is an enforced closed loop", () => {
         "utf8",
       );
       // The generated suite must carry the @sync flag and the enforcement guard.
-      assert.match(tsSuite, /entry\.sync && isAwaitable/);
+      assert.match(tsSuite, /entrySync && isAwaitable/);
       writeFileSync(
         path.join(tsDir, "vector-conformance.test.js"),
         transpile(tsSuite),

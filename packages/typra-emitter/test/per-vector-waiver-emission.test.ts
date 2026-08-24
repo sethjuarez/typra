@@ -70,8 +70,8 @@ function findFile(root: string, basename: string): string {
 // Per-language harness filename plus the exact per-vector key expression the
 // generated code uses to probe the waiver registry beyond the operation key.
 const TARGETS: Array<{ name: string; file: string; perVectorKey: RegExp }> = [
-  { name: "typescript", file: "vector-conformance.test.ts", perVectorKey: /\$\{entry\.operation\}:\$\{vectorName\}/ },
-  { name: "python", file: "test_vector_conformance.py", perVectorKey: /\{entry\['operation'\]\}:\{vector_name\}/ },
+  { name: "typescript", file: "vector-conformance.test.ts", perVectorKey: /\$\{operation\}:\$\{vectorName\}/ },
+  { name: "python", file: "test_vector_conformance.py", perVectorKey: /\{operation\}:\{vector_name\}/ },
   { name: "go", file: "vector_conformance_test.go", perVectorKey: /operation\+":"\+vectorName/ },
   { name: "rust", file: "vector_conformance_test.rs", perVectorKey: /format!\("\{\}:\{\}", operation, vector_name\)/ },
   { name: "java", file: "VectorConformanceTests.java", perVectorKey: /operation \+ ":" \+ vectorName/ },
