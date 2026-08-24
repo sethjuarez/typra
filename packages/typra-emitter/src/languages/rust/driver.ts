@@ -1387,6 +1387,9 @@ function emitRustVectorConformanceTest(
   adapterPath: string,
 ): string {
   const model = buildVectorConformanceCodeModel(vectors);
+  const hasRequires = model.vectors.some(
+    (entry) => (entry.vector.requires?.length ?? 0) > 0,
+  );
   const payload = JSON.stringify(model.vectors, null, 2);
   const payloadLiteral = `"${rustStringLiteralBody(payload)}"`;
 
@@ -1545,6 +1548,48 @@ function emitRustVectorConformanceTest(
     "        doubles: vector_adapters::doubles(),",
     "        base_dir: base_dir.to_string_lossy().to_string(),",
     "    };",
+    "",
+    ...(hasRequires
+      ? [
+          "    // Requirement guard: a vector may declare abstract capability tokens in",
+          "    // \"requires\". Each is resolved against the runtime-supplied capabilities()",
+          "    // table BEFORE the adapter runs. An unregistered token is a hard failure",
+          "    // (never skip silently). Rust has no runtime-conditional skip (#[ignore] is",
+          "    // compile-time), so an unavailable token is a best-effort skip: print SKIP",
+          "    // and return, passing the test while recording intent on stdout.",
+          "    let requires = vector",
+          '        .get("requires")',
+          "        .and_then(|v| v.as_array())",
+          "        .cloned()",
+          "        .unwrap_or_default();",
+          "    if !requires.is_empty() {",
+          "        let capabilities = vector_adapters::capabilities();",
+          "        for token in &requires {",
+          "            if let Some(token) = token.as_str() {",
+          "                if !capabilities.contains_key(token) {",
+          '                    panic!(',
+          '                        "No capability predicate registered for requirement token \\"{}\\". \\',
+          "Register it in the module referenced by 'vector-adapter-path'. @vector \\",
+          'conformance never skips silently.",',
+          "                        token",
+          "                    );",
+          "                }",
+          "            }",
+          "        }",
+          "        for token in &requires {",
+          "            if let Some(token) = token.as_str() {",
+          "                if let Some(predicate) = capabilities.get(token) {",
+          "                    if !predicate(&ctx) {",
+          '                        println!("SKIP {} (requirement unavailable: {})", vector_id, token);',
+          "                        return;",
+          "                    }",
+          "                }",
+          "            }",
+          "        }",
+          "    }",
+          "",
+        ]
+      : []),
     '    let input = vc_resolve_refs(vector.get("input").unwrap_or(&Value::Null), &base_dir);',
     "    let normalize = |value: Value| -> Value {",
     "        match adapter.normalize {",

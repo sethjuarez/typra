@@ -484,6 +484,110 @@ that the named adapters exist. The generated conformance suite remains the real
 runtime enforcement (a declared-but-unimplemented adapter still fails there), so
 keep that suite in CI alongside `typra-verify`.
 
+## Requirement guards
+
+A vector may declare an ordered list of abstract **capability tokens** it needs
+before it can meaningfully run:
+
+```typespec
+const LiveVectors = #[
+  #{
+    name: "structure",
+    input: #{ request: #{ prompt: "hi" } },
+    expected: #{ role: "assistant" },
+    requires: #["provider:openai", "entra:foundry-project"]
+  }
+];
+```
+
+The guard is a general primitive: **conditionally skip a conformance vector when a
+capability it depends on is absent**, uniformly across all seven runtimes, instead
+of seven hand-authored `invoke`-side skips. The motivating case is **live-provider**
+vectors that call a real API and assert structure — when the credential is absent
+the vector must self-skip rather than send an empty credential and fail — but the
+same mechanism gates on any capability a runtime can probe (a reachable service, a
+present license, a feature flag). The emitter knows nothing about what a token
+means; it only wires the skip.
+
+### Token grammar
+
+Tokens follow a `namespace:name` convention (both segments lowercase,
+hyphen-separated: `[a-z0-9][a-z0-9-]*`) — for example `provider:openai`,
+`entra:foundry-project`, or a domain-neutral `service:database` /
+`feature:experimental`. **The emitter treats tokens as opaque strings; it never
+parses the namespace.** Env-var presence is just one predicate *flavor* a runtime
+may implement — `entra:foundry-project` is a probe (can we mint an Entra token for a
+project URL?), not an env-key check.
+The grammar is an authoring convention, enforced only by the decorator's
+"non-empty string" shape check.
+
+### The `VECTOR_CAPABILITIES` seam
+
+Alongside `VECTOR_ADAPTERS` and `VECTOR_WAIVERS`, a runtime supplies a
+**capability table** in the same module named by `vector-adapter-path`: a map from
+a token string to a **predicate**. The predicate receives the same context object
+the adapter receives and returns truthy when the capability is available.
+
+| Runtime | Accessor | Predicate |
+| --- | --- | --- |
+| Python | `VECTOR_CAPABILITIES` | `token -> callable(context) -> bool` |
+| TypeScript | `vectorCapabilities` | `(context) => boolean` |
+| Go | `VectorCapabilities` | `map[string]func(Context) bool` |
+| C# | `VectorAdapters.Capabilities()` | `Func<VectorContext, bool>` |
+| Java | `VectorAdapters.capabilities()` | `Capability` (`boolean test(VectorContext)`) |
+| Swift | `VectorAdapters.capabilities()` | `(VectorContext) -> Bool` |
+| Rust | `vector_adapters::capabilities()` | `fn(&Context) -> bool` |
+
+The seam is emitted **per suite, on demand**: the harness loads
+`VECTOR_CAPABILITIES` and emits the guard only when at least one vector in that
+suite declares `requires`. A suite with no `requires` tokens generates no capability
+load and no guard, so existing runtimes need not add an (empty) capability table
+until they actually author a `requires` vector. This keeps regeneration a clean
+no-op for suites that don't use the feature.
+
+### Ordering and the canonical skip reason
+
+The guard runs **after** adapter resolution (so a normal op with a missing adapter
+still hard-fails) and **before** the per-vector waiver check and the adapter
+`invoke`. It makes two deterministic passes over `requires`, in author order
+(never sorted):
+
+1. **Registration pass** — every token must be present in the capability table.
+   An unregistered token is a **hard failure** (see below). This runs first so a
+   typo always fails even when a later token is also absent.
+2. **Availability pass** — predicates evaluate in order; on the first falsy result
+   the harness emits its language's skip with the canonical, **byte-identical**
+   reason `requirement unavailable: <token>` (a `pytest.skip`/`t.Skip` where the
+   framework supports it, a `SKIP … (requirement unavailable: <token>)` recorded
+   line otherwise).
+
+### Unknown tokens fail hard
+
+A token with **no** registered predicate is a hard failure, never a silent skip:
+
+> No capability predicate registered for requirement token "&lt;token&gt;". Register it
+> in the module referenced by `vector-adapter-path`. @vector conformance never
+> skips silently.
+
+Otherwise a typo would quietly disable a live test on every runtime.
+
+### Three distinct axes
+
+Keep the three outcomes separate — the reason strings distinguish them in CI logs:
+
+- **waiver** — a permanent, tracked *gap* (`VECTOR_WAIVERS`), reason `waived: …`.
+- **capability-absent** — a *transient environment* condition (this guard), reason
+  `requirement unavailable: …`.
+- **failure** — adapter present, capability present, wrong structure.
+
+### Rust caveat
+
+Rust has no runtime-conditional skip (`#[ignore]` is compile-time). The Rust
+harness therefore treats an unavailable capability as a **best-effort** skip:
+`println!("SKIP {} (requirement unavailable: {})", …); return;` — the test passes
+and records intent on stdout, exactly as the Rust harness already handles waivers.
+An unknown token still `panic!`s. "Uniform skip" is thus best-effort in Rust.
+
 ## Doctrine
 
 Any interface documented as "not expected to be implemented by any runtime" is

@@ -350,6 +350,9 @@ function emitTypeScriptVectorConformanceTest(
   adapterImportPath: string,
 ): string {
   const model = buildVectorConformanceCodeModel(vectors);
+  const hasRequires = model.vectors.some(
+    (entry) => (entry.vector.requires?.length ?? 0) > 0,
+  );
   const payload = jsonWithTrailingCommas(JSON.stringify(model.vectors, null, 2));
   return [
     "// Copyright (c) Microsoft. All rights reserved.",
@@ -398,11 +401,20 @@ function emitTypeScriptVectorConformanceTest(
     "  vectorAdapters?: Record<string, VectorAdapter>;",
     "  default?: Record<string, VectorAdapter>;",
     "  vectorWaivers?: Record<string, string>;",
+    ...(hasRequires
+      ? ["  vectorCapabilities?: Record<string, (context: AdapterContext) => boolean>;"]
+      : []),
     "  vectorDoubles?: Record<string, unknown>;",
     "};",
     "const adapters: Record<string, VectorAdapter> =",
     "  adapterModule.vectorAdapters ?? adapterModule.default ?? {};",
     "const waivers: Record<string, string> = adapterModule.vectorWaivers ?? {};",
+    ...(hasRequires
+      ? [
+          "const capabilities: Record<string, (context: AdapterContext) => boolean> =",
+          "  adapterModule.vectorCapabilities ?? {};",
+        ]
+      : []),
     "const doubles: Record<string, unknown> = adapterModule.vectorDoubles ?? {};",
     "const baseDir = __dirname;",
     "",
@@ -472,6 +484,45 @@ function emitTypeScriptVectorConformanceTest(
     "            \"@vector conformance never skips silently.\",",
     "        );",
     "      }",
+    ...(hasRequires
+      ? [
+          "      // Requirement guard: a vector may declare abstract capability tokens in",
+          "      // `requires`. Each is resolved against the runtime-supplied capability",
+          "      // table BEFORE the adapter runs. An unregistered token is a hard failure",
+          "      // (never skip silently); an unavailable one yields a clean skip so an",
+          "      // absent credential never reaches invoke as an empty value.",
+          "      const requires = Array.isArray(vector.requires)",
+          "        ? (vector.requires as string[])",
+          "        : [];",
+          "      if (requires.length > 0) {",
+          "        const capabilityContext: AdapterContext = {",
+          "          contract: entry.contract,",
+          "          operation: entry.operation,",
+          "          vector,",
+          '          provider: typeof vector.provider === "string" ? vector.provider : undefined,',
+          '          targetApi: typeof vector.targetApi === "string" ? vector.targetApi : undefined,',
+          "          doubles,",
+          "          baseDir,",
+          "          resolveInput: (value: unknown) => resolveRefs(value, baseDir),",
+          "        };",
+          "        for (const token of requires) {",
+          "          if (!(token in capabilities)) {",
+          "            throw new Error(",
+          "              `No capability predicate registered for requirement token \"${token}\". ` +",
+          "                `Register vectorCapabilities[\"${token}\"] in the module referenced by ` +",
+          "                \"'vector-adapter-path'. @vector conformance never skips silently.\",",
+          "            );",
+          "          }",
+          "        }",
+          "        for (const token of requires) {",
+          "          if (!capabilities[token](capabilityContext)) {",
+          "            console.log(`SKIP ${vectorId} (requirement unavailable: ${token})`);",
+          "            return;",
+          "          }",
+          "        }",
+          "      }",
+        ]
+      : []),
     "      // Per-vector waiver, consulted even when an adapter IS registered. Keyed",
     "      // by the vector id (`Contract.operation:name`) or `operation:name` so it",
     "      // never collides with an operation-level waiver. xfail: a waived vector",

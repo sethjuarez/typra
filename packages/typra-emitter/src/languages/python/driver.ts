@@ -413,6 +413,9 @@ function emitPythonVectorConformanceTest(
   adapterModule: string,
 ): string {
   const model = buildVectorConformanceCodeModel(vectors);
+  const hasRequires = model.vectors.some(
+    (entry) => (entry.vector.requires?.length ?? 0) > 0,
+  );
   const payload = JSON.stringify(model.vectors, null, 2);
   const lines = [
     "# Copyright (c) Microsoft. All rights reserved.",
@@ -453,6 +456,9 @@ function emitPythonVectorConformanceTest(
     `_ADAPTER_MODULE = importlib.import_module(${JSON.stringify(adapterModule)})`,
     'VECTOR_ADAPTERS = getattr(_ADAPTER_MODULE, "VECTOR_ADAPTERS", {})',
     'VECTOR_WAIVERS = getattr(_ADAPTER_MODULE, "VECTOR_WAIVERS", {})',
+    ...(hasRequires
+      ? ['VECTOR_CAPABILITIES = getattr(_ADAPTER_MODULE, "VECTOR_CAPABILITIES", {})']
+      : []),
     'VECTOR_DOUBLES = getattr(_ADAPTER_MODULE, "VECTOR_DOUBLES", {})',
     "",
     "_BASE_DIR = os.path.dirname(os.path.abspath(__file__))",
@@ -521,6 +527,37 @@ function emitPythonVectorConformanceTest(
     "        raise AssertionError(",
     '            f"Adapter for {operation_key} exposes no callable \'invoke\'."',
     "        )",
+    ...(hasRequires
+      ? [
+          "    # Requirement guard: a vector may declare abstract capability tokens in",
+          '    # "requires". Each is resolved against the runtime-supplied',
+          "    # VECTOR_CAPABILITIES table BEFORE the adapter runs. An unregistered token",
+          "    # is a hard failure (never skip silently); an unavailable one yields a clean",
+          "    # skip so an absent credential never reaches invoke as an empty value.",
+          '    requires = vector.get("requires") if isinstance(vector, dict) else None',
+          "    if requires:",
+          "        capability_context = {",
+          '            "contract": entry["contract"],',
+          '            "operation": entry["operation"],',
+          '            "vector": vector,',
+          '            "provider": vector.get("provider"),',
+          '            "targetApi": vector.get("targetApi"),',
+          '            "doubles": VECTOR_DOUBLES,',
+          '            "baseDir": _BASE_DIR,',
+          '            "resolveInput": _resolve_refs,',
+          "        }",
+          "        for token in requires:",
+          "            if token not in VECTOR_CAPABILITIES:",
+          "                raise AssertionError(",
+          "                    f'No capability predicate registered for requirement token \"{token}\". '",
+          "                    f'Register VECTOR_CAPABILITIES[\"{token}\"] in the module referenced by '",
+          "                    \"'vector-adapter-path'. @vector conformance never skips silently.\"",
+          "                )",
+          "        for token in requires:",
+          "            if not VECTOR_CAPABILITIES[token](capability_context):",
+          '                pytest.skip(f"requirement unavailable: {token}")',
+        ]
+      : []),
     "    # Per-vector waiver, consulted even when an adapter IS registered. Keyed by",
     '    # the vector id ("Contract.operation:name") or "operation:name" so it never',
     "    # collides with an operation-level waiver. xfail: a waived vector that fails",

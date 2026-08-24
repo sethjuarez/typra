@@ -423,6 +423,9 @@ function emitJavaVectorConformanceTest(
   adapterClass: string,
 ): string {
   const model = buildVectorConformanceCodeModel(vectors);
+  const hasRequires = model.vectors.some(
+    (entry) => (entry.vector.requires?.length ?? 0) > 0,
+  );
   const payload = JSON.stringify(model.vectors);
   const payloadChunks = javaPayloadLiteralChunks(payload);
   const buildPayloadBody = [
@@ -483,6 +486,15 @@ function emitJavaVectorConformanceTest(
     "    Object apply(Object value, VectorContext ctx);",
     "  }",
     "",
+    ...(hasRequires
+      ? [
+          "  @FunctionalInterface",
+          "  public interface Capability {",
+          "    boolean test(VectorContext ctx);",
+          "  }",
+          "",
+        ]
+      : []),
     "  public static final class VectorAdapter {",
     "    public final Invoke invoke;",
     "    public final Normalizer normalize;",
@@ -698,6 +710,40 @@ function emitJavaVectorConformanceTest(
     '          + "an explicit waiver. @vector conformance never skips silently.");',
     "    }",
     "",
+    ...(hasRequires
+      ? [
+          "    // Requirement guard: a vector may declare abstract capability tokens in",
+          "    // \"requires\". Each is resolved against the runtime-supplied capabilities()",
+          "    // table BEFORE the adapter runs. An unregistered token is a hard failure",
+          "    // (never skip silently); an unavailable one yields a clean skip so an absent",
+          "    // credential never reaches invoke as an empty value.",
+          '    Object requiresRaw = field(vector, "requires");',
+          "    if (requiresRaw instanceof List<?> requiresList && !requiresList.isEmpty()) {",
+          `      Map<String, Capability> capabilities = ${adapterClass}.capabilities();`,
+          "      for (Object item : requiresList) {",
+          "        if (item instanceof String token && !capabilities.containsKey(token)) {",
+          '          throw new AssertionError("No capability predicate registered for requirement token \\"" + token',
+          "              + \"\\\". Register it in the class referenced by 'vector-adapter-path'. \"",
+          '              + "@vector conformance never skips silently.");',
+          "        }",
+          "      }",
+          "      Path capDir = baseDir();",
+          '      Object capProvider = field(vector, "provider");',
+          '      Object capTargetApi = field(vector, "targetApi");',
+          "      VectorContext capCtx = new VectorContext(contract, operation, deepCopy(vector),",
+          "          capProvider instanceof String p ? p : null,",
+          "          capTargetApi instanceof String t ? t : null,",
+          `          ${adapterClass}.doubles(), capDir);`,
+          "      for (Object item : requiresList) {",
+          "        if (item instanceof String token && !capabilities.get(token).test(capCtx)) {",
+          '          System.out.println("SKIP " + vectorId + " (requirement unavailable: " + token + ")");',
+          "          return;",
+          "        }",
+          "      }",
+          "    }",
+          "",
+        ]
+      : []),
     "    // Per-vector waiver, consulted even when an adapter IS registered. Keyed by",
     "    // the vector id (\"Contract.operation:name\") or \"operation:name\" so it never",
     "    // collides with an operation-level waiver. xfail: a waived vector that fails",

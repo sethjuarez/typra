@@ -116,6 +116,70 @@ describe("@vector callable behavior contracts", () => {
     ]);
   });
 
+  it("carries an author-declared requires token list into the vector IR", () => {
+    const { context, program, diagnostics } = testContext();
+    const op = operation();
+
+    $vector(context, op, {
+      name: "live-structure",
+      input: { request: { prompt: "hi" } },
+      expected: { output: "hi" },
+      requires: ["provider:openai", "var:live-enabled"],
+    });
+
+    assert.deepEqual(diagnostics, []);
+    assert.deepEqual(lowerOperationVectors(program, op), [
+      {
+        name: "live-structure",
+        stage: "callable",
+        operation: "render",
+        input: { request: { prompt: "hi" } },
+        expected: { output: "hi" },
+        requires: ["provider:openai", "var:live-enabled"],
+      },
+    ]);
+  });
+
+  it("rejects a requires field that is not an array of non-empty strings", () => {
+    const { context, program, diagnostics } = testContext();
+    const op = operation();
+
+    // Not an array.
+    $vector(context, op, {
+      name: "bad-scalar",
+      input: { request: { prompt: "hi" } },
+      expected: {},
+      requires: "provider:openai",
+    } as unknown as object);
+    // Array with a non-string entry.
+    $vector(context, op, {
+      name: "bad-entry",
+      input: { request: { prompt: "hi" } },
+      expected: {},
+      requires: ["provider:openai", 7],
+    } as unknown as object);
+    // Array with an empty-string entry.
+    $vector(context, op, {
+      name: "bad-empty",
+      input: { request: { prompt: "hi" } },
+      expected: {},
+      requires: [""],
+    } as unknown as object);
+
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      [
+        "typra-emitter-vector-shape",
+        "typra-emitter-vector-shape",
+        "typra-emitter-vector-shape",
+      ],
+    );
+    for (const diagnostic of diagnostics) {
+      assert.match(diagnostic.message, /'requires' must be an array of non-empty/);
+    }
+    assert.deepEqual(lowerOperationVectors(program, op), []);
+  });
+
   it("captures named vector-set style arrays without changing operation ownership", () => {
     const { context, program } = testContext();
     const op = operation();

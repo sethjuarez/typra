@@ -463,6 +463,23 @@ export function $vector(
       continue;
     }
 
+    if (Object.hasOwn(entry, "requires") && entry.requires !== undefined) {
+      const requires = entry.requires;
+      if (
+        !Array.isArray(requires) ||
+        requires.some(
+          (token) => typeof token !== "string" || token.length === 0,
+        )
+      ) {
+        reportVectorDiagnostic(
+          context,
+          target,
+          `Vector entry ${index} 'requires' must be an array of non-empty capability token strings.`,
+        );
+        continue;
+      }
+    }
+
     valid.push(entry as unknown as VectorEntry);
   }
 

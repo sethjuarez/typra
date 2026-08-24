@@ -20,6 +20,16 @@ export interface VectorEntry {
   targetApi?: string;
   portability?: "portable" | "delegated";
   normalization?: unknown;
+  /**
+   * Ordered list of abstract capability tokens (e.g. `provider:openai`,
+   * `entra:foundry-project`, `var:live-enabled`) that must be available for this
+   * vector to run. The generated harness resolves each token against the
+   * runtime-supplied `VECTOR_CAPABILITIES` table BEFORE invoking the adapter: an
+   * unavailable token yields a language-native skip (`requirement unavailable:
+   * <token>`), an unregistered token is a hard failure. Tokens are opaque to the
+   * emitter — it never parses the `namespace:name` convention.
+   */
+  requires?: string[];
 }
 
 export interface CallableVector extends VectorEntry {
