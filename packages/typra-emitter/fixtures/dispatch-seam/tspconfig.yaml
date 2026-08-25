@@ -1,0 +1,87 @@
+emit:
+  - "@typra/emitter"
+options:
+  "@typra/emitter":
+    emitter-output-dir: "{cwd}/generated/dispatch-seam"
+    root-object: "Typra.Fixtures.DispatchSeam.Root"
+    deterministic-output: true
+    # This fixture is an illustrative, eyeball-oriented reference: it emits the
+    # per-language MODELS (including the polymorphic discriminator de/serialization),
+    # the @dispatch seam scaffold (compile-only), and the IR goldens
+    # (.typra-generated/json-ast, export-surfaces.json, vectors.json). It does NOT
+    # emit the per-language vector/conformance harness — that harness (Go vector
+    # adapters, Swift package resources) and the dispatch resolve/registry glue are
+    # Part II-B. So no test-dir is configured here; the vectors surface in the IR
+    # goldens, and validate-fixtures does not compile this tree.
+    emit-targets:
+      - type: TypeScript
+        output-dir: "generated/dispatch-seam/typescript"
+        import-path: "../index"
+        format: false
+        protocol-scaffolds: "compile-only"
+      - type: TypeScript
+        output-dir: "generated/dispatch-seam/typescript-zod"
+        import-path: "../index"
+        format: false
+        native-serialization: "zod"
+        protocol-scaffolds: "compile-only"
+      - type: Python
+        output-dir: "generated/dispatch-seam/python"
+        import-path: "fixtures"
+        format: false
+        protocol-scaffolds: "compile-only"
+      - type: Python
+        output-dir: "generated/dispatch-seam/python_pydantic"
+        import-path: "fixtures_pydantic"
+        format: false
+        native-serialization: "pydantic"
+        protocol-scaffolds: "compile-only"
+      - type: Go
+        output-dir: "generated/dispatch-seam/go"
+        import-path: "fixtures"
+        package-name: "fixtures"
+        format: false
+        protocol-scaffolds: "compile-only"
+      - type: Java
+        output-dir: "generated/dispatch-seam/java"
+        package-name: "typra.fixtures"
+        format: false
+        protocol-scaffolds: "compile-only"
+      - type: Java
+        output-dir: "generated/dispatch-seam/java-jackson"
+        package-name: "typra.fixtures"
+        format: false
+        native-serialization: "jackson"
+        protocol-scaffolds: "compile-only"
+      - type: CSharp
+        output-dir: "generated/dispatch-seam/csharp"
+        namespace: "Typra.Fixtures"
+        format: false
+        protocol-scaffolds: "compile-only"
+      - type: Rust
+        output-dir: "generated/dispatch-seam/rust"
+        import-path: "fixtures::model"
+        enum-parsing: "case-insensitive"
+        format: false
+        protocol-scaffolds: "compile-only"
+      - type: Rust
+        output-dir: "generated/dispatch-seam/rust-serde"
+        import-path: "fixtures_serde::model"
+        enum-parsing: "case-insensitive"
+        format: false
+        native-serialization: "serde"
+        protocol-scaffolds: "compile-only"
+      - type: Swift
+        output-dir: "generated/dispatch-seam/swift"
+        package-name: "TypraFixtures"
+        format: false
+        protocol-scaffolds: "compile-only"
+      - type: Swift
+        output-dir: "generated/dispatch-seam/swift-codable"
+        package-name: "TypraFixtures"
+        format: false
+        native-serialization: "codable"
+        protocol-scaffolds: "compile-only"
+      - type: Markdown
+        output-dir: "generated/dispatch-seam/markdown"
+        format: false

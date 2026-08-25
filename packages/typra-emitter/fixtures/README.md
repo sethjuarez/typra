@@ -4,6 +4,11 @@ Fixtures are organized so every supported semantic feature can be inspected in
 isolation while `integration/main.tsp` keeps the broad cross-feature surface.
 
 - `integration/main.tsp` is the broad integration fixture.
+- `dispatch-seam/main.tsp` is a dedicated, end-to-end **eyeball** fixture: a full
+  model + `@sample` + polymorphic discriminated union + `@dispatch`-keyed seam
+  interface + `@vector`s, generated across all targets so the real per-language
+  output (polymorphic de/serialization, seam scaffolds, resolved dispatch path in
+  the IR surface) can be inspected side by side. See below.
 - `features/<feature>/main.tsp` covers one Typra feature area with multiple
   small examples. These fixtures should stay domain-agnostic; they may cover
   real consuming-project shapes, but should not pin to that project's branding.
@@ -35,3 +40,33 @@ behavior is genuinely runtime-specific.
 | Transport | `features/transport/main.tsp` | Path, query, header, cookie, body, status, success/error body envelopes, and wildcard status bodies. |
 | Namespaces | `features/namespaces/main.tsp` | Nested namespaces and cross-namespace references. |
 | Documentation | `features/docs/main.tsp` | `@doc` metadata and multiline sample text. |
+
+## Dispatch-seam integration fixture
+
+`dispatch-seam/main.tsp` is a standalone, cross-target fixture built to be _read_.
+It stands up the full shape that motivated behavioral dispatch, end to end:
+
+- a polymorphic discriminated union `TemplateFormat` (`@discriminator("kind")` with
+  `mustache` / `jinja2` / `liquid` subtypes, each with a variant field),
+- container models (`Template`, `Agent`, `Inputs`) carrying `@sample` payloads,
+- a `@dispatch(TemplateFormat.kind)` seam interface `Renderer` whose discriminator
+  resolves to the deterministic access path `agent.template.format.kind`, and
+- `@vector`s exercising the seam.
+
+Regenerate it into `generated/dispatch-seam/<target>` (git-ignored, like all
+generated output) with:
+
+```
+npm run generate:fixtures:dispatch-seam
+```
+
+Worth eyeballing per target: the polymorphic `TemplateFormat` de/serialization
+(discriminator-driven load/save), the `Renderer` seam scaffold (key-free at this
+stage), and `generated/dispatch-seam/.typra-generated/export-surfaces.json`, which
+records the resolved `dispatch.path` on every code target.
+
+> **Scope:** this fixture emits models, seam scaffolds, and IR/surface goldens
+> only. It intentionally does **not** emit or compile the per-language
+> vector/conformance harness or any dispatch resolve/registry glue — that is the
+> emission half (Part II-B). `validate:fixtures` therefore only asserts the
+> recorded dispatch path here; it does not compile this tree.

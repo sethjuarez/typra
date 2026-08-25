@@ -1,0 +1,142 @@
+import "@typra/emitter";
+
+namespace Typra.Fixtures.DispatchSeam;
+
+// ===========================================================================
+// Dispatched seam, end to end.
+//
+// This fixture exists to be *looked at*: it stands up a full model + sample +
+// polymorphic discriminated union + @dispatch seam interface + vectors, and is
+// generated across every target under generated/dispatch-seam/<lang>. That output
+// is git-ignored (like all generated trees) but reproduced deterministically by
+// `npm run generate:fixtures:dispatch-seam` — read it alongside this source.
+//
+// Part II-A (this change) resolves the @dispatch discriminator to a
+// deterministic access path and surfaces it in export-surfaces.json — it does
+// NOT yet emit per-language resolve/registry glue (that is Part II-B). So in the
+// generated code the seam interface renders as a plain compile-only scaffold,
+// identical to an undispatched one; the dispatch metadata lives only in
+// generated/dispatch-seam/.typra-generated/export-surfaces.json.
+// ===========================================================================
+
+// ---- Polymorphic discriminator union: the dispatch key --------------------
+
+@doc("Closed discriminator union naming each supported template dialect.")
+union TemplateFormatKind {
+  mustache: "mustache",
+  jinja2: "jinja2",
+  liquid: "liquid",
+}
+
+@doc("Polymorphic base over template dialects. `kind` is the discriminator that `@dispatch` resolves the Renderer on.")
+@discriminator("kind")
+model TemplateFormat {
+  kind: TemplateFormatKind;
+}
+
+@doc("Mustache dialect variant.")
+model MustacheFormat extends TemplateFormat {
+  kind: "mustache";
+
+  @sample(#{ partialsEnabled: true })
+  @doc("Whether `{{> partial }}` expansion is enabled.")
+  partialsEnabled: boolean;
+}
+
+@doc("Jinja2 dialect variant.")
+model Jinja2Format extends TemplateFormat {
+  kind: "jinja2";
+
+  @sample(#{ autoescape: true })
+  @doc("Whether HTML autoescaping is on.")
+  autoescape: boolean;
+}
+
+@doc("Liquid dialect variant.")
+model LiquidFormat extends TemplateFormat {
+  kind: "liquid";
+
+  @sample(#{ strictVariables: false })
+  @doc("Whether undefined variables raise instead of rendering empty.")
+  strictVariables: boolean;
+}
+
+// ---- Container models (sample synthesis exercised) ------------------------
+
+@doc("A template: a dialect plus its source content.")
+model Template {
+  @sample(#{
+    format: #{ kind: "mustache", partialsEnabled: true },
+    content: "Hello {{name}}",
+  })
+  @doc("The dialect this template is written in — the polymorphic dispatch key lives here.")
+  format: TemplateFormat;
+
+  @doc("Raw template source in the declared dialect.")
+  content: string;
+}
+
+@doc("An agent that owns a template.")
+model Agent {
+  @doc("Human-facing agent name.")
+  name: string;
+
+  @doc("The template the agent renders; `template.format.kind` is the dispatch discriminator.")
+  template: Template;
+}
+
+@doc("Runtime inputs bound into the template at render time.")
+model Inputs {
+  @doc("Free-form name/value bindings.")
+  values: Record<unknown>;
+}
+
+// ---- Dispatched seam ------------------------------------------------------
+
+// The concrete Renderer implementation is selected at runtime by the value of
+// `TemplateFormat.kind`, uniquely reachable from the `agent` parameter as
+// `agent.template.format.kind`. `inputs` does not reach the discriminator, so
+// the path is unambiguous. The seam method stays key-free — the engine is never
+// a parameter; it is resolved once from the discriminator field.
+@doc("Behavioral seam whose implementation is resolved by template dialect.")
+@dispatch(TemplateFormat.kind)
+interface Renderer {
+  @vector(#{
+    name: "mustache-basic",
+    stage: "callable",
+    input: #{
+      agent: #{
+        name: "greeter",
+        template: #{
+          content: "Hello {{name}}",
+          format: #{ kind: "mustache", partialsEnabled: true },
+        },
+      },
+      inputs: #{ values: #{ name: "world" } },
+    },
+    expected: "Hello world",
+  })
+  @vector(#{
+    name: "jinja2-basic",
+    stage: "callable",
+    input: #{
+      agent: #{
+        name: "greeter",
+        template: #{
+          content: "Hello {{ name }}",
+          format: #{ kind: "jinja2", autoescape: true },
+        },
+      },
+      inputs: #{ values: #{ name: "world" } },
+    },
+    expected: "Hello world",
+  })
+  @doc("Render the agent's template against the supplied inputs.")
+  render(agent: Agent, inputs: Inputs): string;
+}
+
+@doc("Fixture root aggregating the dispatched-seam graph.")
+model Root {
+  @doc("The agent whose template carries the dispatch discriminator.")
+  agent: Agent;
+}

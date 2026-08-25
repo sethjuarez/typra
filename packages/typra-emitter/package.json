@@ -44,7 +44,8 @@
     "fixtures/**/*.tsp",
     "src/lib/*.tsp",
     "tspconfig.yaml",
-    "fixtures/tspconfig.yaml"
+    "fixtures/tspconfig.yaml",
+    "fixtures/dispatch-seam/tspconfig.yaml"
   ],
   "peerDependencies": {
     "@typespec/compiler": ">=1.10.0 <2.0.0",
@@ -70,7 +71,9 @@
     "build": "tsc",
     "prepack": "npm run build",
     "watch": "tsc --watch",
-    "generate:fixtures": "tsp compile ./fixtures/integration/main.tsp --config ./fixtures/tspconfig.yaml",
+    "generate:fixtures": "npm run generate:fixtures:integration && npm run generate:fixtures:dispatch-seam",
+    "generate:fixtures:integration": "tsp compile ./fixtures/integration/main.tsp --config ./fixtures/tspconfig.yaml",
+    "generate:fixtures:dispatch-seam": "tsp compile ./fixtures/dispatch-seam/main.tsp --config ./fixtures/dispatch-seam/tspconfig.yaml",
     "pretest": "npm run build",
     "prevalidate:fixtures": "npm run build && npm run generate:fixtures",
     "validate:fixtures": "node ./scripts/validate-fixtures.mjs",

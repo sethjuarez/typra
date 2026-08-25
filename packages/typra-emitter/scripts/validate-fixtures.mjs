@@ -88,6 +88,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "static-fixture-coverage",
   "static-conformance-matrix",
   "export-surface-snapshot",
+  "dispatch-seam-snapshot",
   "hydration-boundary-snapshot",
   "generated-output-report",
   "actual-generated-surface",
@@ -1995,6 +1996,59 @@ function authorVectorAdapters() {
   }
 }
 
+// Light-touch guard for the dedicated dispatch-seam eyeball fixture. Unlike the
+// integration tree, generated/dispatch-seam is NOT compiled/conformance-checked
+// here (its per-language vector harness is Part II-B); this stage only asserts the
+// committed IR surface still records the resolved @dispatch discriminator path on
+// every code target, so the fixture keeps demonstrating what it claims to.
+function assertDispatchSeamSnapshot() {
+  const snapshot = readJson(
+    path.join(
+      "generated",
+      "dispatch-seam",
+      ".typra-generated",
+      "export-surfaces.json",
+    ),
+  );
+  if (!snapshot) return;
+
+  if (snapshot.root?.object !== "Typra.Fixtures.DispatchSeam.Root") {
+    fail("Dispatch-seam snapshot does not record the expected root object.");
+  }
+
+  const codeTargets = (snapshot.targets ?? []).filter(
+    (target) => target.target !== "markdown",
+  );
+  if (codeTargets.length === 0) {
+    fail("Dispatch-seam snapshot has no code targets to inspect.");
+    return;
+  }
+
+  for (const target of codeTargets) {
+    const renderer = (target.protocols ?? []).find(
+      (protocol) => protocol.name === "Renderer",
+    );
+    if (!renderer) {
+      fail(`Dispatch-seam target ${target.target} is missing the Renderer seam.`);
+      continue;
+    }
+    const dispatch = renderer.dispatch;
+    if (dispatch?.path !== "agent.template.format.kind") {
+      fail(
+        `Dispatch-seam target ${target.target} resolved an unexpected @dispatch path: ${JSON.stringify(dispatch?.path)}`,
+      );
+    }
+    if (
+      dispatch?.discriminator?.model !== "TemplateFormat" ||
+      dispatch?.discriminator?.field !== "kind"
+    ) {
+      fail(
+        `Dispatch-seam target ${target.target} recorded an unexpected discriminator: ${JSON.stringify(dispatch?.discriminator)}`,
+      );
+    }
+  }
+}
+
 function runDeclaredValidationStages() {
   runExpectedExecutionPlan({
     label: "Fixture validation",
@@ -2008,6 +2062,7 @@ function runDeclaredValidationStages() {
       ["static-fixture-coverage", assertStaticFixtureCoverage],
       ["static-conformance-matrix", assertConformanceMatrix],
       ["export-surface-snapshot", assertExportSurfaceSnapshot],
+      ["dispatch-seam-snapshot", assertDispatchSeamSnapshot],
       ["hydration-boundary-snapshot", assertHydrationBoundarySnapshot],
       ["generated-output-report", assertGeneratedOutputReport],
       ["actual-generated-surface", assertActualGeneratedSurface],
