@@ -65,8 +65,14 @@ Worth eyeballing per target: the polymorphic `TemplateFormat` de/serialization
 stage), and `generated/dispatch-seam/.typra-generated/export-surfaces.json`, which
 records the resolved `dispatch.path` on every code target.
 
+The same committed spec is compiled in-process and asserted by
+`test/dispatch-seam.integration.test.ts` (`npm test`): it emits to a temp dir and
+checks the polymorphic dispatch, the key-free seam, and the recorded dispatch path
+across TypeScript / Python / Go. The emitted code is never committed — the spec is
+the durable artifact, the test is the guard.
+
 > **Scope:** this fixture emits models, seam scaffolds, and IR/surface goldens
 > only. It intentionally does **not** emit or compile the per-language
 > vector/conformance harness or any dispatch resolve/registry glue — that is the
-> emission half (Part II-B). `validate:fixtures` therefore only asserts the
-> recorded dispatch path here; it does not compile this tree.
+> emission half (Part II-B). The integration test asserts the Part II-A surface
+> (dispatch path + key-free seam); it does not exercise resolve/registry emission.
