@@ -205,6 +205,8 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (TypeScrip
 
       const suite = readFileSync(path.join(tsDir, "vector-conformance.test.ts"), "utf8");
       writeFileSync(path.join(tsDir, "vector-conformance.test.js"), transpile(suite));
+      const runner = readFileSync(path.join(tsDir, "vector-runner.ts"), "utf8");
+      writeFileSync(path.join(tsDir, "vector-runner.js"), transpile(runner));
       writeFileSync(path.join(tsDir, "runner.js"), TS_RUNNER);
       writeFileSync(
         path.join(tsDir, "package.json"),

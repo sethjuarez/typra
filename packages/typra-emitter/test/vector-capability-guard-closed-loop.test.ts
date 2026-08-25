@@ -205,15 +205,24 @@ describe("@vector requirement guard is an enforced closed loop", () => {
         path.join(tsDir, "vector-conformance.test.ts"),
         "utf8",
       );
-      // The generated suite must carry the guard: the canonical skip reason, the
-      // hard-fail for an unregistered token, and the capabilities seam load.
-      assert.match(tsSuite, /requirement unavailable: /);
-      assert.match(tsSuite, /No capability predicate registered for requirement token/);
+      const tsRunner = readFileSync(
+        path.join(tsDir, "vector-runner.ts"),
+        "utf8",
+      );
+      // The seam-agnostic runner carries the guard: the canonical skip reason and
+      // the hard-fail for an unregistered token. The thin harness loads the
+      // capabilities seam and injects it.
+      assert.match(tsRunner, /requirement unavailable: /);
+      assert.match(tsRunner, /No capability predicate registered for requirement token/);
       assert.match(tsSuite, /adapterModule\.vectorCapabilities/);
 
       writeFileSync(
         path.join(tsDir, "vector-conformance.test.js"),
         transpile(tsSuite),
+      );
+      writeFileSync(
+        path.join(tsDir, "vector-runner.js"),
+        transpile(tsRunner),
       );
       writeFileSync(path.join(tsDir, "runner.js"), TS_RUNNER);
       writeFileSync(

@@ -80,8 +80,12 @@ interface Target {
   file: string;
   extra?: string[];
   // Guard proving the harness rejects a @sync adapter that returns an awaitable
-  // (Go documents its exemption instead).
+  // (Go documents its exemption instead). Relocated targets host the guard in
+  // the shared runner module named by `guardFile`.
   guard: RegExp;
+  // File the @sync enforcement guard lives in. Defaults to `file`; targets that
+  // relocated their interpreter into a runner module point this at that module.
+  guardFile?: string;
   // How the harness classifies the @sync op ('format') as sync and the
   // async-default op ('authorize') as async. Migrated targets thread the flag
   // as an emit-time call argument (no `sync` field leaks into embedded data);
@@ -101,8 +105,9 @@ const TARGETS: Target[] = [
     testDir: "typescript-tests",
     file: "vector-conformance.test.ts",
     guard: /entrySync && isAwaitable\(/,
-    syncTrue: /runVector\("[^"]*", "format", vector, true\)/,
-    syncFalse: /runVector\("[^"]*", "authorize", vector, false\)/,
+    guardFile: "vector-runner.ts",
+    syncTrue: /runVector\("[^"]*", "format", vector, true, seam\)/,
+    syncFalse: /runVector\("[^"]*", "authorize", vector, false, seam\)/,
   },
   {
     type: "Python",
@@ -242,9 +247,13 @@ describe("@sync classification is threaded and enforced across all targets", () 
           `${target.type}: expected async-default op 'authorize' to be classified sync:false`,
         );
 
-        // (b) a native enforcement guard is present (Go documents its exemption)
+        // (b) a native enforcement guard is present (Go documents its exemption).
+        // Relocated targets host the guard in a shared runner module.
+        const guardSource = target.guardFile
+          ? readFileSync(path.join(testDir, target.guardFile), "utf8")
+          : suite;
         assert.match(
-          suite,
+          guardSource,
           target.guard,
           `${target.type}: expected a native @sync enforcement guard in the harness`,
         );

@@ -70,6 +70,7 @@ function assertGeneratedTypeScriptTestsTypeCheck(output: string): void {
         include: [
           "typescript/**/*.ts",
           "typescript-tests/vector-conformance.test.ts",
+          "typescript-tests/vector-runner.ts",
           "typescript-tests/transport-client.test.ts",
           "typescript-tests/globals.d.ts",
         ],

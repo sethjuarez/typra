@@ -69,8 +69,13 @@ function findFile(root: string, basename: string): string {
 
 // Per-language harness filename plus the exact per-vector key expression the
 // generated code uses to probe the waiver registry beyond the operation key.
-const TARGETS: Array<{ name: string; file: string; perVectorKey: RegExp }> = [
-  { name: "typescript", file: "vector-conformance.test.ts", perVectorKey: /\$\{operation\}:\$\{vectorName\}/ },
+const TARGETS: Array<{
+  name: string;
+  file: string;
+  perVectorKey: RegExp;
+  runnerFile?: string;
+}> = [
+  { name: "typescript", file: "vector-conformance.test.ts", perVectorKey: /\$\{operation\}:\$\{vectorName\}/, runnerFile: "vector-runner.ts" },
   { name: "python", file: "test_vector_conformance.py", perVectorKey: /\{operation\}:\{vector_name\}/ },
   { name: "go", file: "vector_conformance_test.go", perVectorKey: /operation\+":"\+vectorName/ },
   { name: "rust", file: "vector_conformance_test.rs", perVectorKey: /format!\("\{\}:\{\}", operation, vector_name\)/ },
@@ -150,18 +155,22 @@ describe("@vector harness consults per-vector waivers on every target (#265)", (
 
       for (const target of TARGETS) {
         const harness = readFileSync(findFile(gen, target.file), "utf8");
+        // Relocated targets host the waiver xfail/xpass logic in a runner module.
+        const waiverSource = target.runnerFile
+          ? readFileSync(findFile(gen, target.runnerFile), "utf8")
+          : harness;
         assert.match(
-          harness,
+          waiverSource,
           /XFAIL/,
           `${target.name} harness must emit an XFAIL branch for waived-and-failing vectors`,
         );
         assert.match(
-          harness,
+          waiverSource,
           /waived vector unexpectedly/,
           `${target.name} harness must emit an XPASS guard for waived-but-passing vectors`,
         );
         assert.match(
-          harness,
+          waiverSource,
           target.perVectorKey,
           `${target.name} harness must probe a per-vector waiver key ("<operation>:<name>")`,
         );
