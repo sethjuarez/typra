@@ -26,6 +26,7 @@ import {
 import { StateKeys } from "../lib.js";
 import { scalarRuntimeKind } from "./scalar-kinds.js";
 import { detectWireCollisions } from "./lower.js";
+import type { CallableDispatch } from "./callable.js";
 
 /**
  * Models whose `@knownAs` wire mappings have already been checked for
@@ -183,6 +184,12 @@ export class TypeNode {
   public discriminator: string | undefined = undefined;
   public factories: FactoryEntry[] = [];
   public methods: MethodEntry[] = [];
+  /**
+   * Behavioral polymorphic dispatch metadata from `@dispatch`, populated when a
+   * TypeSpec-native seam interface is projected as a protocol node. Absent for
+   * plain protocol/interface nodes.
+   */
+  public dispatch?: CallableDispatch = undefined;
   /** Semantic group derived from the TSP source subfolder (e.g. "connection", "tools"). */
   public group: string = "";
 

@@ -3,6 +3,7 @@ import {
   type Model,
   Program,
   Type,
+  Interface,
   ModelProperty,
   ObjectValue,
   Operation,
@@ -764,6 +765,25 @@ export function $defaultFor(
 
 export function $protocol(context: DecoratorContext, target: Model) {
   setStateScalar(context, StateKeys.protocols, target, true);
+}
+
+// ============================================================================
+// Dispatch decorator (@dispatch)
+// ============================================================================
+
+/**
+ * Declares that a seam `interface` is resolved by behavioral polymorphic
+ * dispatch keyed by the value of the `discriminator` ModelProperty. The
+ * decorator only records the discriminator; the access path from the seam
+ * methods' parameters to that field is resolved deterministically during IR
+ * lowering (see `resolveCallableDispatch`).
+ */
+export function $dispatch(
+  context: DecoratorContext,
+  target: Interface,
+  discriminator: ModelProperty,
+) {
+  setStateScalar(context, StateKeys.dispatch, target, discriminator);
 }
 
 // ============================================================================

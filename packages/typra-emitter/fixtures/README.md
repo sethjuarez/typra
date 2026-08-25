@@ -30,6 +30,7 @@ behavior is genuinely runtime-specific.
 | Coercions | `features/coercions/main.tsp` | Scalar-to-model coercions, factories, method stubs, and entry shorthand for named collections. |
 | Defaults | `features/defaults/main.tsp` | Explicit scalar defaults, optional collections, and required complex field sample synthesis. |
 | Protocols | `features/protocols/main.tsp` | TypeSpec-native interfaces/operations plus runtime cancellation, sync, optional, and effect metadata. |
+| Dispatch | `features/dispatch/main.tsp` | Behavioral polymorphic dispatch via `@dispatch`, resolving a discriminator field to a deterministic parameter access path. |
 | Provider wire | `features/wire/main.tsp` | Provider-specific names with `@@knownAs` and provider defaults with `@@defaultFor`. |
 | Transport | `features/transport/main.tsp` | Path, query, header, cookie, body, status, success/error body envelopes, and wildcard status bodies. |
 | Namespaces | `features/namespaces/main.tsp` | Nested namespaces and cross-namespace references. |

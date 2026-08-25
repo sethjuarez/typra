@@ -209,6 +209,36 @@ extern dec parseAlias(target: Union, canonical: valueof string, aliases: valueof
 extern dec protocol(target: Model);
 
 /**
+ * Declares that a seam `interface` is resolved by behavioral polymorphic
+ * dispatch: at runtime one of several interchangeable implementations is
+ * selected by the value of a discriminator field on an ambient config/context
+ * model, not by an operation parameter. Seam methods stay key-free — the engine
+ * is never a parameter; the implementation is resolved once from the field.
+ *
+ * The discriminator argument is a reference to the ModelProperty whose value is
+ * the registry key (the same target class `@knownAs` uses). The field must be
+ * uniquely reachable from the seam methods' parameters via a field-access path
+ * (e.g. `agent` → `agent.template.format.kind`); the emitter resolves that path
+ * deterministically and reports a diagnostic when the field is unreachable or
+ * ambiguously reachable rather than guessing a path.
+ *
+ * Applies to an `interface` only. A standalone `op` is the static/free-function
+ * case and contributes nothing to the seam surface, so `@dispatch` on an `op` is
+ * a target-type error.
+ *
+ * @param discriminator The ModelProperty whose value selects the implementation
+ *
+ * @example
+ * ```typespec
+ * @dispatch(TemplateFormat.kind)
+ * interface Renderer {
+ *   render(agent: Agent, inputs: Inputs): string;
+ * }
+ * ```
+ */
+extern dec dispatch(target: Interface, discriminator: ModelProperty);
+
+/**
  * Declares which field of this model receives an immediate scalar value when the
  * model appears as an entry of a name-keyed collection.
  *
