@@ -330,11 +330,9 @@ function emitGoVectorConformanceTest(
   adapterImportPath: string,
 ): string {
   const model = buildVectorConformanceCodeModel(vectors);
-  const payload = JSON.stringify(model.vectors, null, 2);
-  // JSON string escapes are a subset of Go interpreted-string-literal escapes,
-  // so JSON.stringify yields a valid Go double-quoted literal — except a raw
-  // U+FEFF (BOM), which Go rejects mid-source, so escape it explicitly.
-  const payloadLiteral = JSON.stringify(payload).replace(/\uFEFF/g, "\\ufeff");
+  const hasRequires = model.vectors.some(
+    (entry) => (entry.vector.requires?.length ?? 0) > 0,
+  );
 
   const lines: string[] = [
     "// Copyright (c) Microsoft. All rights reserved.",
@@ -367,8 +365,6 @@ function emitGoVectorConformanceTest(
     "",
     `\tvectoradapters ${JSON.stringify(adapterImportPath)}`,
     ")",
-    "",
-    `var vectorConformancePayload = []byte(${payloadLiteral})`,
     "",
     "// vcCanonical round-trips a value through generic JSON so map keys sort",
     "// regardless of whether the adapter returned a struct or a map.",
@@ -442,16 +438,8 @@ function emitGoVectorConformanceTest(
     "\t}",
     "}",
     "",
-    "func vcRunVector(t *testing.T, index int) {",
-    "\tvar vectors []map[string]any",
-    "\tif err := json.Unmarshal(vectorConformancePayload, &vectors); err != nil {",
-    '\t\tt.Fatalf("failed to decode embedded vectors: %v", err)',
-    "\t}",
-    "\tentry := vectors[index]",
-    '\tcontract, _ := entry["contract"].(string)',
-    '\toperation, _ := entry["operation"].(string)',
+    "func vcRunVector(t *testing.T, contract string, operation string, vector map[string]any) {",
     '\toperationKey := contract + "." + operation',
-    '\tvector, _ := entry["vector"].(map[string]any)',
     '\tvectorName := "unnamed"',
     '\tif name, ok := vector["name"].(string); ok {',
     "\t\tvectorName = name",
@@ -478,6 +466,52 @@ function emitGoVectorConformanceTest(
     "\t\treturn",
     "\t}",
     "",
+    ...(hasRequires
+      ? [
+          "\t// Requirement guard: a vector may declare abstract capability tokens in",
+          "\t// \"requires\". Each is resolved against the runtime-supplied",
+          "\t// VectorCapabilities table BEFORE the adapter runs. An unregistered token",
+          "\t// is a hard failure (never skip silently); an unavailable one yields a",
+          "\t// clean skip so an absent credential never reaches Invoke as an empty value.",
+          "\tvar requires []string",
+          "\tif raw, ok := vector[\"requires\"].([]any); ok {",
+          "\t\tfor _, item := range raw {",
+          "\t\t\tif token, isStr := item.(string); isStr {",
+          "\t\t\t\trequires = append(requires, token)",
+          "\t\t\t}",
+          "\t\t}",
+          "\t}",
+          "\tif len(requires) > 0 {",
+          "\t\tcapabilities := vectoradapters.VectorCapabilities",
+          "\t\tfor _, token := range requires {",
+          "\t\t\tif _, ok := capabilities[token]; !ok {",
+          "\t\t\t\tt.Fatalf(\"No capability predicate registered for requirement token %q. \"+",
+          "\t\t\t\t\t\"Register VectorCapabilities[%q] in the package referenced by \"+",
+          "\t\t\t\t\t\"'vector-adapter-path'. @vector conformance never skips silently.\", token, token)",
+          "\t\t\t\treturn",
+          "\t\t\t}",
+          "\t\t}",
+          "\t\tprovider, _ := vector[\"provider\"].(string)",
+          "\t\ttargetAPI, _ := vector[\"targetApi\"].(string)",
+          "\t\tcapCtx := vectoradapters.Context{",
+          "\t\t\tContract:  contract,",
+          "\t\t\tOperation: operation,",
+          "\t\t\tVector:    vector,",
+          "\t\t\tProvider:  provider,",
+          "\t\t\tTargetAPI: targetAPI,",
+          "\t\t\tDoubles:   vectoradapters.VectorDoubles,",
+          "\t\t\tBaseDir:   vcBaseDir(),",
+          "\t\t}",
+          "\t\tfor _, token := range requires {",
+          "\t\t\tif !capabilities[token](capCtx) {",
+          "\t\t\t\tt.Skipf(\"SKIP %s (requirement unavailable: %s)\", vectorID, token)",
+          "\t\t\t\treturn",
+          "\t\t\t}",
+          "\t\t}",
+          "\t}",
+          "",
+        ]
+      : []),
     "\t// Per-vector waiver, consulted even when an adapter IS registered. Keyed by",
     "\t// the full vector id (\"Contract.operation:name\") or \"operation:name\" so it",
     "\t// never collides with an operation-level waiver. xfail: a waived vector that",
@@ -558,10 +592,20 @@ function emitGoVectorConformanceTest(
   ];
 
   model.vectors.forEach((entry, index) => {
+    const vectorJSON = JSON.stringify(entry.vector, null, 2);
     lines.push(
-      `func ${goVectorSlug(index, entry)}(t *testing.T) { vcRunVector(t, ${index}) }`,
+      `func ${goVectorSlug(index, entry)}(t *testing.T) {`,
+      `\tvectorJSON := \`${vectorJSON}\``,
+      "\tvar vector map[string]any",
+      "\tif err := json.Unmarshal([]byte(vectorJSON), &vector); err != nil {",
+      '\t\tt.Fatalf("failed to decode vector: %v", err)',
+      "\t}",
+      `\tvcRunVector(t, ${JSON.stringify(entry.contract)}, ${JSON.stringify(
+        entry.operation,
+      )}, vector)`,
+      "}",
+      "",
     );
   });
-  lines.push("");
   return lines.join("\n");
 }

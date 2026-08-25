@@ -82,7 +82,17 @@ interface Target {
   // Guard proving the harness rejects a @sync adapter that returns an awaitable
   // (Go documents its exemption instead).
   guard: RegExp;
+  // How the harness classifies the @sync op ('format') as sync and the
+  // async-default op ('authorize') as async. Migrated targets thread the flag
+  // as an emit-time call argument (no `sync` field leaks into embedded data);
+  // legacy targets still embed a `sync:true`/`sync:false` entry field, so a
+  // target without explicit patterns falls back to the embedded-data form.
+  syncTrue?: RegExp;
+  syncFalse?: RegExp;
 }
+
+const EMBEDDED_SYNC_TRUE = /"?operation"?:"format",[^]*?"?sync"?:true/;
+const EMBEDDED_SYNC_FALSE = /"?operation"?:"authorize",[^]*?"?sync"?:false/;
 
 const TARGETS: Target[] = [
   {
@@ -90,7 +100,9 @@ const TARGETS: Target[] = [
     outputDir: "typescript",
     testDir: "typescript-tests",
     file: "vector-conformance.test.ts",
-    guard: /entry\.sync && isAwaitable\(/,
+    guard: /entrySync && isAwaitable\(/,
+    syncTrue: /runVector\("[^"]*", "format", vector, true\)/,
+    syncFalse: /runVector\("[^"]*", "authorize", vector, false\)/,
   },
   {
     type: "Python",
@@ -98,6 +110,8 @@ const TARGETS: Target[] = [
     testDir: "python-tests",
     file: "test_vector_conformance.py",
     guard: /_SyncViolation/,
+    syncTrue: /_run_vector\("[^"]*", "format", vector, True\)/,
+    syncFalse: /_run_vector\("[^"]*", "authorize", vector, False\)/,
   },
   {
     type: "CSharp",
@@ -106,6 +120,8 @@ const TARGETS: Target[] = [
     file: "VectorConformanceTests.cs",
     extra: ['        vector-adapter-path: "Typra.Proof.Adapters"'],
     guard: /sync && IsAwaitable\(/,
+    syncTrue: /RunVector\("[^"]*", "format", vector, true\)/,
+    syncFalse: /RunVector\("[^"]*", "authorize", vector, false\)/,
   },
   {
     type: "Go",
@@ -114,6 +130,11 @@ const TARGETS: Target[] = [
     file: "vector_conformance_test.go",
     extra: ['        vector-adapter-path: "typraproof/vectoradapters"'],
     guard: /@sync classification is not separately enforced/,
+    // Go has no awaitable type, so it threads operation as a call argument with
+    // no sync flag at all (enforcement is a no-op by construction). Assert both
+    // operations are still emitted as per-vector call arguments.
+    syncTrue: /vcRunVector\(t, "[^"]*", "format", vector\)/,
+    syncFalse: /vcRunVector\(t, "[^"]*", "authorize", vector\)/,
   },
   {
     type: "Java",
@@ -126,6 +147,8 @@ const TARGETS: Target[] = [
       '        vector-adapter-path: "typra.proof.VectorAdapters"',
     ],
     guard: /sync && isAwaitable\(/,
+    syncTrue: /runVector\("[^"]*", "format", vector, true\)/,
+    syncFalse: /runVector\("[^"]*", "authorize", vector, false\)/,
   },
   {
     type: "Rust",
@@ -134,6 +157,8 @@ const TARGETS: Target[] = [
     file: "vector_conformance_test.rs",
     extra: ['        vector-adapter-path: "vector_adapters.rs"'],
     guard: /if let vector_adapters::Invoke::Async\(_\) = adapter\.invoke/,
+    syncTrue: /vc_run_vector\("[^"]*", "format", vector, true\)/,
+    syncFalse: /vc_run_vector\("[^"]*", "authorize", vector, false\)/,
   },
   {
     type: "Swift",
@@ -142,6 +167,10 @@ const TARGETS: Target[] = [
     file: "VectorConformanceTests.swift",
     extra: ['        package-name: "TypraProof"'],
     guard: /if sync, case \.asynchronous = adapter\.invoke/,
+    syncTrue:
+      /runVector\(contract: "[^"]*", operation: "format", vector: vector, sync: true\)/,
+    syncFalse:
+      /runVector\(contract: "[^"]*", operation: "authorize", vector: vector, sync: false\)/,
   },
 ];
 
@@ -195,18 +224,21 @@ describe("@sync classification is threaded and enforced across all targets", () 
         const suite = readFileSync(path.join(testDir, target.file), "utf8");
         const flat = flatten(suite);
 
-        // (a) the @sync op is classified sync:true, the async-default op sync:false.
-        // TypeScript's payload is a real object literal, so prettier drops quotes
-        // from its identifier keys; the other targets embed it as a JSON string
-        // (quoted keys). Accept either so one assertion covers every target.
+        // (a) the @sync op is classified sync:true, the async-default op
+        // sync:false. Migrated targets thread the flag as a call argument
+        // (`runVector(..., true)`); legacy targets embed a `sync` entry field.
+        // TypeScript's payload is a real object literal, so prettier drops
+        // quotes from identifier keys; the JSON-string targets keep quoted keys.
+        const syncTrue = target.syncTrue ?? EMBEDDED_SYNC_TRUE;
+        const syncFalse = target.syncFalse ?? EMBEDDED_SYNC_FALSE;
         assert.match(
-          flat,
-          /"?operation"?:"format",[^]*?"?sync"?:true/,
+          target.syncTrue ? suite : flat,
+          syncTrue,
           `${target.type}: expected the @sync op 'format' to be classified sync:true`,
         );
         assert.match(
-          flat,
-          /"?operation"?:"authorize",[^]*?"?sync"?:false/,
+          target.syncFalse ? suite : flat,
+          syncFalse,
           `${target.type}: expected async-default op 'authorize' to be classified sync:false`,
         );
 

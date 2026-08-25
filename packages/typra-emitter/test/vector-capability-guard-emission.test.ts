@@ -1,20 +1,19 @@
 // Copyright (c) Microsoft. All rights reserved.
 
-// Deterministic, toolchain-free lock for #265: the @vector conformance harness
-// must consult the runtime waiver registry PER VECTOR (not just per operation)
-// and honour it as an xfail/xpass gate on every target runtime.
+// Deterministic, toolchain-free lock for the generated requirement guard: the
+// @vector conformance harness must, on every one of the seven target runtimes,
+//   * load the runtime-supplied capability table (the VECTOR_CAPABILITIES seam),
+//   * emit the canonical, byte-identical skip reason "requirement unavailable:
+//     <token>" when a required capability is absent, and
+//   * hard-fail on an unregistered requirement token (never skip silently),
+// and the author-declared `requires` tokens must flow through serialization into
+// every harness's embedded vector payload.
 //
-// We compile ONE spec carrying a @vector operation into all seven targets in a
-// single pass, then read each generated harness and assert it contains:
-//   * the per-vector XFAIL branch (waived vector that fails is expected -> green)
-//   * the XPASS branch ("waived vector unexpectedly passed" -> hard failure so
-//     stale waivers are removed)
-//   * a per-vector waiver key ("<operation>:<name>") distinct from the
-//     operation-level key, proving the lookup fires on the adapter-present path.
-//
-// This needs no language toolchain (only `tsp compile`, i.e. Node), so it runs
-// everywhere and pins the rendered target code, per the reproduce-before-fix
-// contract.
+// We compile ONE spec whose vector declares `requires: ["provider:openai"]` into
+// all seven targets in a single pass, then read each generated harness and
+// assert the guard text and the token are present. This needs no language
+// toolchain (only `tsp compile`, i.e. Node), so it runs everywhere and pins the
+// rendered target code per the reproduce-before-fix contract.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -32,20 +31,19 @@ function yamlString(value: string): string {
 const SPEC = [
   'import "@typra/emitter";',
   "",
-  "namespace Typra.Waiver;",
+  "namespace Typra.Cap;",
   "",
   "model Root {",
   "  id: string;",
   "}",
   "",
-  "const EchoVectors = #[",
-  '  #{ name: "shout", input: #{ payload: "hi" }, expected: "HI" },',
-  '  #{ name: "quiet", input: #{ payload: "lo" }, expected: "lo" }',
+  "const LiveVectors = #[",
+  '  #{ name: "structure", input: #{ payload: "hi" }, expected: "PONG", requires: #["provider:openai"] }',
   "];",
   "",
-  "interface Echo {",
-  "  @vector(EchoVectors)",
-  "  echo(payload: string): string;",
+  "interface Live {",
+  "  @vector(LiveVectors)",
+  "  ping(payload: string): string;",
   "}",
   "",
 ].join("\n");
@@ -67,21 +65,21 @@ function findFile(root: string, basename: string): string {
   throw new Error(`harness file ${basename} not found under ${root}`);
 }
 
-// Per-language harness filename plus the exact per-vector key expression the
-// generated code uses to probe the waiver registry beyond the operation key.
-const TARGETS: Array<{ name: string; file: string; perVectorKey: RegExp }> = [
-  { name: "typescript", file: "vector-conformance.test.ts", perVectorKey: /\$\{operation\}:\$\{vectorName\}/ },
-  { name: "python", file: "test_vector_conformance.py", perVectorKey: /\{operation\}:\{vector_name\}/ },
-  { name: "go", file: "vector_conformance_test.go", perVectorKey: /operation\+":"\+vectorName/ },
-  { name: "rust", file: "vector_conformance_test.rs", perVectorKey: /format!\("\{\}:\{\}", operation, vector_name\)/ },
-  { name: "java", file: "VectorConformanceTests.java", perVectorKey: /operation \+ ":" \+ vectorName/ },
-  { name: "swift", file: "VectorConformanceTests.swift", perVectorKey: /\\\(operation\):\\\(vectorName\)/ },
-  { name: "csharp", file: "VectorConformanceTests.cs", perVectorKey: /\{operation\}:\{vectorName\}/ },
+// Per-language harness filename plus the exact expression the generated code
+// uses to load the runtime capability table (parallel to the waiver seam).
+const TARGETS: Array<{ name: string; file: string; seam: RegExp }> = [
+  { name: "typescript", file: "vector-conformance.test.ts", seam: /adapterModule\.vectorCapabilities/ },
+  { name: "python", file: "test_vector_conformance.py", seam: /VECTOR_CAPABILITIES/ },
+  { name: "go", file: "vector_conformance_test.go", seam: /vectoradapters\.VectorCapabilities/ },
+  { name: "rust", file: "vector_conformance_test.rs", seam: /vector_adapters::capabilities\(\)/ },
+  { name: "java", file: "VectorConformanceTests.java", seam: /\.capabilities\(\)/ },
+  { name: "swift", file: "VectorConformanceTests.swift", seam: /\.capabilities\(\)/ },
+  { name: "csharp", file: "VectorConformanceTests.cs", seam: /VectorAdapters\.Capabilities\(\)/ },
 ];
 
-describe("@vector harness consults per-vector waivers on every target (#265)", () => {
-  it("emits an xfail/xpass per-vector waiver gate for all seven runtimes", () => {
-    const output = mkdtempSync(path.join(process.cwd(), "tmp-per-vector-waiver-"));
+describe("@vector harness emits the requirement guard on every target", () => {
+  it("loads the capability seam, emits the canonical skip reason, and hard-fails unknown tokens for all seven runtimes", () => {
+    const output = mkdtempSync(path.join(process.cwd(), "tmp-cap-guard-emission-"));
     const source = path.join(output, "main.tsp");
     const config = path.join(output, "tspconfig.yaml");
     const gen = path.join(output, "generated");
@@ -101,8 +99,8 @@ describe("@vector harness consults per-vector waivers on every target (#265)", (
           "options:",
           '  "@typra/emitter":',
           `    emitter-output-dir: ${yamlString(gen)}`,
-          '    root-object: "Typra.Waiver.Root"',
-          '    root-namespace: "Typra.Waiver"',
+          '    root-object: "Typra.Cap.Root"',
+          '    root-namespace: "Typra.Cap"',
           "    emit-targets:",
           "      - type: TypeScript",
           `        output-dir: ${yamlString(dir("typescript"))}`,
@@ -115,7 +113,7 @@ describe("@vector harness consults per-vector waivers on every target (#265)", (
           "      - type: Go",
           `        output-dir: ${yamlString(dir("go"))}`,
           `        test-dir: ${yamlString(dir("go-tests"))}`,
-          '        vector-adapter-path: "typrawaiver/vectoradapters"',
+          '        vector-adapter-path: "typracap/vectoradapters"',
           "        format: false",
           "      - type: Rust",
           `        output-dir: ${yamlString(dir("rust"))}`,
@@ -125,18 +123,18 @@ describe("@vector harness consults per-vector waivers on every target (#265)", (
           "      - type: Java",
           `        output-dir: ${yamlString(dir("java"))}`,
           `        test-dir: ${yamlString(dir("java-tests"))}`,
-          '        package-name: "typra.waiver"',
-          '        vector-adapter-path: "typra.waiver.adapters.VectorAdapters"',
+          '        package-name: "typra.cap"',
+          '        vector-adapter-path: "typra.cap.adapters.VectorAdapters"',
           "        format: false",
           "      - type: Swift",
           `        output-dir: ${yamlString(dir("swift"))}`,
           `        test-dir: ${yamlString(dir("swift-tests"))}`,
-          '        package-name: "TypraWaiver"',
+          '        package-name: "TypraCap"',
           "        format: false",
           "      - type: CSharp",
           `        output-dir: ${yamlString(dir("csharp"))}`,
           `        test-dir: ${yamlString(dir("csharp-tests"))}`,
-          '        vector-adapter-path: "Typra.Waiver.Adapters"',
+          '        vector-adapter-path: "Typra.Cap.Adapters"',
           "        format: false",
           "",
         ].join("\n"),
@@ -152,18 +150,23 @@ describe("@vector harness consults per-vector waivers on every target (#265)", (
         const harness = readFileSync(findFile(gen, target.file), "utf8");
         assert.match(
           harness,
-          /XFAIL/,
-          `${target.name} harness must emit an XFAIL branch for waived-and-failing vectors`,
+          target.seam,
+          `${target.name} harness must load the VECTOR_CAPABILITIES seam`,
         );
         assert.match(
           harness,
-          /waived vector unexpectedly/,
-          `${target.name} harness must emit an XPASS guard for waived-but-passing vectors`,
+          /requirement unavailable: /,
+          `${target.name} harness must emit the canonical skip reason`,
         );
         assert.match(
           harness,
-          target.perVectorKey,
-          `${target.name} harness must probe a per-vector waiver key ("<operation>:<name>")`,
+          /No capability predicate registered for requirement token/,
+          `${target.name} harness must hard-fail an unregistered requirement token`,
+        );
+        assert.match(
+          harness,
+          /provider:openai/,
+          `${target.name} harness must carry the author-declared requires token in its payload`,
         );
       }
     } finally {

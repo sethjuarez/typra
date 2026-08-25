@@ -265,12 +265,22 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
       // The bidi control (U+202E) is embedded as an ASCII JSON escape, never raw.
       assert.match(javaSuite, /\\\\u202e/);
       assert.doesNotMatch(javaSuite, /\u202e/);
-      // The payload exceeds the 64 KiB constant-pool limit, so it must be assembled
-      // from multiple runtime-concatenated chunks rather than one string literal.
-      assert.match(javaSuite, /private static String buildPayload\(\)/);
+      // Each vector is emitted as its own straight-line method that inlines only its
+      // own data (mirroring the model/sample tests) — no monolithic embedded payload.
+      assert.doesNotMatch(javaSuite, /private static String buildPayload\(\)/);
+      assert.match(
+        javaSuite,
+        /private static void vector\d+\w*\(\) throws Exception/,
+      );
+      assert.match(
+        javaSuite,
+        /runVector\("[^"]*", "[^"]*", vector, (?:true|false)\)/,
+      );
+      // The "big" vector alone exceeds the 64 KiB constant-pool limit, so its own
+      // literal must be assembled from multiple runtime-concatenated chunks.
       assert.ok(
         (javaSuite.match(/sb\.append\(/g) ?? []).length >= 2,
-        "large payload should split into multiple appended chunks",
+        "the oversized vector should split into multiple appended chunks",
       );
 
       // Assemble a self-contained source tree: the emitted model/runtime files
