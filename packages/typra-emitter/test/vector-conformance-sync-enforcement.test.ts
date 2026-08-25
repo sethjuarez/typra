@@ -143,8 +143,9 @@ const TARGETS: Target[] = [
     file: "VectorConformanceTests.cs",
     extra: ['        vector-adapter-path: "Typra.Proof.Adapters"'],
     guard: /sync && IsAwaitable\(/,
-    syncTrue: /RunVector\("[^"]*", "format", vector, true\)/,
-    syncFalse: /RunVector\("[^"]*", "authorize", vector, false\)/,
+    guardFile: "VectorRunner.cs",
+    syncTrue: /VectorRunner\.RunVector\("[^"]*", "format", vector, true, /,
+    syncFalse: /VectorRunner\.RunVector\("[^"]*", "authorize", vector, false, /,
   },
   {
     type: "Go",

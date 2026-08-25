@@ -319,14 +319,21 @@ describe("@vector conformance is an enforced closed loop (C#)", () => {
         { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
       );
 
-      // Sanity: the generated suite must invoke a runtime adapter registry.
+      // Sanity: the generated suite must invoke a runtime adapter registry via
+      // the seam it injects into the shared runner (the interpreter now lives in
+      // the sibling VectorRunner file).
       const csSuite = readFileSync(
         path.join(csTestDir, "VectorConformanceTests.cs"),
         "utf8",
       );
+      const csRunner = readFileSync(
+        path.join(csTestDir, "VectorRunner.cs"),
+        "utf8",
+      );
       assert.match(csSuite, /using Typra\.Proof\.Adapters;/);
       assert.match(csSuite, /VectorAdapters\.Adapters\(\)/);
-      assert.match(csSuite, /No vector adapter registered for/);
+      assert.match(csSuite, /VectorRunner\.RunVector\(/);
+      assert.match(csRunner, /No vector adapter registered for/);
       assert.match(csSuite, /public async Task Vector\d+EchoEchoShout\(\)/);
       assert.match(csSuite, /public async Task Vector\d+SumSumBasic\(\)/);
       assert.match(csSuite, /public async Task Vector\d+NoteNoteBidi\(\)/);
@@ -335,7 +342,7 @@ describe("@vector conformance is an enforced closed loop (C#)", () => {
       assert.doesNotMatch(csSuite, /\u202e/);
 
       // Assemble a self-contained xUnit project: the generated suite plus the
-      // runtime adapter file compiled side by side.
+      // shared runner and the runtime adapter file compiled side by side.
       const moduleDir = path.join(output, "module");
       const artifacts = path.join(output, "cs-artifacts");
       mkdirSync(moduleDir, { recursive: true });
@@ -364,6 +371,10 @@ describe("@vector conformance is an enforced closed loop (C#)", () => {
       writeFileSync(
         path.join(moduleDir, "VectorConformanceTests.cs"),
         csSuite,
+      );
+      writeFileSync(
+        path.join(moduleDir, "VectorRunner.cs"),
+        csRunner,
       );
 
       const writeAdapter = (src: string): void => {

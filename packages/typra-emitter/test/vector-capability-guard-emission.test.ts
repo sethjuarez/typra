@@ -87,7 +87,7 @@ const TARGETS: Array<{
   { name: "rust", file: "vector_conformance_test.rs", seam: /vector_adapters::capabilities\(\)/ },
   { name: "java", file: "VectorConformanceTests.java", seam: /\.capabilities\(\)/ },
   { name: "swift", file: "VectorConformanceTests.swift", seam: /\.capabilities\(\)/ },
-  { name: "csharp", file: "VectorConformanceTests.cs", seam: /VectorAdapters\.Capabilities\(\)/ },
+  { name: "csharp", file: "VectorConformanceTests.cs", seam: /VectorAdapters\.Capabilities\(\)/, guardFile: "VectorRunner.cs" },
 ];
 
 describe("@vector harness emits the requirement guard on every target", () => {

@@ -81,7 +81,7 @@ const TARGETS: Array<{
   { name: "rust", file: "vector_conformance_test.rs", perVectorKey: /format!\("\{\}:\{\}", operation, vector_name\)/ },
   { name: "java", file: "VectorConformanceTests.java", perVectorKey: /operation \+ ":" \+ vectorName/ },
   { name: "swift", file: "VectorConformanceTests.swift", perVectorKey: /\\\(operation\):\\\(vectorName\)/ },
-  { name: "csharp", file: "VectorConformanceTests.cs", perVectorKey: /\{operation\}:\{vectorName\}/ },
+  { name: "csharp", file: "VectorConformanceTests.cs", perVectorKey: /\{operation\}:\{vectorName\}/, runnerFile: "VectorRunner.cs" },
 ];
 
 describe("@vector harness consults per-vector waivers on every target (#265)", () => {
