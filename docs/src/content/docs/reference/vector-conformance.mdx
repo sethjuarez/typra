@@ -241,9 +241,9 @@ package typra.proof.adapters;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.HashMap;
 import java.util.Map;
-import typra.proof.VectorConformanceTests.VectorAdapter;
-import typra.proof.VectorConformanceTests.VectorContext;
-import typra.proof.VectorConformanceTests.VectorException;
+import typra.proof.VectorRunner.VectorAdapter;
+import typra.proof.VectorRunner.VectorContext;
+import typra.proof.VectorRunner.VectorException;
 
 public final class VectorAdapters {
     private VectorAdapters() { }
@@ -263,12 +263,13 @@ public final class VectorAdapters {
 
 The support types (`VectorAdapter`, `VectorContext`, `VectorException`, and the
 `Invoke`/`Normalizer` functional interfaces) are **nested** inside the generated
-`VectorConformanceTests`, so import them as
-`<package-name>.VectorConformanceTests.VectorAdapter` etc. `invoke` returns a
-`JsonNode`; for an error vector throw a `VectorException` whose `payload` (a
-`JsonNode`) carries the expected error. The Java harness is only emitted for the
-**jackson** serialization mode, which supplies the JSON runtime it parses and
-canonicalizes with; a missing adapter class is a **compile error**, never a skip.
+`VectorRunner` (the interpreter module beside the thin `VectorConformanceTests`
+harness), so import them as `<package-name>.VectorRunner.VectorAdapter` etc.
+`invoke` returns a `JsonNode`; for an error vector throw a `VectorException` whose
+`payload` (a `JsonNode`) carries the expected error. The Java harness is only
+emitted for the **jackson** serialization mode, which supplies the JSON runtime it
+parses and canonicalizes with; a missing adapter class is a **compile error**,
+never a skip.
 
 </TabItem>
 <TabItem label="Swift">

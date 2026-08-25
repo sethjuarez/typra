@@ -820,8 +820,8 @@ function javaEchoAdapter(divergent: boolean, waiverEntries: string[]): string {
     "import java.util.HashMap;",
     "import java.util.Locale;",
     "import java.util.Map;",
-    "import typra.proof.VectorConformanceTests.VectorAdapter;",
-    "import typra.proof.VectorConformanceTests.VectorContext;",
+    "import typra.proof.VectorRunner.VectorAdapter;",
+    "import typra.proof.VectorRunner.VectorContext;",
     "",
     "public final class VectorAdapters {",
     "  private VectorAdapters() { }",
@@ -884,6 +884,7 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Java)", (
       // generated harness, the runtime adapter, and a tiny Main that drives run().
       const modelSources = collectJavaSources(javaOut);
       const harnessPath = path.join(javaTestDir, "VectorConformanceTests.java");
+      const runnerPath = path.join(javaTestDir, "VectorRunner.java");
       const srcDir = path.join(output, "src");
       const classesDir = path.join(output, "classes");
       mkdirSync(srcDir, { recursive: true });
@@ -911,7 +912,7 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Java)", (
         writeFileSync(adapterPath, adapterSrc);
         rmSync(classesDir, { recursive: true, force: true });
         mkdirSync(classesDir, { recursive: true });
-        const sources = [...modelSources, harnessPath, adapterPath, mainPath];
+        const sources = [...modelSources, runnerPath, harnessPath, adapterPath, mainPath];
         try {
           execFileSync("javac", ["-Xlint:all", "-Werror", "-d", classesDir, ...sources], {
             cwd: output,

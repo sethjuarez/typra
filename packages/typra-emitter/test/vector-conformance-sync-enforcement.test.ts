@@ -176,8 +176,9 @@ const TARGETS: Target[] = [
       '        vector-adapter-path: "typra.proof.VectorAdapters"',
     ],
     guard: /sync && isAwaitable\(/,
-    syncTrue: /runVector\("[^"]*", "format", vector, true\)/,
-    syncFalse: /runVector\("[^"]*", "authorize", vector, false\)/,
+    guardFile: "VectorRunner.java",
+    syncTrue: /VectorRunner\.runVector\("[^"]*", "format", vector, true, seam\(\)\)/,
+    syncFalse: /VectorRunner\.runVector\("[^"]*", "authorize", vector, false, seam\(\)\)/,
   },
   {
     type: "Rust",

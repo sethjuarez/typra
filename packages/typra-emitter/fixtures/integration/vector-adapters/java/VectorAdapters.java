@@ -11,8 +11,8 @@ package typra.fixtures;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import typra.fixtures.VectorConformanceTests.VectorAdapter;
-import typra.fixtures.VectorConformanceTests.VectorContext;
+import typra.fixtures.VectorRunner.VectorAdapter;
+import typra.fixtures.VectorRunner.VectorContext;
 
 public final class VectorAdapters {
   private VectorAdapters() { }
