@@ -280,6 +280,7 @@ export function runPythonExecutableConformance(
     '    "propertyCases": [{"id": entry["id"], "seed": entry["seed"], "caseId": entry["caseId"], "root": FixtureRoot.load(entry["input"]).save()} for entry in property_cases],',
     '    "imageContent": image_content.save(),',
     '    "openai": wire.to_wire("openai"),',
+    '    "openaiRoundTrip": WireOptions.from_wire("openai", wire.to_wire("openai")).to_wire("openai"),',
     '    "anthropic": wire.to_wire("anthropic"),',
     '    "unmapped": wire.to_wire("unmapped-provider"),',
     '    "emptyProvider": wire.to_wire(""),',

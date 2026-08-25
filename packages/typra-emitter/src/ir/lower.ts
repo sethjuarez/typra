@@ -555,6 +555,65 @@ function lowerWire(node: TypeNode, fields: FieldDecl[]): WireDecl | null {
   };
 }
 
+/**
+ * A provider whose wire name is claimed by more than one canonical field.
+ *
+ * Because `fromWire(provider)` inverts the wire map (wire name → canonical
+ * field), two canonical fields mapping to the same provider wire name cannot be
+ * disambiguated on the way back in. That is an author error, surfaced as the
+ * `typra-emitter-wire-collision` diagnostic (see resolveModel in ast.ts, which
+ * has access to the compiler `Program` needed to report it — lowering runs once
+ * per target language and would otherwise report the same collision N times).
+ */
+export interface WireCollision {
+  /** Provider identifier the collision occurs for (e.g. "openai"). */
+  provider: string;
+  /** The shared provider-native wire name. */
+  wireName: string;
+  /** Canonical field names that collide on `wireName`, in declaration order. */
+  fields: string[];
+}
+
+/**
+ * Detect wire-name collisions in a set of field → provider-name mappings.
+ *
+ * Iterates `mappings` (and each field's providers) in declaration order so the
+ * reported collisions are deterministic. Returns one {@link WireCollision} per
+ * `(provider, wireName)` pair claimed by two or more canonical fields.
+ */
+export function detectWireCollisions(
+  mappings: { fieldName: string; wireNames: Record<string, string> }[],
+): WireCollision[] {
+  // provider → wire name → canonical field names (in declaration order)
+  const byProvider = new Map<string, Map<string, string[]>>();
+
+  for (const mapping of mappings) {
+    for (const [provider, wireName] of Object.entries(mapping.wireNames)) {
+      let wireNames = byProvider.get(provider);
+      if (!wireNames) {
+        wireNames = new Map<string, string[]>();
+        byProvider.set(provider, wireNames);
+      }
+      const claimants = wireNames.get(wireName);
+      if (claimants) {
+        claimants.push(mapping.fieldName);
+      } else {
+        wireNames.set(wireName, [mapping.fieldName]);
+      }
+    }
+  }
+
+  const collisions: WireCollision[] = [];
+  for (const [provider, wireNames] of byProvider) {
+    for (const [wireName, fields] of wireNames) {
+      if (fields.length > 1) {
+        collisions.push({ provider, wireName, fields });
+      }
+    }
+  }
+  return collisions;
+}
+
 // ============================================================================
 // Coercion property detection
 // ============================================================================

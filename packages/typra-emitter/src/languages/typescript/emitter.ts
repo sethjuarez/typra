@@ -395,9 +395,10 @@ function emitType(
   // save() instance method
   emitSaveMethod(type, lines);
 
-  // toWire() method (only if wire mappings exist)
+  // toWire() / fromWire() methods (only if wire mappings exist)
   if (type.wire !== null) {
     emitToWireMethod(type, lines);
+    emitFromWireMethod(name, type, lines);
   }
 
   // toYaml / toJson
@@ -1648,9 +1649,41 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
   lines.push("");
 }
 
-// ============================================================================
-// toYaml() / toJson()
-// ============================================================================
+function emitFromWireMethod(
+  name: string,
+  type: TypeDecl,
+  lines: string[],
+): void {
+  const wire = type.wire!;
+
+  lines.push(
+    `  static fromWire(provider: string, data: Record<string, unknown>, context?: LoadContext): ${name} {`,
+  );
+  lines.push("    const wireMap: Record<string, Record<string, string>> = {");
+
+  for (const mapping of wire.mappings) {
+    const entries = Object.entries(mapping.wireNames)
+      .map(([prov, wireName]) => `"${prov}": "${wireName}"`)
+      .join(", ");
+    lines.push(`      "${mapping.fieldName}": { ${entries} },`);
+  }
+
+  lines.push("    };");
+  lines.push("    const inverse: Record<string, string> = {};");
+  lines.push("    for (const [field, m] of Object.entries(wireMap)) {");
+  lines.push("      const w = m[provider];");
+  lines.push("      if (w) {");
+  lines.push("        inverse[w] = field;");
+  lines.push("      }");
+  lines.push("    }");
+  lines.push("    const canonical: Record<string, unknown> = {};");
+  lines.push("    for (const [k, v] of Object.entries(data)) {");
+  lines.push("      canonical[inverse[k] ?? k] = v;");
+  lines.push("    }");
+  lines.push(`    return ${name}.load(canonical, context);`);
+  lines.push("  }");
+  lines.push("");
+}
 
 function emitToYaml(name: string, lines: string[]): void {
   lines.push("  toYaml(context?: SaveContext): string {");

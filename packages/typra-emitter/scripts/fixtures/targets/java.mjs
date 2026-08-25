@@ -400,6 +400,7 @@ export function runJavaExecutableConformance() {
       '    output.put("propertyCases", propertyOutputs);',
       '    output.put("imageContent", reloadedImageContent.save(new SaveContext()));',
       '    output.put("openai", wire.toWire("openai"));',
+      '    output.put("openaiRoundTrip", WireOptions.fromWire("openai", wire.toWire("openai")).toWire("openai"));',
       '    output.put("anthropic", wire.toWire("anthropic"));',
       '    output.put("unmapped", wire.toWire("unmapped-provider"));',
       '    output.put("emptyProvider", wire.toWire(""));',

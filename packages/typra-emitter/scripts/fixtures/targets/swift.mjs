@@ -495,6 +495,7 @@ final class ConformanceValidateTests: XCTestCase {
       "propertyCases": propertyOutputs,
       "imageContent": try imageContent.save(),
       "openai": try wire.toWire("openai"),
+      "openaiRoundTrip": try WireOptions.fromWire("openai", wire.toWire("openai")).toWire("openai"),
       "anthropic": try wire.toWire("anthropic"),
       "unmapped": try wire.toWire("unmapped-provider"),
       "emptyProvider": try wire.toWire(""),

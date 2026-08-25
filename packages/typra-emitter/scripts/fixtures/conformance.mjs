@@ -265,6 +265,13 @@ export const conformanceCanonical = {
     max_completion_tokens: 256,
     temperature: 0.7,
   },
+  // Round-tripping the openai wire payload back through fromWire and re-serializing must reproduce
+  // the original wire bytes: fromWire inverts the wire-name -> canonical-field remapping toWire
+  // applied, then load()/toWire replays it. openai maps both fields, so the round-trip is lossless.
+  openaiRoundTrip: {
+    max_completion_tokens: 256,
+    temperature: 0.7,
+  },
   anthropic: {
     max_tokens: 256,
   },

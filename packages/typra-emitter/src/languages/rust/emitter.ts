@@ -990,6 +990,7 @@ function emitImpl(
   // to_wire() (only when wire mappings exist)
   if (type.wire) {
     emitToWireMethod(type, lines);
+    emitFromWireMethod(type, lines);
   }
 
   // Dict accessor helpers (only for dict-category fields, not scalar value types)
@@ -2130,6 +2131,52 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
   lines.push(`            }`);
   lines.push(`        }`);
   lines.push(`        serde_json::Value::Object(result)`);
+  lines.push(`    }`);
+}
+
+function emitFromWireMethod(type: TypeDecl, lines: string[]): void {
+  const wire = type.wire!;
+
+  lines.push("");
+  lines.push(`    /// Load from a provider-specific wire-format payload.`);
+  lines.push(
+    `    pub fn from_wire(provider: &str, data: &serde_json::Value, ctx: &LoadContext) -> Self {`,
+  );
+  lines.push(
+    `        let wire_map: std::collections::HashMap<&str, std::collections::HashMap<&str, &str>> = std::collections::HashMap::from([`,
+  );
+  for (const mapping of wire.mappings) {
+    const entries = Object.entries(mapping.wireNames);
+    const inner = entries
+      .map(([provider, wireName]) => `("${provider}", "${wireName}")`)
+      .join(", ");
+    lines.push(
+      `            ("${mapping.fieldName}", std::collections::HashMap::from([${inner}])),`,
+    );
+  }
+  lines.push(`        ]);`);
+  lines.push(
+    `        let mut inverse: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();`,
+  );
+  lines.push(`        for (field, mapping) in &wire_map {`);
+  lines.push(`            if let Some(wire_name) = mapping.get(provider) {`);
+  lines.push(`                inverse.insert(*wire_name, *field);`);
+  lines.push(`            }`);
+  lines.push(`        }`);
+  lines.push(`        let mut canonical = serde_json::Map::new();`);
+  lines.push(`        if let serde_json::Value::Object(map) = data {`);
+  lines.push(`            for (key, value) in map {`);
+  lines.push(
+    `                let field = inverse.get(key.as_str()).copied().unwrap_or(key.as_str());`,
+  );
+  lines.push(
+    `                canonical.insert(field.to_string(), value.clone());`,
+  );
+  lines.push(`            }`);
+  lines.push(`        }`);
+  lines.push(
+    `        Self::load_from_value(&serde_json::Value::Object(canonical), ctx)`,
+  );
   lines.push(`    }`);
 }
 

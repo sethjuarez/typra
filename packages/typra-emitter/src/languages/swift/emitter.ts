@@ -483,6 +483,8 @@ function emitStruct(
   if (type.wire) {
     lines.push("");
     emitToWire(type, lines, polymorphicTypeNames);
+    lines.push("");
+    emitFromWire(type, lines);
   }
   emitJsonYamlMethods(typeName, lines);
   for (const factory of type.factories) {
@@ -843,6 +845,34 @@ function emitToWire(
     emitWireField(mapping, lines, polymorphicTypeNames, collectionHelper);
   }
   lines.push("    return result");
+  lines.push("  }");
+}
+
+function emitFromWire(type: TypeDecl, lines: string[]): void {
+  const typeName = type.typeName.name;
+  lines.push(
+    `  public static func fromWire(_ provider: String, _ data: [String: Any], context: LoadContext = LoadContext()) throws -> ${typeName} {`,
+  );
+  lines.push("    let wireMap: [String: [String: String]] = [");
+  for (const mapping of type.wire!.mappings) {
+    const inner = Object.entries(mapping.wireNames)
+      .map(
+        ([provider, wireName]) =>
+          `${swiftStringLiteral(provider)}: ${swiftStringLiteral(wireName)}`,
+      )
+      .join(", ");
+    lines.push(`      ${swiftStringLiteral(mapping.fieldName)}: [${inner}],`);
+  }
+  lines.push("    ]");
+  lines.push("    var inverse: [String: String] = [:]");
+  lines.push("    for (field, mapping) in wireMap {");
+  lines.push("      if let wireName = mapping[provider] { inverse[wireName] = field }");
+  lines.push("    }");
+  lines.push("    var canonical: [String: Any] = [:]");
+  lines.push("    for (key, value) in data {");
+  lines.push("      canonical[inverse[key] ?? key] = value");
+  lines.push("    }");
+  lines.push("    return try load(canonical, context: context)");
   lines.push("  }");
 }
 
