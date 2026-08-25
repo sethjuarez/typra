@@ -940,6 +940,20 @@ function assertStaticFixtureCoverage() {
   assertIncludes(
     path.join("generated", "fixtures", "typescript", "wire-options.ts"),
     "toWire(provider: string)",
+    "static fromWire(",
+    "const inverse: Record<string, string> = {}",
+    "canonical[inverse[k] ?? k] = v",
+    "return WireOptions.load(canonical, context)",
+    "max_completion_tokens",
+    "max_tokens",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "python", "_WireOptions.py"),
+    "def to_wire(self, provider: str)",
+    "def from_wire(",
+    "inverse[w] = field",
+    "canonical[inverse.get(k, k)] = v",
+    "return WireOptions.load(canonical, context)",
     "max_completion_tokens",
     "max_tokens",
   );
@@ -1129,10 +1143,29 @@ function assertStaticFixtureCoverage() {
     'raise NotImplementedError("EventSink.emit is a compile-only protocol scaffold.")',
   );
   assertIncludes(
+    path.join("generated", "fixtures", "csharp", "WireOptions.cs"),
+    "public Dictionary<string, object?> ToWire(string provider)",
+    "public static WireOptions FromWire(string provider, Dictionary<string, object?> data, LoadContext? context = null)",
+    "var inverse = new Dictionary<string, string>();",
+    "return Load(canonical, context);",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust", "wire_options.rs"),
+    "pub fn to_wire(&self, provider: &str)",
+    "pub fn from_wire(provider: &str, data: &serde_json::Value, ctx: &LoadContext) -> Self {",
+    "Self::load_from_value(&serde_json::Value::Object(canonical), ctx)",
+  );
+  assertIncludes(
     path.join("generated", "fixtures", "go", "wire_options.go"),
     "func (",
     "ToWire(provider string)",
     "max_completion_tokens",
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "go", "wire_options.go"),
+    "func WireOptionsFromWire(provider string",
+    "inverse := make(map[string]string)",
+    "return LoadWireOptions(canonical, ctx)",
   );
   assertIncludes(
     path.join("generated", "fixtures", "go", "tests", "fixture_root_test.go"),
@@ -1174,6 +1207,8 @@ function assertStaticFixtureCoverage() {
     "TestWireOptionsToWire",
     "max_completion_tokens",
     "max_tokens",
+    "WireOptionsFromWire(",
+    "reflect.DeepEqual(",
   );
   assertIncludes(
     path.join(
@@ -1192,6 +1227,20 @@ function assertStaticFixtureCoverage() {
     "public Map<String, Object> toWire(String provider)",
     "max_completion_tokens",
     "max_tokens",
+    "public static WireOptions fromWire(String provider, Map<String, Object> data, LoadContext context) {",
+    "if (w != null) inverse.put(w, e.getKey());",
+    "return load(canonical, context);",
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "java",
+      "tests",
+      "WireOptionsGeneratedTest.java",
+    ),
+    "WireOptions openaiRestored = WireOptions.fromWire(\"openai\", openaiWire);",
+    "openaiRestored.toWire(\"openai\").keySet()",
   );
   assertIncludes(
     path.join("generated", "fixtures", "java", "FixtureRoot.java"),
@@ -1382,6 +1431,8 @@ function assertStaticFixtureCoverage() {
     "public func toWire(_ provider: String",
     "max_completion_tokens",
     "max_tokens",
+    "public static func fromWire(_ provider: String, _ data: [String: Any], context: LoadContext = LoadContext()) throws -> WireOptions {",
+    "return try load(canonical, context: context)",
   );
   assertIncludes(
     path.join(

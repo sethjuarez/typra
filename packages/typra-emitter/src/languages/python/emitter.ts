@@ -528,6 +528,7 @@ function emitType(
   // to_wire() method (only when wire mappings exist)
   if (type.wire) {
     emitToWireMethod(type, lines);
+    emitFromWireMethod(type, lines);
   }
 
   // to_yaml() method
@@ -1662,6 +1663,54 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
   lines.push("            if mapping is not None and provider in mapping:");
   lines.push("                result[mapping[provider]] = value");
   lines.push("        return result");
+  lines.push("");
+}
+
+function emitFromWireMethod(type: TypeDecl, lines: string[]): void {
+  const name = type.typeName.name;
+  const wire = type.wire!;
+
+  lines.push("    @staticmethod");
+  lines.push(
+    `    def from_wire(provider: str, data: dict[str, Any], context: LoadContext | None = None) -> "${name}":`,
+  );
+  lines.push(
+    `        """Load a ${name} instance from a provider-specific wire payload.`,
+  );
+  lines.push("        Args:");
+  lines.push(
+    '            provider (str): The provider the payload came from (e.g., "openai", "anthropic").',
+  );
+  lines.push(
+    "            data (dict[str, Any]): The wire-format dictionary with provider-specific field names.",
+  );
+  lines.push(
+    "            context (Optional[LoadContext]): Optional context with pre/post processing callbacks.",
+  );
+  lines.push("        Returns:");
+  lines.push(`            ${name}: The loaded ${name} instance.`);
+  lines.push("");
+  lines.push(`        """`);
+
+  // Build the wire_map literal from the IR mappings (identical to to_wire).
+  lines.push("        wire_map: dict[str, dict[str, str]] = {");
+  for (const mapping of wire.mappings) {
+    const entries = Object.entries(mapping.wireNames)
+      .map(([provider, wireName]) => `"${provider}": "${wireName}"`)
+      .join(", ");
+    lines.push(`            "${mapping.fieldName}": {${entries}},`);
+  }
+  lines.push("        }");
+
+  lines.push("        inverse: dict[str, str] = {}");
+  lines.push("        for field, m in wire_map.items():");
+  lines.push("            w = m.get(provider)");
+  lines.push("            if w:");
+  lines.push("                inverse[w] = field");
+  lines.push("        canonical: dict[str, Any] = {}");
+  lines.push("        for k, v in data.items():");
+  lines.push("            canonical[inverse.get(k, k)] = v");
+  lines.push(`        return ${name}.load(canonical, context)`);
   lines.push("");
 }
 

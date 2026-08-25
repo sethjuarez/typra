@@ -276,6 +276,7 @@ function emitType(
   emitSave(type, lines, polymorphicTypeNames, inheritedFields);
   if (type.wire) {
     emitToWire(type.wire, lines);
+    emitFromWire(type.typeName.name, type.wire, lines);
   }
 
   function collectInheritedFields(
@@ -1164,6 +1165,48 @@ function emitToWire(wire: WireDecl, lines: string[]): void {
     lines.push("    }");
   }
   lines.push("    return result;");
+  lines.push("  }");
+  lines.push("");
+}
+
+function emitFromWire(typeName: string, wire: WireDecl, lines: string[]): void {
+  lines.push(
+    `  public static ${typeName} fromWire(String provider, Map<String, Object> data) {`,
+  );
+  lines.push(`    return fromWire(provider, data, new LoadContext());`);
+  lines.push("  }");
+  lines.push("");
+  lines.push(
+    `  public static ${typeName} fromWire(String provider, Map<String, Object> data, LoadContext context) {`,
+  );
+  lines.push(
+    "    Map<String, Map<String, String>> wireMap = new LinkedHashMap<>();",
+  );
+  for (const field of wire.mappings) {
+    lines.push("    {");
+    lines.push("      Map<String, String> m = new LinkedHashMap<>();");
+    for (const [provider, name] of Object.entries(field.wireNames)) {
+      lines.push(
+        `      m.put("${escapeJava(provider)}", "${escapeJava(name)}");`,
+      );
+    }
+    lines.push(`      wireMap.put("${escapeJava(field.fieldName)}", m);`);
+    lines.push("    }");
+  }
+  lines.push("    Map<String, String> inverse = new LinkedHashMap<>();");
+  lines.push(
+    "    for (Map.Entry<String, Map<String, String>> e : wireMap.entrySet()) {",
+  );
+  lines.push("      String w = e.getValue().get(provider);");
+  lines.push("      if (w != null) inverse.put(w, e.getKey());");
+  lines.push("    }");
+  lines.push("    Map<String, Object> canonical = new LinkedHashMap<>();");
+  lines.push("    for (Map.Entry<String, Object> e : data.entrySet()) {");
+  lines.push(
+    "      canonical.put(inverse.getOrDefault(e.getKey(), e.getKey()), e.getValue());",
+  );
+  lines.push("    }");
+  lines.push("    return load(canonical, context);");
   lines.push("  }");
   lines.push("");
 }

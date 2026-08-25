@@ -399,6 +399,7 @@ export function runRustExecutableConformance(
         ? '        "imageContent": serde_json::to_value(&image_content).unwrap(),'
         : '        "imageContent": image_content.to_value(&save_ctx),',
       '        "openai": wire.to_wire("openai"),',
+      '        "openaiRoundTrip": WireOptions::from_wire("openai", &wire.to_wire("openai"), &load_ctx).to_wire("openai"),',
       '        "anthropic": wire.to_wire("anthropic"),',
       '        "unmapped": wire.to_wire("unmapped-provider"),',
       '        "emptyProvider": wire.to_wire(""),',

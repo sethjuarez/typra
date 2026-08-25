@@ -25,6 +25,16 @@ import {
 } from "../decorators.js";
 import { StateKeys } from "../lib.js";
 import { scalarRuntimeKind } from "./scalar-kinds.js";
+import { detectWireCollisions } from "./lower.js";
+
+/**
+ * Models whose `@knownAs` wire mappings have already been checked for
+ * collisions, so the `typra-emitter-wire-collision` diagnostic is reported at
+ * most once per model even when the model is reachable from several places in
+ * the type graph (resolveModel can run for the same Model more than once).
+ * Keyed by the compiler `Model` object, which is unique per compilation.
+ */
+const checkedWireCollisions = new WeakSet<Model>();
 
 /**
  * Warn when `@entryShorthand` cannot produce any runtime arm.
@@ -492,10 +502,49 @@ export const resolveModel = (
       properties.push(prop);
     }
     node.properties = properties;
+
+    reportWireCollisions(program, model, properties);
   }
 
   return node;
 };
+
+/**
+ * Report `typra-emitter-wire-collision` when two canonical fields on the same
+ * model map to the same provider wire name. Such a mapping is not invertible, so
+ * the emitted `fromWire(provider)` would silently drop one field; we fail loudly
+ * at compile time instead. The collision detection itself lives beside the wire
+ * lowering (`detectWireCollisions` in lower.ts); reporting happens here because
+ * this is the single AST-resolution pass that owns the compiler `Program`.
+ */
+function reportWireCollisions(
+  program: Program,
+  model: Model,
+  properties: PropertyNode[],
+): void {
+  if (checkedWireCollisions.has(model)) return;
+  checkedWireCollisions.add(model);
+
+  const mappings = properties
+    .filter((prop) => prop.knownAs.length > 0)
+    .map((prop) => {
+      const wireNames: Record<string, string> = {};
+      for (const entry of prop.knownAs) {
+        wireNames[entry.provider] = entry.name;
+      }
+      return { fieldName: prop.name, wireNames };
+    });
+  if (mappings.length === 0) return;
+
+  for (const collision of detectWireCollisions(mappings)) {
+    program.reportDiagnostic({
+      code: "typra-emitter-wire-collision",
+      message: `Provider "${collision.provider}" wire name "${collision.wireName}" is claimed by multiple fields on ${model.name}: ${collision.fields.join(", ")}. fromWire(provider) cannot invert an ambiguous wire mapping — give each field a distinct @knownAs name for this provider.`,
+      severity: "error",
+      target: model,
+    });
+  }
+}
 
 function isHttpStatusCodeMetadataProperty(
   program: Program,

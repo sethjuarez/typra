@@ -310,6 +310,12 @@ function emitWireTest(
         );
       }
     }
+    lines.push(
+      `    ${typeName} ${provider}Restored = ${typeName}.fromWire(${javaString(provider)}, ${provider}Wire);`,
+    );
+    lines.push(
+      `    assertEquals(${provider}Wire.keySet(), ${provider}Restored.toWire(${javaString(provider)}).keySet(), "Expected ${provider} FromWire round-trip to reproduce the wire keys");`,
+    );
   }
 }
 

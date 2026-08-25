@@ -377,6 +377,7 @@ export function runTypeScriptExecutableConformance() {
       "  propertyCases: propertyCases.map((entry) => ({ id: entry.id, seed: entry.seed, caseId: entry.caseId, root: FixtureRoot.load(entry.input).save() })),",
       "  imageContent: imageContent.save(),",
       '  openai: wire.toWire("openai"),',
+      '  openaiRoundTrip: WireOptions.fromWire("openai", wire.toWire("openai")).toWire("openai"),',
       '  anthropic: wire.toWire("anthropic"),',
       '  unmapped: wire.toWire("unmapped-provider"),',
       '  emptyProvider: wire.toWire(""),',

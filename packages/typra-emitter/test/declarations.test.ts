@@ -1848,6 +1848,33 @@ describe("lowerFile", () => {
       const code = emitGoTest({ ...context, importPath: "auth/model" });
       assert.match(code, /foundryWire\["refresh_token"\]/);
     });
+
+    // The ToWire conformance test also proves the inverse: FromWire must invert
+    // ToWire so that reloading a provider payload and re-serializing it reproduces
+    // the same wire bytes.
+    it("emits a FromWire round-trip beside the ToWire assertions", () => {
+      const refreshToken = makeProp("refreshToken", "string", {
+        isScalar: true,
+        isOptional: true,
+      });
+      refreshToken.knownAs = [{ provider: "foundry", name: "refresh_token" }];
+      refreshToken.samples = [
+        { sample: { refreshToken: "rt-123" }, description: "" },
+      ];
+      const token = makeType("Token", [refreshToken]);
+
+      const context = buildBaseTestContext(token, "auth", goTestOptions);
+      const code = emitGoTest({ ...context, importPath: "auth/model" });
+
+      // Reloads the provider payload through the generated inverse constructor,
+      assert.match(code, /TokenFromWire\("foundry", foundryWire, ctx\)/);
+      // then asserts the round-trip reproduces the original wire payload.
+      assert.match(
+        code,
+        /reflect\.DeepEqual\(foundryRoundTrip, foundryWire\)/,
+      );
+      assert.match(code, /^\s*"reflect"$/m);
+    });
   });
 
   it("lowers a polymorphic file with parent + children", () => {

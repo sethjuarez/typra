@@ -568,6 +568,7 @@ export function runCSharpExecutableConformance() {
       '    ["propertyCases"] = propertyOutputs,',
       '    ["imageContent"] = imageContent.Save(),',
       '    ["openai"] = wire.ToWire("openai"),',
+      '    ["openaiRoundTrip"] = WireOptions.FromWire("openai", wire.ToWire("openai")).ToWire("openai"),',
       '    ["anthropic"] = wire.ToWire("anthropic"),',
       '    ["unmapped"] = wire.ToWire("unmapped-provider"),',
       '    ["emptyProvider"] = wire.ToWire(""),',

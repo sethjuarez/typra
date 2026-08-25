@@ -368,6 +368,7 @@ function emitTypeBlock(
   // ToWire method (only when wire mappings exist)
   if (type.wire) {
     emitToWireMethod(type, lines);
+    emitFromWireMethod(type, lines);
   }
 
   // ToJSON method
@@ -1737,6 +1738,45 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
   lines.push(`\t\t}`);
   lines.push(`\t}`);
   lines.push(`\treturn result`);
+  lines.push(`}`);
+  lines.push(``);
+}
+
+function emitFromWireMethod(type: TypeDecl, lines: string[]): void {
+  const typeName = type.typeName.name;
+  const wire = type.wire as WireDecl;
+
+  lines.push(
+    `// ${typeName}FromWire loads a ${typeName} from a provider-specific wire payload.`,
+  );
+  lines.push(
+    `func ${typeName}FromWire(provider string, data map[string]interface{}, ctx *LoadContext) (${typeName}, error) {`,
+  );
+  lines.push(`\twireMap := map[string]map[string]string{`);
+
+  for (const mapping of wire.mappings) {
+    const entries = Object.entries(mapping.wireNames)
+      .map(([provider, wireName]) => `"${provider}": "${wireName}"`)
+      .join(", ");
+    lines.push(`\t\t"${mapping.fieldName}": {${entries}},`);
+  }
+
+  lines.push(`\t}`);
+  lines.push(`\tinverse := make(map[string]string)`);
+  lines.push(`\tfor field, m := range wireMap {`);
+  lines.push(`\t\tif wireName, ok := m[provider]; ok {`);
+  lines.push(`\t\t\tinverse[wireName] = field`);
+  lines.push(`\t\t}`);
+  lines.push(`\t}`);
+  lines.push(`\tcanonical := make(map[string]interface{})`);
+  lines.push(`\tfor key, value := range data {`);
+  lines.push(`\t\tif field, ok := inverse[key]; ok {`);
+  lines.push(`\t\t\tcanonical[field] = value`);
+  lines.push(`\t\t} else {`);
+  lines.push(`\t\t\tcanonical[key] = value`);
+  lines.push(`\t\t}`);
+  lines.push(`\t}`);
+  lines.push(`\treturn Load${typeName}(canonical, ctx)`);
   lines.push(`}`);
   lines.push(``);
 }

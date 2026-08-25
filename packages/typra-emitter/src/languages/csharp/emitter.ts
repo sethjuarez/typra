@@ -1132,6 +1132,7 @@ function emitSaveRegion(
   // ToWire method (only when wire mappings exist)
   if (type.wire) {
     emitToWireMethod(type, lines);
+    emitFromWireMethod(type, lines);
   }
 
   // Collection save helpers
@@ -1257,6 +1258,65 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
   lines.push("                result[wireName] = value;");
   lines.push("        }");
   lines.push("        return result;");
+  lines.push("    }");
+  lines.push("");
+}
+
+function emitFromWireMethod(type: TypeDecl, lines: string[]): void {
+  const wire = type.wire!;
+  const typeName = type.typeName.name;
+
+  lines.push("    /// <summary>");
+  lines.push(
+    "    /// Load an instance from a provider-specific wire-format dictionary.",
+  );
+  lines.push("    /// </summary>");
+  lines.push(
+    '    /// <param name="provider">The provider name (e.g., "openai", "anthropic").</param>',
+  );
+  lines.push(
+    '    /// <param name="data">A dictionary with provider-specific field names.</param>',
+  );
+  lines.push(
+    '    /// <param name="context">Optional context with pre/post processing callbacks.</param>',
+  );
+  lines.push(`    /// <returns>The loaded ${typeName} instance.</returns>`);
+  lines.push(
+    `    public static ${typeName} FromWire(string provider, Dictionary<string, object?> data, LoadContext? context = null)`,
+  );
+  lines.push("    {");
+  lines.push(
+    "        var wireMap = new Dictionary<string, Dictionary<string, string>>",
+  );
+  lines.push("        {");
+
+  for (const mapping of wire.mappings) {
+    const entries = Object.entries(mapping.wireNames);
+    const inner = entries
+      .map(([provider, wireName]) => `["${provider}"] = "${wireName}"`)
+      .join(", ");
+    lines.push(
+      `            ["${mapping.fieldName}"] = new Dictionary<string, string> { ${inner} },`,
+    );
+  }
+
+  lines.push("        };");
+  lines.push("        var inverse = new Dictionary<string, string>();");
+  lines.push("        foreach (var (field, mapping) in wireMap)");
+  lines.push("        {");
+  lines.push(
+    "            if (mapping.TryGetValue(provider, out var wireName))",
+  );
+  lines.push("                inverse[wireName] = field;");
+  lines.push("        }");
+  lines.push(
+    "        var canonical = new Dictionary<string, object?>();",
+  );
+  lines.push("        foreach (var (key, value) in data)");
+  lines.push(
+    "            canonical[inverse.TryGetValue(key, out var field) ? field : key] = value;",
+  );
+  lines.push(`        return Load(canonical, context);`);
   lines.push("    }");
   lines.push("");
 }
