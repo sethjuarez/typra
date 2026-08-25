@@ -65,11 +65,19 @@ Worth eyeballing per target: the polymorphic `TemplateFormat` de/serialization
 stage), and `generated/dispatch-seam/.typra-generated/export-surfaces.json`, which
 records the resolved `dispatch.path` on every code target.
 
-The same committed spec is compiled in-process and asserted by
-`test/dispatch-seam.integration.test.ts` (`npm test`): it emits to a temp dir and
-checks the polymorphic dispatch, the key-free seam, and the recorded dispatch path
-across TypeScript / Python / Go. The emitted code is never committed — the spec is
-the durable artifact, the test is the guard.
+The same committed spec is compiled in-process and asserted by two tests
+(`npm test`), which emit to a temp dir (never committing generated code — the
+spec is the durable artifact, the tests are the guard):
+
+- `test/dispatch-seam.integration.test.ts` checks the emitted **shape**: the
+  polymorphic dispatch, the key-free seam, and the recorded dispatch path across
+  TypeScript / Python / Go.
+- `test/dispatch-seam.conformance.test.ts` checks the emitted **behavior**: it
+  walks the resolved `agent.template.format.kind` path over each committed
+  `@vector` input, dispatches to a per-dialect renderer, and asserts the vector's
+  `expected` output — with a negative control proving a non-discriminator path
+  misroutes. This mirrors, in-process, what the Part II-B conformance harness will
+  later emit, so the resolved path is proven correct now.
 
 > **Scope:** this fixture emits models, seam scaffolds, and IR/surface goldens
 > only. It intentionally does **not** emit or compile the per-language
