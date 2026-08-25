@@ -62,8 +62,19 @@ npm run generate:fixtures:dispatch-seam
 
 Worth eyeballing per target: the polymorphic `TemplateFormat` de/serialization
 (discriminator-driven load/save), the `Renderer` seam scaffold (key-free at this
-stage), and `generated/dispatch-seam/.typra-generated/export-surfaces.json`, which
-records the resolved `dispatch.path` on every code target.
+stage), `generated/dispatch-seam/.typra-generated/export-surfaces.json` (which
+records the resolved `dispatch.path` on every code target), and the **emitted
+per-language tests** under `generated/dispatch-seam/<target>/tests/` — the per-model
+round-trip tests plus the `vector-conformance` harness and emitted `vector-runner`.
+
+> **The emitted vector-conformance tests are readable but not yet runnable — on
+> purpose.** They call `runVector("Renderer", "render", …)` against a single
+> adapter table: they do **not** resolve the concrete implementation by the
+> `@dispatch` discriminator path, and they import a hand-authored `./vector-adapters`
+> module that is not emitted (that runtime seam is Part I). Making the emitted
+> harness dispatch-aware — resolve/register by `agent.template.format.kind` — is
+> **Part II-B**. No `vector-adapter-path` is set here, so `validate:fixtures` does
+> not compile or run this tree.
 
 The same committed spec is compiled in-process and asserted by two tests
 (`npm test`), which emit to a temp dir (never committing generated code — the
@@ -76,11 +87,11 @@ spec is the durable artifact, the tests are the guard):
   walks the resolved `agent.template.format.kind` path over each committed
   `@vector` input, dispatches to a per-dialect renderer, and asserts the vector's
   `expected` output — with a negative control proving a non-discriminator path
-  misroutes. This mirrors, in-process, what the Part II-B conformance harness will
-  later emit, so the resolved path is proven correct now.
+  misroutes. This is the in-process stand-in for the dispatch routing the emitted
+  harness does not do yet, so the resolved path is proven correct now.
 
-> **Scope:** this fixture emits models, seam scaffolds, and IR/surface goldens
-> only. It intentionally does **not** emit or compile the per-language
-> vector/conformance harness or any dispatch resolve/registry glue — that is the
-> emission half (Part II-B). The integration test asserts the Part II-A surface
-> (dispatch path + key-free seam); it does not exercise resolve/registry emission.
+> **Scope:** this fixture emits models, seam scaffolds, IR/surface goldens, and the
+> (dispatch-unaware) per-language test surface. It intentionally does **not** emit
+> the dispatch resolve/registry glue that makes the harness route by discriminator,
+> nor does it wire the emitted tests into a compile/run gate — that is the emission
+> half (Part II-B).

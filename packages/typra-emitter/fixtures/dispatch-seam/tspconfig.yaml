@@ -7,65 +7,85 @@ options:
     deterministic-output: true
     # This fixture is an illustrative, eyeball-oriented reference: it emits the
     # per-language MODELS (including the polymorphic discriminator de/serialization),
-    # the @dispatch seam scaffold (compile-only), and the IR goldens
-    # (.typra-generated/json-ast, export-surfaces.json, vectors.json). It does NOT
-    # emit the per-language vector/conformance harness — that harness (Go vector
-    # adapters, Swift package resources) and the dispatch resolve/registry glue are
-    # Part II-B. So no test-dir is configured here; the vectors surface in the IR
-    # goldens, and validate-fixtures does not compile this tree.
+    # the @dispatch seam scaffold (compile-only), the IR goldens
+    # (.typra-generated/json-ast, export-surfaces.json, vectors.json), AND the
+    # per-language test surface (per-model round-trip tests + the vector-conformance
+    # harness + emitted vector-runner) so the generated tests can be read too.
+    #
+    # Caveat — these emitted tests are NOT yet runnable, by design:
+    #   * they import a hand-authored `./vector-adapters` module (selected via
+    #     `vector-adapter-path`) that is not emitted — that runtime seam is Part I
+    #     (runner extraction), and
+    #   * the emitted vector-conformance harness calls runVector("Renderer","render")
+    #     against a single adapter table — it does NOT yet resolve the concrete
+    #     implementation by the @dispatch discriminator path. That routing is
+    #     Part II-B.
+    # So no `vector-adapter-path` is set here and validate-fixtures does not compile
+    # or run this tree; the in-process test/dispatch-seam.conformance.test.ts proves
+    # the resolved dispatch path is behaviorally correct until Part II-B lands.
     emit-targets:
       - type: TypeScript
         output-dir: "generated/dispatch-seam/typescript"
+        test-dir: "generated/dispatch-seam/typescript/tests"
         import-path: "../index"
         format: false
         protocol-scaffolds: "compile-only"
       - type: TypeScript
         output-dir: "generated/dispatch-seam/typescript-zod"
+        test-dir: "generated/dispatch-seam/typescript-zod/tests"
         import-path: "../index"
         format: false
         native-serialization: "zod"
         protocol-scaffolds: "compile-only"
       - type: Python
         output-dir: "generated/dispatch-seam/python"
+        test-dir: "generated/dispatch-seam/python/tests"
         import-path: "fixtures"
         format: false
         protocol-scaffolds: "compile-only"
       - type: Python
         output-dir: "generated/dispatch-seam/python_pydantic"
+        test-dir: "generated/dispatch-seam/python_pydantic/tests"
         import-path: "fixtures_pydantic"
         format: false
         native-serialization: "pydantic"
         protocol-scaffolds: "compile-only"
       - type: Go
         output-dir: "generated/dispatch-seam/go"
+        test-dir: "generated/dispatch-seam/go/tests"
         import-path: "fixtures"
         package-name: "fixtures"
         format: false
         protocol-scaffolds: "compile-only"
       - type: Java
         output-dir: "generated/dispatch-seam/java"
+        test-dir: "generated/dispatch-seam/java/tests"
         package-name: "typra.fixtures"
         format: false
         protocol-scaffolds: "compile-only"
       - type: Java
         output-dir: "generated/dispatch-seam/java-jackson"
+        test-dir: "generated/dispatch-seam/java-jackson/tests"
         package-name: "typra.fixtures"
         format: false
         native-serialization: "jackson"
         protocol-scaffolds: "compile-only"
       - type: CSharp
         output-dir: "generated/dispatch-seam/csharp"
+        test-dir: "generated/dispatch-seam/csharp/tests"
         namespace: "Typra.Fixtures"
         format: false
         protocol-scaffolds: "compile-only"
       - type: Rust
         output-dir: "generated/dispatch-seam/rust"
+        test-dir: "generated/dispatch-seam/rust/tests"
         import-path: "fixtures::model"
         enum-parsing: "case-insensitive"
         format: false
         protocol-scaffolds: "compile-only"
       - type: Rust
         output-dir: "generated/dispatch-seam/rust-serde"
+        test-dir: "generated/dispatch-seam/rust-serde/tests"
         import-path: "fixtures_serde::model"
         enum-parsing: "case-insensitive"
         format: false
@@ -73,11 +93,13 @@ options:
         protocol-scaffolds: "compile-only"
       - type: Swift
         output-dir: "generated/dispatch-seam/swift"
+        test-dir: "generated/dispatch-seam/swift/tests"
         package-name: "TypraFixtures"
         format: false
         protocol-scaffolds: "compile-only"
       - type: Swift
         output-dir: "generated/dispatch-seam/swift-codable"
+        test-dir: "generated/dispatch-seam/swift-codable/tests"
         package-name: "TypraFixtures"
         format: false
         native-serialization: "codable"
