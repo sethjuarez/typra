@@ -1,4 +1,5 @@
 import "@typra/emitter";
+import "./vectors.tsp";
 
 namespace Typra.Fixtures.DispatchSeam;
 
@@ -101,36 +102,10 @@ model Inputs {
 @doc("Behavioral seam whose implementation is resolved by template dialect.")
 @dispatch(TemplateFormat.kind)
 interface Renderer {
-  @vector(#{
-    name: "mustache-basic",
-    stage: "callable",
-    input: #{
-      agent: #{
-        name: "greeter",
-        template: #{
-          content: "Hello {{name}}",
-          format: #{ kind: "mustache", partialsEnabled: true },
-        },
-      },
-      inputs: #{ values: #{ name: "world" } },
-    },
-    expected: "Hello world",
-  })
-  @vector(#{
-    name: "jinja2-basic",
-    stage: "callable",
-    input: #{
-      agent: #{
-        name: "greeter",
-        template: #{
-          content: "Hello {{ name }}",
-          format: #{ kind: "jinja2", autoescape: true },
-        },
-      },
-      inputs: #{ values: #{ name: "world" } },
-    },
-    expected: "Hello world",
-  })
+  // Executable cases are named value objects declared in ./vectors.tsp, applied
+  // here so this file stays focused on the dispatched shape.
+  @vector(mustacheBasic)
+  @vector(jinja2Basic)
   @doc("Render the agent's template against the supplied inputs.")
   render(agent: Agent, inputs: Inputs): string;
 }
