@@ -115,8 +115,9 @@ const TARGETS: Target[] = [
     testDir: "python-tests",
     file: "test_vector_conformance.py",
     guard: /_SyncViolation/,
-    syncTrue: /_run_vector\("[^"]*", "format", vector, True\)/,
-    syncFalse: /_run_vector\("[^"]*", "authorize", vector, False\)/,
+    guardFile: "vector_runner.py",
+    syncTrue: /run_vector\("[^"]*", "format", vector, True, _SEAM\)/,
+    syncFalse: /run_vector\("[^"]*", "authorize", vector, False, _SEAM\)/,
   },
   {
     type: "CSharp",

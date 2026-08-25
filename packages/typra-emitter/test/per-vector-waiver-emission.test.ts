@@ -76,7 +76,7 @@ const TARGETS: Array<{
   runnerFile?: string;
 }> = [
   { name: "typescript", file: "vector-conformance.test.ts", perVectorKey: /\$\{operation\}:\$\{vectorName\}/, runnerFile: "vector-runner.ts" },
-  { name: "python", file: "test_vector_conformance.py", perVectorKey: /\{operation\}:\{vector_name\}/ },
+  { name: "python", file: "test_vector_conformance.py", perVectorKey: /\{operation\}:\{vector_name\}/, runnerFile: "vector_runner.py" },
   { name: "go", file: "vector_conformance_test.go", perVectorKey: /operation\+":"\+vectorName/ },
   { name: "rust", file: "vector_conformance_test.rs", perVectorKey: /format!\("\{\}:\{\}", operation, vector_name\)/ },
   { name: "java", file: "VectorConformanceTests.java", perVectorKey: /operation \+ ":" \+ vectorName/ },

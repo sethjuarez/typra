@@ -234,8 +234,12 @@ describe("@vector requirement guard is an enforced closed loop", () => {
         path.join(pyDir, "test_vector_conformance.py"),
         "utf8",
       );
+      const pyRunner = readFileSync(
+        path.join(pyDir, "vector_runner.py"),
+        "utf8",
+      );
       assert.match(pySuite, /VECTOR_CAPABILITIES/);
-      assert.match(pySuite, /requirement unavailable: /);
+      assert.match(pyRunner, /requirement unavailable: /);
 
       const writeTsAdapter = (source_: string): void => {
         writeFileSync(path.join(tsDir, "vector-adapters.js"), transpile(source_));
