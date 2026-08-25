@@ -613,6 +613,10 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Rust)", (
       );
 
       const rustSuite = readFileSync(path.join(rustTestDir, "vector_conformance_test.rs"), "utf8");
+      const rustRunner = readFileSync(
+        path.join(rustTestDir, "vector_runner", "mod.rs"),
+        "utf8",
+      );
       const moduleDir = path.join(output, "module");
       const testsDir = path.join(moduleDir, "tests");
       const targetDir = path.join(output, "cargo-target");
@@ -638,6 +642,8 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Rust)", (
       );
       writeFileSync(path.join(moduleDir, "lib.rs"), "");
       writeFileSync(path.join(testsDir, "vector_conformance_test.rs"), rustSuite);
+      mkdirSync(path.join(testsDir, "vector_runner"), { recursive: true });
+      writeFileSync(path.join(testsDir, "vector_runner", "mod.rs"), rustRunner);
       const writeAdapter = (src: string): void => {
         writeFileSync(path.join(testsDir, "vector_adapters.rs"), src);
       };

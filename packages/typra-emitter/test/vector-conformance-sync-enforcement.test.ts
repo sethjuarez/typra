@@ -28,13 +28,17 @@ const require = createRequire(import.meta.url);
 // their runner module in different places (TS/Python: a sibling file in the
 // test dir; Go: its own `vectorrunner` package under the output dir), so the
 // guard lookup searches the whole generated tree instead of assuming a path.
-function findFileRecursive(root: string, basename: string): string | undefined {
+function findFileRecursive(root: string, needle: string): string | undefined {
   for (const entry of readdirSync(root)) {
     const full = path.join(root, entry);
     if (statSync(full).isDirectory()) {
-      const found = findFileRecursive(full, basename);
+      const found = findFileRecursive(full, needle);
       if (found) return found;
-    } else if (entry === basename) {
+    } else if (
+      needle.includes("/")
+        ? full.replace(/\\/g, "/").endsWith(needle)
+        : entry === needle
+    ) {
       return full;
     }
   }
@@ -182,8 +186,9 @@ const TARGETS: Target[] = [
     file: "vector_conformance_test.rs",
     extra: ['        vector-adapter-path: "vector_adapters.rs"'],
     guard: /if let vector_adapters::Invoke::Async\(_\) = adapter\.invoke/,
-    syncTrue: /vc_run_vector\("[^"]*", "format", vector, true\)/,
-    syncFalse: /vc_run_vector\("[^"]*", "authorize", vector, false\)/,
+    guardFile: "vector_runner/mod.rs",
+    syncTrue: /vector_runner::vc_run_vector\("[^"]*", "format", vector, true, vc_seam\(\)\)/,
+    syncFalse: /vector_runner::vc_run_vector\("[^"]*", "authorize", vector, false, vc_seam\(\)\)/,
   },
   {
     type: "Swift",

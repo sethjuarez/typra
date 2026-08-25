@@ -51,7 +51,7 @@ const SPEC = [
 ].join("\n");
 
 // Recursively locate the single harness file with the given basename.
-function findFile(root: string, basename: string): string {
+function findFile(root: string, needle: string): string {
   const stack = [root];
   while (stack.length > 0) {
     const dir = stack.pop()!;
@@ -59,12 +59,16 @@ function findFile(root: string, basename: string): string {
       const full = path.join(dir, entry);
       if (statSync(full).isDirectory()) {
         stack.push(full);
-      } else if (entry === basename) {
+      } else if (
+        needle.includes("/")
+          ? full.replace(/\\/g, "/").endsWith(needle)
+          : entry === needle
+      ) {
         return full;
       }
     }
   }
-  throw new Error(`harness file ${basename} not found under ${root}`);
+  throw new Error(`harness file ${needle} not found under ${root}`);
 }
 
 // Per-language harness filename plus the exact per-vector key expression the
@@ -78,7 +82,7 @@ const TARGETS: Array<{
   { name: "typescript", file: "vector-conformance.test.ts", perVectorKey: /\$\{operation\}:\$\{vectorName\}/, runnerFile: "vector-runner.ts" },
   { name: "python", file: "test_vector_conformance.py", perVectorKey: /\{operation\}:\{vector_name\}/, runnerFile: "vector_runner.py" },
   { name: "go", file: "vector_conformance_test.go", perVectorKey: /operation\+":"\+vectorName/, runnerFile: "vector_runner.go" },
-  { name: "rust", file: "vector_conformance_test.rs", perVectorKey: /format!\("\{\}:\{\}", operation, vector_name\)/ },
+  { name: "rust", file: "vector_conformance_test.rs", perVectorKey: /format!\("\{\}:\{\}", operation, vector_name\)/, runnerFile: "vector_runner/mod.rs" },
   { name: "java", file: "VectorConformanceTests.java", perVectorKey: /operation \+ ":" \+ vectorName/ },
   { name: "swift", file: "VectorConformanceTests.swift", perVectorKey: /\\\(operation\):\\\(vectorName\)/ },
   { name: "csharp", file: "VectorConformanceTests.cs", perVectorKey: /\{operation\}:\{vectorName\}/, runnerFile: "VectorRunner.cs" },
