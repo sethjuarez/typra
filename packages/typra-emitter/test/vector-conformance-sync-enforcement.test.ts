@@ -197,10 +197,11 @@ const TARGETS: Target[] = [
     file: "VectorConformanceTests.swift",
     extra: ['        package-name: "TypraProof"'],
     guard: /if sync, case \.asynchronous = adapter\.invoke/,
+    guardFile: "VectorRunner.swift",
     syncTrue:
-      /runVector\(contract: "[^"]*", operation: "format", vector: vector, sync: true\)/,
+      /VectorRunner\.runVector\(contract: "[^"]*", operation: "format", vector: vector, sync: true, seam: seam\(\)\)/,
     syncFalse:
-      /runVector\(contract: "[^"]*", operation: "authorize", vector: vector, sync: false\)/,
+      /VectorRunner\.runVector\(contract: "[^"]*", operation: "authorize", vector: vector, sync: false, seam: seam\(\)\)/,
   },
 ];
 

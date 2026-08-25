@@ -84,7 +84,7 @@ const TARGETS: Array<{
   { name: "go", file: "vector_conformance_test.go", perVectorKey: /operation\+":"\+vectorName/, runnerFile: "vector_runner.go" },
   { name: "rust", file: "vector_conformance_test.rs", perVectorKey: /format!\("\{\}:\{\}", operation, vector_name\)/, runnerFile: "vector_runner/mod.rs" },
   { name: "java", file: "VectorConformanceTests.java", perVectorKey: /operation \+ ":" \+ vectorName/ },
-  { name: "swift", file: "VectorConformanceTests.swift", perVectorKey: /\\\(operation\):\\\(vectorName\)/ },
+  { name: "swift", file: "VectorConformanceTests.swift", perVectorKey: /\\\(operation\):\\\(vectorName\)/, runnerFile: "VectorRunner.swift" },
   { name: "csharp", file: "VectorConformanceTests.cs", perVectorKey: /\{operation\}:\{vectorName\}/, runnerFile: "VectorRunner.cs" },
 ];
 

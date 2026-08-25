@@ -732,7 +732,10 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Swift)", 
         path.join(swiftTestDir, "VectorConformanceTests.swift"),
         "utf8",
       );
-
+      const swiftRunner = readFileSync(
+        path.join(swiftTestDir, "VectorRunner.swift"),
+        "utf8",
+      );
       // Assemble a self-contained SwiftPM package: the generated suite plus the
       // runtime adapter, compiled side by side with no external dependencies.
       const pkgDir = path.join(output, "pkg");
@@ -758,6 +761,7 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Swift)", 
       );
       writeFileSync(path.join(libDir, "Anchor.swift"), "public func typraProofAnchor() {}\n");
       writeFileSync(path.join(testTargetDir, "VectorConformanceTests.swift"), swiftSuite);
+      writeFileSync(path.join(testTargetDir, "VectorRunner.swift"), swiftRunner);
 
       const adapterPath = path.join(testTargetDir, "Adapters.swift");
       const run = (adapterSrc: string): RunResult => {

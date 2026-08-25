@@ -274,10 +274,16 @@ describe("@vector conformance is an enforced closed loop (Swift)", () => {
         path.join(swiftTestDir, "VectorConformanceTests.swift"),
         "utf8",
       );
+      // The interpreter lives in the sibling runner module; the thin harness
+      // only wires the seam.
+      const swiftRunner = readFileSync(
+        path.join(swiftTestDir, "VectorRunner.swift"),
+        "utf8",
+      );
       assert.match(swiftSuite, /VectorAdapters\.adapters\(\)/);
-      assert.match(swiftSuite, /No vector adapter registered for/);
+      assert.match(swiftRunner, /No vector adapter registered for/);
       assert.match(swiftSuite, /func testVector\d+\w*\(\) async throws/);
-      assert.match(swiftSuite, /invokeAdapter\(adapter, input, ctx, sync: sync/);
+      assert.match(swiftRunner, /invokeAdapter\(adapter, input, ctx, sync: sync/);
       // The bidi control (U+202E) is embedded as an ASCII escape, never raw.
       assert.match(swiftSuite, /\\u\{202e\}/);
       assert.doesNotMatch(swiftSuite, /\u202e/);
@@ -312,6 +318,10 @@ describe("@vector conformance is an enforced closed loop (Swift)", () => {
       writeFileSync(
         path.join(testTargetDir, "VectorConformanceTests.swift"),
         swiftSuite,
+      );
+      writeFileSync(
+        path.join(testTargetDir, "VectorRunner.swift"),
+        swiftRunner,
       );
 
       const adapterPath = path.join(testTargetDir, "Adapters.swift");
@@ -413,8 +423,12 @@ describe("@vector conformance is an enforced closed loop (Swift)", () => {
         path.join(swiftTestDir, "VectorConformanceTests.swift"),
         "utf8",
       );
-      // The suite must carry the enum-tag classification guard.
-      assert.match(swiftSuite, /if sync, case \.asynchronous = adapter\.invoke/);
+      const swiftRunner = readFileSync(
+        path.join(swiftTestDir, "VectorRunner.swift"),
+        "utf8",
+      );
+      // The runner carries the enum-tag classification guard.
+      assert.match(swiftRunner, /if sync, case \.asynchronous = adapter\.invoke/);
 
       const pkgDir = path.join(output, "pkg");
       const testTargetDir = path.join(pkgDir, "Tests", "ProofTests");
@@ -444,6 +458,10 @@ describe("@vector conformance is an enforced closed loop (Swift)", () => {
       writeFileSync(
         path.join(testTargetDir, "VectorConformanceTests.swift"),
         swiftSuite,
+      );
+      writeFileSync(
+        path.join(testTargetDir, "VectorRunner.swift"),
+        swiftRunner,
       );
 
       const adapterPath = path.join(testTargetDir, "Adapters.swift");
