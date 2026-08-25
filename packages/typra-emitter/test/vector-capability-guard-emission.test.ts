@@ -49,7 +49,7 @@ const SPEC = [
 ].join("\n");
 
 // Recursively locate the single harness file with the given basename.
-function findFile(root: string, basename: string): string {
+function findFile(root: string, needle: string): string {
   const stack = [root];
   while (stack.length > 0) {
     const dir = stack.pop()!;
@@ -57,24 +57,41 @@ function findFile(root: string, basename: string): string {
       const full = path.join(dir, entry);
       if (statSync(full).isDirectory()) {
         stack.push(full);
-      } else if (entry === basename) {
+      } else if (
+        needle.includes("/")
+          ? full.replace(/\\/g, "/").endsWith(needle)
+          : entry === needle
+      ) {
         return full;
       }
     }
   }
-  throw new Error(`harness file ${basename} not found under ${root}`);
+  throw new Error(`harness file ${needle} not found under ${root}`);
 }
 
 // Per-language harness filename plus the exact expression the generated code
 // uses to load the runtime capability table (parallel to the waiver seam).
-const TARGETS: Array<{ name: string; file: string; seam: RegExp }> = [
-  { name: "typescript", file: "vector-conformance.test.ts", seam: /adapterModule\.vectorCapabilities/ },
-  { name: "python", file: "test_vector_conformance.py", seam: /VECTOR_CAPABILITIES/ },
-  { name: "go", file: "vector_conformance_test.go", seam: /vectoradapters\.VectorCapabilities/ },
-  { name: "rust", file: "vector_conformance_test.rs", seam: /vector_adapters::capabilities\(\)/ },
-  { name: "java", file: "VectorConformanceTests.java", seam: /\.capabilities\(\)/ },
-  { name: "swift", file: "VectorConformanceTests.swift", seam: /\.capabilities\(\)/ },
-  { name: "csharp", file: "VectorConformanceTests.cs", seam: /VectorAdapters\.Capabilities\(\)/ },
+// `guardFile`, when set, is the runner module a relocated target hosts the
+// requirement-guard messages in (the harness still loads the seam and carries
+// the payload).
+const TARGETS: Array<{
+  name: string;
+  file: string;
+  seam: RegExp;
+  guardFile?: string;
+}> = [
+  {
+    name: "typescript",
+    file: "vector-conformance.test.ts",
+    seam: /adapterModule\.vectorCapabilities/,
+    guardFile: "vector-runner.ts",
+  },
+  { name: "python", file: "test_vector_conformance.py", seam: /VECTOR_CAPABILITIES/, guardFile: "vector_runner.py" },
+  { name: "go", file: "vector_conformance_test.go", seam: /vectoradapters\.VectorCapabilities/, guardFile: "vector_runner.go" },
+  { name: "rust", file: "vector_conformance_test.rs", seam: /vector_adapters::capabilities\(\)/, guardFile: "vector_runner/mod.rs" },
+  { name: "java", file: "VectorConformanceTests.java", seam: /\.capabilities\(\)/, guardFile: "VectorRunner.java" },
+  { name: "swift", file: "VectorConformanceTests.swift", seam: /\.capabilities\(\)/, guardFile: "VectorRunner.swift" },
+  { name: "csharp", file: "VectorConformanceTests.cs", seam: /VectorAdapters\.Capabilities\(\)/, guardFile: "VectorRunner.cs" },
 ];
 
 describe("@vector harness emits the requirement guard on every target", () => {
@@ -148,18 +165,23 @@ describe("@vector harness emits the requirement guard on every target", () => {
 
       for (const target of TARGETS) {
         const harness = readFileSync(findFile(gen, target.file), "utf8");
+        // Relocated targets host the requirement-guard logic in a runner module;
+        // the harness still loads the seam and carries the payload token.
+        const guardSource = target.guardFile
+          ? readFileSync(findFile(gen, target.guardFile), "utf8")
+          : harness;
         assert.match(
           harness,
           target.seam,
           `${target.name} harness must load the VECTOR_CAPABILITIES seam`,
         );
         assert.match(
-          harness,
+          guardSource,
           /requirement unavailable: /,
           `${target.name} harness must emit the canonical skip reason`,
         );
         assert.match(
-          harness,
+          guardSource,
           /No capability predicate registered for requirement token/,
           `${target.name} harness must hard-fail an unregistered requirement token`,
         );

@@ -205,6 +205,8 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (TypeScrip
 
       const suite = readFileSync(path.join(tsDir, "vector-conformance.test.ts"), "utf8");
       writeFileSync(path.join(tsDir, "vector-conformance.test.js"), transpile(suite));
+      const runner = readFileSync(path.join(tsDir, "vector-runner.ts"), "utf8");
+      writeFileSync(path.join(tsDir, "vector-runner.js"), transpile(runner));
       writeFileSync(path.join(tsDir, "runner.js"), TS_RUNNER);
       writeFileSync(
         path.join(tsDir, "package.json"),
@@ -436,13 +438,20 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Go)", () 
       );
 
       const goSuite = readFileSync(path.join(goTestDir, "vector_conformance_test.go"), "utf8");
+      const goRunner = readFileSync(
+        path.join(gen, "go", "vectorrunner", "vector_runner.go"),
+        "utf8",
+      );
       const moduleDir = path.join(output, "module");
       const confDir = path.join(moduleDir, "conformance");
+      const runnerDir = path.join(moduleDir, "vectorrunner");
       const adapterDir = path.join(moduleDir, "vectoradapters");
       mkdirSync(confDir, { recursive: true });
+      mkdirSync(runnerDir, { recursive: true });
       mkdirSync(adapterDir, { recursive: true });
       writeFileSync(path.join(moduleDir, "go.mod"), "module typraproof\n\ngo 1.22\n");
       writeFileSync(path.join(confDir, "vector_conformance_test.go"), goSuite);
+      writeFileSync(path.join(runnerDir, "vector_runner.go"), goRunner);
       const writeAdapter = (src: string): void => {
         writeFileSync(path.join(adapterDir, "adapters.go"), src);
       };
@@ -604,6 +613,10 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Rust)", (
       );
 
       const rustSuite = readFileSync(path.join(rustTestDir, "vector_conformance_test.rs"), "utf8");
+      const rustRunner = readFileSync(
+        path.join(rustTestDir, "vector_runner", "mod.rs"),
+        "utf8",
+      );
       const moduleDir = path.join(output, "module");
       const testsDir = path.join(moduleDir, "tests");
       const targetDir = path.join(output, "cargo-target");
@@ -629,6 +642,8 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Rust)", (
       );
       writeFileSync(path.join(moduleDir, "lib.rs"), "");
       writeFileSync(path.join(testsDir, "vector_conformance_test.rs"), rustSuite);
+      mkdirSync(path.join(testsDir, "vector_runner"), { recursive: true });
+      writeFileSync(path.join(testsDir, "vector_runner", "mod.rs"), rustRunner);
       const writeAdapter = (src: string): void => {
         writeFileSync(path.join(testsDir, "vector_adapters.rs"), src);
       };
@@ -717,7 +732,10 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Swift)", 
         path.join(swiftTestDir, "VectorConformanceTests.swift"),
         "utf8",
       );
-
+      const swiftRunner = readFileSync(
+        path.join(swiftTestDir, "VectorRunner.swift"),
+        "utf8",
+      );
       // Assemble a self-contained SwiftPM package: the generated suite plus the
       // runtime adapter, compiled side by side with no external dependencies.
       const pkgDir = path.join(output, "pkg");
@@ -743,6 +761,7 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Swift)", 
       );
       writeFileSync(path.join(libDir, "Anchor.swift"), "public func typraProofAnchor() {}\n");
       writeFileSync(path.join(testTargetDir, "VectorConformanceTests.swift"), swiftSuite);
+      writeFileSync(path.join(testTargetDir, "VectorRunner.swift"), swiftRunner);
 
       const adapterPath = path.join(testTargetDir, "Adapters.swift");
       const run = (adapterSrc: string): RunResult => {
@@ -801,8 +820,8 @@ function javaEchoAdapter(divergent: boolean, waiverEntries: string[]): string {
     "import java.util.HashMap;",
     "import java.util.Locale;",
     "import java.util.Map;",
-    "import typra.proof.VectorConformanceTests.VectorAdapter;",
-    "import typra.proof.VectorConformanceTests.VectorContext;",
+    "import typra.proof.VectorRunner.VectorAdapter;",
+    "import typra.proof.VectorRunner.VectorContext;",
     "",
     "public final class VectorAdapters {",
     "  private VectorAdapters() { }",
@@ -865,6 +884,7 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Java)", (
       // generated harness, the runtime adapter, and a tiny Main that drives run().
       const modelSources = collectJavaSources(javaOut);
       const harnessPath = path.join(javaTestDir, "VectorConformanceTests.java");
+      const runnerPath = path.join(javaTestDir, "VectorRunner.java");
       const srcDir = path.join(output, "src");
       const classesDir = path.join(output, "classes");
       mkdirSync(srcDir, { recursive: true });
@@ -892,7 +912,7 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Java)", (
         writeFileSync(adapterPath, adapterSrc);
         rmSync(classesDir, { recursive: true, force: true });
         mkdirSync(classesDir, { recursive: true });
-        const sources = [...modelSources, harnessPath, adapterPath, mainPath];
+        const sources = [...modelSources, runnerPath, harnessPath, adapterPath, mainPath];
         try {
           execFileSync("javac", ["-Xlint:all", "-Werror", "-d", classesDir, ...sources], {
             cwd: output,

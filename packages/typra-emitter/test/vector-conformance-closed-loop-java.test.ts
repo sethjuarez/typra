@@ -152,9 +152,9 @@ function javaAdapter(
     "import java.util.List;",
     "import java.util.Locale;",
     "import java.util.Map;",
-    "import typra.proof.VectorConformanceTests.VectorAdapter;",
-    "import typra.proof.VectorConformanceTests.VectorContext;",
-    "import typra.proof.VectorConformanceTests.VectorException;",
+    "import typra.proof.VectorRunner.VectorAdapter;",
+    "import typra.proof.VectorRunner.VectorContext;",
+    "import typra.proof.VectorRunner.VectorException;",
     "",
     "public final class VectorAdapters {",
     "  private VectorAdapters() { }",
@@ -253,11 +253,18 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
         path.join(javaTestDir, "VectorConformanceTests.java"),
         "utf8",
       );
+      // The interpreter (adapter lookup, invocation, classification) now lives in
+      // the sibling VectorRunner module; the thin harness only builds payloads and
+      // injects the seam. Sanity-check each concern against the file that owns it.
+      const javaRunner = readFileSync(
+        path.join(javaTestDir, "VectorRunner.java"),
+        "utf8",
+      );
       assert.match(javaSuite, /package typra\.proof;/);
       assert.match(javaSuite, /typra\.proof\.adapters\.VectorAdapters\.adapters\(\)/);
-      assert.match(javaSuite, /No vector adapter registered for/);
-      assert.match(javaSuite, /Object apply\(Object input, VectorContext ctx\)/);
-      assert.match(javaSuite, /invokeAdapter\(adapter, input, ctx, sync, vectorId\)/);
+      assert.match(javaRunner, /No vector adapter registered for/);
+      assert.match(javaRunner, /Object apply\(Object input, VectorContext ctx\)/);
+      assert.match(javaRunner, /invokeAdapter\(adapter, input, ctx, sync, vectorId\)/);
       // #259 regression lock: the harness must be serialization-agnostic — no
       // Jackson types — since it is emitted for the native (none) backend too.
       assert.doesNotMatch(javaSuite, /com\.fasterxml\.jackson/);
@@ -274,7 +281,7 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
       );
       assert.match(
         javaSuite,
-        /runVector\("[^"]*", "[^"]*", vector, (?:true|false)\)/,
+        /VectorRunner\.runVector\("[^"]*", "[^"]*", vector, (?:true|false), seam\(\)\)/,
       );
       // The "big" vector alone exceeds the 64 KiB constant-pool limit, so its own
       // literal must be assembled from multiple runtime-concatenated chunks.
@@ -293,6 +300,7 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
       mkdirSync(srcDir, { recursive: true });
       mkdirSync(classesDir, { recursive: true });
       const harnessPath = path.join(javaTestDir, "VectorConformanceTests.java");
+      const runnerPath = path.join(javaTestDir, "VectorRunner.java");
       writeFileSync(
         path.join(srcDir, "Main.java"),
         [
@@ -319,6 +327,7 @@ describe("@vector conformance is an enforced closed loop (Java)", () => {
         mkdirSync(classesDir, { recursive: true });
         const sources = [
           ...modelSources,
+          runnerPath,
           harnessPath,
           adapterPath,
           path.join(srcDir, "Main.java"),

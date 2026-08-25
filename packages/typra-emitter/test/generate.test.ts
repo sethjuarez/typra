@@ -70,6 +70,7 @@ function assertGeneratedTypeScriptTestsTypeCheck(output: string): void {
         include: [
           "typescript/**/*.ts",
           "typescript-tests/vector-conformance.test.ts",
+          "typescript-tests/vector-runner.ts",
           "typescript-tests/transport-client.test.ts",
           "typescript-tests/globals.d.ts",
         ],
@@ -508,10 +509,16 @@ describe("generate", () => {
         ),
         "utf8",
       );
+      const pyVectorRunner = readFileSync(
+        path.join(output, "generated", "python-tests", "vector_runner.py"),
+        "utf8",
+      );
       assert.match(pyVectorTest, /_ADAPTER_MODULE = importlib\.import_module/);
-      assert.match(pyVectorTest, /VECTOR_ADAPTERS\.get\(operation_key\)/);
+      // The adapter lookup lives in the seam-agnostic runner, keyed off the
+      // injected seam table rather than a module global.
+      assert.match(pyVectorRunner, /adapters\.get\(operation_key\)/);
       assert.match(pyVectorTest, /def test_vector_0_/);
-      assert.match(pyVectorTest, /@vector conformance never skips silently/);
+      assert.match(pyVectorRunner, /@vector conformance never skips silently/);
       assert.doesNotMatch(pyVectorTest, /assert_vector_model_roundtrips/);
       assert.doesNotMatch(pyVectorTest, /RenderRequest\.load/);
       assert.equal(
@@ -1491,7 +1498,7 @@ describe("generate", () => {
       assert.doesNotMatch(pythonVectorConformance, /assert observed_transcript == expected_transcript/);
       assert.match(pythonVectorConformance, /_ADAPTER_MODULE = importlib\.import_module/);
       assert.match(pythonVectorConformance, /async def test_vector_\d+_/);
-      assert.match(pythonVectorConformance, /await _run_vector\(/);
+      assert.match(pythonVectorConformance, /await run_vector\(/);
 
       const tsClient = readFileSync(
         path.join(output, "generated", "typescript", "transport-client.ts"),

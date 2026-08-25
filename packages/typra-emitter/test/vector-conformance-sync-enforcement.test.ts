@@ -19,10 +19,31 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const require = createRequire(import.meta.url);
+
+// Recursively locate a file by basename under `root`. Relocated targets host
+// their runner module in different places (TS/Python: a sibling file in the
+// test dir; Go: its own `vectorrunner` package under the output dir), so the
+// guard lookup searches the whole generated tree instead of assuming a path.
+function findFileRecursive(root: string, needle: string): string | undefined {
+  for (const entry of readdirSync(root)) {
+    const full = path.join(root, entry);
+    if (statSync(full).isDirectory()) {
+      const found = findFileRecursive(full, needle);
+      if (found) return found;
+    } else if (
+      needle.includes("/")
+        ? full.replace(/\\/g, "/").endsWith(needle)
+        : entry === needle
+    ) {
+      return full;
+    }
+  }
+  return undefined;
+}
 
 function yamlString(value: string): string {
   return JSON.stringify(value);
@@ -80,8 +101,12 @@ interface Target {
   file: string;
   extra?: string[];
   // Guard proving the harness rejects a @sync adapter that returns an awaitable
-  // (Go documents its exemption instead).
+  // (Go documents its exemption instead). Relocated targets host the guard in
+  // the shared runner module named by `guardFile`.
   guard: RegExp;
+  // File the @sync enforcement guard lives in. Defaults to `file`; targets that
+  // relocated their interpreter into a runner module point this at that module.
+  guardFile?: string;
   // How the harness classifies the @sync op ('format') as sync and the
   // async-default op ('authorize') as async. Migrated targets thread the flag
   // as an emit-time call argument (no `sync` field leaks into embedded data);
@@ -101,8 +126,9 @@ const TARGETS: Target[] = [
     testDir: "typescript-tests",
     file: "vector-conformance.test.ts",
     guard: /entrySync && isAwaitable\(/,
-    syncTrue: /runVector\("[^"]*", "format", vector, true\)/,
-    syncFalse: /runVector\("[^"]*", "authorize", vector, false\)/,
+    guardFile: "vector-runner.ts",
+    syncTrue: /runVector\("[^"]*", "format", vector, true, seam\)/,
+    syncFalse: /runVector\("[^"]*", "authorize", vector, false, seam\)/,
   },
   {
     type: "Python",
@@ -110,8 +136,9 @@ const TARGETS: Target[] = [
     testDir: "python-tests",
     file: "test_vector_conformance.py",
     guard: /_SyncViolation/,
-    syncTrue: /_run_vector\("[^"]*", "format", vector, True\)/,
-    syncFalse: /_run_vector\("[^"]*", "authorize", vector, False\)/,
+    guardFile: "vector_runner.py",
+    syncTrue: /run_vector\("[^"]*", "format", vector, True, _SEAM\)/,
+    syncFalse: /run_vector\("[^"]*", "authorize", vector, False, _SEAM\)/,
   },
   {
     type: "CSharp",
@@ -120,8 +147,9 @@ const TARGETS: Target[] = [
     file: "VectorConformanceTests.cs",
     extra: ['        vector-adapter-path: "Typra.Proof.Adapters"'],
     guard: /sync && IsAwaitable\(/,
-    syncTrue: /RunVector\("[^"]*", "format", vector, true\)/,
-    syncFalse: /RunVector\("[^"]*", "authorize", vector, false\)/,
+    guardFile: "VectorRunner.cs",
+    syncTrue: /VectorRunner\.RunVector\("[^"]*", "format", vector, true, /,
+    syncFalse: /VectorRunner\.RunVector\("[^"]*", "authorize", vector, false, /,
   },
   {
     type: "Go",
@@ -130,11 +158,12 @@ const TARGETS: Target[] = [
     file: "vector_conformance_test.go",
     extra: ['        vector-adapter-path: "typraproof/vectoradapters"'],
     guard: /@sync classification is not separately enforced/,
+    guardFile: "vector_runner.go",
     // Go has no awaitable type, so it threads operation as a call argument with
     // no sync flag at all (enforcement is a no-op by construction). Assert both
     // operations are still emitted as per-vector call arguments.
-    syncTrue: /vcRunVector\(t, "[^"]*", "format", vector\)/,
-    syncFalse: /vcRunVector\(t, "[^"]*", "authorize", vector\)/,
+    syncTrue: /vectorrunner\.RunVector\(t, "[^"]*", "format", vector, /,
+    syncFalse: /vectorrunner\.RunVector\(t, "[^"]*", "authorize", vector, /,
   },
   {
     type: "Java",
@@ -147,8 +176,9 @@ const TARGETS: Target[] = [
       '        vector-adapter-path: "typra.proof.VectorAdapters"',
     ],
     guard: /sync && isAwaitable\(/,
-    syncTrue: /runVector\("[^"]*", "format", vector, true\)/,
-    syncFalse: /runVector\("[^"]*", "authorize", vector, false\)/,
+    guardFile: "VectorRunner.java",
+    syncTrue: /VectorRunner\.runVector\("[^"]*", "format", vector, true, seam\(\)\)/,
+    syncFalse: /VectorRunner\.runVector\("[^"]*", "authorize", vector, false, seam\(\)\)/,
   },
   {
     type: "Rust",
@@ -157,8 +187,9 @@ const TARGETS: Target[] = [
     file: "vector_conformance_test.rs",
     extra: ['        vector-adapter-path: "vector_adapters.rs"'],
     guard: /if let vector_adapters::Invoke::Async\(_\) = adapter\.invoke/,
-    syncTrue: /vc_run_vector\("[^"]*", "format", vector, true\)/,
-    syncFalse: /vc_run_vector\("[^"]*", "authorize", vector, false\)/,
+    guardFile: "vector_runner/mod.rs",
+    syncTrue: /vector_runner::vc_run_vector\("[^"]*", "format", vector, true, vc_seam\(\)\)/,
+    syncFalse: /vector_runner::vc_run_vector\("[^"]*", "authorize", vector, false, vc_seam\(\)\)/,
   },
   {
     type: "Swift",
@@ -167,10 +198,11 @@ const TARGETS: Target[] = [
     file: "VectorConformanceTests.swift",
     extra: ['        package-name: "TypraProof"'],
     guard: /if sync, case \.asynchronous = adapter\.invoke/,
+    guardFile: "VectorRunner.swift",
     syncTrue:
-      /runVector\(contract: "[^"]*", operation: "format", vector: vector, sync: true\)/,
+      /VectorRunner\.runVector\(contract: "[^"]*", operation: "format", vector: vector, sync: true, seam: seam\(\)\)/,
     syncFalse:
-      /runVector\(contract: "[^"]*", operation: "authorize", vector: vector, sync: false\)/,
+      /VectorRunner\.runVector\(contract: "[^"]*", operation: "authorize", vector: vector, sync: false, seam: seam\(\)\)/,
   },
 ];
 
@@ -242,9 +274,24 @@ describe("@sync classification is threaded and enforced across all targets", () 
           `${target.type}: expected async-default op 'authorize' to be classified sync:false`,
         );
 
-        // (b) a native enforcement guard is present (Go documents its exemption)
+        // (b) a native enforcement guard is present (Go documents its exemption).
+        // Relocated targets host the guard in a shared runner module, which may
+        // live outside the test dir (Go's `vectorrunner` package), so locate it
+        // by basename across the whole generated tree.
+        let guardSource = suite;
+        if (target.guardFile) {
+          const guardPath = findFileRecursive(
+            path.join(output, "generated"),
+            target.guardFile,
+          );
+          assert.ok(
+            guardPath,
+            `${target.type}: expected to find runner module ${target.guardFile}`,
+          );
+          guardSource = readFileSync(guardPath, "utf8");
+        }
         assert.match(
-          suite,
+          guardSource,
           target.guard,
           `${target.type}: expected a native @sync enforcement guard in the harness`,
         );

@@ -425,20 +425,29 @@ describe("@vector conformance is an enforced closed loop (Rust)", () => {
       );
 
       // Sanity: the generated suite must actually include a runtime adapter
-      // module, not compare vector data to itself.
+      // module, not compare vector data to itself. The interpreter now lives in
+      // the sibling vector_runner module; the thin harness only wires the seam.
       const rustSuite = readFileSync(
         path.join(rustTestDir, "vector_conformance_test.rs"),
         "utf8",
       );
+      const rustRunner = readFileSync(
+        path.join(rustTestDir, "vector_runner", "mod.rs"),
+        "utf8",
+      );
       assert.match(rustSuite, /#\[path = "vector_adapters\.rs"\]/);
       assert.match(rustSuite, /mod vector_adapters;/);
-      assert.match(rustSuite, /No vector adapter registered for/);
+      assert.match(rustSuite, /#\[path = "vector_runner\/mod\.rs"\]/);
+      assert.match(rustSuite, /mod vector_runner;/);
       assert.match(rustSuite, /#\[tokio::test\]/);
       assert.match(rustSuite, /async fn test_vector_\d+_echo_echo_shout/);
       assert.match(rustSuite, /async fn test_vector_\d+_sum_sum_basic/);
       assert.match(rustSuite, /async fn test_vector_\d+_note_note_bidi/);
-      assert.match(rustSuite, /vc_invoke\(adapter, &input, &ctx\)\.await/);
-      assert.match(rustSuite, /vector_adapters::Invoke::Async\(f\) => f\(input, ctx\)\.await/);
+      assert.match(rustSuite, /vector_runner::vc_run_vector\(/);
+      // The interpreter details moved to the runner module.
+      assert.match(rustRunner, /No vector adapter registered for/);
+      assert.match(rustRunner, /vc_invoke\(adapter, &input, &ctx\)\.await/);
+      assert.match(rustRunner, /vector_adapters::Invoke::Async\(f\) => f\(input, ctx\)\.await/);
       // The bidi control (U+202E) must be embedded as an ASCII escape, never a
       // raw codepoint — Rust denies bidi controls even inside raw strings.
       assert.match(rustSuite, /\\u\{202e\}/);
@@ -473,6 +482,13 @@ describe("@vector conformance is an enforced closed loop (Rust)", () => {
       writeFileSync(
         path.join(testsDir, "vector_conformance_test.rs"),
         rustSuite,
+      );
+      // The interpreter lives under tests/vector_runner/ so cargo never compiles
+      // it as a standalone integration-test crate.
+      mkdirSync(path.join(testsDir, "vector_runner"), { recursive: true });
+      writeFileSync(
+        path.join(testsDir, "vector_runner", "mod.rs"),
+        rustRunner,
       );
 
       const writeAdapter = (src: string): void => {
@@ -569,8 +585,14 @@ describe("@vector conformance is an enforced closed loop (Rust)", () => {
         path.join(rustTestDir, "vector_conformance_test.rs"),
         "utf8",
       );
-      // The suite must carry the enum-tag classification guard.
-      assert.match(rustSuite, /vector_adapters::Invoke::Async\(_\) = adapter\.invoke/);
+      const rustRunner = readFileSync(
+        path.join(rustTestDir, "vector_runner", "mod.rs"),
+        "utf8",
+      );
+      // The suite wires the seam; the enum-tag classification guard lives in the
+      // runner module it injects into.
+      assert.match(rustSuite, /vector_runner::vc_run_vector\(/);
+      assert.match(rustRunner, /vector_adapters::Invoke::Async\(_\) = adapter\.invoke/);
 
       const moduleDir = path.join(output, "module");
       const testsDir = path.join(moduleDir, "tests");
@@ -597,6 +619,11 @@ describe("@vector conformance is an enforced closed loop (Rust)", () => {
       );
       writeFileSync(path.join(moduleDir, "lib.rs"), "");
       writeFileSync(path.join(testsDir, "vector_conformance_test.rs"), rustSuite);
+      mkdirSync(path.join(testsDir, "vector_runner"), { recursive: true });
+      writeFileSync(
+        path.join(testsDir, "vector_runner", "mod.rs"),
+        rustRunner,
+      );
 
       const writeAdapter = (src: string): void => {
         writeFileSync(path.join(testsDir, "vector_adapters.rs"), src);

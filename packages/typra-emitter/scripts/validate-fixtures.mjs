@@ -516,6 +516,7 @@ function assertGeneratedStructuredLoadCoverage() {
         suite.testFile(file) &&
         !normalized.includes("protocolscaffolds") &&
         !normalized.includes("vectorconformance") &&
+        !normalized.includes("vectorrunner") &&
         lower !== "test_context.py" &&
         lower !== "conformancetests.swift"
       );

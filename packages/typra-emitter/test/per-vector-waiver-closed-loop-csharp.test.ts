@@ -223,9 +223,13 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (C#)", () 
         path.join(csTestDir, "VectorConformanceTests.cs"),
         "utf8",
       );
+      const csRunner = readFileSync(
+        path.join(csTestDir, "VectorRunner.cs"),
+        "utf8",
+      );
       assert.match(csSuite, /VectorAdapters\.Adapters\(\)/);
-      assert.match(csSuite, /XFAIL \{vectorId\}/);
-      assert.match(csSuite, /waived vector unexpectedly passed/);
+      assert.match(csRunner, /XFAIL \{vectorId\}/);
+      assert.match(csRunner, /waived vector unexpectedly passed/);
 
       const moduleDir = path.join(output, "module");
       const artifacts = path.join(output, "cs-artifacts");
@@ -253,6 +257,7 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (C#)", () 
         ].join("\n"),
       );
       writeFileSync(path.join(moduleDir, "VectorConformanceTests.cs"), csSuite);
+      writeFileSync(path.join(moduleDir, "VectorRunner.cs"), csRunner);
 
       const writeAdapter = (src: string): void => {
         writeFileSync(path.join(moduleDir, "Adapters.cs"), src);

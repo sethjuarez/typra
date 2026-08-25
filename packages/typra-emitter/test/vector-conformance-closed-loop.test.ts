@@ -312,12 +312,20 @@ describe("@vector conformance is an enforced closed loop", () => {
 
       // Sanity: the generated suite must actually invoke a runtime adapter, not
       // compare vector data to itself.
+      // Sanity: the generated suite must actually invoke a runtime adapter, not
+      // compare vector data to itself. The interpreter now lives in the runner
+      // module the thin suite imports, so its markers are asserted there.
       const tsSuite = readFileSync(
         path.join(tsDir, "vector-conformance.test.ts"),
         "utf8",
       );
-      assert.match(tsSuite, /adapter\.invoke\(input, context\)/);
-      assert.match(tsSuite, /No vector adapter registered for/);
+      const tsRunner = readFileSync(
+        path.join(tsDir, "vector-runner.ts"),
+        "utf8",
+      );
+      assert.match(tsSuite, /await runVector\(/);
+      assert.match(tsRunner, /adapter\.invoke\(input, context\)/);
+      assert.match(tsRunner, /No vector adapter registered for/);
       const pySuite = readFileSync(
         path.join(pyDir, "test_vector_conformance.py"),
         "utf8",
@@ -329,6 +337,10 @@ describe("@vector conformance is an enforced closed loop", () => {
       writeFileSync(
         path.join(tsDir, "vector-conformance.test.js"),
         transpile(tsSuite),
+      );
+      writeFileSync(
+        path.join(tsDir, "vector-runner.js"),
+        transpile(tsRunner),
       );
       writeFileSync(path.join(tsDir, "runner.js"), TS_RUNNER);
       // The package declares "type": "module"; force CommonJS for these emitted
@@ -581,11 +593,21 @@ describe("@vector conformance is an enforced closed loop", () => {
         path.join(tsDir, "vector-conformance.test.ts"),
         "utf8",
       );
-      // The generated suite must carry the @sync flag and the enforcement guard.
-      assert.match(tsSuite, /entrySync && isAwaitable/);
+      const tsRunner = readFileSync(
+        path.join(tsDir, "vector-runner.ts"),
+        "utf8",
+      );
+      // The generated suite must carry the @sync flag; the enforcement guard
+      // lives in the runner module the suite drives.
+      assert.match(tsSuite, /await runVector\([^)]*, (?:true|false), seam\)/);
+      assert.match(tsRunner, /entrySync && isAwaitable/);
       writeFileSync(
         path.join(tsDir, "vector-conformance.test.js"),
         transpile(tsSuite),
+      );
+      writeFileSync(
+        path.join(tsDir, "vector-runner.js"),
+        transpile(tsRunner),
       );
       writeFileSync(path.join(tsDir, "runner.js"), TS_RUNNER);
       writeFileSync(
