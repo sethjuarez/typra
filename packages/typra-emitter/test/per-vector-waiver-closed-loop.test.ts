@@ -438,13 +438,20 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Go)", () 
       );
 
       const goSuite = readFileSync(path.join(goTestDir, "vector_conformance_test.go"), "utf8");
+      const goRunner = readFileSync(
+        path.join(gen, "go", "vectorrunner", "vector_runner.go"),
+        "utf8",
+      );
       const moduleDir = path.join(output, "module");
       const confDir = path.join(moduleDir, "conformance");
+      const runnerDir = path.join(moduleDir, "vectorrunner");
       const adapterDir = path.join(moduleDir, "vectoradapters");
       mkdirSync(confDir, { recursive: true });
+      mkdirSync(runnerDir, { recursive: true });
       mkdirSync(adapterDir, { recursive: true });
       writeFileSync(path.join(moduleDir, "go.mod"), "module typraproof\n\ngo 1.22\n");
       writeFileSync(path.join(confDir, "vector_conformance_test.go"), goSuite);
+      writeFileSync(path.join(runnerDir, "vector_runner.go"), goRunner);
       const writeAdapter = (src: string): void => {
         writeFileSync(path.join(adapterDir, "adapters.go"), src);
       };

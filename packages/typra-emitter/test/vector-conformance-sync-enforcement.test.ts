@@ -19,10 +19,27 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const require = createRequire(import.meta.url);
+
+// Recursively locate a file by basename under `root`. Relocated targets host
+// their runner module in different places (TS/Python: a sibling file in the
+// test dir; Go: its own `vectorrunner` package under the output dir), so the
+// guard lookup searches the whole generated tree instead of assuming a path.
+function findFileRecursive(root: string, basename: string): string | undefined {
+  for (const entry of readdirSync(root)) {
+    const full = path.join(root, entry);
+    if (statSync(full).isDirectory()) {
+      const found = findFileRecursive(full, basename);
+      if (found) return found;
+    } else if (entry === basename) {
+      return full;
+    }
+  }
+  return undefined;
+}
 
 function yamlString(value: string): string {
   return JSON.stringify(value);
@@ -136,11 +153,12 @@ const TARGETS: Target[] = [
     file: "vector_conformance_test.go",
     extra: ['        vector-adapter-path: "typraproof/vectoradapters"'],
     guard: /@sync classification is not separately enforced/,
+    guardFile: "vector_runner.go",
     // Go has no awaitable type, so it threads operation as a call argument with
     // no sync flag at all (enforcement is a no-op by construction). Assert both
     // operations are still emitted as per-vector call arguments.
-    syncTrue: /vcRunVector\(t, "[^"]*", "format", vector\)/,
-    syncFalse: /vcRunVector\(t, "[^"]*", "authorize", vector\)/,
+    syncTrue: /vectorrunner\.RunVector\(t, "[^"]*", "format", vector, /,
+    syncFalse: /vectorrunner\.RunVector\(t, "[^"]*", "authorize", vector, /,
   },
   {
     type: "Java",
@@ -249,10 +267,21 @@ describe("@sync classification is threaded and enforced across all targets", () 
         );
 
         // (b) a native enforcement guard is present (Go documents its exemption).
-        // Relocated targets host the guard in a shared runner module.
-        const guardSource = target.guardFile
-          ? readFileSync(path.join(testDir, target.guardFile), "utf8")
-          : suite;
+        // Relocated targets host the guard in a shared runner module, which may
+        // live outside the test dir (Go's `vectorrunner` package), so locate it
+        // by basename across the whole generated tree.
+        let guardSource = suite;
+        if (target.guardFile) {
+          const guardPath = findFileRecursive(
+            path.join(output, "generated"),
+            target.guardFile,
+          );
+          assert.ok(
+            guardPath,
+            `${target.type}: expected to find runner module ${target.guardFile}`,
+          );
+          guardSource = readFileSync(guardPath, "utf8");
+        }
         assert.match(
           guardSource,
           target.guard,

@@ -220,21 +220,30 @@ describe("@vector conformance is an enforced closed loop (Go)", () => {
       );
 
       // Sanity: the generated suite must actually invoke a runtime adapter, not
-      // compare vector data to itself.
+      // compare vector data to itself. The interpreter now lives in the shared
+      // `vectorrunner` package; the thin harness only wires the authored seam.
       const goSuite = readFileSync(
         path.join(goTestDir, "vector_conformance_test.go"),
         "utf8",
       );
-      assert.match(goSuite, /vectoradapters\.VectorAdapters\[operationKey\]/);
-      assert.match(goSuite, /No vector adapter registered for/);
+      const goRunner = readFileSync(
+        path.join(goOut, "vectorrunner", "vector_runner.go"),
+        "utf8",
+      );
+      assert.match(goRunner, /seam\.Adapters\[operationKey\]/);
+      assert.match(goRunner, /No vector adapter registered for/);
+      assert.match(goSuite, /vectoradapters\.VectorAdapters/);
       assert.match(goSuite, /func TestVector0/);
 
       // Assemble a self-contained module: the generated suite alone in
-      // conformance/, the runtime adapter package in vectoradapters/.
+      // conformance/, the shared runner in vectorrunner/, the runtime adapter
+      // package in vectoradapters/.
       const moduleDir = path.join(output, "module");
       const confDir = path.join(moduleDir, "conformance");
+      const runnerDir = path.join(moduleDir, "vectorrunner");
       const adapterDir = path.join(moduleDir, "vectoradapters");
       mkdirSync(confDir, { recursive: true });
+      mkdirSync(runnerDir, { recursive: true });
       mkdirSync(adapterDir, { recursive: true });
       writeFileSync(
         path.join(moduleDir, "go.mod"),
@@ -243,6 +252,10 @@ describe("@vector conformance is an enforced closed loop (Go)", () => {
       writeFileSync(
         path.join(confDir, "vector_conformance_test.go"),
         goSuite,
+      );
+      writeFileSync(
+        path.join(runnerDir, "vector_runner.go"),
+        goRunner,
       );
 
       const writeAdapter = (src: string): void => {

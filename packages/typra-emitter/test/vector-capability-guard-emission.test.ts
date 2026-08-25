@@ -83,7 +83,7 @@ const TARGETS: Array<{
     guardFile: "vector-runner.ts",
   },
   { name: "python", file: "test_vector_conformance.py", seam: /VECTOR_CAPABILITIES/, guardFile: "vector_runner.py" },
-  { name: "go", file: "vector_conformance_test.go", seam: /vectoradapters\.VectorCapabilities/ },
+  { name: "go", file: "vector_conformance_test.go", seam: /vectoradapters\.VectorCapabilities/, guardFile: "vector_runner.go" },
   { name: "rust", file: "vector_conformance_test.rs", seam: /vector_adapters::capabilities\(\)/ },
   { name: "java", file: "VectorConformanceTests.java", seam: /\.capabilities\(\)/ },
   { name: "swift", file: "VectorConformanceTests.swift", seam: /\.capabilities\(\)/ },
