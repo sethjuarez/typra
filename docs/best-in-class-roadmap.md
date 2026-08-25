@@ -2,6 +2,11 @@
 
 Typra is now in a strong "ship after review" state for the current emitter work. This roadmap captures remaining investments after the first runtime-semantics contract, conformance matrix, native-interop variants, and save-side executable conformance oracle have shipped.
 
+> The shared vector runner and behavioral polymorphic dispatch (which refine "polymorphic
+> dispatch" in §1 and "Discriminator dispatch rules and fallback behavior" in §4) have a
+> detailed, decision-level design in
+> [`vector-runner-and-dispatch-plan.md`](./vector-runner-and-dispatch-plan.md).
+
 ## 1. Executable conformance specification
 
 Extend the language-neutral semantic contract and make every target prove more of it with executable tests.
