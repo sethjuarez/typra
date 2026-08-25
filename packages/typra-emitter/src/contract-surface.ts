@@ -3,6 +3,7 @@ import { EmitTarget, TypraEmitterOptions } from "./lib.js";
 import { TypeNode } from "./ir/ast.js";
 import {
   CallableContract,
+  CallableDispatch,
   lowerLegacyCallableContracts,
 } from "./ir/callable.js";
 import { toKebabCase, toSnakeCase } from "./ir/utilities.js";
@@ -30,6 +31,8 @@ export interface ExportSurfaceProtocol {
   symbol: string;
   source: string;
   methods: ExportSurfaceMethod[];
+  /** Present when the seam interface is decorated with `@dispatch`. */
+  dispatch?: CallableDispatch;
 }
 
 export interface ExportSurfaceEntry {
@@ -154,6 +157,7 @@ function buildTargetSurface(
         atomic: operation.atomic,
         nonFatal: operation.nonFatal,
       })),
+      ...(contract.dispatch ? { dispatch: contract.dispatch } : {}),
     };
   });
 

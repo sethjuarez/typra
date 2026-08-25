@@ -370,6 +370,10 @@ export const $lib = createTypeSpecLibrary({
     knownAs: { description: "Wire field name mappings per target system" },
     defaultFor: { description: "Per-target required default values" },
     protocols: { description: "Pipeline interface markers" },
+    dispatch: {
+      description:
+        "Behavioral polymorphic dispatch discriminator for a seam interface",
+    },
     vectors: { description: "Operation-level callable behavior vectors" },
     parseAliases: { description: "Parse-only aliases for named string unions" },
     entryShorthands: {

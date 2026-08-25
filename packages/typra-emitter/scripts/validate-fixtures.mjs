@@ -566,6 +566,7 @@ function assertFocusedFeatureFixtures() {
     "features/protocols/main.tsp",
     "features/wire/main.tsp",
     "features/transport/main.tsp",
+    "features/dispatch/main.tsp",
   );
 
   for (const fixture of fixtures) {
@@ -721,6 +722,50 @@ function assertFocusedFeatureFixtures() {
         fail(
           "Focused protocols fixture must carry native-op optional/nullable lowering (optional param, nullable return, optional value-returning op).",
         );
+      }
+    }
+
+    if (featureName === "dispatch") {
+      const exportSurfacePath = path.join(
+        outputRoot,
+        ".typra-generated",
+        "export-surfaces.json",
+      );
+      const exportSurface = existsSync(exportSurfacePath)
+        ? JSON.parse(readFileSync(exportSurfacePath, "utf8"))
+        : undefined;
+      const protocols = exportSurface?.targets?.[0]?.protocols ?? [];
+      const renderer = protocols.find(
+        (protocol) => protocol.name === "Renderer",
+      );
+      // The @dispatch discriminator must resolve to the unique field-access path
+      // from the seam parameter (`agent` → `agent.template.format.kind`), never
+      // a guessed path, and carry the discriminator's owning model + field.
+      if (
+        renderer?.dispatch?.path !== "agent.template.format.kind" ||
+        renderer?.dispatch?.discriminator?.model !== "TemplateFormat" ||
+        renderer?.dispatch?.discriminator?.field !== "kind"
+      ) {
+        fail(
+          "Focused dispatch fixture must resolve the @dispatch discriminator to the unique access path agent.template.format.kind.",
+        );
+      }
+
+      const vectorPath = path.join(
+        outputRoot,
+        ".typra-generated",
+        "vectors.json",
+      );
+      const vectors = existsSync(vectorPath)
+        ? JSON.parse(readFileSync(vectorPath, "utf8"))
+        : undefined;
+      const serialized = JSON.stringify(vectors ?? {});
+      for (const expected of ["mustache-basic", "jinja2-basic"]) {
+        if (!serialized.includes(expected)) {
+          fail(
+            `Focused dispatch fixture did not preserve expected vector: ${expected}`,
+          );
+        }
       }
     }
   }

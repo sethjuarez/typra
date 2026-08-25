@@ -4,6 +4,7 @@ import {
   getTypeName,
   Interface,
   Model,
+  ModelProperty,
   Namespace,
   Operation,
   Program,
@@ -32,6 +33,30 @@ export interface CallableHydrationSeam {
   generatedBoundary: "interface";
 }
 
+/**
+ * Behavioral polymorphic dispatch metadata attached to a seam interface by
+ * `@dispatch`. The interface is resolved at runtime by the value of the
+ * discriminator field, read at a deterministic access path from the seam
+ * methods' parameters. This carries the mechanism only — never a roster of
+ * concrete implementations, which stay runtime-registered.
+ */
+export interface CallableDispatch {
+  /** The discriminator ModelProperty, identified by its owning model + field. */
+  discriminator: {
+    /** Name of the model that declares the discriminator field. */
+    model: string;
+    /** Name of the discriminator field. */
+    field: string;
+  };
+  /**
+   * Deterministic field-access path from a seam parameter to the discriminator
+   * field, e.g. `agent.template.format.kind`. Uniquely reachable from the
+   * parameter set — an unreachable or ambiguous field is a diagnostic, not a
+   * guessed path.
+   */
+  path: string;
+}
+
 export interface CallableOperation {
   name: string;
   returns: string;
@@ -54,6 +79,11 @@ export interface CallableContract {
   source: CallableSource;
   hydration: CallableHydrationSeam;
   operations: CallableOperation[];
+  /**
+   * Present when the interface is decorated with `@dispatch`. Absent for plain
+   * seam interfaces, keeping the shape byte-identical for undecorated contracts.
+   */
+  dispatch?: CallableDispatch;
 }
 
 export function lowerLegacyCallableContracts(
@@ -98,6 +128,7 @@ export function lowerLegacyCallableContract(node: TypeNode): CallableContract {
         source,
       }))
       .sort((left, right) => left.name.localeCompare(right.name)),
+    ...(node.dispatch ? { dispatch: node.dispatch } : {}),
   };
 }
 
@@ -165,6 +196,7 @@ export function lowerTypeSpecCallableContract(
         lowerTypeSpecCallableOperation(program, operation, source),
       )
       .sort((left, right) => left.name.localeCompare(right.name)),
+    ...(resolveCallableDispatch(program, iface) ?? {}),
   };
 }
 
@@ -178,6 +210,7 @@ export function callableContractToProtocolNode(
   };
   node.group = contract.group;
   node.isProtocol = true;
+  node.dispatch = contract.dispatch;
   node.methods = contract.operations.map((operation) => ({
     name: operation.name,
     returns: operation.returns,
@@ -190,6 +223,101 @@ export function callableContractToProtocolNode(
     nonFatal: operation.nonFatal,
   }));
   return node;
+}
+
+/**
+ * Resolves the `@dispatch` discriminator for a seam interface into a
+ * deterministic access path from its methods' parameters. Returns
+ * `{ dispatch }` when the discriminator is uniquely reachable, or `undefined`
+ * when the interface is not dispatched or when the field is unreachable or
+ * ambiguously reachable (both reported as diagnostics — never a guessed path).
+ */
+function resolveCallableDispatch(
+  program: Program,
+  iface: Interface,
+): { dispatch: CallableDispatch } | undefined {
+  const discriminator = getStateScalar<ModelProperty>(
+    program,
+    StateKeys.dispatch,
+    iface,
+  );
+  // Guard against non-ModelProperty state (a mock program's stateMap may fall
+  // back to another map): only a real discriminator ModelProperty is resolved.
+  if (!discriminator || discriminator.kind !== "ModelProperty") return undefined;
+
+  const paths = new Set<string>();
+  for (const operation of iface.operations.values()) {
+    for (const [paramName, param] of operation.parameters.properties) {
+      for (const found of collectDispatchPaths(
+        paramName,
+        param.type,
+        discriminator,
+      )) {
+        paths.add(found);
+      }
+    }
+  }
+
+  const candidates = Array.from(paths).sort();
+  const field = discriminator.name;
+  const model = discriminator.model?.name ?? "";
+
+  if (candidates.length === 0) {
+    program.reportDiagnostic({
+      code: "typra-emitter-dispatch-unreachable",
+      message: `@dispatch discriminator ${model}.${field} is not reachable from any parameter of interface ${iface.name}. The discriminator must be reachable via a field-access path from a seam method parameter.`,
+      severity: "error",
+      target: iface,
+    });
+    return undefined;
+  }
+
+  if (candidates.length > 1) {
+    program.reportDiagnostic({
+      code: "typra-emitter-dispatch-ambiguous",
+      message: `@dispatch discriminator ${model}.${field} is ambiguously reachable from the parameters of interface ${iface.name} via multiple paths: ${candidates.join(
+        ", ",
+      )}. The discriminator must be uniquely reachable.`,
+      severity: "error",
+      target: iface,
+    });
+    return undefined;
+  }
+
+  return { dispatch: { discriminator: { model, field }, path: candidates[0] } };
+}
+
+/**
+ * Enumerates every distinct field-access path from a seam parameter to the
+ * discriminator ModelProperty. Traversal is order-stable (declaration order)
+ * and cycle-guarded per path; array-typed fields are not traversed because an
+ * indexed hop is not a single scalar access.
+ */
+function collectDispatchPaths(
+  rootName: string,
+  rootType: Type,
+  discriminator: ModelProperty,
+): string[] {
+  const found: string[] = [];
+
+  const walk = (type: Type, prefix: string, visited: ReadonlySet<Model>) => {
+    if (type.kind !== "Model" || type.name === "Array") return;
+    const model = type as Model;
+    if (visited.has(model)) return;
+    const nextVisited = new Set(visited);
+    nextVisited.add(model);
+    for (const [propName, property] of model.properties) {
+      const propPath = `${prefix}.${propName}`;
+      if (property === discriminator) {
+        found.push(propPath);
+        continue;
+      }
+      walk(property.type, propPath, nextVisited);
+    }
+  };
+
+  walk(rootType, rootName, new Set());
+  return found;
 }
 
 function lowerTypeSpecCallableOperation(
