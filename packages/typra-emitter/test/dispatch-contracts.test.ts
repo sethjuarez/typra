@@ -54,6 +54,18 @@ function scalar(name: string): Type {
   return { kind: "Scalar", name } as unknown as Type;
 }
 
+/**
+ * A union mock whose variants expose `.type`, matching how
+ * `nonNullUnionVariants` reads a real compiler `Union`. Used to exercise the
+ * coerce-canonical `Model | scalar` traversal.
+ */
+function union(...types: Type[]): Type {
+  return {
+    kind: "Union",
+    variants: new Map(types.map((type, index) => [String(index), { type }])),
+  } as unknown as Type;
+}
+
 /** A Model-kinded type used for interface return types (never traversed). */
 function returnType(name: string): Type {
   return { kind: "Model", name } as unknown as Type;
@@ -191,6 +203,89 @@ describe("@dispatch decorator + IR resolution (Part II-A)", () => {
       discriminator: { model: "TemplateFormat", field: "kind" },
       path: "agent.template.format.kind",
     });
+  });
+
+  it("resolves the discriminator through a @coerce-designated `T | string` union arm", () => {
+    // The seam param field `Template.format` is a `TemplateFormat | string`
+    // union — the "accepts an object OR a shorthand string" wire spelling.
+    // `@coerce(TemplateFormat, string, #{ kind })` designates TemplateFormat as
+    // the canonical arm, so the discriminator must resolve through it.
+    const { program } = createContext();
+    const format = model("TemplateFormat", { kind: scalar("string") });
+    const template = model("Template", {
+      format: union(format as unknown as Type, scalar("string")),
+      content: scalar("string"),
+    });
+    const agent = model("Agent", {
+      name: scalar("string"),
+      template: template as unknown as Type,
+    });
+    const inputs = model("Inputs", { values: scalar("string") });
+    const discriminator = property(format, "kind");
+    const renderer = iface("Renderer", {
+      render: {
+        params: {
+          agent: agent as unknown as Type,
+          inputs: inputs as unknown as Type,
+        },
+      },
+    });
+    program.stateMap(StateKeys.dispatch).set(renderer, discriminator);
+    program
+      .stateMap(StateKeys.coercions)
+      .set(format as unknown as Type, [
+        { scalar: "string", expansion: { kind: "{value}" } },
+      ]);
+
+    const contract = lowerTypeSpecCallableContract(
+      program,
+      renderer,
+      "Typra.Runtime",
+      "Runtime",
+    );
+
+    assert.deepEqual(contract.dispatch, {
+      discriminator: { model: "TemplateFormat", field: "kind" },
+      path: "agent.template.format.kind",
+    });
+  });
+
+  it("leaves a `T | string` union with no @coerce unreachable instead of guessing", () => {
+    // Without a @coerce designating the canonical arm, a union has no principled
+    // arm to descend into — the discriminator stays unreachable (a diagnostic),
+    // never a guessed path. This guards that the fix keys on the coercion, not
+    // merely on "there happens to be a model arm".
+    const { program, diagnostics } = createContext();
+    const format = model("TemplateFormat", { kind: scalar("string") });
+    const template = model("Template", {
+      format: union(format as unknown as Type, scalar("string")),
+      content: scalar("string"),
+    });
+    const agent = model("Agent", {
+      name: scalar("string"),
+      template: template as unknown as Type,
+    });
+    const discriminator = property(format, "kind");
+    const renderer = iface("Renderer", {
+      render: { params: { agent: agent as unknown as Type } },
+    });
+    program.stateMap(StateKeys.dispatch).set(renderer, discriminator);
+    // Intentionally no coercion registered on `format`.
+
+    const contract = lowerTypeSpecCallableContract(
+      program,
+      renderer,
+      "Typra.Runtime",
+      "Runtime",
+    );
+
+    assert.equal(contract.dispatch, undefined);
+    assert.ok(
+      diagnostics.some(
+        (entry) => entry.code === "typra-emitter-dispatch-unreachable",
+      ),
+      "expected an unreachability diagnostic",
+    );
   });
 
   it("carries dispatch metadata through the TypeNode round-trip", () => {

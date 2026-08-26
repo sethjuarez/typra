@@ -8,12 +8,17 @@ import {
   Namespace,
   Operation,
   Program,
+  Scalar,
   Type,
   Union,
 } from "@typespec/compiler";
-import { getStateScalar, OperationEffectEntry } from "../decorators.js";
+import {
+  getStateScalar,
+  getStateValue,
+  OperationEffectEntry,
+} from "../decorators.js";
 import { StateKeys } from "../lib.js";
-import { resolveModel, TypeNode } from "./ast.js";
+import { Coercion, resolveModel, TypeNode } from "./ast.js";
 import type { PolymorphicDispatchDecl } from "./declarations.js";
 import { lowerPolymorphicDispatch } from "./lower.js";
 import { CallableVector, lowerOperationVectors } from "./vector.js";
@@ -265,6 +270,7 @@ function resolveCallableDispatch(
   for (const operation of iface.operations.values()) {
     for (const [paramName, param] of operation.parameters.properties) {
       for (const found of collectDispatchPaths(
+        program,
         paramName,
         param.type,
         discriminator,
@@ -355,12 +361,62 @@ function resolveDispatchDecl(
 }
 
 /**
+ * When a union property is the coerce-canonical spelling of a single model,
+ * return that model. A `@coerce(S)` on model M declares that a bare scalar `S`
+ * IS an M — the scalar arm is pure shorthand for the canonical,
+ * discriminator-bearing shape. So for a `M | S` union whose non-null arms are
+ * exactly one Model M and one Scalar S, where M carries a coercion FROM S,
+ * dispatch path resolution resolves the discriminator against M.
+ *
+ * A plain `A | B` union with no such coercion returns `undefined` and stays
+ * unreachable: without a `@coerce` designating the canonical arm there is no
+ * principled way to pick one, and guessing is exactly what the unreachable /
+ * ambiguous diagnostics exist to prevent.
+ *
+ * This is a LOCAL read of the coercion state for path resolution only — it
+ * never mutates or canonicalizes the union type, which remains the load-bearing
+ * "accepts an object OR a shorthand scalar" wire contract consumed by schema
+ * emission and the scalar→object constructors. It mirrors the local
+ * `T | null → T?` fold in `typeToCallableName`, which likewise reads through a
+ * union without rewriting it.
+ */
+function coerceCanonicalModelArm(
+  program: Program,
+  union: Union,
+): Model | undefined {
+  const variants = nonNullUnionVariants(union);
+  if (variants.length !== 2) return undefined;
+  const models = variants.filter(
+    (variant): variant is Model =>
+      variant.kind === "Model" && variant.name !== "Array",
+  );
+  const scalars = variants.filter(
+    (variant): variant is Scalar => variant.kind === "Scalar",
+  );
+  if (models.length !== 1 || scalars.length !== 1) return undefined;
+  const target = models[0];
+  const scalarName = scalars[0].name;
+  const coercions = getStateValue<Coercion>(
+    program,
+    StateKeys.coercions,
+    target,
+  );
+  return coercions.some((coercion) => coercion.scalar === scalarName)
+    ? target
+    : undefined;
+}
+
+/**
  * Enumerates every distinct field-access path from a seam parameter to the
  * discriminator ModelProperty. Traversal is order-stable (declaration order)
  * and cycle-guarded per path; array-typed fields are not traversed because an
- * indexed hop is not a single scalar access.
+ * indexed hop is not a single scalar access. A `Model | scalar` field carrying
+ * a `@coerce` FROM that scalar is traversed through its coerce-canonical model
+ * arm (see `coerceCanonicalModelArm`), so a discriminator behind the common
+ * "object OR shorthand string" union spelling stays reachable.
  */
 function collectDispatchPaths(
+  program: Program,
   rootName: string,
   rootType: Type,
   discriminator: ModelProperty,
@@ -368,6 +424,16 @@ function collectDispatchPaths(
   const found: string[] = [];
 
   const walk = (type: Type, prefix: string, visited: ReadonlySet<Model>) => {
+    // A `Model | scalar` union with a `@coerce` FROM that scalar is the
+    // shorthand spelling of the coerce-target model: resolve the discriminator
+    // against the model arm at the SAME access path (the scalar arm is sugar for
+    // it, not a distinct field hop). Only the coerce-designated arm is traversed
+    // — a plain `A | B` union stays unreachable rather than guessing an arm.
+    if (type.kind === "Union") {
+      const target = coerceCanonicalModelArm(program, type);
+      if (target) walk(target, prefix, visited);
+      return;
+    }
     if (type.kind !== "Model" || type.name === "Array") return;
     const model = type as Model;
     if (visited.has(model)) return;
