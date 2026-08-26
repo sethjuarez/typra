@@ -1,0 +1,26 @@
+test(emitter): extend coerce-union dispatch fixture to all three prompty seams
+
+Broaden the `dispatch-union-coerce` fixture from the Format seam alone to all
+three prompty seam shapes, proving the coerce-aware path resolution end to end
+against prompty's real schema shapes:
+
+- Renderer  (CLOSED union): discriminator field IS the coerce target
+  (`kind` == coerce `#{ kind }`) -> `agent.template.format.kind`.
+- Executor  (OPEN union + `*` wildcard): the load-bearing case where the coerce
+  target DIFFERS from the discriminator. `@coerce(Model, string, #{ id })`
+  targets `id`, but dispatch resolves `provider`; the bare-string shorthand
+  yields `{ id }` with NO provider yet emit still succeeds and
+  `agent.model.provider` resolves through the coerce-canonical arm. The open
+  `string` union member makes the decl `isClosed: false`; the `CustomModel
+  { provider: "*" }` catch-all lowers to the fallback `defaultVariant` (the
+  downstream-registry delegation hook) while the known literal providers stay
+  enumerated `variants`.
+- Parser    (CLOSED union): a second field-IS-coerce-target seam on a distinct
+  model -> `agent.parser.kind`.
+
+This confirms the fix composes with (a) the id-vs-provider coerce/discriminator
+mismatch and (b) open discriminator unions with a wildcard arm, not just closed
+unions. Also registers the fixture in the validate-fixtures allow-list.
+
+Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>
+Copilot-Session: 7042c169-d09c-453d-9537-9f0db72a0636
