@@ -39,6 +39,19 @@ export interface CallableVector extends VectorEntry {
 
 export interface CallableVectorSnapshotEntry {
   contract: string;
+  /**
+   * Fully-qualified namespace of the owning seam interface (e.g.
+   * `Typra.Sample`). Threaded from the contract node so the conformance-file
+   * emitters can reuse the SAME per-group folder helper the model/`@sample`
+   * test path already uses (issue §8.4) — one file per interface, placed in its
+   * namespace folder, instead of a flat monolith.
+   */
+  namespace: string;
+  /**
+   * Semantic group derived from the seam's source subfolder (may be empty).
+   * Feeds the same `<lang>GroupFolder` helper as the model test path.
+   */
+  group: string;
   operation: string;
   params: Record<string, string>;
   returns: string;
@@ -98,6 +111,8 @@ export function buildCallableVectorSnapshot(
         contract.operations.flatMap((operation) =>
           (operation.vectors ?? []).map((vector) => ({
             contract: contract.name,
+            namespace: contract.namespace,
+            group: contract.group,
             operation: operation.name,
             params: operation.params,
             returns: operation.returns,

@@ -11,6 +11,8 @@ import type { CallableVectorSnapshotEntry } from "../src/ir/vector.js";
 function vectorEntry(): CallableVectorSnapshotEntry {
   return {
     contract: "Renderer",
+    namespace: "Typra.Sample",
+    group: "",
     operation: "render",
     params: { request: "RenderRequest" },
     returns: "RenderResult",

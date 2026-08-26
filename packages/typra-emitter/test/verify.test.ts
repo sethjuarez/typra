@@ -667,6 +667,8 @@ function makeVectorSnapshot(): CallableVectorSnapshot {
     vectors: [
       {
         contract: "Renderer",
+        namespace: "Typra.Sample",
+        group: "",
         operation: "render",
         params: { input: "RenderRequest" },
         returns: "RenderResult",
@@ -681,6 +683,8 @@ function makeVectorSnapshot(): CallableVectorSnapshot {
       },
       {
         contract: "Processor",
+        namespace: "Typra.Sample",
+        group: "",
         operation: "process",
         params: { input: "ProcessRequest" },
         returns: "ProcessResult",

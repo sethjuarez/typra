@@ -13,7 +13,9 @@ import {
 } from "@typespec/compiler";
 import { getStateScalar, OperationEffectEntry } from "../decorators.js";
 import { StateKeys } from "../lib.js";
-import { TypeNode } from "./ast.js";
+import { resolveModel, TypeNode } from "./ast.js";
+import type { PolymorphicDispatchDecl } from "./declarations.js";
+import { lowerPolymorphicDispatch } from "./lower.js";
 import { CallableVector, lowerOperationVectors } from "./vector.js";
 
 export type CallableContractSourceKind =
@@ -55,6 +57,17 @@ export interface CallableDispatch {
    * guessed path.
    */
   path: string;
+  /**
+   * The SAME lowered `PolymorphicDispatchDecl` that drives the discriminator
+   * model's shape `Load` switch, resolved from `discriminator.model`. This is
+   * the Part III IR edge: it lets every emitter render the behavioral resolver
+   * as the twin of the shape switch (same `variants`, `isClosed`,
+   * `defaultVariant`) instead of interpreting a stringly-typed runtime path.
+   * Absent only when the discriminator model is not polymorphic (no
+   * discriminator + child types), which keeps undispatched-adjacent shapes
+   * byte-identical.
+   */
+  decl?: PolymorphicDispatchDecl;
 }
 
 export interface CallableOperation {
@@ -196,7 +209,8 @@ export function lowerTypeSpecCallableContract(
         lowerTypeSpecCallableOperation(program, operation, source),
       )
       .sort((left, right) => left.name.localeCompare(right.name)),
-    ...(resolveCallableDispatch(program, iface) ?? {}),
+    ...(resolveCallableDispatch(program, iface, rootNamespace, rootAlias) ??
+      {}),
   };
 }
 
@@ -235,6 +249,8 @@ export function callableContractToProtocolNode(
 function resolveCallableDispatch(
   program: Program,
   iface: Interface,
+  rootNamespace: string,
+  rootAlias: string,
 ): { dispatch: CallableDispatch } | undefined {
   const discriminator = getStateScalar<ModelProperty>(
     program,
@@ -284,7 +300,58 @@ function resolveCallableDispatch(
     return undefined;
   }
 
-  return { dispatch: { discriminator: { model, field }, path: candidates[0] } };
+  return {
+    dispatch: {
+      discriminator: { model, field },
+      path: candidates[0],
+      ...resolveDispatchDecl(
+        program,
+        discriminator,
+        rootNamespace,
+        rootAlias,
+      ),
+    },
+  };
+}
+
+/**
+ * Resolves the discriminator model to the SAME `PolymorphicDispatchDecl` that
+ * drives its shape `Load` switch, by lowering it through the shared shape rail
+ * (`resolveModel` → `lowerPolymorphicDispatch`). Returns `{ decl }` when the
+ * model is polymorphic (has a discriminator + child types), or `{}` otherwise
+ * so the spread stays a no-op for non-polymorphic discriminator models.
+ *
+ * The discriminator model's shape lowering is the source of truth for the decl.
+ * A user-authored discriminator model always carries a syntax `node`; synthetic
+ * models fabricated by unit tests do not, and `resolveModel` cannot traverse
+ * them. We detect that precise case up front and degrade to path-only dispatch,
+ * so the `catch` is only a defense-in-depth net — not a way to swallow a shape
+ * bug on a real model. Any genuine lowering failure on a real model still
+ * surfaces through the independent shape pass, which lowers the SAME model.
+ */
+function resolveDispatchDecl(
+  program: Program,
+  discriminator: ModelProperty,
+  rootNamespace: string,
+  rootAlias: string,
+): { decl?: PolymorphicDispatchDecl } {
+  const model = discriminator.model;
+  // A real, user-authored discriminator model always has a syntax node; a
+  // model without one is synthetic (unit-test mock) and is not traversable.
+  if (!model || !model.node) return {};
+  try {
+    const node: TypeNode = resolveModel(
+      program,
+      model,
+      new Set(),
+      rootNamespace,
+      rootAlias,
+    );
+    const decl = lowerPolymorphicDispatch(node);
+    return decl ? { decl } : {};
+  } catch {
+    return {};
+  }
 }
 
 /**

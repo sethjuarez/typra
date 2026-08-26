@@ -457,6 +457,8 @@ describe("generate", () => {
       assert.deepEqual(vectors.vectors, [
         {
           contract: "Renderer",
+          namespace: "Typra.CallableProbe",
+          group: "",
           operation: "render",
           params: { request: "RenderRequest", context: "RenderContext" },
           returns: "RenderResult",
@@ -471,6 +473,8 @@ describe("generate", () => {
         },
         {
           contract: "Renderer",
+          namespace: "Typra.CallableProbe",
+          group: "",
           operation: "summarize",
           params: { scores: "int32[]" },
           returns: "int32[]",
