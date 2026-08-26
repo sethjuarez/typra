@@ -7,10 +7,13 @@ options:
     deterministic-output: true
     # This fixture is an illustrative, eyeball-oriented reference: it emits the
     # per-language MODELS (including the polymorphic discriminator de/serialization),
-    # the @dispatch seam scaffold (compile-only), the IR goldens
-    # (.typra-generated/json-ast, export-surfaces.json, vectors.json), AND the
-    # per-language test surface (per-model round-trip tests + the vector-conformance
-    # harness + emitted vector-runner) so the generated tests can be read too.
+    # the @dispatch seam scaffold (compile-only), the Part III TYPED dispatch
+    # resolver beside the seam (e.g. csharp/RendererResolver.cs,
+    # python/_renderer_resolver.py — provider + resolver twin of the shape Load
+    # switch), the IR goldens (.typra-generated/json-ast, export-surfaces.json,
+    # vectors.json), AND the per-language test surface (per-model round-trip tests
+    # + the vector-conformance harness + emitted vector-runner) so the generated
+    # tests can be read too.
     #
     # Caveat — the emitted vector-conformance tree is illustrative here (this
     # fixture keeps `protocol-scaffolds: compile-only` and sets no
@@ -26,7 +29,9 @@ options:
     # load-bearing end-to-end (TypeScript + Python, positive + negative control)
     # by test/dispatch-emission.closed-loop.test.ts, which compiles THIS spec; the
     # in-process test/dispatch-seam.conformance.test.ts remains the Part II-A guard
-    # that the resolved path itself is correct.
+    # that the resolved path itself is correct. Part III's typed resolver is a
+    # separate library rail: the emitted conformance still routes via `#value`,
+    # and the resolver is proven by test/dispatch-resolver.typed-<lang>.test.ts.
     emit-targets:
       - type: TypeScript
         output-dir: "generated/dispatch-seam/typescript"
