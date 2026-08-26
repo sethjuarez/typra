@@ -17,13 +17,16 @@ import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
   DispatchedContract,
+  CallableVectorSnapshotEntry,
+  isTypedDispatchEntry,
+  assertTypedDispatchSupported,
 } from "../../ir/vector.js";
 import {
   buildBaseTestContext,
   typescriptTestOptions,
 } from "../../testing/test-context.js";
 import { toKebabCase } from "../../ir/utilities.js";
-import { resolve, dirname } from "path";
+import { resolve, dirname, relative } from "path";
 import { execFileSync } from "child_process";
 import { existsSync } from "fs";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
@@ -240,27 +243,98 @@ export const generateTypeScript = async (
     }
 
     if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
-      // The interpreter lives in a standalone, seam-agnostic runner module; the
-      // conformance suite below is a thin harness that injects the
-      // runtime-authored seam tables. The runner is vector-independent, so its
-      // text never varies with the schema.
-      await emitTypeScriptFile(
-        context,
-        "vector-runner.ts",
-        emitTypeScriptVectorRunner(),
-        emitTarget["test-dir"],
-        emitTarget["test-dir"],
+      const allVectors = options!.callableVectors!.vectors;
+      // §8: a @dispatch seam that lowered to a decl gets a TYPED per-interface
+      // `${iface}.conformance.test.ts` that routes through the emitted resolver
+      // against a consumer-attached `${iface}Provider`. Everything else —
+      // including a decl-less @dispatch — stays on the stringly vector-runner, so
+      // no vector is dropped from both rails.
+      const undispatched = allVectors.filter(
+        (entry) => !isTypedDispatchEntry(entry),
       );
-      await emitTypeScriptFile(
-        context,
-        "vector-conformance.test.ts",
-        emitTypeScriptVectorConformanceTest(
-          options!.callableVectors!,
-          emitTarget["vector-adapter-path"] ?? "./vector-adapters",
-        ),
-        emitTarget["test-dir"],
-        emitTarget["test-dir"],
-      );
+
+      if (undispatched.length > 0) {
+        // The interpreter lives in a standalone, seam-agnostic runner module; the
+        // conformance suite below is a thin harness that injects the
+        // runtime-authored seam tables. The runner is vector-independent, so its
+        // text never varies with the schema.
+        await emitTypeScriptFile(
+          context,
+          "vector-runner.ts",
+          emitTypeScriptVectorRunner(),
+          emitTarget["test-dir"],
+          emitTarget["test-dir"],
+        );
+        await emitTypeScriptFile(
+          context,
+          "vector-conformance.test.ts",
+          emitTypeScriptVectorConformanceTest(
+            { ...options!.callableVectors!, vectors: undispatched },
+            emitTarget["vector-adapter-path"] ?? "./vector-adapters",
+          ),
+          emitTarget["test-dir"],
+          emitTarget["test-dir"],
+        );
+      }
+
+      for (const dispatched of collectDispatchedContracts(allVectors)) {
+        const ifaceVectors = allVectors.filter(
+          (entry) =>
+            isTypedDispatchEntry(entry) &&
+            entry.namespace === dispatched.namespace &&
+            entry.group === dispatched.group &&
+            entry.contract === dispatched.contract,
+        );
+        // §8.5: never emit an empty conformance file.
+        if (ifaceVectors.length === 0) continue;
+        const group = dispatched.group || "";
+        const conformanceDir = group
+          ? `${emitTarget["test-dir"]}/${group}`
+          : emitTarget["test-dir"];
+        const groupDepth = group
+          ? group.split("/").filter(Boolean).length
+          : 0;
+        const testImportPath =
+          groupDepth > 0
+            ? `${"../".repeat(groupDepth)}${importPath}`
+            : importPath;
+        // The resolver is an EMITTED file whose location we control
+        // (`output-dir/[group]/${kebab}-resolver.ts`), so derive the import from
+        // the real test→resolver path relationship rather than the model
+        // import-path (which may be a bare package). This stays correct for a
+        // grouped seam and for a package-style import-path.
+        const resolverDir = group
+          ? `${emitTarget["output-dir"]}/${group}`
+          : emitTarget["output-dir"];
+        const resolverImport = toModuleSpecifier(
+          relative(
+            conformanceDir,
+            `${resolverDir}/${toKebabCase(dispatched.contract)}-resolver`,
+          ),
+        );
+        // The adapter module is the USER seam. A relative default lives beside
+        // the test root, so rebase it by the group depth; a bare/package
+        // specifier is passed through untouched.
+        const configuredAdapter =
+          emitTarget["vector-adapter-path"] ?? "./vector-adapters";
+        const adapterImport =
+          groupDepth > 0 && /^\.\.?\//.test(configuredAdapter)
+            ? `${"../".repeat(groupDepth)}${configuredAdapter.replace(/^\.\//, "")}`
+            : configuredAdapter;
+        await emitTypeScriptFile(
+          context,
+          `${toKebabCase(dispatched.contract)}.conformance.test.ts`,
+          emitTypeScriptInterfaceConformanceTest(
+            dispatched,
+            ifaceVectors,
+            testImportPath,
+            resolverImport,
+            adapterImport,
+          ),
+          conformanceDir,
+          emitTarget["test-dir"],
+        );
+      }
     }
 
     const transportContracts = options?.transportContracts ?? [];
@@ -766,6 +840,133 @@ function emitTypeScriptVectorConformanceTest(
     "});",
     "",
   ].join("\n");
+}
+
+/**
+ * Emit the TYPED per-interface `@vector` conformance suite — the behavioral twin
+ * of the per-model `${model}.test.ts` file (issue #282 §8). Each vector builds
+ * the operation inputs from its JSON, reads the shape discriminator, routes it
+ * through the emitted `resolve${Interface}` against a consumer-authored
+ * `${interface}Provider`, invokes the typed seam, and asserts `expected`.
+ *
+ * The provider TYPE (`${Interface}Provider`, a `Record<Kind, Seam | null>`) is
+ * emitted beside the resolver; a forgotten slot is a compile error. The provider
+ * VALUE is authored by the consumer in the `vector-adapter-path` module and
+ * imported here, so a dropped `@dispatch` attachment fails to build rather than
+ * silently skipping.
+ */
+function emitTypeScriptInterfaceConformanceTest(
+  dispatched: DispatchedContract,
+  entries: CallableVectorSnapshotEntry[],
+  importPath: string,
+  resolverImport: string,
+  adapterImportPath: string,
+): string {
+  const iface = dispatched.contract;
+  const resolveFn = `resolve${iface}`;
+  const providerType = `${iface}Provider`;
+  const providerVar = `${iface.charAt(0).toLowerCase()}${iface.slice(1)}Provider`;
+  const field = dispatched.decl.discriminatorField;
+
+  // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
+  const sorted = [...entries].sort((left, right) =>
+    (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+  );
+  // Distinct param model types, in first-seen order, for a stable model import.
+  const modelTypes: string[] = [];
+  for (const entry of sorted) {
+    for (const type of Object.values(entry.params)) {
+      if (!modelTypes.includes(type)) modelTypes.push(type);
+    }
+  }
+
+  const lines: string[] = [
+    "// Copyright (c) Microsoft. All rights reserved.",
+    "// WARNING: This is an auto-generated file. DO NOT EDIT THIS FILE DIRECTLY.",
+    "//",
+    `// Part III TYPED @vector conformance for ${iface} — the per-interface twin of`,
+    "// the per-model ${model}.test.ts file (issue #282 §8). Each test builds the",
+    "// operation inputs from the vector JSON, reads the shape discriminator, routes",
+    `// it through the emitted ${resolveFn} against the consumer-authored`,
+    `// '${providerVar}' provider, invokes the typed seam, and asserts 'expected'.`,
+    `// The provider VALUE is authored by the consumer as a '${providerVar}' export`,
+    `// in the 'vector-adapter-path' module; the emitted '${providerType}' Record`,
+    "// makes a dropped @dispatch slot a compile error, so conformance never skips.",
+    "// See docs: reference/vector-conformance.",
+    "",
+    modelTypes.length > 0
+      ? `import { ${modelTypes.join(", ")} } from ${JSON.stringify(importPath)};`
+      : "",
+    `import { ${resolveFn} } from ${JSON.stringify(resolverImport)};`,
+    `import { ${providerVar} } from ${JSON.stringify(adapterImportPath)};`,
+    "",
+    `describe(${JSON.stringify(`${iface} @vector conformance`)}, () => {`,
+  ].filter((line, index, all) => !(line === "" && all[index - 1] === ""));
+
+  sorted.forEach((entry) => {
+    assertTypedDispatchSupported(entry);
+    const accessor = tsDiscriminatorAccessor(entry.dispatch!.path);
+    const method = entry.operation;
+    const paramNames = Object.keys(entry.params);
+    const vectorName = entry.vector.name ?? "vector";
+    const inputLiteral = JSON.stringify(
+      JSON.stringify(entry.vector.input ?? {}),
+    );
+    const expected = entry.vector.expected;
+
+    lines.push(
+      `  it(${JSON.stringify(vectorName)}, async () => {`,
+      `    const payload = JSON.parse(${inputLiteral}) as Record<string, unknown>;`,
+    );
+    for (const paramName of paramNames) {
+      lines.push(
+        `    const ${paramName} = ${entry.params[paramName]}.load(payload[${JSON.stringify(
+          paramName,
+        )}] as Record<string, unknown>);`,
+      );
+    }
+    lines.push(
+      `    const ${field} = ${accessor};`,
+      `    const impl = ${resolveFn}(${field}, ${providerVar});`,
+      "    expect(impl).not.toBeNull();",
+      `    const result = await impl!.${method}(${paramNames.join(", ")});`,
+    );
+    if (typeof expected === "string") {
+      lines.push(`    expect(result).toEqual(${JSON.stringify(expected)});`);
+    } else {
+      // No scalar `expected` (the eligibility guard already rejects the richer
+      // shapes); reaching here means the route resolved and the seam ran.
+      lines.push("    expect(result).toBeDefined();");
+    }
+    lines.push("  });");
+  });
+  lines.push("});", "");
+  return lines.join("\n");
+}
+
+/**
+ * Render the typed discriminator accessor a TypeScript test reads to route a
+ * vector. The first path segment is the operation parameter (a local built via
+ * `.load`); the remaining segments are the emitted models' camelCase attributes
+ * (e.g. `agent.template.format.kind`).
+ */
+function tsDiscriminatorAccessor(path: string): string {
+  const [head, ...rest] = path.split(".");
+  const camel = (segment: string): string =>
+    segment.replace(/[_-]+([a-zA-Z0-9])/g, (_match, char: string) =>
+      char.toUpperCase(),
+    );
+  return [head, ...rest.map(camel)].join(".");
+}
+
+/**
+ * Normalize a filesystem-relative path (from `path.relative`) into a POSIX ESM
+ * module specifier: forward slashes, an explicit `./` when it would otherwise be
+ * a bare name, and no `.ts` extension.
+ */
+function toModuleSpecifier(relativePath: string): string {
+  const posix = relativePath.split(/[\\/]/).join("/").replace(/\.ts$/, "");
+  return /^\.\.?\//.test(posix) ? posix : `./${posix}`;
 }
 
 /**

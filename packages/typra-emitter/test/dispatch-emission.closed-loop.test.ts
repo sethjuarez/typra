@@ -1,38 +1,25 @@
 // Copyright (c) Microsoft. All rights reserved.
 
-// Executable proof that Part II-B moved @dispatch routing into the EMITTED code.
+// Rendered-code lock proving @dispatch routing is EMITTED (not hand-written glue)
+// for every runtime target, plus the Part III §8 retirement of the stringly
+// monolith once a seam is fully dispatched.
 //
-// The sibling `dispatch-seam.conformance.test.ts` (Part II-A) performs the
-// dispatch itself, in-process, from the recorded path — it proves the resolved
-// path is correct but never runs emitted glue. This file compiles the committed
-// `fixtures/dispatch-seam` spec, then drives the *generated* vector-runner and
-// vector-conformance harness against a runtime registry keyed by discriminator
-// value:
-//
-//   * positive   -> the emitted harness passes the resolved dispatch path; each
-//                   committed vector routes to its own dialect renderer and
-//                   reproduces `expected`                              => GREEN
-//   * negative   -> the SAME registry and SAME vectors driven through the SAME
-//                   emitted runner with a WRONG path (`agent.name`) misroute to
-//                   a decoy and diverge from `expected`                => RED
-//
-// Only the dispatch path differs between the two runs, so a green positive and a
-// red negative together prove the emitted routing is load-bearing, not cosmetic.
+// Executable end-to-end proofs live in siblings: the TYPED resolver rail is run
+// per language in `dispatch-conformance.typed-typescript.test.ts` /
+// `dispatch-conformance.typed-python.test.ts` (emitted per-interface conformance,
+// positive + missing-attachment negative) and `dispatch-resolver.typed-*.test.ts`
+// (resolver contract). This file asserts the RENDERED target code: the still
+// stringly-routed targets (Go/Java/Rust/Swift) keep the vector-runner path-walker
+// + composite-key lookup, while the migrated targets (C#, Python, TypeScript)
+// emit a typed per-interface conformance suite that routes through the emitted
+// resolver against a consumer-attached provider — and no longer emit the
+// VectorRunner/VectorConformanceTests monolith at all.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import {
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-  rmSync,
-  existsSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
-
-import * as ts from "typescript";
 
 import { generate } from "../src/generate.js";
 
@@ -44,233 +31,14 @@ const FIXTURE = path.resolve(
 );
 const ROOT_OBJECT = "Typra.Fixtures.DispatchSeam.Root";
 
-// Runtime-authored registry, keyed by `Contract.operation#<discriminatorValue>`
-// exactly as the emitted runner resolves it. Each renderer understands ONLY its
-// own dialect's delimiter style, so routing to the wrong key leaves the template
-// unsubstituted (output !== expected). The `#greeter` decoy is what the negative
-// control's wrong path (`agent.name` === "greeter") resolves to.
-const TS_DISPATCH_ADAPTER = [
-  "function render(regex, input) {",
-  "  const content = input.agent.template.content;",
-  "  const values = input.inputs.values;",
-  "  return content.replace(regex, (_m, key) => String(values[key]));",
-  "}",
-  "export const vectorAdapters = {",
-  '  "Renderer.render#mustache": {',
-  "    invoke(input) { return render(/\\{\\{(\\w+)\\}\\}/g, input); },",
-  "  },",
-  '  "Renderer.render#jinja2": {',
-  "    invoke(input) { return render(/\\{\\{ (\\w+) \\}\\}/g, input); },",
-  "  },",
-  '  "Renderer.render#greeter": {',
-  '    invoke() { return "MISROUTED"; },',
-  "  },",
-  "};",
-  "",
-].join("\n");
-
-// Thin jest-shim: run the emitted harness (which passes the resolved dispatch
-// path) and report PASS/FAIL per vector.
-const TS_POSITIVE_RUNNER = [
-  "const suites = [];",
-  "const tests = [];",
-  "const failures = [];",
-  "function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }",
-  "globalThis.describe = (name, fn) => { suites.push(name); try { fn(); } finally { suites.pop(); } };",
-  "globalThis.it = (name, fn) => { tests.push({ full: [...suites, name].join(' > '), fn }); };",
-  "globalThis.expect = (actual) => ({",
-  "  toBeDefined() { if (actual === undefined || actual === null) throw new Error('not defined'); },",
-  "  toBe(expected) { if (actual !== expected) throw new Error('Expected ' + String(actual) + ' to be ' + String(expected)); },",
-  "  toEqual(expected) { if (!same(actual, expected)) throw new Error('Expected ' + JSON.stringify(actual) + ' to equal ' + JSON.stringify(expected)); },",
-  "  toBeInstanceOf(expected) { if (!(actual instanceof expected)) throw new Error('not instance'); },",
-  "});",
-  "async function main() {",
-  "  require('./vector-conformance.test.js');",
-  "  for (const t of tests) {",
-  "    try { await t.fn(); console.log('PASS ' + t.full); }",
-  "    catch (error) { failures.push(t.full); console.error('FAIL ' + t.full); console.error(error && error.message ? error.message : String(error)); }",
-  "  }",
-  "  if (failures.length > 0) process.exit(1);",
-  "}",
-  "main();",
-  "",
-].join("\n");
-
-// Negative control: drive the SAME emitted runner + registry, but replay each
-// committed vector with a WRONG dispatch path. Every vector must misroute to the
-// decoy and diverge from `expected` (the runner throws on mismatch).
-const TS_NEGATIVE_RUNNER = [
-  "const { runVector } = require('./vector-runner.js');",
-  "const mod = require('./vector-adapters.js');",
-  "const adapters = mod.vectorAdapters ?? mod.default ?? {};",
-  "const seam = { adapters, waivers: {}, doubles: {}, baseDir: __dirname };",
-  "const vectors = require('./vectors-data.json');",
-  "async function main() {",
-  "  for (const vector of vectors) {",
-  "    try {",
-  "      await runVector('Renderer', 'render', vector, false, seam, { path: 'agent.name' });",
-  "      console.log('ROUTED ' + vector.name);",
-  "    } catch (error) {",
-  "      console.log('MISROUTE ' + vector.name);",
-  "    }",
-  "  }",
-  "}",
-  "main();",
-  "",
-].join("\n");
-
-function transpile(code: string): string {
-  return ts.transpileModule(code, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2020,
-      esModuleInterop: true,
-    },
-  }).outputText;
-}
-
-type RunResult = { status: number; output: string };
-
-function runNode(dir: string, entry: string): RunResult {
-  try {
-    const output = execFileSync(process.execPath, [entry], {
-      cwd: dir,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    return { status: 0, output };
-  } catch (error) {
-    const err = error as { status?: number; stdout?: string; stderr?: string };
-    return {
-      status: err.status ?? 1,
-      output: `${err.stdout ?? ""}${err.stderr ?? ""}`,
-    };
-  }
-}
-
-describe("@dispatch routing is emitted and load-bearing (Part II-B)", () => {
-  // TypeScript is the remaining stringly-routed target proven end-to-end here;
-  // Python migrated to the Part III typed resolver rail and is now proven by
-  // test/dispatch-conformance.typed-python.test.ts (emitted per-interface
-  // conformance, positive + dropped-slot negative). Other targets keep the
-  // rendered-code lock in the sibling `it` below until they migrate too.
-  it("routes committed vectors through the emitted harness; a wrong path misroutes", async () => {
-    const output = mkdtempSync(path.join(tmpdir(), "typra-dispatch-emit-"));
-    try {
-      const result = await generate({
-        output,
-        source: FIXTURE,
-        rootObject: ROOT_OBJECT,
-        targets: ["typescript"],
-        format: false,
-        generateTests: true,
-        deterministic: true,
-      });
-      assert.equal(result.success, true, result.errors?.join("\n"));
-
-      const testDir = path.join(output, "typescript", "tests");
-      const harness = readFileSync(
-        path.join(testDir, "vector-conformance.test.ts"),
-        "utf8",
-      );
-      const runner = readFileSync(
-        path.join(testDir, "vector-runner.ts"),
-        "utf8",
-      );
-
-      // -- rendered-code lock: the emitted glue actually dispatches by path -----
-      assert.match(
-        harness,
-        /\{ path: "agent\.template\.format\.kind" \}/,
-        "emitted harness must pass the resolved @dispatch access path",
-      );
-      assert.match(
-        runner,
-        /function resolveDispatchKey\(/,
-        "emitted runner must define the discriminator path walker",
-      );
-      assert.match(
-        runner,
-        /\$\{operationKey\}#\$\{dispatchKey\}/,
-        "emitted runner must look up a per-discriminator composite key",
-      );
-
-      // -- compile the emitted runner + harness once ---------------------------
-      writeFileSync(
-        path.join(testDir, "vector-conformance.test.js"),
-        transpile(harness),
-      );
-      writeFileSync(
-        path.join(testDir, "vector-runner.js"),
-        transpile(runner),
-      );
-      writeFileSync(
-        path.join(testDir, "vector-adapters.js"),
-        transpile(TS_DISPATCH_ADAPTER),
-      );
-      writeFileSync(path.join(testDir, "positive.js"), TS_POSITIVE_RUNNER);
-      writeFileSync(path.join(testDir, "negative.js"), TS_NEGATIVE_RUNNER);
-      writeFileSync(
-        path.join(testDir, "package.json"),
-        JSON.stringify({ type: "commonjs" }, null, 2),
-      );
-
-      // Feed the negative driver the committed vectors from the emitted snapshot.
-      const snapshot = JSON.parse(
-        readFileSync(
-          path.join(output, ".typra-generated", "vectors.json"),
-          "utf8",
-        ),
-      ) as { vectors: { vector: Record<string, unknown> }[] };
-      writeFileSync(
-        path.join(testDir, "vectors-data.json"),
-        JSON.stringify(snapshot.vectors.map((entry) => entry.vector)),
-      );
-
-      // -- positive: correct path routes each dialect to its own renderer ------
-      const positive = runNode(testDir, "positive.js");
-      assert.equal(
-        positive.status,
-        0,
-        `dispatched harness should route green:\n${positive.output}`,
-      );
-      assert.match(
-        positive.output,
-        /PASS callable vector conformance > Renderer\.render:mustache-basic/,
-      );
-      assert.match(
-        positive.output,
-        /PASS callable vector conformance > Renderer\.render:jinja2-basic/,
-      );
-      assert.doesNotMatch(positive.output, /FAIL/);
-
-      // -- negative control: wrong path misroutes both vectors to the decoy ----
-      const negative = runNode(testDir, "negative.js");
-      assert.match(
-        negative.output,
-        /MISROUTE mustache-basic/,
-        "a wrong dispatch path must misroute mustache-basic",
-      );
-      assert.match(
-        negative.output,
-        /MISROUTE jinja2-basic/,
-        "a wrong dispatch path must misroute jinja2-basic",
-      );
-      assert.doesNotMatch(
-        negative.output,
-        /ROUTED/,
-        "no vector may reproduce `expected` under a wrong dispatch path",
-      );
-    } finally {
-      rmSync(output, { recursive: true, force: true });
-    }
-  });
-
-  // Rendered-code lock for the targets not driven end-to-end above
-  // (TypeScript is proven runnable above; C# and Python are proven runnable in
-  // their typed sibling tests). Each stringly-routed runner must define the
-  // discriminator path-walker and look up a per-discriminator composite key,
-  // and each emitted harness must pass the resolved @dispatch access path.
+describe("@dispatch routing is emitted (rendered-code lock)", () => {
+  // Rendered-code lock for every runtime target. The still stringly-routed
+  // targets (Go/Java/Rust/Swift) must define the discriminator path-walker and
+  // look up a per-discriminator composite key in their vector-runner, and their
+  // harness must pass the resolved @dispatch access path. The migrated targets
+  // (C#, Python, TypeScript) instead emit a typed per-interface conformance suite
+  // that routes through the emitted resolver and no longer emit the stringly
+  // monolith — each is also RUN end-to-end in its typed sibling test.
   it("emits @dispatch routing glue for every runtime target", async () => {
     const output = mkdtempSync(path.join(tmpdir(), "typra-dispatch-render-"));
     try {
@@ -305,13 +73,6 @@ describe("@dispatch routing is emitted and load-bearing (Part II-B)", () => {
         harnessArg: string;
       };
       const locks: LangLock[] = [
-        {
-          runner: path.join("typescript", "tests", "vector-runner.ts"),
-          harness: path.join("typescript", "tests", "vector-conformance.test.ts"),
-          helper: /function resolveDispatchKey\(/,
-          composite: /\$\{operationKey\}#\$\{dispatchKey\}/,
-          harnessArg: `{ path: "${PATH}" }`,
-        },
         {
           runner: path.join("go", "vectorrunner", "vector_runner.go"),
           harness: path.join("go", "tests", "vector_conformance_test.go"),
@@ -413,6 +174,28 @@ describe("@dispatch routing is emitted and load-bearing (Part II-B)", () => {
           retired: [
             path.join("python", "tests", "test_vector_conformance.py"),
             path.join("python", "tests", "vector_runner.py"),
+          ],
+        },
+        {
+          conformance: path.join(
+            "typescript",
+            "tests",
+            "renderer.conformance.test.ts",
+          ),
+          mustInclude: [
+            // consumes the emitted resolver, not a stringly composite key
+            /const impl = resolveRenderer\(kind, rendererProvider\)/,
+            // imports the emitted resolver twin of the shape load switch
+            // (import path is namespace-derived here, so match the module suffix)
+            /from "[^"]*renderer-resolver"/,
+            // reads the SAME typed discriminator the shape load switch reads
+            /const kind = agent\.template\.format\.kind;/,
+            // invokes the typed seam method on the resolved impl
+            /await impl!\.render\(agent, inputs\)/,
+          ],
+          retired: [
+            path.join("typescript", "tests", "vector-conformance.test.ts"),
+            path.join("typescript", "tests", "vector-runner.ts"),
           ],
         },
       ];
