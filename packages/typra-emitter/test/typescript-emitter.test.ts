@@ -265,6 +265,25 @@ describe("TypeScript optional collection defaults", () => {
   });
 });
 
+describe("TypeScript runtime neutrality", () => {
+  it("parses YAML through LoadContext.parseYaml instead of a CommonJS require()", () => {
+    const source = emitTypeScriptFile(
+      fileDecl(
+        typeDecl([
+          field("name", { kind: "scalar", scalarType: "string" }, false),
+        ]),
+      ),
+      new TypeScriptExprVisitor(),
+    );
+
+    assert.match(source, /static fromYaml\(/);
+    assert.match(source, /const data = LoadContext\.parseYaml\(yaml\);/);
+    // require() is undefined under native ESM and in the browser; the emitted
+    // library must stay runtime-neutral and never bake in a CommonJS require.
+    assert.doesNotMatch(source, /\brequire\s*\(/);
+  });
+});
+
 describe("TypeScript native serialization option", () => {
   it("keeps the default TypeScript output free of Zod imports and schemas", () => {
     const source = emitTypeScriptFile(

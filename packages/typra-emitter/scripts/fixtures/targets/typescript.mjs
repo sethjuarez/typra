@@ -19,6 +19,8 @@ import {
   propertyCorpusJsonLiteral,
   wireOptionsSample,
 } from "../conformance.mjs";
+import { WEB_COMPILE_COMPILER_OPTIONS } from "../web-compile-profile.mjs";
+import { pathToFileURL } from "node:url";
 
 export function findTypeScriptCli(startDir) {
   let current = startDir;
@@ -122,6 +124,219 @@ export function runGeneratedTypeScriptCompile() {
 
 export function runGeneratedTypeScriptZodCompile() {
   runGeneratedTypeScriptCompileFor("typescript-zod", "TypeScript Zod");
+}
+
+/**
+ * Type-check the SHIPPED library (models, context, transport, optional zod)
+ * under a web-oriented profile: no `@types/node`, the DOM lib instead, and
+ * bundler resolution. Without Node's ambient types, any leak of `process`,
+ * `Buffer`, `require`, `module`, `__dirname`, or a Node-typed API surfaces as a
+ * hard type error — including type-level leaks (e.g. a field typed `Buffer`)
+ * that the source-text runtime-neutrality scan cannot see. The `tests/` subtree
+ * and consumer-authored `vector-adapters.ts` legitimately run under Node and are
+ * excluded, mirroring the runtime-neutrality guard.
+ */
+export function runGeneratedTypeScriptWebCompileFor(targetDir, label) {
+  const sourceDir = path.join(generatedRoot, targetDir);
+  const sourceFiles = walkFiles(
+    sourceDir,
+    (file) =>
+      file.endsWith(".ts") &&
+      !file.endsWith(".d.ts") &&
+      !file.includes(`${path.sep}tests${path.sep}`) &&
+      !file.includes(`${path.sep}.typra-conformance${path.sep}`) &&
+      !file.includes(`${path.sep}.typra-tests${path.sep}`) &&
+      path.basename(file) !== "vector-adapters.ts",
+  );
+
+  if (sourceFiles.length === 0) {
+    fail(`No generated ${label} library files found for the web compile.`);
+    return;
+  }
+  const tscCli = findTypeScriptCli(packageRoot);
+  if (!tscCli) return;
+
+  const configPath = path.join(sourceDir, "tsconfig.web.validate.json");
+  writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          ...WEB_COMPILE_COMPILER_OPTIONS,
+        },
+        files: sourceFiles.map((file) => path.resolve(file)),
+      },
+      null,
+      2,
+    ),
+  );
+
+  try {
+    execFileSync(process.execPath, [tscCli, "-p", configPath], {
+      cwd: packageRoot,
+      stdio: "pipe",
+    });
+  } catch (error) {
+    const output =
+      `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(
+      `Generated ${label} library does not type-check for the web (no @types/node, DOM lib).\n` +
+        `A Node-only global or type leaked into the shipped library; route the host ` +
+        `capability through an injected/centralized seam instead.\n${output || error.message}`,
+    );
+  } finally {
+    if (existsSync(configPath)) {
+      unlinkSync(configPath);
+    }
+  }
+}
+
+export function runGeneratedTypeScriptWebCompile() {
+  runGeneratedTypeScriptWebCompileFor("typescript", "TypeScript");
+}
+
+export function runGeneratedTypeScriptZodWebCompile() {
+  runGeneratedTypeScriptWebCompileFor("typescript-zod", "TypeScript Zod");
+}
+
+/**
+ * Prove the SHIPPED library actually LOADS and RUNS off Node, not merely that it
+ * type-checks: emit it to ESM, then execute a real YAML round-trip under ESM
+ * resolution hooks that force browser export conditions (dropping Node's always-on
+ * `node` condition so a dep like `yaml` resolves its browser build) and reject any
+ * Node builtin reached from the generated graph. A Node-only dependency or a
+ * `require()`/builtin the static scan and type-check both miss surfaces here as a
+ * hard runtime failure. The `tests/` subtree and consumer-authored
+ * `vector-adapters.ts` legitimately run under Node and are excluded.
+ */
+export function runTypeScriptWebRuntimeSmokeFor(targetDir, label) {
+  const sourceDir = path.join(generatedRoot, targetDir);
+  const sourceFiles = walkFiles(
+    sourceDir,
+    (file) =>
+      file.endsWith(".ts") &&
+      !file.endsWith(".d.ts") &&
+      !file.includes(`${path.sep}tests${path.sep}`) &&
+      !file.includes(`${path.sep}.typra-conformance${path.sep}`) &&
+      !file.includes(`${path.sep}.typra-tests${path.sep}`) &&
+      !file.includes(`${path.sep}.typra-web${path.sep}`) &&
+      path.basename(file) !== "vector-adapters.ts",
+  );
+
+  if (sourceFiles.length === 0) {
+    fail(`No generated ${label} library files found for the web runtime smoke.`);
+    return;
+  }
+  const tscCli = findTypeScriptCli(packageRoot);
+  if (!tscCli) return;
+
+  const outDir = path.join(sourceDir, ".typra-web");
+  const configPath = path.join(sourceDir, "tsconfig.web-smoke.json");
+  const runnerPath = path.join(outDir, "web-smoke.validate.mjs");
+  const registerUrl = pathToFileURL(
+    path.join(packageRoot, "scripts", "fixtures", "web-conditions-register.mjs"),
+  ).href;
+
+  writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          ...WEB_COMPILE_COMPILER_OPTIONS,
+          noEmit: false,
+          declaration: false,
+          outDir,
+          rootDir: sourceDir,
+        },
+        files: sourceFiles.map((file) => path.resolve(file)),
+      },
+      null,
+      2,
+    ),
+  );
+
+  try {
+    // Emit the shipped library to ESM. tsc preserves the emitter's extensionless
+    // specifiers under module ESNext; the loader re-adds `.js` at resolve time.
+    execFileSync(process.execPath, [tscCli, "-p", configPath], {
+      cwd: packageRoot,
+      stdio: "pipe",
+    });
+    writeFileSync(
+      path.join(outDir, "package.json"),
+      JSON.stringify({ type: "module" }, null, 2),
+    );
+    writeFileSync(
+      runnerPath,
+      [
+        'import { FixtureRoot } from "./index.js";',
+        `const root = FixtureRoot.load(JSON.parse(${fixtureRootSampleJsonLiteral}));`,
+        // toYaml -> yaml.stringify and fromYaml -> yaml.parse force the `yaml`
+        // dependency (the only external one) to load under browser conditions,
+        // and the round-trip exercises the whole model graph end to end.
+        "const yamlText = root.toYaml();",
+        "const reloaded = FixtureRoot.fromYaml(yamlText);",
+        "if (JSON.stringify(reloaded.save()) !== JSON.stringify(root.save())) {",
+        '  throw new Error("web runtime YAML round-trip did not preserve the model");',
+        "}",
+        'process.stdout.write("WEB_SMOKE_OK");',
+        "",
+      ].join("\n"),
+    );
+
+    let output = "";
+    try {
+      output = execFileSync(
+        process.execPath,
+        ["--import", registerUrl, runnerPath],
+        {
+          cwd: outDir,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          env: {
+            ...process.env,
+            TYPRA_WEB_GENERATED_URL: pathToFileURL(outDir + path.sep).href,
+          },
+        },
+      );
+    } catch (error) {
+      const detail =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Generated ${label} library failed to load and run on the web ` +
+          `(browser export conditions, no Node builtins).\n` +
+          `A Node-only dependency or builtin leaked into the shipped library; ` +
+          `route the host capability through an injected/centralized seam instead.\n${detail || error.message}`,
+      );
+      return;
+    }
+    if (!output.includes("WEB_SMOKE_OK")) {
+      fail(
+        `Generated ${label} web runtime smoke did not report success. Output:\n${output}`,
+      );
+    }
+  } catch (error) {
+    const detail =
+      `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+    fail(
+      `Generated ${label} library failed to compile for the web runtime smoke:\n${detail || error.message}`,
+    );
+  } finally {
+    if (existsSync(configPath)) {
+      unlinkSync(configPath);
+    }
+    if (existsSync(outDir)) {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  }
+}
+
+export function runTypeScriptWebRuntimeSmoke() {
+  runTypeScriptWebRuntimeSmokeFor("typescript", "TypeScript");
+}
+
+export function runTypeScriptZodWebRuntimeSmoke() {
+  runTypeScriptWebRuntimeSmokeFor("typescript-zod", "TypeScript Zod");
 }
 
 export function runTypeScriptGeneratedTests() {
