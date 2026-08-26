@@ -35,6 +35,7 @@ import {
 } from "./scaffolding.js";
 import {
   swiftFileName,
+  swiftFunctionName,
   swiftPropertyName,
   swiftStringLiteral,
   swiftTypeName,
@@ -43,8 +44,11 @@ import { SWIFT_TYPE_MAP } from "./types.js";
 import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
 import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
 import {
+  assertTypedDispatchSupported,
+  CallableVectorSnapshotEntry,
   collectDispatchedContracts,
   DispatchedContract,
+  isTypedDispatchEntry,
 } from "../../ir/vector.js";
 
 export const swiftTypeMapper: Record<string, string> = SWIFT_TYPE_MAP;
@@ -176,27 +180,69 @@ export const generateSwift = async (
     // cleanup reconciles it across config changes (a relocated, removed, or
     // now-empty harness leaves no orphan) while only ever pruning marker-owned
     // files — never the SDK's hand-written tests.
-    //
-    // The interpreter is emitted into a sibling VectorRunner.swift so the harness
-    // stays thin. Both share the test module, so the runner's port types are
-    // visible to the runtime-authored adapter file too.
-    await emitSwiftGeneratedFile(
-      context,
-      "VectorRunner.swift",
-      emitSwiftVectorRunner(),
-      harnessRoot,
-      outputDir,
+    const adapterEnum = emitTarget["vector-adapter-path"] ?? "VectorAdapters";
+    const allVectors = options!.callableVectors!.vectors;
+    // A `@dispatch` seam routes through the typed resolver rail (issue #282 §8):
+    // its vectors get a per-interface, typed `${Interface}ConformanceTests`
+    // XCTestCase in the seam's namespace folder. Undispatched seams — INCLUDING a
+    // @dispatch whose discriminator model is not polymorphic (no `decl`, so no
+    // typed rail) — keep the stringly JSON interpreter (VectorRunner) + monolithic
+    // VectorConformanceTests, so no vector is dropped from both rails.
+    const undispatched = allVectors.filter(
+      (entry) => !isTypedDispatchEntry(entry),
     );
-    await emitSwiftGeneratedFile(
-      context,
-      "VectorConformanceTests.swift",
-      emitSwiftVectorConformanceTest(
-        options!.callableVectors!,
-        emitTarget["vector-adapter-path"] ?? "VectorAdapters",
-      ),
-      harnessRoot,
-      outputDir,
-    );
+
+    if (undispatched.length > 0) {
+      // The interpreter is emitted into a sibling VectorRunner.swift so the
+      // harness stays thin. Both share the test module, so the runner's port
+      // types are visible to the runtime-authored adapter file too.
+      await emitSwiftGeneratedFile(
+        context,
+        "VectorRunner.swift",
+        emitSwiftVectorRunner(),
+        harnessRoot,
+        outputDir,
+      );
+      await emitSwiftGeneratedFile(
+        context,
+        "VectorConformanceTests.swift",
+        emitSwiftVectorConformanceTest(
+          { ...options!.callableVectors!, vectors: undispatched },
+          adapterEnum,
+        ),
+        harnessRoot,
+        outputDir,
+      );
+    }
+
+    for (const dispatched of collectDispatchedContracts(allVectors)) {
+      const ifaceVectors = allVectors.filter(
+        (entry) =>
+          isTypedDispatchEntry(entry) &&
+          entry.namespace === dispatched.namespace &&
+          entry.group === dispatched.group &&
+          entry.contract === dispatched.contract,
+      );
+      // §8.5: never emit an empty conformance file — but the resolver below is
+      // still emitted for a zero-vector dispatched seam so control 2 keeps biting.
+      if (ifaceVectors.length === 0) continue;
+      const iface = swiftTypeName(dispatched.contract);
+      const outDir = dispatched.group
+        ? `${harnessRoot}/${dispatched.group}`
+        : harnessRoot;
+      await emitSwiftGeneratedFile(
+        context,
+        `${iface}ConformanceTests.swift`,
+        emitSwiftInterfaceConformanceTest(
+          dispatched,
+          ifaceVectors,
+          moduleName,
+          adapterEnum,
+        ),
+        outDir,
+        outputDir,
+      );
+    }
   }
 
   // Part III: emit one behavioral @dispatch resolver (provider protocol +
@@ -896,6 +942,149 @@ function emitSwiftVectorConformanceTest(
   lines.push("}");
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * Emit the TYPED per-interface `@vector` conformance (issue #282 §8) — the
+ * per-seam twin of the per-model `${Model}Tests.swift` file. Each XCTest method
+ * builds the operation inputs from the vector JSON, reads the shape discriminator
+ * off the typed graph, routes it through the emitted `${Interface}Resolver`
+ * against the consumer-attached provider, invokes the typed seam, and asserts the
+ * result reproduces `expected`. The provider VALUE is authored by the consumer as
+ * `VectorProviders.${interface}()` (the enum named by 'vector-adapter-path' with
+ * its `Adapters` suffix swapped for `Providers`); conforming to the emitted
+ * `${Interface}Provider` protocol obliges every @dispatch slot, so a forgotten
+ * slot fails to COMPILE and conformance never silently skips.
+ */
+function emitSwiftInterfaceConformanceTest(
+  dispatched: DispatchedContract,
+  entries: CallableVectorSnapshotEntry[],
+  moduleName: string,
+  adapterEnum: string,
+): string {
+  // Reference the seam / resolver / provider by their EMITTED Swift spelling so
+  // the test's type references cannot drift from the library declarations.
+  const seam = swiftTypeName(dispatched.contract);
+  const provider = `${seam}Provider`;
+  const resolver = `${seam}Resolver`;
+  // The consumer authors `VectorProviders.${seam}()`; derive that enum from the
+  // adapter enum by swapping the trailing `Adapters` for `Providers`.
+  const providersEnum = /Adapters$/.test(adapterEnum)
+    ? adapterEnum.replace(/Adapters$/, "Providers")
+    : "VectorProviders";
+  const rawField = dispatched.decl.discriminatorField;
+  // A closed dispatch's resolve throws on an unknown discriminator (the twin of
+  // the shape load switch's default arm); an open one returns nil instead.
+  const resolveTry = isClosedPolymorphicDispatch(dispatched.decl) ? "try " : "";
+  // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
+  const sorted = [...entries].sort((left, right) =>
+    (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+  );
+
+  const lines: string[] = [
+    "// <auto-generated by typra-emitter>",
+    "// Code generated by Typra emitter; DO NOT EDIT.",
+    "//",
+    `// Part III TYPED @vector conformance for ${seam} — the per-interface twin of`,
+    "// the per-model ${Model}Tests file (issue #282 §8). Each XCTest method builds",
+    "// the operation inputs from the vector JSON, reads the shape discriminator,",
+    `// routes it through the emitted ${resolver} against the consumer-attached`,
+    `// provider (VectorProviders.${swiftFunctionName(dispatched.contract)}()),`,
+    "// invokes the typed seam, and asserts the result reproduces `expected`. A",
+    "// dropped @dispatch slot fails to compile, so conformance never silently",
+    "// skips.",
+    "// See docs: reference/vector-conformance.",
+    "",
+    "import Foundation",
+    "import XCTest",
+    `import ${moduleName}`,
+    "",
+    `final class ${seam}ConformanceTests: XCTestCase {`,
+    "  // The consumer-attached provider of typed seam impls, one slot per @dispatch",
+    "  // variant. Authored outside this tree; a forgotten slot cannot compile.",
+    `  private func provider() -> any ${provider} {`,
+    `    ${providersEnum}.${swiftFunctionName(dispatched.contract)}()`,
+    "  }",
+    "",
+  ];
+
+  sorted.forEach((entry, index) => {
+    assertTypedDispatchSupported(entry);
+    const method = swiftFunctionName(entry.operation);
+    const paramNames = Object.keys(entry.params);
+    const accessor = swiftDiscriminatorAccessor(entry.dispatch!.path, rawField);
+    const inputLiteral = swiftPayloadLiteral(
+      JSON.stringify(entry.vector.input ?? {}),
+    );
+    const expected = entry.vector.expected;
+    const vectorName = entry.vector.name ?? `vector ${index}`;
+    const awaitPrefix = entry.sync ? "" : "await ";
+
+    lines.push(
+      `  func ${swiftVectorSlug(index, entry)}() async throws {`,
+      `    guard let inputData = ${inputLiteral}.data(using: .utf8),`,
+      "      let input = try JSONSerialization.jsonObject(with: inputData) as? [String: Any]",
+      "    else {",
+      '      XCTFail("failed to parse embedded vector input")',
+      "      return",
+      "    }",
+    );
+    for (const paramName of paramNames) {
+      const local = swiftPropertyName(paramName);
+      lines.push(
+        `    let ${local} = try ${entry.params[paramName]}.load(input[${swiftStringLiteral(
+          paramName,
+        )}]!)`,
+      );
+    }
+    lines.push(
+      `    let ${swiftPropertyName(rawField)} = ${accessor}`,
+      `    guard let impl = ${resolveTry}${resolver}.resolve(${swiftPropertyName(
+        rawField,
+      )}: ${swiftPropertyName(rawField)}, provider: provider()) else {`,
+      `      XCTFail(${swiftStringLiteral(
+        `${vectorName}: no ${seam} attached for `,
+      )} + ${swiftPropertyName(rawField)})`,
+      "      return",
+      "    }",
+      `    let actual = try ${awaitPrefix}impl.${method}(${paramNames
+        .map((paramName) => {
+          const local = swiftPropertyName(paramName);
+          return `${local}: ${local}`;
+        })
+        .join(", ")})`,
+    );
+    if (typeof expected === "string") {
+      lines.push(`    XCTAssertEqual(actual, ${swiftStringLiteral(expected)})`);
+    } else {
+      // No scalar `expected` to compare: the typed invocation is itself the
+      // assertion — reaching here means the route resolved and the seam ran. A
+      // dispatched fixture needing richer comparison extends this arm
+      // (reproduce-before-fix).
+      lines.push("    XCTAssertNotNil(actual)");
+    }
+    lines.push("  }", "");
+  });
+
+  lines.push("}");
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * Render the typed discriminator accessor a Swift test reads to route a vector.
+ * The dispatched discriminator lives on a polymorphic union (an emitted Swift
+ * `enum` with no stored discriminator property), so the value is read off the
+ * union's serialized form — `try (agent.template.format.save())["kind"] as!
+ * String`. The container is navigated with the models' sanitized property names;
+ * the dict key is the raw wire discriminator field.
+ */
+function swiftDiscriminatorAccessor(path: string, rawField: string): string {
+  const segments = path.split(".");
+  const head = swiftPropertyName(segments[0]);
+  const rest = segments.slice(1, -1).map(swiftPropertyName);
+  const container = [head, ...rest].join(".");
+  return `try (${container}.save())[${swiftStringLiteral(rawField)}] as! String`;
 }
 
 /**
