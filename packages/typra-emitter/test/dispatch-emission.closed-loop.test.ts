@@ -27,6 +27,7 @@ import {
   readFileSync,
   writeFileSync,
   rmSync,
+  existsSync,
 } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -509,13 +510,6 @@ describe("@dispatch routing is emitted and load-bearing (Part II-B)", () => {
           harnessArg: `, "${PATH}")`,
         },
         {
-          runner: path.join("csharp", "tests", "VectorRunner.cs"),
-          harness: path.join("csharp", "tests", "VectorConformanceTests.cs"),
-          helper: /private static string\? ResolveDispatchKey\(/,
-          composite: /\{operationKey\}#\{dispatchKey\}/,
-          harnessArg: `, "${PATH}")`,
-        },
-        {
           runner: path.join("rust", "tests", "vector_runner", "mod.rs"),
           harness: path.join("rust", "tests", "vector_conformance_test.rs"),
           helper: /fn vc_resolve_dispatch_key\(/,
@@ -548,6 +542,58 @@ describe("@dispatch routing is emitted and load-bearing (Part II-B)", () => {
           harness.includes(lock.harnessArg),
           `${lock.harness} must pass the resolved @dispatch access path (${lock.harnessArg})`,
         );
+      }
+
+      // Part III §8: languages migrated to the TYPED resolver rail no longer emit
+      // the stringly VectorRunner/VectorConformanceTests monolith for an
+      // all-dispatched fixture. Instead they emit a per-interface, typed
+      // conformance suite that ROUTES THROUGH the emitted resolver against a
+      // consumer-attached provider — the same discriminator the shape reads,
+      // now enforced by the compiler rather than a JSON dictionary.
+      type TypedLock = {
+        conformance: string;
+        mustInclude: RegExp[];
+        retired: string[];
+      };
+      const typedLocks: TypedLock[] = [
+        {
+          conformance: path.join(
+            "csharp",
+            "tests",
+            "RendererConformanceTests.cs",
+          ),
+          mustInclude: [
+            // consumes the emitted resolver, not a stringly composite key
+            /RendererResolver\.Resolve\(kind, Provider\(\)\)/,
+            // reads the SAME typed discriminator the shape Load switch reads
+            /var kind = agent\.Template\.Format\.Kind;/,
+            // invokes the typed seam method on the resolved impl
+            /await impl!\.RenderAsync\(agent, inputs\)/,
+            // provider VALUE is consumer-authored outside the conformance tree
+            /VectorProviders\.Renderer\(\)/,
+          ],
+          retired: [
+            path.join("csharp", "tests", "VectorConformanceTests.cs"),
+            path.join("csharp", "tests", "VectorRunner.cs"),
+          ],
+        },
+      ];
+
+      for (const lock of typedLocks) {
+        const conformance = read(lock.conformance);
+        for (const pattern of lock.mustInclude) {
+          assert.match(
+            conformance,
+            pattern,
+            `${lock.conformance} must route through the typed resolver rail (${pattern})`,
+          );
+        }
+        for (const retired of lock.retired) {
+          assert.ok(
+            !existsSync(path.join(output, retired)),
+            `${retired} must NOT be emitted once the seam is fully dispatched (typed rail retires the stringly monolith)`,
+          );
+        }
       }
     } finally {
       rmSync(output, { recursive: true, force: true });
