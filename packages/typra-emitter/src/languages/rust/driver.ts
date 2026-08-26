@@ -18,6 +18,11 @@ import {
   rustTestOptions,
 } from "../../testing/test-context.js";
 import { toSnakeCase } from "../../ir/utilities.js";
+import {
+  isClosedPolymorphicDispatch,
+  PolymorphicDispatchDecl,
+} from "../../ir/declarations.js";
+import { CallableVectorSnapshotEntry } from "../../ir/vector.js";
 import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
 import { emitRustFile as emitRustFileDecl, RUST_ALLOW_ATTR } from "./emitter.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
@@ -298,6 +303,32 @@ export const generateRust = async (
     );
     if (!testGroupModuleNames.has("")) testGroupModuleNames.set("", []);
     testGroupModuleNames.get("")!.push("vector_conformance_test");
+  }
+
+  // Part III typed @dispatch resolver: for each dispatched seam, emit a library
+  // module (beside the seam trait) carrying a consumer-implemented provider trait
+  // + a resolve() fn that twins the shape discriminator `match`. Registered in
+  // the seam's group so `mod.rs` re-exports it — the provider trait becomes part
+  // of the crate's public surface, exactly the contract a downstream implements.
+  if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
+    for (const dispatched of collectRustDispatchedContracts(
+      options!.callableVectors!.vectors,
+    )) {
+      const moduleName = `${toSnakeCase(dispatched.contract)}_resolver`;
+      const outDir = dispatched.group
+        ? `${emitTarget["output-dir"]}/${dispatched.group}`
+        : emitTarget["output-dir"];
+      await emitRustFile(
+        context,
+        `${moduleName}.rs`,
+        emitRustDispatchResolver(dispatched),
+        outDir,
+        emitTarget["output-dir"],
+      );
+      if (!groupModuleNames.has(dispatched.group))
+        groupModuleNames.set(dispatched.group, []);
+      groupModuleNames.get(dispatched.group)!.push(moduleName);
+    }
   }
 
   // Render per-group mod.rs files (source)
@@ -1384,6 +1415,135 @@ function rustVectorSlug(
     .replace(/^_+|_+$/g, "")
     .toLowerCase();
   return `test_vector_${index}_${slug || "unnamed"}`;
+}
+
+/**
+ * One dispatched seam contract: the discriminated interface plus the lowered
+ * `PolymorphicDispatchDecl` its `@dispatch` resolves on, and the namespace/group
+ * that places its resolver module in the crate tree.
+ */
+interface RustDispatchedContract {
+  contract: string;
+  decl: PolymorphicDispatchDecl;
+  namespace: string;
+  group: string;
+}
+
+/**
+ * Dedup the raw per-vector snapshot down to one entry per dispatched seam,
+ * keyed by (namespace, group, contract) so the same seam name in different
+ * namespaces gets its own resolver. Deterministic order for zero-diff regen.
+ */
+function collectRustDispatchedContracts(
+  entries: CallableVectorSnapshotEntry[],
+): RustDispatchedContract[] {
+  const byContract = new Map<string, RustDispatchedContract>();
+  for (const entry of entries) {
+    const decl = entry.dispatch?.decl;
+    if (!decl) continue;
+    const key = `${entry.namespace}\u0000${entry.group}\u0000${entry.contract}`;
+    if (!byContract.has(key)) {
+      byContract.set(key, {
+        contract: entry.contract,
+        decl,
+        namespace: entry.namespace,
+        group: entry.group,
+      });
+    }
+  }
+  return [...byContract.values()].sort(
+    (left, right) =>
+      left.namespace.localeCompare(right.namespace) ||
+      left.group.localeCompare(right.group) ||
+      left.contract.localeCompare(right.contract),
+  );
+}
+
+/**
+ * Emit the Part III behavioral @dispatch resolver for one seam — the Rust twin
+ * of the shape discriminator `match` (`emitter.ts:1125`). Where the shape match
+ * maps a discriminator value to a constructed variant, this maps it to a
+ * selected BEHAVIOR (`&dyn <Seam>`) drawn from a consumer-implemented provider
+ * trait whose methods ARE the `dispatch.variants`.
+ *
+ * The provider trait is the compile-time completeness control (issue #282 §5
+ * control 2): a downstream `impl <Seam>Provider for _` that omits a variant
+ * method fails to compile (E0046, "not all trait items implemented"). Methods
+ * return `Option` so a consumer signals a valid-but-unimplemented variant with
+ * `None`, and the conformance harness does an explicit skip rather than a silent
+ * registration miss.
+ *
+ * The unknown-value arm twins the shape layer: `load_from_value`
+ * (`emitter.ts:1745`) panics on an unknown discriminator for a closed/abstract
+ * base, so a closed dispatch panics here too; a default/open dispatch has no
+ * base impl and yields `None`.
+ */
+function emitRustDispatchResolver(entry: RustDispatchedContract): string {
+  const seam = entry.contract;
+  const providerTrait = `${seam}Provider`;
+  const field = entry.decl.discriminatorField;
+  // Preserve the SAME variant order the shape match emits (`emitter.ts:1112`
+  // iterates `dispatch.variants` directly) so the two switches stay a faithful,
+  // deterministic twin.
+  const variants = entry.decl.variants;
+  const rejectsUnknown =
+    isClosedPolymorphicDispatch(entry.decl) ||
+    (entry.decl.isAbstract && entry.decl.defaultVariant === null);
+
+  const lines: string[] = [
+    "// Code generated by Typra emitter; DO NOT EDIT.",
+    "//",
+    `// Part III behavioral @dispatch resolver for \`${seam}\` — the twin of the`,
+    "// shape discriminator match. The provider trait below has one method per",
+    "// @dispatch variant; a consumer attaches concrete impls by implementing it,",
+    "// so a forgotten slot fails to compile (E0046).",
+    "// See docs: reference/vector-conformance.",
+    "",
+    RUST_ALLOW_ATTR,
+    "",
+    `use super::${toSnakeCase(seam)}::${seam};`,
+    "",
+    `/// Consumer-attached provider of \`${seam}\` impls, one method per @dispatch`,
+    "/// variant. Returns `None` for a valid-but-unimplemented variant so the",
+    "/// conformance harness skips it (never a silent registration miss).",
+    `pub trait ${providerTrait} {`,
+  ];
+  // Method names are the snake_case of the discriminator value. Every fixture
+  // value today is a plain identifier; a value colliding with a Rust keyword
+  // would need a raw identifier (r#kw). Deferred until a fixture needs it.
+  for (const variant of variants) {
+    lines.push(
+      `    fn ${toSnakeCase(variant.value)}(&self) -> Option<&dyn ${seam}>;`,
+    );
+  }
+  lines.push("}");
+  lines.push("");
+  lines.push(
+    `/// Map a \`${field}\` discriminator value to the selected \`${seam}\` impl —`,
+  );
+  lines.push("/// the behavioral twin of the shape discriminator match.");
+  lines.push(
+    `pub fn resolve<'a>(${toSnakeCase(field)}: &str, provider: &'a dyn ${providerTrait}) -> Option<&'a dyn ${seam}> {`,
+  );
+  lines.push(`    match ${toSnakeCase(field)} {`);
+  for (const variant of variants) {
+    lines.push(
+      `        ${JSON.stringify(variant.value)} => provider.${toSnakeCase(
+        variant.value,
+      )}(),`,
+    );
+  }
+  if (rejectsUnknown) {
+    lines.push(
+      `        other => panic!("Unknown ${seam} discriminator '${field}' value: {}", other),`,
+    );
+  } else {
+    lines.push("        _ => None,");
+  }
+  lines.push("    }");
+  lines.push("}");
+  lines.push("");
+  return lines.join("\n");
 }
 
 /**
