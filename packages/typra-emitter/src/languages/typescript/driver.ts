@@ -924,7 +924,7 @@ function emitTypeScriptDispatchResolver(entry: DispatchedContract): string {
     "// variant to the caller (e.g. the conformance harness skips it).",
     "// See docs: reference/vector-conformance.",
     "",
-    `import { ${seam} } from "${seamModule}";`,
+    `import type { ${seam} } from "${seamModule}";`,
     "",
     `/** Every @dispatch discriminator value for the ${seam} seam. */`,
     `export type ${kindType} = ${kindUnion};`,
