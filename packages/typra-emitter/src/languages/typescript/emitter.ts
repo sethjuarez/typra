@@ -1730,8 +1730,7 @@ function emitFromYaml(name: string, type: TypeDecl, lines: string[]): void {
   lines.push(
     `  static fromYaml(yaml: string, context?: LoadContext): ${name} {`,
   );
-  lines.push('    const { parse } = require("yaml");');
-  lines.push("    const data = parse(yaml);");
+  lines.push("    const data = LoadContext.parseYaml(yaml);");
 
   if (type.load.coercions.length > 0) {
     // Pass raw parsed value directly to load() — it handles typeof coercions

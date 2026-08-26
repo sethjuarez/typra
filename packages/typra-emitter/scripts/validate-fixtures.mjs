@@ -3,6 +3,7 @@ import {
   assertExcludes,
   assertIncludes,
   assertMarkdownFrontmatterFirst,
+  AUTHORED_VECTOR_ADAPTER_SEGMENTS,
   execFileSync,
   existsSync,
   fail,
@@ -96,6 +97,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "vector-adapters.author",
   "typescript.compile",
   "typescript-zod.compile",
+  "typescript.runtime-neutrality",
   "typescript.generated-tests",
   "python.compile",
   "python_pydantic.compile",
@@ -294,6 +296,122 @@ function assertGeneratedOutputHygiene() {
     for (let index = 0; index < lines.length; index++) {
       if (/[ \t]+$/.test(lines[index])) {
         fail(`${relativePath}:${index + 1} has trailing whitespace.`);
+      }
+    }
+  }
+}
+
+// Node builtins whose presence in the shipped TypeScript library would couple
+// the generated code to a Node runtime and break web/edge/Deno consumers. The
+// generated library must stay runtime-neutral: host capabilities (transport,
+// file/env resolution, YAML) are injected or centralized behind a seam, never
+// imported directly into the emitted model classes. The injected
+// TypraFetchTransport in the generated fetch client is the intended pattern.
+const NODE_ONLY_MODULES = new Set([
+  "fs",
+  "fs/promises",
+  "path",
+  "os",
+  "crypto",
+  "stream",
+  "util",
+  "child_process",
+  "http",
+  "https",
+  "net",
+  "tls",
+  "zlib",
+  "events",
+  "url",
+  "process",
+  "module",
+  "worker_threads",
+  "buffer",
+  "readline",
+  "dns",
+  "cluster",
+  "vm",
+  "perf_hooks",
+]);
+
+// The @vector conformance runner, generated tests, and consumer-authored vector
+// adapters legitimately run under Node and live under each target's `tests/` dir
+// (or are authored, not emitted), so they are excluded from the shipped-library
+// runtime-neutrality guard.
+function isShippedTypeScriptLibraryFile(relativeSegments, basename) {
+  if (!basename.endsWith(".ts")) return false;
+  if (relativeSegments.includes("tests")) return false;
+  if (AUTHORED_VECTOR_ADAPTER_SEGMENTS.has(basename)) return false;
+  return true;
+}
+
+function findTypeScriptRuntimeCoupling(content) {
+  // Blank out comments before scanning so prose like "...data to process." or a
+  // JSDoc mention of require() is never mistaken for real Node coupling. Newlines
+  // are preserved so reported line numbers still point at the source line.
+  const withoutBlockComments = content.replace(/\/\*[\s\S]*?\*\//g, (match) =>
+    match.replace(/[^\n]/g, " "),
+  );
+  const findings = [];
+  const lines = withoutBlockComments.split("\n");
+  const importPattern = /(?:import|export)\s[^;]*?from\s*["']([^"']+)["']/g;
+  for (let index = 0; index < lines.length; index++) {
+    // Drop a trailing line comment (but not the // inside a URL like https://).
+    const line = lines[index].replace(/(?<!:)\/\/.*$/, "");
+    const lineNumber = index + 1;
+
+    if (/\brequire\s*\(/.test(line)) {
+      findings.push({ lineNumber, reason: "CommonJS require() call" });
+    }
+    if (/(?<![A-Za-z0-9_$.])process\s*\./.test(line)) {
+      findings.push({ lineNumber, reason: "Node process global" });
+    }
+
+    importPattern.lastIndex = 0;
+    let match;
+    while ((match = importPattern.exec(line)) !== null) {
+      const specifier = match[1];
+      const normalized = specifier.startsWith("node:")
+        ? specifier.slice("node:".length)
+        : specifier;
+      if (specifier.startsWith("node:") || NODE_ONLY_MODULES.has(normalized)) {
+        findings.push({
+          lineNumber,
+          reason: `import of Node builtin "${specifier}"`,
+        });
+      }
+    }
+  }
+  return findings;
+}
+
+function assertTypeScriptRuntimeNeutrality(context) {
+  const targetRoots = ["typescript", "typescript-zod"]
+    .map((target) => path.join(generatedRoot, target))
+    .filter((root) => existsSync(root));
+
+  if (targetRoots.length === 0) {
+    context.skip("no TypeScript targets generated");
+    return;
+  }
+
+  for (const root of targetRoots) {
+    for (const file of walkFiles(root, isGeneratedTextFile)) {
+      const relativeToTarget = path.relative(root, file);
+      const segments = relativeToTarget.split(path.sep);
+      const basename = path.basename(file);
+      if (!isShippedTypeScriptLibraryFile(segments, basename)) continue;
+
+      const relativePath = path.relative(packageRoot, file);
+      const content = readFileSync(file, "utf8");
+      for (const finding of findTypeScriptRuntimeCoupling(content)) {
+        fail(
+          `${relativePath}:${finding.lineNumber} couples the shipped TypeScript ` +
+            `library to Node (${finding.reason}). The generated library must stay ` +
+            `runtime-neutral so web/edge/Deno consumers can import it; inject or ` +
+            `centralize the host capability behind a seam instead (see the ` +
+            `injected TypraFetchTransport and LoadContext.parseYaml).`,
+        );
       }
     }
   }
@@ -2016,6 +2134,7 @@ function runDeclaredValidationStages() {
       ["vector-adapters.author", authorVectorAdapters],
       ["typescript.compile", runGeneratedTypeScriptCompile],
       ["typescript-zod.compile", runGeneratedTypeScriptZodCompile],
+      ["typescript.runtime-neutrality", assertTypeScriptRuntimeNeutrality],
       ["python.compile", () => runPythonCompile()],
       ["python_pydantic.compile", () => runPythonCompile("python_pydantic")],
       ["python.lint", () => runPythonRuffCheck()],
@@ -2050,6 +2169,7 @@ function runDeclaredValidationStages() {
     ]),
     allowedSkips: {
       ...idempotencyAllowedSkips(),
+      "typescript.runtime-neutrality": "no TypeScript targets generated",
     },
   });
 }
