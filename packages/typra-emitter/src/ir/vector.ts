@@ -7,7 +7,7 @@ import {
 } from "@typespec/compiler";
 import { getStateValue } from "../decorators.js";
 import { StateKeys, TypraEmitterOptions } from "../lib.js";
-import type { CallableContract } from "./callable.js";
+import type { CallableContract, CallableDispatch } from "./callable.js";
 
 export interface VectorEntry {
   name?: string;
@@ -51,6 +51,15 @@ export interface CallableVectorSnapshotEntry {
    * permissive under the await-if-awaitable contract.
    */
   sync: boolean;
+  /**
+   * Present when the vector's owning seam interface is decorated with
+   * `@dispatch`. Carries the discriminator identity plus the deterministic
+   * field-access path (e.g. `agent.template.format.kind`) the conformance
+   * harness walks over the vector input to select the concrete implementation.
+   * Absent for undispatched seams, keeping their snapshot entries
+   * byte-identical.
+   */
+  dispatch?: CallableDispatch;
   vector: CallableVector;
 }
 
@@ -93,6 +102,7 @@ export function buildCallableVectorSnapshot(
             params: operation.params,
             returns: operation.returns,
             sync: operation.sync,
+            ...(contract.dispatch ? { dispatch: contract.dispatch } : {}),
             vector,
           })),
         ),
