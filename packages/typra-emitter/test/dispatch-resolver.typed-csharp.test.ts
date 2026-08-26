@@ -180,10 +180,12 @@ const PROGRAM = [
   '            var name = vector.GetProperty("name").GetString()!;',
   '            var input = vector.GetProperty("input");',
   '            var expected = vector.GetProperty("expected").GetString();',
-  '            var kind = input.GetProperty("agent").GetProperty("template")',
-  '                .GetProperty("format").GetProperty("kind").GetString()!;',
   '            var agent = Agent.FromJson(input.GetProperty("agent").GetRawText());',
   '            var inputs = Inputs.FromJson(input.GetProperty("inputs").GetRawText());',
+  "            // Route via the TYPED discriminator surfaced by the shape Load path",
+  "            // (Agent.Template.Format.Kind), not the raw JSON — this proves the",
+  "            // behavioral resolver rides the same discriminator the shape does.",
+  "            var kind = agent.Template.Format.Kind;",
   "            var renderer = RendererResolver.Resolve(kind, provider);",
   "            if (renderer is null)",
   "            {",
@@ -347,10 +349,17 @@ describe("typed @dispatch resolver is a compile-time contract (C#)", () => {
         0,
         `a provider missing a @dispatch slot must fail to compile:\n${red.output}`,
       );
+      // Require BOTH the specific diagnostic code AND the missing member: a bare
+      // CS0535 elsewhere, or an unrelated "Mustache" mention, must not satisfy it.
       assert.match(
         red.output,
-        /CS0535|does not implement interface member 'IRendererProvider\.Mustache'/,
-        `the build error must be the missing IRendererProvider.Mustache member:\n${red.output}`,
+        /CS0535/,
+        `the build must fail with CS0535 (unimplemented interface member):\n${red.output}`,
+      );
+      assert.match(
+        red.output,
+        /IRendererProvider\.Mustache/,
+        `the missing member must be IRendererProvider.Mustache:\n${red.output}`,
       );
     } finally {
       rmSync(output, { recursive: true, force: true });
