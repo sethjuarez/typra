@@ -20,11 +20,17 @@ import {
 import { toSnakeCase } from "../../ir/utilities.js";
 import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
 import {
+  assertTypedDispatchSupported,
+  CallableVectorSnapshotEntry,
   collectDispatchedContracts,
   DispatchedContract,
+  isTypedDispatchEntry,
 } from "../../ir/vector.js";
 import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
-import { emitRustFile as emitRustFileDecl, RUST_ALLOW_ATTR } from "./emitter.js";
+import {
+  emitRustFile as emitRustFileDecl,
+  RUST_ALLOW_ATTR,
+} from "./emitter.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import {
   resolveCustomFormatters,
@@ -280,29 +286,72 @@ export const generateRust = async (
     emitTarget["test-dir"] &&
     (options?.callableVectors?.vectors.length ?? 0) > 0
   ) {
-    // Option A relocate: the seam-agnostic interpreter lives in its own module
-    // (tests/vector_runner/mod.rs — a subdirectory so cargo never compiles it as
-    // a standalone integration-test crate) and the harness stays thin. The
-    // runner is emitted into a subdir and included by the harness via #[path].
-    await emitRustFile(
-      context,
-      "mod.rs",
-      emitRustVectorRunner(),
-      `${emitTarget["test-dir"]}/vector_runner`,
-      emitTarget["test-dir"],
+    const allVectors = options!.callableVectors!.vectors;
+    // A `@dispatch` seam routes through the typed resolver rail (issue #282 §8):
+    // its vectors get a per-interface, typed `${iface}_conformance_test.rs` file
+    // that CONSUMES the emitted `${seam}_resolver`. Undispatched seams —
+    // INCLUDING a @dispatch whose discriminator model is not polymorphic (no
+    // `decl`, so no typed rail) — keep the stringly JSON interpreter
+    // (vector_runner) + monolithic vector_conformance_test.rs, so no vector is
+    // dropped from both rails.
+    const undispatched = allVectors.filter(
+      (entry) => !isTypedDispatchEntry(entry),
     );
-    await emitRustFile(
-      context,
-      "vector_conformance_test.rs",
-      emitRustVectorConformanceTest(
-        options!.callableVectors!,
-        emitTarget["vector-adapter-path"] ?? "vector_adapters.rs",
-      ),
-      emitTarget["test-dir"],
-      emitTarget["test-dir"],
-    );
-    if (!testGroupModuleNames.has("")) testGroupModuleNames.set("", []);
-    testGroupModuleNames.get("")!.push("vector_conformance_test");
+
+    if (undispatched.length > 0) {
+      // Option A relocate: the seam-agnostic interpreter lives in its own module
+      // (tests/vector_runner/mod.rs — a subdirectory so cargo never compiles it
+      // as a standalone integration-test crate) and the harness stays thin. The
+      // runner is emitted into a subdir and included by the harness via #[path].
+      await emitRustFile(
+        context,
+        "mod.rs",
+        emitRustVectorRunner(),
+        `${emitTarget["test-dir"]}/vector_runner`,
+        emitTarget["test-dir"],
+      );
+      await emitRustFile(
+        context,
+        "vector_conformance_test.rs",
+        emitRustVectorConformanceTest(
+          { ...options!.callableVectors!, vectors: undispatched },
+          emitTarget["vector-adapter-path"] ?? "vector_adapters.rs",
+        ),
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
+      if (!testGroupModuleNames.has("")) testGroupModuleNames.set("", []);
+      testGroupModuleNames.get("")!.push("vector_conformance_test");
+    }
+
+    for (const dispatched of collectDispatchedContracts(allVectors)) {
+      const ifaceVectors = allVectors.filter(
+        (entry) =>
+          isTypedDispatchEntry(entry) &&
+          entry.namespace === dispatched.namespace &&
+          entry.group === dispatched.group &&
+          entry.contract === dispatched.contract,
+      );
+      // §8.5: never emit an empty conformance file — but the resolver below is
+      // still emitted for a zero-vector dispatched seam so control 2 keeps biting.
+      if (ifaceVectors.length === 0) continue;
+      const moduleName = `${toSnakeCase(dispatched.contract)}_conformance_test`;
+      await emitRustFile(
+        context,
+        `${moduleName}.rs`,
+        emitRustInterfaceConformanceTest(
+          dispatched,
+          ifaceVectors,
+          emitTarget["import-path"] ?? "crate::model",
+          emitTarget["vector-adapter-path"] ?? "vector_adapters.rs",
+        ),
+        `${emitTarget["test-dir"]}/${dispatched.group}`,
+        emitTarget["test-dir"],
+      );
+      if (!testGroupModuleNames.has(dispatched.group))
+        testGroupModuleNames.set(dispatched.group, []);
+      testGroupModuleNames.get(dispatched.group)!.push(moduleName);
+    }
   }
 
   // Part III typed @dispatch resolver: for each dispatched seam, emit a library
@@ -2001,4 +2050,179 @@ function emitRustVectorConformanceTest(
     lines.push("");
   });
   return lines.join("\n");
+}
+
+/**
+ * Emit the TYPED per-interface Rust `@vector` conformance harness
+ * (tests/${iface}_conformance_test.rs) — the per-interface twin of the per-model
+ * ${model}_test.rs file (issue #282 §8). Each test loads the operation params
+ * from the vector JSON, reads the shape discriminator off the TYPED graph, routes
+ * it through the emitted `${seam}_resolver::resolve` against the consumer-attached
+ * provider (`vector_adapters::${snake(seam)}_provider()`), invokes the typed seam,
+ * and asserts the result reproduces `expected`. Missing an @dispatch slot fails to
+ * COMPILE (E0046) on the consumer's provider impl, so conformance never silently
+ * skips — the compile-time completeness control §5 control 2.
+ */
+function emitRustInterfaceConformanceTest(
+  dispatched: DispatchedContract,
+  entries: CallableVectorSnapshotEntry[],
+  importPath: string,
+  adapterPath: string,
+): string {
+  const seam = dispatched.contract;
+  const providerTrait = `${seam}Provider`;
+  const resolverModule = `${toSnakeCase(seam)}_resolver`;
+  const providerFactory = `${toSnakeCase(seam)}_provider`;
+  // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
+  const sorted = [...entries].sort((left, right) =>
+    (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+  );
+  // Import the seam plus every param type it operates on, deduped and sorted so
+  // the `use` line is deterministic.
+  const typeNames = new Set<string>([seam]);
+  for (const entry of sorted) {
+    for (const typeName of Object.values(entry.params)) typeNames.add(typeName);
+  }
+  const importedTypes = [...typeNames].sort();
+  const seen = new Map<string, number>();
+
+  const lines: string[] = [
+    "// <auto-generated by typra-emitter>",
+    "// Code generated by Typra emitter; DO NOT EDIT.",
+    "//",
+    `// Part III TYPED @vector conformance for ${seam} — the per-interface twin of`,
+    "// the per-model ${model}_test.rs file (issue #282 §8). Each test reads the",
+    `// shape discriminator off the TYPED graph, routes it through ${resolverModule}::resolve`,
+    `// against the consumer-attached provider (vector_adapters::${providerFactory}()),`,
+    "// invokes the typed seam, and asserts the result reproduces `expected`. A",
+    "// forgotten @dispatch slot fails to COMPILE (E0046) on the provider impl, so",
+    "// conformance never silently skips.",
+    "// See docs: reference/vector-conformance.",
+    "",
+    "#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, unexpected_cfgs, clippy::all)]",
+    "",
+    "// The consumer-authored provider attachment. Included via #[path] so the",
+    "// harness stays a thin CONSUMER of the emitted resolver, never authoring the",
+    "// provider itself.",
+    `#[path = ${JSON.stringify(adapterPath)}]`,
+    "mod vector_adapters;",
+    "",
+    `use ${importPath}::{${importedTypes.join(", ")}};`,
+    `use ${importPath}::context::LoadContext;`,
+    `use ${importPath}::${resolverModule}::{self, ${providerTrait}};`,
+    "",
+  ];
+
+  sorted.forEach((entry, index) => {
+    assertTypedDispatchSupported(entry);
+    const paramNames = Object.keys(entry.params);
+    const method = toSnakeCase(entry.operation);
+    const accessor = rustDiscriminatorAccessor(entry.dispatch!.path);
+    const label = entry.vector.name ?? entry.operation;
+    const expected = entry.vector.expected;
+    const input = (entry.vector.input ?? {}) as Record<string, unknown>;
+
+    lines.push(entry.sync ? "#[test]" : "#[tokio::test]");
+    lines.push(
+      `${entry.sync ? "fn" : "async fn"} ${uniqueRustTestName(
+        seam,
+        entry,
+        index,
+        seen,
+      )}() {`,
+    );
+    lines.push("    let ctx = LoadContext::default();");
+    for (const paramName of paramNames) {
+      const paramType = entry.params[paramName];
+      const local = rustFieldName(paramName);
+      const paramJson = JSON.stringify(input[paramName] ?? {}, null, 2);
+      lines.push(`    let ${local} = ${paramType}::from_json(`);
+      lines.push(`        r####"`);
+      lines.push(paramJson);
+      lines.push(`"####,`);
+      lines.push("        &ctx,");
+      lines.push("    )");
+      lines.push(`    .expect(${JSON.stringify(`${paramName} parses`)});`);
+    }
+    lines.push(`    let kind = ${accessor};`);
+    lines.push(`    let provider = vector_adapters::${providerFactory}();`);
+    lines.push(`    let seam_impl = ${resolverModule}::resolve(kind, &provider)`);
+    lines.push(
+      `        .unwrap_or_else(|| panic!(${JSON.stringify(
+        `${label}: no ${seam} attached for {kind}`,
+      )}));`,
+    );
+    const callArgs = paramNames
+      .map((name) => `&${rustFieldName(name)}`)
+      .join(", ");
+    // A seam method is async => `-> Result<T, _>` (unwrap the awaited Result); a
+    // sync seam method returns the value directly (rust/emitter.ts:2568), so it
+    // has neither `.await` nor a Result to `.expect`.
+    const invocationTail = entry.sync
+      ? ""
+      : `.await.expect(${JSON.stringify("seam invocation")})`;
+    lines.push(
+      `    let actual = seam_impl.${method}(${callArgs})${invocationTail};`,
+    );
+    if (typeof expected === "string") {
+      lines.push(
+        `    assert_eq!(actual, ${JSON.stringify(
+          expected,
+        )}, ${JSON.stringify(`${label} misrouted`)});`,
+      );
+    } else {
+      // No scalar `expected`: reaching here means the route resolved and the seam
+      // ran without error, which is the assertion. `actual` is referenced to
+      // satisfy the compiler. A dispatched fixture needing richer comparison
+      // extends this arm (reproduce-before-fix).
+      lines.push("    let _ = actual;");
+    }
+    lines.push("}");
+    lines.push("");
+  });
+
+  return lines.join("\n");
+}
+
+/**
+ * Read the shape discriminator off a LOADED param for the typed Rust conformance
+ * harness. A Rust polymorphic union field is `serde_json::Value` (see
+ * dispatch-resolver.typed-rust.test.ts), so navigate the typed param graph to the
+ * union then read the raw wire field via `.get(field).as_str()`. The path head is
+ * a param local (guaranteed by assertTypedDispatchSupported); middle segments
+ * navigate snake_case struct fields.
+ */
+function rustDiscriminatorAccessor(path: string): string {
+  const segments = path.split(".");
+  const rawField = segments[segments.length - 1];
+  const container = [
+    rustFieldName(segments[0]),
+    ...segments.slice(1, -1).map((segment) => rustFieldName(segment)),
+  ].join(".");
+  return `${container}\n        .get(${JSON.stringify(
+    rawField,
+  )})\n        .and_then(|v| v.as_str())\n        .expect("discriminator present")`;
+}
+
+/**
+ * A collision-safe snake_case Rust test fn name for a per-interface conformance
+ * vector: `test_${seam}_${operation}_${vectorName}`, with a numeric suffix on the
+ * rare identifier collision so two vector names never emit duplicate fns.
+ */
+function uniqueRustTestName(
+  seam: string,
+  entry: { operation: string; vector: { name?: string } },
+  index: number,
+  seen: Map<string, number>,
+): string {
+  const raw = `${seam} ${entry.operation} ${entry.vector.name ?? "unnamed"}`;
+  const base =
+    `test_${toSnakeCase(raw.replace(/[^A-Za-z0-9]+/g, "_"))}` || `test_${index}`;
+  const prior = seen.get(base);
+  if (prior === undefined) {
+    seen.set(base, 0);
+    return base;
+  }
+  seen.set(base, prior + 1);
+  return `${base}_${prior + 1}`;
 }
