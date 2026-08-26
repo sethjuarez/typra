@@ -32,8 +32,11 @@ import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
 import { goFieldName } from "./identifiers.js";
 import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
 import {
+  assertTypedDispatchSupported,
+  CallableVectorSnapshotEntry,
   collectDispatchedContracts,
   DispatchedContract,
+  isTypedDispatchEntry,
 } from "../../ir/vector.js";
 import {
   collectProtocolNodes,
@@ -210,32 +213,71 @@ export const generateGo = async (
     const adapterImportPath =
       emitTarget["vector-adapter-path"] ?? "vectoradapters";
     const runnerImportPath = goVectorRunnerImportPath(adapterImportPath);
-
-    // The shared runner is its own importable package (`vectorrunner`). A Go
-    // directory may hold only one non-test package, so the runner cannot be a
-    // sibling FILE of the harness the way it is on every other target — it is a
-    // sibling PACKAGE of the runtime-authored `vectoradapters` package, emitted
-    // under the module root so it resolves alongside it.
-    await emitGoFile(
-      context,
-      "vector_runner.go",
-      emitGoVectorRunner(adapterImportPath),
-      resolvePath(emitTarget["output-dir"] ?? "vectorrunner", "vectorrunner"),
-      emitTarget["output-dir"],
+    const importPath = emitTarget["import-path"] || packageName;
+    const allVectors = options!.callableVectors!.vectors;
+    // A `@dispatch` seam routes through the typed resolver rail (issue #282 §8):
+    // its vectors get a per-interface, typed `${iface}_conformance_test.go` file
+    // in the seam's package. Undispatched seams — INCLUDING a @dispatch whose
+    // discriminator model is not polymorphic (no `decl`, so no typed rail) — keep
+    // the stringly JSON interpreter (vectorrunner) + monolithic
+    // vector_conformance_test.go, so no vector is dropped from both rails.
+    const undispatched = allVectors.filter(
+      (entry) => !isTypedDispatchEntry(entry),
     );
 
-    await emitGoFile(
-      context,
-      "vector_conformance_test.go",
-      emitGoVectorConformanceTest(
-        options!.callableVectors!,
-        packageName,
-        adapterImportPath,
-        runnerImportPath,
-      ),
-      emitTarget["test-dir"],
-      emitTarget["test-dir"],
-    );
+    if (undispatched.length > 0) {
+      // The shared runner is its own importable package (`vectorrunner`). A Go
+      // directory may hold only one non-test package, so the runner cannot be a
+      // sibling FILE of the harness the way it is on every other target — it is a
+      // sibling PACKAGE of the runtime-authored `vectoradapters` package, emitted
+      // under the module root so it resolves alongside it.
+      await emitGoFile(
+        context,
+        "vector_runner.go",
+        emitGoVectorRunner(adapterImportPath),
+        resolvePath(emitTarget["output-dir"] ?? "vectorrunner", "vectorrunner"),
+        emitTarget["output-dir"],
+      );
+
+      await emitGoFile(
+        context,
+        "vector_conformance_test.go",
+        emitGoVectorConformanceTest(
+          { ...options!.callableVectors!, vectors: undispatched },
+          packageName,
+          adapterImportPath,
+          runnerImportPath,
+        ),
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
+    }
+
+    for (const dispatched of collectDispatchedContracts(allVectors)) {
+      const ifaceVectors = allVectors.filter(
+        (entry) =>
+          isTypedDispatchEntry(entry) &&
+          entry.namespace === dispatched.namespace &&
+          entry.group === dispatched.group &&
+          entry.contract === dispatched.contract,
+      );
+      // §8.5: never emit an empty conformance file — but the resolver above is
+      // still emitted for a zero-vector dispatched seam so control 2 keeps biting.
+      if (ifaceVectors.length === 0) continue;
+      await emitGoFile(
+        context,
+        `${toSnakeCase(dispatched.contract)}_conformance_test.go`,
+        emitGoInterfaceConformanceTest(
+          dispatched,
+          ifaceVectors,
+          packageName,
+          importPath,
+          adapterImportPath,
+        ),
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
+    }
   }
 
   // Format emitted files if format option is enabled (default: true)
@@ -987,4 +1029,185 @@ function emitGoVectorConformanceTest(
     );
   });
   return lines.join("\n");
+}
+
+/**
+ * Part III typed per-interface @vector conformance (issue #282 §8): the twin of
+ * the per-model `${model}_test.go` file. Routes each vector's discriminator
+ * through the emitted `Resolve${Seam}` switch against a consumer-attached typed
+ * provider, invokes the typed seam, and asserts the result reproduces
+ * `expected`. Go has no compile-time completeness, so a forgotten @dispatch slot
+ * errors at provider collection (`New${Seam}Provider`) rather than compiling —
+ * conformance never silently skips.
+ */
+function emitGoInterfaceConformanceTest(
+  dispatched: DispatchedContract,
+  entries: CallableVectorSnapshotEntry[],
+  packageName: string,
+  importPath: string,
+  adapterImportPath: string,
+): string {
+  const seam = goFieldName(dispatched.contract);
+  const rawField = dispatched.decl.discriminatorField;
+  // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
+  const sorted = [...entries].sort((left, right) =>
+    (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+  );
+  // Disambiguate Test* function names: two vector names that PascalCase to the
+  // same identifier would emit duplicate Go funcs and fail to compile.
+  const seen = new Map<string, number>();
+
+  const lines: string[] = [
+    "// <auto-generated by typra-emitter>",
+    "// Code generated by Typra emitter; DO NOT EDIT.",
+    "//",
+    `// Part III TYPED @vector conformance for ${dispatched.contract} — the per-interface`,
+    "// twin of the per-model ${model}_test.go file (issue #282 §8). Each test builds",
+    "// the operation inputs from the vector JSON, reads the shape discriminator, routes",
+    `// it through the emitted Resolve${seam} against the consumer-attached provider`,
+    `// (vectoradapters.${seam}Provider()), invokes the typed seam, and asserts the`,
+    "// result reproduces `expected`. Go has no compile-time completeness, so a dropped",
+    `// @dispatch slot errors at provider collection (New${seam}Provider) rather than`,
+    "// compiling — conformance never silently skips.",
+    "// See docs: reference/vector-conformance.",
+    "",
+    `package ${packageName}_test`,
+    "",
+    "import (",
+    '\t"encoding/json"',
+    '\t"testing"',
+    "",
+    `\tfixtures ${JSON.stringify(importPath)}`,
+    `\tvectoradapters ${JSON.stringify(adapterImportPath)}`,
+    ")",
+    "",
+  ];
+
+  sorted.forEach((entry, index) => {
+    assertTypedDispatchSupported(entry);
+    const paramNames = Object.keys(entry.params);
+    const method = goFieldName(entry.operation);
+    const accessor = goDiscriminatorAccessor(entry.dispatch!.path);
+    const inputJSON = JSON.stringify(entry.vector.input ?? {}, null, 2);
+    const expected = entry.vector.expected;
+    const label = entry.vector.name ?? entry.operation;
+
+    lines.push(
+      `func ${uniqueGoTestName(dispatched.contract, entry, index, seen)}(t *testing.T) {`,
+    );
+    lines.push(`\tinputJSON := \`${inputJSON}\``);
+    lines.push("\tvar payload map[string]any");
+    lines.push(
+      "\tif err := json.Unmarshal([]byte(inputJSON), &payload); err != nil {",
+    );
+    lines.push('\t\tt.Fatalf("failed to decode vector input: %v", err)');
+    lines.push("\t}");
+    for (const paramName of paramNames) {
+      const paramType = goFieldName(entry.params[paramName]);
+      lines.push(
+        `\t${paramName}, err := fixtures.Load${paramType}(payload[${JSON.stringify(
+          paramName,
+        )}], fixtures.NewLoadContext())`,
+      );
+      lines.push("\tif err != nil {");
+      lines.push(
+        `\t\tt.Fatalf("${paramName} parse: %v", err)`,
+      );
+      lines.push("\t}");
+    }
+    lines.push(`\t${goDispatchParam(rawField)} := ${accessor}`);
+    lines.push(
+      `\timpl, err := fixtures.Resolve${seam}(${goDispatchParam(
+        rawField,
+      )}, vectoradapters.${seam}Provider())`,
+    );
+    lines.push("\tif err != nil {");
+    lines.push(
+      `\t\tt.Fatalf("resolve %q: %v", ${goDispatchParam(rawField)}, err)`,
+    );
+    lines.push("\t}");
+    lines.push("\tif impl == nil {");
+    lines.push(
+      `\t\tt.Fatalf("${label}: no ${dispatched.contract} attached for %q", ${goDispatchParam(
+        rawField,
+      )})`,
+    );
+    lines.push("\t}");
+    const call = `impl.${method}(${paramNames.join(", ")})`;
+    lines.push(`\tactual, err := ${call}`);
+    lines.push("\tif err != nil {");
+    lines.push(`\t\tt.Fatalf("${label}: %v", err)`);
+    lines.push("\t}");
+    if (typeof expected === "string") {
+      lines.push(`\tif actual != ${JSON.stringify(expected)} {`);
+      lines.push(
+        `\t\tt.Fatalf("${label} misrouted: got %q want %q", actual, ${JSON.stringify(
+          expected,
+        )})`,
+      );
+      lines.push("\t}");
+    } else {
+      // No scalar `expected` (e.g. an expectedError vector): reaching here means
+      // the route resolved and the seam ran without error, which is the
+      // assertion. A dispatched fixture needing richer comparison extends this
+      // arm (reproduce-before-fix). `actual` is referenced to satisfy the
+      // compiler.
+      lines.push("\t_ = actual");
+    }
+    lines.push("}");
+    lines.push("");
+  });
+
+  return lines.join("\n");
+}
+
+/**
+ * Read the shape discriminator off a LOADED param for the typed conformance
+ * harness. A Go polymorphic union field is `interface{}` with no exported
+ * discriminator accessor, so — mirroring the emitted union's own Save switch
+ * (template.go) — assert the concrete value to the anonymous Save interface and
+ * read the raw wire field off the serialized map. The path head is a param
+ * local (guaranteed by assertTypedDispatchSupported); middle segments navigate
+ * exported struct fields via goFieldName.
+ */
+function goDiscriminatorAccessor(path: string): string {
+  const segments = path.split(".");
+  const rawField = segments[segments.length - 1];
+  const container = [
+    segments[0],
+    ...segments.slice(1, -1).map((segment) => goFieldName(segment)),
+  ].join(".");
+  return `${container}.(interface {\n\t\tSave(*fixtures.SaveContext) map[string]interface{}\n\t}).Save(fixtures.NewSaveContext())[${JSON.stringify(
+    rawField,
+  )}].(string)`;
+}
+
+/**
+ * A collision-safe exported Go test name for a per-interface conformance vector:
+ * `Test${Seam}${Operation}${VectorName}`, PascalCased, with a numeric suffix on
+ * the rare identifier collision so two vector names never emit duplicate funcs.
+ */
+function uniqueGoTestName(
+  contract: string,
+  entry: { operation: string; vector: { name?: string } },
+  index: number,
+  seen: Map<string, number>,
+): string {
+  const raw = `${contract} ${entry.operation} ${entry.vector.name ?? "unnamed"}`;
+  const pascal =
+    raw
+      .replace(/[^A-Za-z0-9]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter((word) => word.length > 0)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join("") || `Unnamed${index}`;
+  const base = `Test${pascal}`;
+  const prior = seen.get(base);
+  if (prior === undefined) {
+    seen.set(base, 0);
+    return base;
+  }
+  seen.set(base, prior + 1);
+  return `${base}${prior + 1}`;
 }

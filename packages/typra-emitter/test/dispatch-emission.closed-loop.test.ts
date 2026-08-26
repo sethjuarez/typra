@@ -9,9 +9,9 @@
 // `dispatch-conformance.typed-python.test.ts` (emitted per-interface conformance,
 // positive + missing-attachment negative) and `dispatch-resolver.typed-*.test.ts`
 // (resolver contract). This file asserts the RENDERED target code: the still
-// stringly-routed targets (Go/Rust) keep the vector-runner path-walker
+// stringly-routed target (Rust) keeps the vector-runner path-walker
 // + composite-key lookup, while the migrated targets (C#, Python, TypeScript,
-// Java, Swift) emit a typed per-interface conformance suite that routes through
+// Java, Swift, Go) emit a typed per-interface conformance suite that routes through
 // the emitted resolver against a consumer-attached provider — and no longer emit
 // the VectorRunner/VectorConformanceTests monolith at all.
 
@@ -33,10 +33,10 @@ const ROOT_OBJECT = "Typra.Fixtures.DispatchSeam.Root";
 
 describe("@dispatch routing is emitted (rendered-code lock)", () => {
   // Rendered-code lock for every runtime target. The still stringly-routed
-  // targets (Go/Rust) must define the discriminator path-walker and
-  // look up a per-discriminator composite key in their vector-runner, and their
+  // target (Rust) must define the discriminator path-walker and
+  // look up a per-discriminator composite key in its vector-runner, and its
   // harness must pass the resolved @dispatch access path. The migrated targets
-  // (C#, Python, TypeScript, Java, Swift) instead emit a typed per-interface
+  // (C#, Python, TypeScript, Java, Swift, Go) instead emit a typed per-interface
   // conformance suite that routes through the emitted resolver and no longer emit
   // the stringly monolith — each is also RUN end-to-end in its typed sibling test.
   it("emits @dispatch routing glue for every runtime target", async () => {
@@ -73,13 +73,6 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
         harnessArg: string;
       };
       const locks: LangLock[] = [
-        {
-          runner: path.join("go", "vectorrunner", "vector_runner.go"),
-          harness: path.join("go", "tests", "vector_conformance_test.go"),
-          helper: /func resolveDispatchKey\(/,
-          composite: /operationKey\+"#"\+dispatchKey|operationKey \+ "#" \+ dispatchKey/,
-          harnessArg: `, "${PATH}")`,
-        },
         {
           runner: path.join("rust", "tests", "vector_runner", "mod.rs"),
           harness: path.join("rust", "tests", "vector_conformance_test.rs"),
@@ -225,6 +218,29 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
           retired: [
             path.join("swift", "tests", "VectorConformanceTests.swift"),
             path.join("swift", "tests", "VectorRunner.swift"),
+          ],
+        },
+        {
+          conformance: path.join(
+            "go",
+            "tests",
+            "renderer_conformance_test.go",
+          ),
+          mustInclude: [
+            // consumes the emitted resolver against the consumer provider, not a
+            // stringly composite key
+            /impl, err := fixtures\.ResolveRenderer\(kind, vectoradapters\.RendererProvider\(\)\)/,
+            // reads the SAME discriminator off the typed union's serialized form
+            // (a Go union field is interface{} with no exported discriminator)
+            /kind := agent\.Template\.Format\.\(interface \{/,
+            // invokes the typed seam method on the resolved impl
+            /actual, err := impl\.Render\(agent, inputs\)/,
+            // provider VALUE is consumer-authored outside the conformance tree
+            /vectoradapters\.RendererProvider\(\)/,
+          ],
+          retired: [
+            path.join("go", "tests", "vector_conformance_test.go"),
+            path.join("go", "vectorrunner", "vector_runner.go"),
           ],
         },
       ];
