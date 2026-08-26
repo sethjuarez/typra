@@ -12,17 +12,21 @@ options:
     # per-language test surface (per-model round-trip tests + the vector-conformance
     # harness + emitted vector-runner) so the generated tests can be read too.
     #
-    # Caveat — these emitted tests are NOT yet runnable, by design:
-    #   * they import a hand-authored `./vector-adapters` module (selected via
-    #     `vector-adapter-path`) that is not emitted — that runtime seam is Part I
-    #     (runner extraction), and
-    #   * the emitted vector-conformance harness calls runVector("Renderer","render")
-    #     against a single adapter table — it does NOT yet resolve the concrete
-    #     implementation by the @dispatch discriminator path. That routing is
-    #     Part II-B.
-    # So no `vector-adapter-path` is set here and validate-fixtures does not compile
-    # or run this tree; the in-process test/dispatch-seam.conformance.test.ts proves
-    # the resolved dispatch path is behaviorally correct until Part II-B lands.
+    # Caveat — the emitted vector-conformance tree is illustrative here (this
+    # fixture keeps `protocol-scaffolds: compile-only` and sets no
+    # `vector-adapter-path`, so validate-fixtures does not compile or run it):
+    #   * running it requires a hand-authored `./vector-adapters` module (selected
+    #     via `vector-adapter-path`) that is not emitted — that runtime seam is
+    #     Part I (runner extraction).
+    # As of Part II-B the emitted vector-runner + harness ARE @dispatch-aware: for
+    # a dispatched seam the harness passes the resolved discriminator access path
+    # and the runner walks it over the vector input to select the concrete
+    # implementation from a per-discriminator registry keyed
+    # `Contract.operation#<value>`. That emitted routing is proven runnable and
+    # load-bearing end-to-end (TypeScript + Python, positive + negative control)
+    # by test/dispatch-emission.closed-loop.test.ts, which compiles THIS spec; the
+    # in-process test/dispatch-seam.conformance.test.ts remains the Part II-A guard
+    # that the resolved path itself is correct.
     emit-targets:
       - type: TypeScript
         output-dir: "generated/dispatch-seam/typescript"
