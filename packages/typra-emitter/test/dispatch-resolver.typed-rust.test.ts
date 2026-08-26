@@ -184,8 +184,8 @@ function fullProviderAndTest(
     "#[path = \"renderers.rs\"]",
     "mod renderers;",
     "",
-    `use ${CRATE}::model::{Agent, Inputs, LoadContext, Renderer, RendererProvider};`,
-    `use ${CRATE}::model::renderer_resolver;`,
+    `use ${CRATE}::model::{Agent, Inputs, LoadContext, Renderer};`,
+    `use ${CRATE}::model::renderer_resolver::{self, RendererProvider};`,
     "use renderers::{Jinja2Renderer, MustacheRenderer};",
     "",
     "// Attaches every @dispatch slot; liquid is a valid-but-unimplemented variant.",
@@ -242,7 +242,8 @@ function fullProviderAndTest(
 // RendererProvider trait still declares it, so this cannot compile (E0046).
 function partialProviderTest(): string {
   return [
-    `use ${CRATE}::model::{Renderer, RendererProvider};`,
+    `use ${CRATE}::model::Renderer;`,
+    `use ${CRATE}::model::renderer_resolver::RendererProvider;`,
     "",
     "struct PartialProvider;",
     "",
@@ -330,10 +331,13 @@ describe("typed @dispatch resolver is a compile-time contract (Rust)", () => {
       // Closed dispatch: an unknown discriminator is a hard error, never None.
       assert.match(resolverSrc, /other => panic!/);
 
-      // The generated mod.rs must re-export the resolver as a library module.
+      // The generated mod.rs declares the resolver as a library module WITHOUT a
+      // glob re-export — two dispatched seams would otherwise collide on `resolve`
+      // (ambiguous_glob_reexports). Consumers reach it via the qualified path
+      // `renderer_resolver::resolve`.
       const modSrc = readFileSync(path.join(rustOut, "mod.rs"), "utf8");
       assert.match(modSrc, /pub mod renderer_resolver;/);
-      assert.match(modSrc, /pub use renderer_resolver::\*;/);
+      assert.doesNotMatch(modSrc, /pub use renderer_resolver::/);
 
       // Feed the proof the committed vectors that carry a scalar `expected`.
       const snapshot = JSON.parse(

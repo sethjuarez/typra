@@ -93,7 +93,6 @@ const RENDERERS = [
   "using System.Text.RegularExpressions;",
   "using System.Threading.Tasks;",
   "using Typra.Fixtures;",
-  "using Typra.Fixtures.Conformance;",
   "",
   "namespace Proof;",
   "",
@@ -122,7 +121,6 @@ const RENDERERS = [
 const FULL_PROVIDER = [
   "#nullable enable",
   "using Typra.Fixtures;",
-  "using Typra.Fixtures.Conformance;",
   "",
   "namespace Proof;",
   "",
@@ -140,7 +138,6 @@ const FULL_PROVIDER = [
 const PARTIAL_PROVIDER = [
   "#nullable enable",
   "using Typra.Fixtures;",
-  "using Typra.Fixtures.Conformance;",
   "",
   "namespace Proof;",
   "",
@@ -163,7 +160,6 @@ const PROGRAM = [
   "using System.Text.Json;",
   "using System.Threading.Tasks;",
   "using Typra.Fixtures;",
-  "using Typra.Fixtures.Conformance;",
   "",
   "namespace Proof;",
   "",
@@ -275,7 +271,7 @@ describe("typed @dispatch resolver is a compile-time contract (C#)", () => {
         },
       );
 
-      const resolver = path.join(csTestDir, "RendererResolver.cs");
+      const resolver = path.join(csOut, "RendererResolver.cs");
 
       // -- rendered-code lock: the emitted resolver is the twin of the shape ----
       // Load switch — a generated provider surface with one slot per variant.
@@ -316,7 +312,6 @@ describe("typed @dispatch resolver is a compile-time contract (C#)", () => {
           copyFileSync(path.join(csOut, file), path.join(moduleDir, file));
         }
       }
-      copyFileSync(resolver, path.join(moduleDir, "RendererResolver.cs"));
 
       const vectorsFile = path.join(moduleDir, "vectors-data.json");
       writeFileSync(vectorsFile, JSON.stringify(vectors));
