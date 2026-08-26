@@ -197,6 +197,35 @@ runtime-specific quirks live under
 feature or runtime without turning the top-level fixture folder into a flat list
 of test names.
 
+### TypeScript web/runtime compatibility
+
+The generated TypeScript library is runtime-neutral: it loads and runs under
+native ESM, bundlers, and browser/edge/Deno — not just Node. There is nothing to
+configure and nothing to activate; web compatibility is a property of the emitted
+code, not a mode or option. YAML support is centralized in
+`LoadContext.parseYaml` over a module-level `import * as yaml`, so model classes
+never call `require()` and the `yaml` dependency resolves its browser build under
+bundler/browser conditions. Consuming projects get this for free by regenerating;
+the public API (`load`/`save`/`toYaml`/`fromYaml`) is unchanged.
+
+Three stages in `npm run validate:fixtures` keep it that way. These are internal
+CI guards for contributors, not consumer-facing features — they inspect generated
+output and fail the build on a Node-only coupling, but add no options and change
+no emitted code:
+
+- `typescript.runtime-neutrality` — scans the shipped library source for
+  `require()`, Node builtins, or `process.*` coupling.
+- `typescript.web-compile` — type-checks the shipped library with no
+  `@types/node` and the DOM lib, catching type-level Node leaks (e.g. a field
+  typed `Buffer`) the source scan cannot see.
+- `typescript.web-runtime` — emits the library to ESM and runs a real YAML
+  round-trip under forced browser export conditions with Node builtins rejected,
+  proving it loads and runs off Node.
+
+Each runs for the `typescript` and `typescript-zod` targets. The `tests/` subtree
+and consumer-authored `vector-adapters.ts` legitimately run under Node and are
+excluded from these gates.
+
 ### Go parity and validation
 
 Generated Go models include `Load*`, `Save`, `ToJSON`, `ToYAML`,
