@@ -9,10 +9,10 @@
 // `dispatch-conformance.typed-python.test.ts` (emitted per-interface conformance,
 // positive + missing-attachment negative) and `dispatch-resolver.typed-*.test.ts`
 // (resolver contract). This file asserts the RENDERED target code: the still
-// stringly-routed targets (Go/Java/Rust/Swift) keep the vector-runner path-walker
-// + composite-key lookup, while the migrated targets (C#, Python, TypeScript)
-// emit a typed per-interface conformance suite that routes through the emitted
-// resolver against a consumer-attached provider — and no longer emit the
+// stringly-routed targets (Go/Rust/Swift) keep the vector-runner path-walker
+// + composite-key lookup, while the migrated targets (C#, Python, TypeScript,
+// Java) emit a typed per-interface conformance suite that routes through the
+// emitted resolver against a consumer-attached provider — and no longer emit the
 // VectorRunner/VectorConformanceTests monolith at all.
 
 import { describe, it } from "node:test";
@@ -33,11 +33,11 @@ const ROOT_OBJECT = "Typra.Fixtures.DispatchSeam.Root";
 
 describe("@dispatch routing is emitted (rendered-code lock)", () => {
   // Rendered-code lock for every runtime target. The still stringly-routed
-  // targets (Go/Java/Rust/Swift) must define the discriminator path-walker and
+  // targets (Go/Rust/Swift) must define the discriminator path-walker and
   // look up a per-discriminator composite key in their vector-runner, and their
   // harness must pass the resolved @dispatch access path. The migrated targets
-  // (C#, Python, TypeScript) instead emit a typed per-interface conformance suite
-  // that routes through the emitted resolver and no longer emit the stringly
+  // (C#, Python, TypeScript, Java) instead emit a typed per-interface conformance
+  // suite that routes through the emitted resolver and no longer emit the stringly
   // monolith — each is also RUN end-to-end in its typed sibling test.
   it("emits @dispatch routing glue for every runtime target", async () => {
     const output = mkdtempSync(path.join(tmpdir(), "typra-dispatch-render-"));
@@ -78,13 +78,6 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
           harness: path.join("go", "tests", "vector_conformance_test.go"),
           helper: /func resolveDispatchKey\(/,
           composite: /operationKey\+"#"\+dispatchKey|operationKey \+ "#" \+ dispatchKey/,
-          harnessArg: `, "${PATH}")`,
-        },
-        {
-          runner: path.join("java", "tests", "VectorRunner.java"),
-          harness: path.join("java", "tests", "VectorConformanceTests.java"),
-          helper: /private static String resolveDispatchKey\(/,
-          composite: /operationKey \+ "#" \+ dispatchKey/,
           harnessArg: `, "${PATH}")`,
         },
         {
@@ -196,6 +189,27 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
           retired: [
             path.join("typescript", "tests", "vector-conformance.test.ts"),
             path.join("typescript", "tests", "vector-runner.ts"),
+          ],
+        },
+        {
+          conformance: path.join(
+            "java",
+            "tests",
+            "RendererConformanceTests.java",
+          ),
+          mustInclude: [
+            // consumes the emitted resolver, not a stringly composite key
+            /Renderer impl = RendererResolver\.resolve\(kind, VectorProviders\.renderer\(\)\)/,
+            // reads the SAME typed discriminator the shape load switch reads
+            /String kind = agent\.template\.format\.kind;/,
+            // invokes the typed seam method on the resolved impl
+            /Object actual = impl\.render\(agent, inputs\)/,
+            // provider VALUE is consumer-authored outside the conformance tree
+            /VectorProviders\.renderer\(\)/,
+          ],
+          retired: [
+            path.join("java", "tests", "VectorConformanceTests.java"),
+            path.join("java", "tests", "VectorRunner.java"),
           ],
         },
       ];

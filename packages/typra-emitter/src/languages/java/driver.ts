@@ -18,6 +18,9 @@ import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
   DispatchedContract,
+  CallableVectorSnapshotEntry,
+  isTypedDispatchEntry,
+  assertTypedDispatchSupported,
 } from "../../ir/vector.js";
 import {
   buildBaseTestContext,
@@ -48,7 +51,7 @@ import {
   emitJavaProtocolScaffolds,
   shouldEmitCompileOnlyProtocolScaffolds,
 } from "../../protocol-scaffolds.js";
-import { javaEnumTypeName, javaMethodName, javaTypeName } from "./identifiers.js";
+import { javaEnumTypeName, javaMethodName, javaPropertyName, javaTypeName } from "./identifiers.js";
 import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
 
 export const javaTestOptions: TestContextOptions = {
@@ -250,28 +253,69 @@ export const generateJava = async (
     emitTarget["test-dir"] &&
     (options?.callableVectors?.vectors.length ?? 0) > 0
   ) {
-    // The interpreter is emitted into a sibling VectorRunner class (which owns the
-    // port types) so the harness stays thin. VectorRunner is a support class, not
-    // a test class, so it is NOT registered in testClassNames.
-    await emitJavaFile(
-      context,
-      "VectorRunner.java",
-      emitJavaVectorRunner(packageName),
-      emitTarget["test-dir"],
-      emitTarget["test-dir"],
+    const adapterClass =
+      emitTarget["vector-adapter-path"] ?? `${packageName}.VectorAdapters`;
+    const allVectors = options!.callableVectors!.vectors;
+    // A `@dispatch` seam routes through the typed resolver rail (issue #282 §8):
+    // its vectors get a per-interface, typed `${Interface}ConformanceTests` class
+    // in the seam's package. Undispatched seams — INCLUDING a @dispatch whose
+    // discriminator model is not polymorphic (no `decl`, so no typed rail) — keep
+    // the stringly JSON interpreter (VectorRunner) + monolithic
+    // VectorConformanceTests, so no vector is dropped from both rails.
+    const undispatched = allVectors.filter(
+      (entry) => !isTypedDispatchEntry(entry),
     );
-    testClassNames.push("VectorConformanceTests");
-    await emitJavaFile(
-      context,
-      "VectorConformanceTests.java",
-      emitJavaVectorConformanceTest(
-        options!.callableVectors!,
-        packageName,
-        emitTarget["vector-adapter-path"] ?? `${packageName}.VectorAdapters`,
-      ),
-      emitTarget["test-dir"],
-      emitTarget["test-dir"],
-    );
+
+    if (undispatched.length > 0) {
+      // The interpreter is emitted into a sibling VectorRunner class (which owns
+      // the port types) so the harness stays thin. VectorRunner is a support
+      // class, not a test class, so it is NOT registered in testClassNames.
+      await emitJavaFile(
+        context,
+        "VectorRunner.java",
+        emitJavaVectorRunner(packageName),
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
+      testClassNames.push("VectorConformanceTests");
+      await emitJavaFile(
+        context,
+        "VectorConformanceTests.java",
+        emitJavaVectorConformanceTest(
+          { ...options!.callableVectors!, vectors: undispatched },
+          packageName,
+          adapterClass,
+        ),
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
+    }
+
+    for (const dispatched of collectDispatchedContracts(allVectors)) {
+      const ifaceVectors = allVectors.filter(
+        (entry) =>
+          isTypedDispatchEntry(entry) &&
+          entry.namespace === dispatched.namespace &&
+          entry.group === dispatched.group &&
+          entry.contract === dispatched.contract,
+      );
+      // §8.5: never emit an empty conformance file — but the resolver below is
+      // still emitted for a zero-vector dispatched seam so control 2 keeps biting.
+      if (ifaceVectors.length === 0) continue;
+      testClassNames.push(`${dispatched.contract}ConformanceTests`);
+      await emitJavaFile(
+        context,
+        `${dispatched.contract}ConformanceTests.java`,
+        emitJavaInterfaceConformanceTest(
+          dispatched,
+          ifaceVectors,
+          packageName,
+          adapterClass,
+        ),
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
+    }
   }
 
   if (emitTarget["test-dir"] && testClassNames.length > 0) {
@@ -1106,6 +1150,203 @@ function emitJavaVectorConformanceTest(
     "}",
     "",
   ].join("\n");
+}
+
+/**
+ * Emit the Part III TYPED per-interface conformance suite for one dispatched seam
+ * — the `@vector` twin of the per-model `${Type}GeneratedTest` class (issue #282
+ * §8). Where the monolithic `VectorConformanceTests` feeds the JSON interpreter a
+ * stringly `Contract.operation#value` route, this suite is fully typed: each
+ * per-vector method builds the operation inputs from the vector JSON via the
+ * emitted models' `load`, reads the SAME discriminator the shape load switch reads
+ * (through the typed accessor chain), routes it through the emitted
+ * `${Interface}Resolver.resolve` against a consumer-attached provider, invokes the
+ * typed seam method, and asserts the result reproduces `expected`.
+ *
+ * The provider VALUE is authored by the consumer OUTSIDE the conformance tree — a
+ * static `VectorProviders.${iface}()` accessor returning the generated
+ * `${Interface}Provider` — so a dropped `@dispatch` slot fails to COMPILE
+ * (implementing the provider interface obliges every accessor; §5 control 2). Only
+ * the per-vector methods are emitted here; the resolver + provider TYPE live in the
+ * colocated `${Interface}Resolver`/`${Interface}Provider` library files. Like the
+ * model tests, this class exposes a static `run()` orchestrated by
+ * `TypraGeneratedTests`.
+ */
+function emitJavaInterfaceConformanceTest(
+  dispatched: DispatchedContract,
+  entries: CallableVectorSnapshotEntry[],
+  packageName: string,
+  adapterClass: string,
+): string {
+  const iface = dispatched.contract;
+  const resolver = `${iface}Resolver`;
+  const field = dispatched.decl.discriminatorField;
+  const camelSeam = iface.charAt(0).toLowerCase() + iface.slice(1);
+  // The consumer authors the provider VALUE in a `VectorProviders` class beside
+  // the `VectorAdapters` class named by 'vector-adapter-path'. Reference it by its
+  // fully-qualified name unless it shares the conformance package, mirroring how
+  // the monolith references the adapter class.
+  const providersFqn = adapterClass.replace(/[^.]+$/, "VectorProviders");
+  const providersPkg = providersFqn.includes(".")
+    ? providersFqn.replace(/\.[^.]+$/, "")
+    : "";
+  const providersRef =
+    providersPkg === packageName ? "VectorProviders" : providersFqn;
+
+  // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
+  const sorted = [...entries].sort((left, right) =>
+    (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+  );
+  const needsNotNull = sorted.some(
+    (entry) => typeof entry.vector.expected !== "string",
+  );
+
+  const lines: string[] = [
+    "// <auto-generated by typra-emitter>",
+    "// Code generated by Typra emitter; DO NOT EDIT.",
+    "//",
+    `// Part III TYPED @vector conformance for ${iface} — the per-interface twin of`,
+    "// the per-model GeneratedTest class (issue #282 §8). Each per-vector method",
+    "// builds the operation inputs from the vector JSON, reads the shape",
+    `// discriminator, routes it through the emitted ${resolver} against the`,
+    `// consumer-attached '${providersRef}.${camelSeam}()' provider, invokes the`,
+    "// typed seam, and asserts the result reproduces `expected`. A dropped",
+    "// @dispatch slot fails to compile, so conformance never silently skips.",
+    "// See docs: reference/vector-conformance.",
+    `package ${packageName};`,
+    "",
+    `public final class ${iface}ConformanceTests {`,
+    `  private ${iface}ConformanceTests() { }`,
+    "",
+  ];
+
+  sorted.forEach((entry, index) => {
+    assertTypedDispatchSupported(entry);
+    const method = javaMethodName(entry.operation);
+    const paramNames = Object.keys(entry.params);
+    // Sanitize operation-parameter locals the same way the models sanitize field
+    // names, so a param named like a Java keyword stays a legal, consistent
+    // identifier at its declaration, the discriminator head, and the call site.
+    const locals = new Map(
+      paramNames.map((paramName) => [paramName, javaPropertyName(paramName)]),
+    );
+    const fieldLocal = javaPropertyName(field);
+    const accessor = javaDiscriminatorAccessor(entry.dispatch!.path, locals);
+    const chunks = javaPayloadLiteralChunks(
+      JSON.stringify(entry.vector.input ?? {}),
+    );
+    const expected = entry.vector.expected;
+    const vectorName = entry.vector.name ?? `vector ${index}`;
+
+    lines.push(
+      `  private static void ${javaVectorSlug(index, entry)}() throws Exception {`,
+      "    StringBuilder sb = new StringBuilder();",
+      ...chunks.map((chunk) => `    sb.append("${chunk}");`),
+      "    Object payload = TypraJson.parse(sb.toString());",
+      "    java.util.Map<?, ?> input = (java.util.Map<?, ?>) payload;",
+    );
+    for (const paramName of paramNames) {
+      lines.push(
+        `    ${entry.params[paramName]} ${locals.get(
+          paramName,
+        )} = ${entry.params[paramName]}.load(input.get(${JSON.stringify(
+          paramName,
+        )}), null);`,
+      );
+    }
+    lines.push(
+      `    String ${fieldLocal} = ${accessor};`,
+      `    ${iface} impl = ${resolver}.resolve(${fieldLocal}, ${providersRef}.${camelSeam}());`,
+      `    if (impl == null) throw new AssertionError(${JSON.stringify(
+        `${vectorName}: no ${iface} attached for `,
+      )} + ${fieldLocal});`,
+      `    Object actual = impl.${method}(${paramNames
+        .map((paramName) => locals.get(paramName))
+        .join(", ")});`,
+    );
+    if (typeof expected === "string") {
+      lines.push(
+        `    assertEquals(${JSON.stringify(expected)}, actual, ${JSON.stringify(
+          vectorName,
+        )});`,
+      );
+    } else {
+      // No scalar `expected` (the eligibility guard already rejects the vector
+      // shapes that would need richer comparison); reaching here means the route
+      // resolved and the seam ran (reproduce-before-fix).
+      lines.push(`    assertNotNull(actual, ${JSON.stringify(vectorName)});`);
+    }
+    lines.push("  }", "");
+  });
+
+  lines.push("  public static void run() {");
+  lines.push("    int failed = 0;");
+  sorted.forEach((entry, index) => {
+    const vectorName = entry.vector.name ?? "unnamed";
+    const vectorId = `${entry.contract}.${entry.operation}:${vectorName}`;
+    lines.push(
+      `    failed += runCase(${JSON.stringify(
+        vectorId,
+      )}, ${iface}ConformanceTests::${javaVectorSlug(index, entry)});`,
+    );
+  });
+  lines.push(
+    "    if (failed > 0) {",
+    `      throw new AssertionError(failed + " @vector conformance failure(s)");`,
+    "    }",
+    "  }",
+    "",
+    "  @FunctionalInterface",
+    "  private interface VectorCase {",
+    "    void run() throws Exception;",
+    "  }",
+    "",
+    "  // Run one vector, mirroring the pass/fail stdout protocol the model tests use.",
+    "  private static int runCase(String vectorId, VectorCase test) {",
+    "    try {",
+    "      test.run();",
+    '      System.out.println("PASS " + vectorId);',
+    "      return 0;",
+    "    } catch (Throwable error) {",
+    '      System.out.println("FAIL " + vectorId + ": " + error.getMessage());',
+    "      return 1;",
+    "    }",
+    "  }",
+    "",
+    "  private static void assertEquals(Object expected, Object actual, String message) {",
+    "    if (expected == null ? actual != null : !expected.equals(actual)) {",
+    '      throw new AssertionError(message + ": expected " + expected + ", got " + actual);',
+    "    }",
+    "  }",
+  );
+  if (needsNotNull) {
+    lines.push(
+      "",
+      "  private static void assertNotNull(Object actual, String message) {",
+      "    if (actual == null) {",
+      '      throw new AssertionError(message + ": expected non-null result");',
+      "    }",
+      "  }",
+    );
+  }
+  lines.push("}", "");
+  return lines.join("\n");
+}
+
+/**
+ * Render the typed discriminator accessor a Java test reads to route a vector. The
+ * first path segment is the operation parameter (a local built via `.load`, using
+ * the sanitized local name); the remaining segments are the emitted models'
+ * fields, sanitized the same way the models emit them (e.g.
+ * `agent.template.format.kind`).
+ */
+function javaDiscriminatorAccessor(
+  path: string,
+  locals: Map<string, string>,
+): string {
+  const [head, ...rest] = path.split(".");
+  const headLocal = locals.get(head) ?? javaPropertyName(head);
+  return [headLocal, ...rest.map(javaPropertyName)].join(".");
 }
 
 /**
