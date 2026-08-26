@@ -202,6 +202,13 @@ emit-targets:
     enum-parsing: "case-insensitive"
 ```
 
+> **Preview — not production-ready.** The `native-serialization` framework
+> variants (`pydantic`, `jackson`, `serde`, `zod`, `codable`) and the HTTP
+> transport projections (`fastapi`, `starlette`, `httpx`, `fetch`) are
+> experimental. Several are not yet idempotency-locked under the output hygiene
+> guard, and their generated shape may still change. For production, rely on the
+> core model surface — `load`/`save` and the JSON/YAML helpers.
+
 TypeScript targets can opt into native runtime validation artifacts with
 `native-serialization: "zod"`. The default is `"none"`, so existing TypeScript
 output does not import Zod. Zod mode emits class-attached `schema`,

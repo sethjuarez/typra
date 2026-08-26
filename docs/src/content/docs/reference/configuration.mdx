@@ -165,6 +165,10 @@ that native output would survive its own formatter unchanged.
 
 `protocol-scaffolds: "compile-only"` emits test-only implementations that prove generated protocols compile. They intentionally throw or reject when called and are not runtime fakes.
 
+:::caution[Preview — not production-ready]
+Native serialization framework variants (`pydantic`, `jackson`, `serde`, `zod`, `codable`) and the `outputs` HTTP transport projections (`fastapi`, `starlette`, `httpx`, `fetch`) are experimental. Several are not yet idempotency-locked under the output hygiene guard (see the deferred table above), and their generated shape may still change. Depend on the core `load`/`save` model surface for production; adopt these opt-in surfaces with that caveat in mind.
+:::
+
 Native serialization is additional interop, not a replacement for Typra's generated contract. Generated `load`/`save` methods remain authoritative for diagnostics, wire names, optional/default semantics, and raw payload preservation.
 
 Native serialization mode support is validated per target. Unsupported

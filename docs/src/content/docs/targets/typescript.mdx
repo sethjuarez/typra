@@ -28,6 +28,10 @@ emit-targets:
 | `native-serialization` | Defaults to `"none"`. Set to `"zod"` to emit class-attached Zod validators. `"standard-schema"` is reserved and fails fast. |
 | `outputs` | Optional generated surfaces. `kind: consumer` / `provider: fetch` emits contract-specific HTTP clients backed by an injected transport. |
 
+:::caution[Preview — not production-ready]
+`native-serialization: "zod"` and the `consumer:fetch` transport projection are experimental. They are not yet idempotency-locked under the output hygiene guard, and their generated shape may still change. The production-ready TypeScript output is the core model surface — `load`/`save` and the JSON/YAML helpers.
+:::
+
 Generated TypeScript surfaces include model classes, runtime helpers, JSON/YAML helpers, tests, protocol scaffold tests, optional Zod validation artifacts, and optional fetch consumer clients.
 
 `native-serialization: "zod"` emits `schema`, `wireSchema`, and
