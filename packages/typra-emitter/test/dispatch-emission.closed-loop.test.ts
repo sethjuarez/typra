@@ -119,72 +119,6 @@ const TS_NEGATIVE_RUNNER = [
   "",
 ].join("\n");
 
-// -- Python: same registry, keyed by discriminator value ---------------------
-
-const PY_DISPATCH_ADAPTER = [
-  "import re",
-  "",
-  "",
-  "def _render(pattern, input):",
-  '    content = input["agent"]["template"]["content"]',
-  '    values = input["inputs"]["values"]',
-  "    return re.sub(pattern, lambda m: str(values[m.group(1)]), content)",
-  "",
-  "",
-  "class _Mustache:",
-  "    def invoke(self, input, context):",
-  '        return _render(r"\\{\\{(\\w+)\\}\\}", input)',
-  "",
-  "",
-  "class _Jinja2:",
-  "    def invoke(self, input, context):",
-  '        return _render(r"\\{\\{ (\\w+) \\}\\}", input)',
-  "",
-  "",
-  "class _Decoy:",
-  "    def invoke(self, input, context):",
-  '        return "MISROUTED"',
-  "",
-  "",
-  "VECTOR_ADAPTERS = {",
-  '    "Renderer.render#mustache": _Mustache(),',
-  '    "Renderer.render#jinja2": _Jinja2(),',
-  '    "Renderer.render#greeter": _Decoy(),',
-  "}",
-  "",
-].join("\n");
-
-const PY_NEGATIVE_RUNNER = [
-  "import asyncio",
-  "import json",
-  "import os",
-  "",
-  "from vector_runner import run_vector",
-  "import vector_adapters as mod",
-  "",
-  "seam = {",
-  '    "adapters": mod.VECTOR_ADAPTERS,',
-  '    "waivers": {},',
-  '    "doubles": {},',
-  '    "base_dir": os.path.dirname(os.path.abspath(__file__)),',
-  "}",
-  'with open("vectors-data.json", "r", encoding="utf-8") as handle:',
-  "    vectors = json.load(handle)",
-  "",
-  "",
-  "async def main():",
-  "    for vector in vectors:",
-  "        try:",
-  '            await run_vector("Renderer", "render", vector, False, seam, dispatch={"path": "agent.name"})',
-  '            print("ROUTED " + vector["name"])',
-  "        except Exception:",
-  '            print("MISROUTE " + vector["name"])',
-  "",
-  "",
-  "asyncio.run(main())",
-  "",
-].join("\n");
-
 function transpile(code: string): string {
   return ts.transpileModule(code, {
     compilerOptions: {
@@ -214,33 +148,12 @@ function runNode(dir: string, entry: string): RunResult {
   }
 }
 
-function runUv(dir: string, args: string[]): RunResult {
-  try {
-    const output = execFileSync("uv", args, {
-      cwd: dir,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    return { status: 0, output };
-  } catch (error) {
-    const err = error as { status?: number; stdout?: string; stderr?: string };
-    return {
-      status: err.status ?? 1,
-      output: `${err.stdout ?? ""}${err.stderr ?? ""}`,
-    };
-  }
-}
-
-function uvAvailable(): boolean {
-  try {
-    execFileSync("uv", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 describe("@dispatch routing is emitted and load-bearing (Part II-B)", () => {
+  // TypeScript is the remaining stringly-routed target proven end-to-end here;
+  // Python migrated to the Part III typed resolver rail and is now proven by
+  // test/dispatch-conformance.typed-python.test.ts (emitted per-interface
+  // conformance, positive + dropped-slot negative). Other targets keep the
+  // rendered-code lock in the sibling `it` below until they migrate too.
   it("routes committed vectors through the emitted harness; a wrong path misroutes", async () => {
     const output = mkdtempSync(path.join(tmpdir(), "typra-dispatch-emit-"));
     try {
@@ -248,7 +161,7 @@ describe("@dispatch routing is emitted and load-bearing (Part II-B)", () => {
         output,
         source: FIXTURE,
         rootObject: ROOT_OBJECT,
-        targets: ["typescript", "python"],
+        targets: ["typescript"],
         format: false,
         generateTests: true,
         deterministic: true,
@@ -348,103 +261,14 @@ describe("@dispatch routing is emitted and load-bearing (Part II-B)", () => {
         /ROUTED/,
         "no vector may reproduce `expected` under a wrong dispatch path",
       );
-
-      // == Python: mirror the routing proof against the emitted Python harness ==
-      const pyTestDir = path.join(output, "python", "tests");
-      const pyHarness = readFileSync(
-        path.join(pyTestDir, "test_vector_conformance.py"),
-        "utf8",
-      );
-      const pyRunner = readFileSync(
-        path.join(pyTestDir, "vector_runner.py"),
-        "utf8",
-      );
-
-      // -- rendered-code lock ---------------------------------------------------
-      assert.match(
-        pyHarness,
-        /dispatch=\{"path": "agent\.template\.format\.kind"\}/,
-        "emitted Python harness must pass the resolved @dispatch access path",
-      );
-      assert.match(
-        pyRunner,
-        /def _resolve_dispatch_key\(/,
-        "emitted Python runner must define the discriminator path walker",
-      );
-      assert.match(
-        pyRunner,
-        /\{operation_key\}#\{dispatch_key\}/,
-        "emitted Python runner must look up a per-discriminator composite key",
-      );
-
-      if (uvAvailable()) {
-        writeFileSync(
-          path.join(pyTestDir, "vector_adapters.py"),
-          PY_DISPATCH_ADAPTER,
-        );
-        writeFileSync(path.join(pyTestDir, "negative.py"), PY_NEGATIVE_RUNNER);
-        writeFileSync(
-          path.join(pyTestDir, "vectors-data.json"),
-          JSON.stringify(snapshot.vectors.map((entry) => entry.vector)),
-        );
-
-        // -- positive: emitted harness routes both dialects green ---------------
-        const pyPositive = runUv(pyTestDir, [
-          "run",
-          "--python",
-          "3.12",
-          "--with",
-          "pytest",
-          "--with",
-          "pytest-asyncio",
-          "python",
-          "-m",
-          "pytest",
-          "test_vector_conformance.py",
-          "-q",
-          "-p",
-          "no:cacheprovider",
-        ]);
-        assert.equal(
-          pyPositive.status,
-          0,
-          `dispatched Python harness should route green:\n${pyPositive.output}`,
-        );
-        assert.match(pyPositive.output, /2 passed/);
-
-        // -- negative control: wrong path misroutes both vectors ----------------
-        const pyNegative = runUv(pyTestDir, [
-          "run",
-          "--python",
-          "3.12",
-          "--with",
-          "pytest",
-          "python",
-          "negative.py",
-        ]);
-        assert.match(
-          pyNegative.output,
-          /MISROUTE mustache-basic/,
-          "a wrong dispatch path must misroute mustache-basic (Python)",
-        );
-        assert.match(
-          pyNegative.output,
-          /MISROUTE jinja2-basic/,
-          "a wrong dispatch path must misroute jinja2-basic (Python)",
-        );
-        assert.doesNotMatch(
-          pyNegative.output,
-          /ROUTED/,
-          "no Python vector may reproduce `expected` under a wrong dispatch path",
-        );
-      }
     } finally {
       rmSync(output, { recursive: true, force: true });
     }
   });
 
-  // Rendered-code lock for the five targets not driven end-to-end above
-  // (TS + Python are proven runnable). Each emitted runner must define the
+  // Rendered-code lock for the targets not driven end-to-end above
+  // (TypeScript is proven runnable above; C# and Python are proven runnable in
+  // their typed sibling tests). Each stringly-routed runner must define the
   // discriminator path-walker and look up a per-discriminator composite key,
   // and each emitted harness must pass the resolved @dispatch access path.
   it("emits @dispatch routing glue for every runtime target", async () => {
@@ -487,13 +311,6 @@ describe("@dispatch routing is emitted and load-bearing (Part II-B)", () => {
           helper: /function resolveDispatchKey\(/,
           composite: /\$\{operationKey\}#\$\{dispatchKey\}/,
           harnessArg: `{ path: "${PATH}" }`,
-        },
-        {
-          runner: path.join("python", "tests", "vector_runner.py"),
-          harness: path.join("python", "tests", "test_vector_conformance.py"),
-          helper: /def _resolve_dispatch_key\(/,
-          composite: /\{operation_key\}#\{dispatch_key\}/,
-          harnessArg: `dispatch={"path": "${PATH}"}`,
         },
         {
           runner: path.join("go", "vectorrunner", "vector_runner.go"),
@@ -575,6 +392,27 @@ describe("@dispatch routing is emitted and load-bearing (Part II-B)", () => {
           retired: [
             path.join("csharp", "tests", "VectorConformanceTests.cs"),
             path.join("csharp", "tests", "VectorRunner.cs"),
+          ],
+        },
+        {
+          conformance: path.join(
+            "python",
+            "tests",
+            "test_renderer_conformance.py",
+          ),
+          mustInclude: [
+            // consumes the emitted resolver, not a stringly composite key
+            /impl = resolve_renderer\(kind, renderer_provider\)/,
+            // imports the emitted resolver twin of the shape load switch
+            /\._renderer_resolver import resolve_renderer/,
+            // reads the SAME typed discriminator the shape load switch reads
+            /kind = agent\.template\.format\.kind/,
+            // invokes the typed seam method on the resolved impl
+            /result = impl\.render\(agent, inputs\)/,
+          ],
+          retired: [
+            path.join("python", "tests", "test_vector_conformance.py"),
+            path.join("python", "tests", "vector_runner.py"),
           ],
         },
       ];
