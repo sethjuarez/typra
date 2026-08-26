@@ -902,12 +902,12 @@ function emitTypeScriptDispatchResolver(entry: DispatchedContract): string {
   const field = entry.decl.discriminatorField;
   const variants = entry.decl.variants;
   const seamModule = `./${toKebabCase(seam)}`;
-  // Closed (no fallback) OR abstract base without a default: an unknown
-  // discriminator is a hard error, exactly as the shape switch throws. A
-  // default/open dispatch yields null (harness explicit-skip) instead.
-  const rejectsUnknown =
-    isClosedPolymorphicDispatch(entry.decl) ||
-    (entry.decl.isAbstract && entry.decl.defaultVariant === null);
+  // Closed (no fallback, no default): an unknown discriminator is a hard error,
+  // exactly as the shape switch throws. An open or default dispatch yields null
+  // (harness explicit-skip); an abstract-open base routes unknowns to a carrier
+  // in the shape loader, never throwing, so a bare `isClosedPolymorphicDispatch`
+  // is the faithful twin of that throw arm.
+  const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
   const kindUnion = variants
     .map((variant) => JSON.stringify(variant.value))
     .join(" | ");
