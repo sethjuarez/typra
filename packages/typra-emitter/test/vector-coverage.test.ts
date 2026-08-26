@@ -16,6 +16,8 @@ function snapshot(): CallableVectorSnapshot {
     vectors: [
       {
         contract: "Echo",
+        namespace: "Typra.Sample",
+        group: "",
         operation: "echo",
         params: { payload: "string" },
         returns: "string",
@@ -24,6 +26,8 @@ function snapshot(): CallableVectorSnapshot {
       },
       {
         contract: "Echo",
+        namespace: "Typra.Sample",
+        group: "",
         operation: "echo",
         params: { payload: "string" },
         returns: "string",
@@ -38,6 +42,8 @@ function snapshot(): CallableVectorSnapshot {
       },
       {
         contract: "Sum",
+        namespace: "Typra.Sample",
+        group: "",
         operation: "sum",
         params: { values: "int32[]" },
         returns: "int32",

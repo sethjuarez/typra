@@ -12,6 +12,8 @@ describe("structural CodeModel", () => {
       vectors: [
         {
           contract: "Renderer",
+          namespace: "Typra.Sample",
+          group: "",
           operation: "render",
           params: {
             request: "RenderRequest",
@@ -38,6 +40,8 @@ describe("structural CodeModel", () => {
         },
         {
           contract: "Parser",
+          namespace: "Typra.Sample",
+          group: "",
           operation: "parse",
           params: { value: "string" },
           returns: "unknown",

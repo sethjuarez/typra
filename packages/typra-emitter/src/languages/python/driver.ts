@@ -41,6 +41,14 @@ import { ExprVisitor, renderObjectLiteral } from "../../ir/visitor.js";
 import { PythonExprVisitor } from "./visitor.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { toSnakeCase } from "../../ir/utilities.js";
+import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
+import {
+  collectDispatchedContracts,
+  DispatchedContract,
+  CallableVectorSnapshotEntry,
+  isTypedDispatchEntry,
+  assertTypedDispatchSupported,
+} from "../../ir/vector.js";
 import { scalarRuntimeKind } from "../../ir/scalar-kinds.js";
 import {
   buildBaseTestContext,
@@ -245,6 +253,31 @@ export const generatePython = async (
     }
   }
 
+  // Part III: emit one behavioral @dispatch resolver per dispatched seam into
+  // the LIBRARY (issue #282), the twin of the shape discriminator load switch.
+  // Python has no compile-time completeness for a Protocol set, so enforcement
+  // is runtime: a provider dataclass with one slot per variant plus a
+  // new_X_provider collection guard that raises when a consumer omits a variant
+  // slot (a forgotten attachment cannot silently skip), and a resolve_X switch
+  // that raises on an unknown discriminator for a closed dispatch. Gated on the
+  // presence of @vector cases, independent of test-dir.
+  if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
+    for (const dispatched of collectDispatchedContracts(
+      options!.callableVectors!.vectors,
+    )) {
+      const resolverDir = dispatched.group
+        ? `${emitTarget["output-dir"]}/${dispatched.group}`
+        : emitTarget["output-dir"];
+      await emitPythonFile(
+        context,
+        `_${toSnakeCase(dispatched.contract)}_resolver.py`,
+        emitPythonDispatchResolver(dispatched),
+        resolverDir,
+        emitTarget["output-dir"],
+      );
+    }
+  }
+
   if (
     emitTarget["test-dir"] &&
     shouldEmitCompileOnlyProtocolScaffolds(emitTarget)
@@ -267,23 +300,57 @@ export const generatePython = async (
     emitTarget["test-dir"] &&
     (options?.callableVectors?.vectors.length ?? 0) > 0
   ) {
-    await emitPythonFile(
-      context,
-      "vector_runner.py",
-      emitPythonVectorRunner(),
-      emitTarget["test-dir"],
-      emitTarget["test-dir"],
+    const allVectors = options!.callableVectors!.vectors;
+    // §8: a @dispatch seam that resolved to a lowered decl gets a TYPED
+    // per-interface `test_${iface}_conformance.py` that routes through the
+    // emitted resolver via a consumer-authored `${iface}_provider` conftest
+    // fixture. Everything else — including a decl-less @dispatch — stays on the
+    // stringly `vector_runner`, so no vector is dropped from both rails.
+    const undispatched = allVectors.filter(
+      (entry) => !isTypedDispatchEntry(entry),
     );
-    await emitPythonFile(
-      context,
-      "test_vector_conformance.py",
-      emitPythonVectorConformanceTest(
-        options!.callableVectors!,
-        emitTarget["vector-adapter-path"] ?? "vector_adapters",
-      ),
-      emitTarget["test-dir"],
-      emitTarget["test-dir"],
-    );
+
+    if (undispatched.length > 0) {
+      await emitPythonFile(
+        context,
+        "vector_runner.py",
+        emitPythonVectorRunner(),
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
+      await emitPythonFile(
+        context,
+        "test_vector_conformance.py",
+        emitPythonVectorConformanceTest(
+          { ...options!.callableVectors!, vectors: undispatched },
+          emitTarget["vector-adapter-path"] ?? "vector_adapters",
+        ),
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
+    }
+
+    for (const dispatched of collectDispatchedContracts(allVectors)) {
+      const ifaceVectors = allVectors.filter(
+        (entry) =>
+          isTypedDispatchEntry(entry) &&
+          entry.namespace === dispatched.namespace &&
+          entry.group === dispatched.group &&
+          entry.contract === dispatched.contract,
+      );
+      // §8.5: never emit an empty conformance file.
+      if (ifaceVectors.length === 0) continue;
+      const conformanceDir = dispatched.group
+        ? `${emitTarget["test-dir"]}/${dispatched.group}`
+        : emitTarget["test-dir"];
+      await emitPythonFile(
+        context,
+        `test_${toSnakeCase(dispatched.contract)}_conformance.py`,
+        emitPythonInterfaceConformanceTest(dispatched, ifaceVectors, importPath),
+        conformanceDir,
+        emitTarget["test-dir"],
+      );
+    }
   }
 
   if (shouldEmitFastApi(emitTarget)) {
@@ -744,6 +811,159 @@ function emitPythonVectorConformanceTest(
   });
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * Emit the Part III TYPED per-interface conformance suite for one dispatched
+ * seam (Python) — the `@vector` twin of the per-model `test_${model}.py` file
+ * (issue #282 §8.6). Where the monolithic `test_vector_conformance.py` feeds the
+ * JSON interpreter a stringly `Contract.operation#value` route, each test here
+ * is fully typed: it builds the operation inputs from the vector JSON via the
+ * emitted models' `.load`, reads the SAME discriminator the shape load switch
+ * reads, routes it through the emitted `resolve_${iface}` against a
+ * consumer-authored provider, invokes the typed seam, and asserts `expected`.
+ *
+ * Python has no import-time completeness for a Protocol set, so the provider is
+ * a pytest fixture the consumer authors in `conftest.py` — `${iface}_provider`,
+ * built through the emitted `new_${iface}_provider` collection guard. A dropped
+ * `@dispatch` slot raises at fixture setup (§5 control 2, runtime-enforced),
+ * never a silent skip. Only the tests are emitted here; the provider VALUE lives
+ * outside this tree.
+ */
+function emitPythonInterfaceConformanceTest(
+  dispatched: DispatchedContract,
+  entries: CallableVectorSnapshotEntry[],
+  importPath: string,
+): string {
+  const iface = toSnakeCase(dispatched.contract);
+  const resolverModule = `${importPath}._${iface}_resolver`;
+  const resolveFn = `resolve_${iface}`;
+  const fixture = `${iface}_provider`;
+  // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
+  const sorted = [...entries].sort((left, right) =>
+    (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+  );
+  // Distinct param model types, in first-seen order, for a stable model import.
+  const modelTypes: string[] = [];
+  for (const entry of sorted) {
+    for (const type of Object.values(entry.params)) {
+      if (!modelTypes.includes(type)) modelTypes.push(type);
+    }
+  }
+
+  const lines: string[] = [
+    "# <auto-generated by typra-emitter>",
+    "# WARNING: This is an auto-generated file. DO NOT EDIT THIS FILE DIRECTLY.",
+    "#",
+    `# Part III TYPED @vector conformance for ${dispatched.contract} — the per-interface`,
+    "# twin of the per-model test_*.py file (issue #282 §8). Each test builds the",
+    "# operation inputs from the vector JSON, reads the shape discriminator, routes",
+    `# it through the emitted ${resolveFn} against the consumer-authored`,
+    `# '${fixture}' pytest fixture, invokes the typed seam, and asserts 'expected'.`,
+    `# The provider VALUE is authored by the consumer as a '${fixture}' fixture in`,
+    "# conftest.py, built via new_" + iface + "_provider — a dropped @dispatch slot",
+    "# raises at fixture setup, so conformance never silently skips.",
+    "# See docs: reference/vector-conformance.",
+    "",
+    "import asyncio",
+    "import inspect",
+    "import json",
+    "",
+    modelTypes.length > 0
+      ? `from ${importPath} import ${modelTypes.join(", ")}`
+      : "",
+    `from ${resolverModule} import ${resolveFn}`,
+  ].filter((line, index, all) => !(line === "" && all[index - 1] === ""));
+
+  const seen = new Map<string, number>();
+  sorted.forEach((entry, index) => {
+    assertTypedDispatchSupported(entry);
+    const fn = uniquePythonName(
+      pythonConformanceFnName(entry.vector.name, index),
+      seen,
+    );
+    const accessor = pythonDiscriminatorAccessor(entry.dispatch!.path);
+    const field = dispatched.decl.discriminatorField;
+    const method = toSnakeCase(entry.operation);
+    const paramNames = Object.keys(entry.params);
+    const inputJson = JSON.stringify(entry.vector.input ?? {}, null, 2)
+      .split("\n")
+      .map((line) => (line.length > 0 ? `    ${line}` : ""))
+      .join("\n");
+    const expected = entry.vector.expected;
+
+    lines.push(
+      "",
+      "",
+      `def ${fn}(${fixture}):`,
+      "    payload = json.loads(",
+      "        r'''",
+      inputJson,
+      "        ''',",
+      "        strict=False,",
+      "    )",
+    );
+    for (const paramName of paramNames) {
+      lines.push(
+        `    ${paramName} = ${entry.params[paramName]}.load(payload[${JSON.stringify(
+          paramName,
+        )}])`,
+      );
+    }
+    lines.push(
+      `    ${field} = ${accessor}`,
+      `    impl = ${resolveFn}(${field}, ${fixture})`,
+      `    assert impl is not None, f${JSON.stringify(
+        `${entry.vector.name ?? fn}: no ${dispatched.contract} attached for {${field}}`,
+      )}`,
+      `    result = impl.${method}(${paramNames.join(", ")})`,
+      "    if inspect.isawaitable(result):",
+      "        result = asyncio.run(result)",
+    );
+    if (typeof expected === "string") {
+      lines.push(`    assert result == ${JSON.stringify(expected)}`);
+    } else {
+      // No scalar `expected` (the eligibility guard already rejects the vector
+      // shapes that would need richer comparison); reaching here means the route
+      // resolved and the seam ran (reproduce-before-fix).
+      lines.push("    assert result is not None");
+    }
+  });
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * Snake_case a `@vector` name into a legal, unique pytest function suffix,
+ * prefixed `test_`. Falls back to a positional slug when a name is absent.
+ */
+function pythonConformanceFnName(
+  name: string | undefined,
+  index: number,
+): string {
+  const slug = toSnakeCase((name ?? "").replace(/[^A-Za-z0-9]+/g, "_"))
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+  if (slug.length === 0) return `test_vector_${index}`;
+  return /^[0-9]/.test(slug) ? `test_vector_${slug}` : `test_${slug}`;
+}
+
+/** Disambiguate pytest function names within one conformance module. */
+function uniquePythonName(base: string, seen: Map<string, number>): string {
+  const count = seen.get(base) ?? 0;
+  seen.set(base, count + 1);
+  return count === 0 ? base : `${base}_${count + 1}`;
+}
+
+/**
+ * Render the typed discriminator accessor a Python test reads to route a vector.
+ * The first path segment is the operation parameter (a local built via `.load`);
+ * the remaining segments are the emitted models' snake_case attributes (e.g.
+ * `agent.template.format.kind`).
+ */
+function pythonDiscriminatorAccessor(path: string): string {
+  const [head, ...rest] = path.split(".");
+  return [head, ...rest.map((segment) => toSnakeCase(segment))].join(".");
 }
 
 function collectLoadSaveTypeNames(nodes: TypeNode[]): Set<string> {
@@ -1878,6 +2098,200 @@ function getUniqueImportTypes(node: TypeNode): string[] {
   // Remove duplicates and sort
   return Array.from(new Set(imports)).sort();
 }
+
+/**
+ * Emit the Part III behavioral @dispatch resolver for one seam (issue #282): a
+ * provider dataclass with one slot per @dispatch variant, a variant tuple, a
+ * new_X_provider collection guard, and a resolve_X switch that is the twin of
+ * the shape discriminator load switch. Python cannot enforce Protocol-set
+ * completeness at import/collection time, so the guard is runtime:
+ * new_X_provider raises when a consumer omits a variant key (a forgotten
+ * attachment cannot silently skip), while a slot set to None is a legitimate
+ * valid-but-unimplemented variant. The resolve switch raises on an unknown
+ * discriminator exactly when the shape load switch does — a closed dispatch
+ * with no default.
+ */
+function emitPythonDispatchResolver(entry: DispatchedContract): string {
+  const seam = entry.contract;
+  const provider = `${seam}Provider`;
+  const rawField = entry.decl.discriminatorField;
+  const param = pyDispatchIdentifier(toSnakeCase(rawField) || "discriminator");
+  // Preserve the SAME variant order the shape load switch emits, keeping the two
+  // switches a faithful twin.
+  const variants = entry.decl.variants;
+  const variantsVar = `${toSnakeCase(seam).toUpperCase()}_VARIANTS`;
+  // Raise on an unknown discriminator exactly when the shape load switch does —
+  // a closed dispatch with no default (_TemplateFormat.load_kind else arm).
+  const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
+  const slot = (value: string): string =>
+    pyDispatchIdentifier(toSnakeCase(value) || "value");
+
+  const lines: string[] = [
+    "# <auto-generated by typra-emitter>",
+    "##########################################",
+    "# WARNING: This is an auto-generated file.",
+    "# DO NOT EDIT THIS FILE DIRECTLY",
+    "# ANY EDITS WILL BE LOST",
+    "##########################################",
+    "",
+    "from __future__ import annotations",
+    "",
+    "from dataclasses import dataclass",
+    "from typing import Mapping",
+    "",
+    `from ._${seam} import ${seam}`,
+    "",
+    "",
+    `${variantsVar}: tuple[str, ...] = (${variants
+      .map((variant) => `${JSON.stringify(variant.value)},`)
+      .join(" ")})`,
+    `"""Every @dispatch variant the ${seam} seam must cover, in shape order."""`,
+    "",
+    "",
+    "@dataclass",
+    `class ${provider}:`,
+    `    """Carries one ${seam} impl per @dispatch variant, the twin of the shape`,
+    "    discriminator's variant set. A ``None`` slot models a valid-but-",
+    `    unimplemented variant; build via :func:\`new_${toSnakeCase(seam)}_provider\``,
+    "    so a forgotten variant is a collection-time error rather than a silent",
+    "    ``None`` (the slots are required, so a bare constructor call cannot skip",
+    "    a variant either).",
+    '    """',
+    "",
+  ];
+  for (const variant of variants) {
+    // Required (no default): a bare ``Provider()`` cannot silently skip every
+    // slot. Explicit ``None`` still marks a valid-but-unimplemented variant.
+    lines.push(`    ${slot(variant.value)}: ${seam} | None`);
+  }
+  lines.push("");
+  lines.push("");
+  lines.push(
+    `def new_${toSnakeCase(seam)}_provider(impls: Mapping[str, ${seam} | None]) -> ${provider}:`,
+  );
+  lines.push(
+    `    """Build a :class:\`${provider}\` from a variant->impl mapping, raising when`,
+  );
+  lines.push(
+    "    a variant is ABSENT (a forgotten attachment). A key present with a",
+  );
+  lines.push(
+    "    ``None`` value is allowed and marks a variant as valid-but-unimplemented.",
+  );
+  lines.push('    """');
+  lines.push(`    missing = [kind for kind in ${variantsVar} if kind not in impls]`);
+  lines.push("    if missing:");
+  lines.push(
+    `        raise ValueError(f"${seam} provider is missing @dispatch variant(s): {missing}")`,
+  );
+  lines.push(`    return ${provider}(`);
+  for (const variant of variants) {
+    lines.push(`        ${slot(variant.value)}=impls[${JSON.stringify(variant.value)}],`);
+  }
+  lines.push("    )");
+  lines.push("");
+  lines.push("");
+  lines.push(
+    `def resolve_${toSnakeCase(seam)}(${param}: str, provider: ${provider}) -> ${seam} | None:`,
+  );
+  if (rejectsUnknown) {
+    lines.push(
+      `    """Map a '${rawField}' discriminator to the attached ${seam} impl — the`,
+    );
+    lines.push(
+      "    behavioral twin of the shape discriminator load switch. An unknown",
+    );
+    lines.push(
+      "    discriminator is a hard error; a known variant returns its slot",
+    );
+    lines.push(
+      "    (possibly ``None`` for a valid-but-unimplemented variant) for the caller",
+    );
+    lines.push("    to skip explicitly, never a silent miss.");
+    lines.push('    """');
+  } else {
+    lines.push(
+      `    """Map a '${rawField}' discriminator to the attached ${seam} impl — the`,
+    );
+    lines.push(
+      "    behavioral twin of the shape discriminator load switch. A known variant",
+    );
+    lines.push(
+      "    returns its slot (possibly ``None`` for a valid-but-unimplemented",
+    );
+    lines.push(
+      "    variant); an unknown discriminator returns ``None``, mirroring the open",
+    );
+    lines.push("    shape loader's non-throwing arm, for the caller to skip explicitly.");
+    lines.push('    """');
+  }
+  variants.forEach((variant, index) => {
+    const keyword = index === 0 ? "if" : "elif";
+    lines.push(`    ${keyword} ${param} == ${JSON.stringify(variant.value)}:`);
+    lines.push(`        return provider.${slot(variant.value)}`);
+  });
+  if (rejectsUnknown) {
+    lines.push("    raise ValueError(");
+    lines.push(
+      `        f"Unknown ${seam} discriminator field '${rawField}' value: {${param}}"`,
+    );
+    lines.push("    )");
+  } else {
+    lines.push("    return None");
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+// A discriminator field or variant value that snake-cases to a Python keyword
+// cannot be a bare dataclass field or parameter name. PEP 8 recommends a single
+// trailing underscore to sidestep the clash (e.g. ``class_``). The raw variant
+// value is still used verbatim as the mapping key and switch literal — only the
+// emitted Python identifier is adjusted, keeping the resolver a faithful twin.
+function pyDispatchIdentifier(candidate: string): string {
+  return PY_KEYWORDS.has(candidate) ? `${candidate}_` : candidate;
+}
+
+// Python 3 hard keywords (keyword.kwlist). ``toSnakeCase`` lowercases its input,
+// so only the lowercase spellings can ever collide, but the full set is listed
+// for clarity.
+const PY_KEYWORDS = new Set<string>([
+  "false",
+  "none",
+  "true",
+  "and",
+  "as",
+  "assert",
+  "async",
+  "await",
+  "break",
+  "class",
+  "continue",
+  "def",
+  "del",
+  "elif",
+  "else",
+  "except",
+  "finally",
+  "for",
+  "from",
+  "global",
+  "if",
+  "import",
+  "in",
+  "is",
+  "lambda",
+  "nonlocal",
+  "not",
+  "or",
+  "pass",
+  "raise",
+  "return",
+  "try",
+  "while",
+  "with",
+  "yield",
+]);
 
 /**
  * Write generated Python content to file using TypeSpec's emitFile API.

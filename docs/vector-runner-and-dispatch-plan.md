@@ -262,6 +262,42 @@ documented as best-effort per language.
 
 ---
 
+# Part III — typed `@dispatch` resolver (landed: rail + typed conformance)
+
+Part III (issue `sethjuarez/typra#282`, continuing `#280` II-A + `#281` II-B) moves
+behavioral `@dispatch` off the stringly-typed `Contract.operation#value` runtime
+dictionary and onto the **same `PolymorphicDispatchDecl` rail the emitter uses for
+SHAPES**. For each dispatched seam every language emits, as a **library** artifact, the
+twin of the shape `Load` switch: a **provider type** (one slot per `@dispatch` variant)
+plus a **completeness-checked resolver** (`resolve_<seam>(kind, provider)`) selecting the
+consumer-attached `I<Seam>` impl.
+
+Landed in Part III: the IR seam (`CallableDispatch.decl` →
+the discriminator model's `PolymorphicDispatchDecl`), provider + resolver emission for all
+7 runtimes, and a permanent per-language proof test asserting rendered target code —
+positive routing reproduces each vector's `expected`, and a missing provider slot **fails
+to compile** (C#/TS/Java/Rust/Swift) or **raises at collection** (Go/Python). Enforcement:
+compile-time for C#/TS/Java/Rust/Swift, runtime for Go/Python.
+
+Also landed: the emitted **`@vector` conformance is now typed** for all 7 languages. Each
+language partitions its vectors — typed (polymorphic-`decl`) entries emit **per-interface
+conformance files in namespace folders** (§8 parity with the `@sample`/model-test
+convention) that import the consumer provider, call `resolve_<seam>`, and invoke the typed
+seam with typed input; the monolithic stringly runner + its `#value` dispatch branch are
+emitted **only when undispatched vectors remain**. A fully-dispatched group emits no
+stringly artifact (verified: zero `operation#value` routing in the emitted tree).
+
+Deliberately **retained** (permitted by #282 §7): the `#value` runner **strictly as the
+undispatched safety net**. A `@dispatch` whose discriminator model is not polymorphic
+carries a path but no `decl`, so it stays on the stringly runner and its conformance is
+never silently dropped. The undispatched single-adapter branch is untouched (no regression).
+#282 is **closed** by this work.
+
+Full Part III design, the Phase-3 resolution rationale, and the acceptance gates live in
+[`dispatch-typed-resolver-plan.md`](./dispatch-typed-resolver-plan.md).
+
+---
+
 # Sequencing
 
 1. **Runner extraction first (enabler).** Execute end-to-end across all 7 runtimes as one

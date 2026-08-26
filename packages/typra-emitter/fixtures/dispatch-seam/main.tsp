@@ -12,12 +12,18 @@ namespace Typra.Fixtures.DispatchSeam;
 // is git-ignored (like all generated trees) but reproduced deterministically by
 // `npm run generate:fixtures:dispatch-seam` — read it alongside this source.
 //
-// Part II-A (this change) resolves the @dispatch discriminator to a
-// deterministic access path and surfaces it in export-surfaces.json — it does
-// NOT yet emit per-language resolve/registry glue (that is Part II-B). So in the
-// generated code the seam interface renders as a plain compile-only scaffold,
-// identical to an undispatched one; the dispatch metadata lives only in
-// generated/dispatch-seam/.typra-generated/export-surfaces.json.
+// Part II-A resolved the @dispatch discriminator to a deterministic access path
+// (surfaced in export-surfaces.json); Part II-B made the emitted vector-runner +
+// harness route dispatched vectors through a per-discriminator registry keyed
+// `Contract.operation#<value>`. Part III (this rail) adds the TYPED resolver: for
+// this seam every target emits a provider + resolver twin of the shape Load
+// switch beside the interface — e.g. csharp/RendererResolver.cs (compile-time
+// IRendererProvider) and python/_renderer_resolver.py (runtime completeness
+// guard) — one slot per @dispatch variant, so a forgotten attachment fails to
+// compile (C#/TS/Java/Rust/Swift) or errors at collection (Go/Python). The
+// emitted vector-conformance harness still routes via the retained `#value`
+// path; the typed resolver is proven load-bearing by the per-language
+// test/dispatch-resolver.typed-<lang>.test.ts proofs.
 // ===========================================================================
 
 // ---- Polymorphic discriminator union: the dispatch key --------------------

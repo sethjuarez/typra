@@ -342,8 +342,12 @@ function lowerSave(node: TypeNode, fields: FieldDecl[]): SaveDecl {
 /**
  * Lower polymorphic dispatch specification from TypeNode.
  * Returns null if the type is not polymorphic (no discriminator or no children).
+ *
+ * Exported so the behavioral `@dispatch` seam rail (src/ir/callable.ts) can reuse
+ * the SAME discriminator lowering that drives the shape `Load` switch — one decl,
+ * two twins (shape construction + behavior resolution).
  */
-function lowerPolymorphicDispatch(
+export function lowerPolymorphicDispatch(
   node: TypeNode,
 ): PolymorphicDispatchDecl | null {
   const polyTypes = node.retrievePolymorphicTypes();

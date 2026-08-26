@@ -32,6 +32,10 @@ emit-targets:
 | `native-serialization` | `"none"` keeps dataclass output. `"pydantic"` emits Pydantic v2 `BaseModel` types. |
 | `outputs` | Optional generated surfaces. `server:fastapi` and `server:starlette` emit HTTP route factories; `consumer:httpx` emits contract clients backed by an injected async transport. |
 
+:::caution[Preview — not production-ready]
+`native-serialization: "pydantic"` and the HTTP transport projections (`fastapi`, `starlette`, `httpx`) are experimental. They are not yet idempotency-locked under the output hygiene guard, and their generated shape may still change. The production-ready Python output is the core model surface — `load`/`save` and the JSON/YAML helpers.
+:::
+
 Generated Python surfaces include model surfaces, loader/saver helpers, JSON/YAML helpers, import-pruned output, and tests.
 
 `native-serialization: "pydantic"` is opt-in and requires Pydantic v2 in the consuming Python environment. Typra still treats generated `load()` and `save()` as the authoritative contract surface: the Pydantic `model_validate()`, `model_validate_json()`, `model_dump()`, and `model_dump_json()` helpers delegate to those methods rather than introducing a second loader or serializer with different semantics. `model_validate_strings()` hard-fails because Pydantic's string-coercing validation would not preserve Typra's loader contract.

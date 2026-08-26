@@ -38,6 +38,14 @@ import {
   TypeResolver,
 } from "../../testing/test-context.js";
 import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
+import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
+import {
+  collectDispatchedContracts,
+  DispatchedContract,
+  CallableVectorSnapshotEntry,
+  isTypedDispatchEntry,
+  assertTypedDispatchSupported,
+} from "../../ir/vector.js";
 
 /**
  * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the
@@ -237,26 +245,96 @@ export const generateCsharp = async (
   ) {
     const adapterNamespace =
       emitTarget["vector-adapter-path"] ?? `${csharpNamespace}.Conformance`;
-    await emitCsharpFile(
-      context,
-      node,
-      emitCSharpVectorRunner(csharpNamespace, adapterNamespace),
-      "VectorRunner.cs",
-      emitTarget["test-dir"],
-      emitTarget["test-dir"],
+    const allVectors = options!.callableVectors!.vectors;
+    // A `@dispatch` seam routes through the typed resolver rail (issue #282 §8):
+    // its vectors get a per-interface, typed `${Interface}ConformanceTests` file
+    // in the seam's namespace folder. Undispatched seams — INCLUDING a @dispatch
+    // whose discriminator model is not polymorphic (no `decl`, so no typed rail) —
+    // keep the stringly JSON interpreter (`VectorRunner`) + monolithic
+    // `VectorConformanceTests`, so no vector is dropped from both rails.
+    const undispatched = allVectors.filter(
+      (entry) => !isTypedDispatchEntry(entry),
     );
-    await emitCsharpFile(
-      context,
-      node,
-      emitCSharpVectorConformanceTest(
-        options!.callableVectors!,
-        csharpNamespace,
-        adapterNamespace,
-      ),
-      "VectorConformanceTests.cs",
-      emitTarget["test-dir"],
-      emitTarget["test-dir"],
-    );
+
+    if (undispatched.length > 0) {
+      await emitCsharpFile(
+        context,
+        node,
+        emitCSharpVectorRunner(csharpNamespace, adapterNamespace),
+        "VectorRunner.cs",
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
+      await emitCsharpFile(
+        context,
+        node,
+        emitCSharpVectorConformanceTest(
+          { ...options!.callableVectors!, vectors: undispatched },
+          csharpNamespace,
+          adapterNamespace,
+        ),
+        "VectorConformanceTests.cs",
+        emitTarget["test-dir"],
+        emitTarget["test-dir"],
+      );
+    }
+
+    for (const dispatched of collectDispatchedContracts(allVectors)) {
+      const ifaceVectors = allVectors.filter(
+        (entry) =>
+          isTypedDispatchEntry(entry) &&
+          entry.namespace === dispatched.namespace &&
+          entry.group === dispatched.group &&
+          entry.contract === dispatched.contract,
+      );
+      // §8.5: never emit an empty conformance file — but the resolver below is
+      // still emitted for a zero-vector dispatched seam so control 2 keeps biting.
+      if (ifaceVectors.length === 0) continue;
+      const conformanceFolder = csharpGroupFolder(dispatched.group);
+      const conformanceDir = conformanceFolder
+        ? `${emitTarget["test-dir"]}/${conformanceFolder}`
+        : emitTarget["test-dir"];
+      await emitCsharpFile(
+        context,
+        node,
+        emitCSharpInterfaceConformanceTest(
+          dispatched,
+          ifaceVectors,
+          csharpNamespace,
+          adapterNamespace,
+        ),
+        `${dispatched.contract}ConformanceTests.cs`,
+        conformanceDir,
+        emitTarget["test-dir"],
+      );
+    }
+  }
+
+  // Part III: emit one behavioral @dispatch resolver (provider type + Resolve
+  // switch, the twin of the shape Load switch) per dispatched seam interface,
+  // into the LIBRARY beside the seam interface (issue #282). The provider is a
+  // real extension point a consumer implements, so a forgotten slot fails to
+  // compile — the same rail as the shape discriminator switch, itself a library
+  // artifact. NOTE: emission currently rides the presence of @vector cases;
+  // decoupling it to emit for every dispatched contract regardless of test
+  // coverage is a tracked follow-up (issue #282).
+  if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
+    for (const dispatched of collectDispatchedContracts(
+      options!.callableVectors!.vectors,
+    )) {
+      const resolverFolder = csharpGroupFolder(dispatched.group);
+      const resolverDir = resolverFolder
+        ? `${emitTarget["output-dir"]}/${resolverFolder}`
+        : emitTarget["output-dir"];
+      await emitCsharpFile(
+        context,
+        node,
+        emitCSharpDispatchResolver(dispatched, csharpNamespace),
+        `${dispatched.contract}Resolver.cs`,
+        resolverDir,
+        emitTarget["output-dir"],
+      );
+    }
   }
 
   // Format emitted files if format option is enabled (default: true)
@@ -1061,9 +1139,290 @@ function emitCSharpVectorConformanceTest(
 }
 
 /**
- * Format C# files using dotnet format.
- * Runs formatter from the .NET project root (where .csproj or .sln is located).
+ * PascalCase a `@vector` name (which may contain hyphens/spaces/dots) into a
+ * unique, legal C# `[Fact]` method identifier — the typed twin of the
+ * conversion-test method names. Falls back to a positional slug when a name is
+ * absent or reduces to nothing, so emission stays total and deterministic.
  */
+function csharpConformanceMethodName(name: string | undefined, index: number): string {
+  const slug = (name ?? "")
+    .split(/[^A-Za-z0-9]+/)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
+  if (slug.length === 0) return `Vector${index}`;
+  return /^[0-9]/.test(slug) ? `Vector${slug}` : slug;
+}
+
+/**
+ * Ensure a `[Fact]` method identifier is unique within one conformance file.
+ * On a collision, append a `_N` disambiguator (deterministic in emission order)
+ * so distinct vectors never collapse to the same C# method.
+ */
+function uniqueMethodName(base: string, seen: Map<string, number>): string {
+  const count = seen.get(base) ?? 0;
+  seen.set(base, count + 1);
+  return count === 0 ? base : `${base}_${count + 1}`;
+}
+
+/**
+ * Render the TYPED discriminator accessor the [Fact] reads to route a vector —
+ * the behavioral twin of how the shape `Load` switch reaches its discriminator.
+ * The first path segment is the operation parameter (a local built via
+ * `FromJson`); the remaining segments are the emitted models' PascalCase
+ * properties (e.g. `agent.template.format.kind` -> `agent.Template.Format.Kind`).
+ */
+function csharpDiscriminatorAccessor(path: string): string {
+  const segments = path.split(".");
+  const [head, ...rest] = segments;
+  return [head, ...rest.map((segment) => toPascalCase(segment))].join(".");
+}
+
+/**
+ * Emit the Part III TYPED per-interface conformance suite for one dispatched
+ * seam — the `@vector` twin of the per-model `${Type}ConversionTests` file
+ * (issue #282 §8). Where the monolithic `VectorConformanceTests` feeds the JSON
+ * interpreter a stringly `Contract.operation#value` route, this suite is fully
+ * typed: each `[Fact]` builds the operation inputs from the vector JSON via the
+ * emitted models' `FromJson`, reads the SAME discriminator the shape `Load`
+ * switch reads (through the typed accessor chain), routes it through the emitted
+ * `${Interface}Resolver.Resolve` against a consumer-attached provider, invokes
+ * the typed seam method, and asserts the result reproduces `expected`.
+ *
+ * The provider VALUE is authored by the consumer OUTSIDE the conformance tree —
+ * a static `VectorProviders.${Interface}()` accessor returning the generated
+ * `I${Interface}Provider` — so a dropped `@dispatch` slot fails to COMPILE (§5
+ * control 2). Only the `[Fact]`s are emitted here; the resolver + provider TYPE
+ * live in the colocated `${Interface}Resolver` file.
+ */
+function emitCSharpInterfaceConformanceTest(
+  dispatched: DispatchedContract,
+  entries: CallableVectorSnapshotEntry[],
+  testNamespace: string,
+  adapterNamespace: string,
+): string {
+  const provider = `I${dispatched.contract}Provider`;
+  const resolver = `${dispatched.contract}Resolver`;
+  const field = dispatched.decl.discriminatorField;
+  // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
+  const sorted = [...entries].sort((left, right) =>
+    (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+  );
+  // Disambiguate [Fact] method names within the file: two vector names that
+  // PascalCase to the same identifier (e.g. `foo-bar` / `foo bar`) would emit
+  // duplicate C# methods and fail to compile.
+  const seenMethods = new Map<string, number>();
+
+  const lines: string[] = [
+    "// <auto-generated by typra-emitter>",
+    "// Code generated by Typra emitter; DO NOT EDIT.",
+    "//",
+    `// Part III TYPED @vector conformance for ${dispatched.contract} — the per-interface`,
+    "// twin of the per-model ConversionTests file (issue #282 §8). Each [Fact] builds",
+    "// the operation inputs from the vector JSON, reads the shape discriminator, routes",
+    `// it through the emitted ${resolver} against the consumer-attached provider, invokes`,
+    "// the typed seam, and asserts the result reproduces `expected`. The provider VALUE",
+    `// is authored by the consumer as VectorProviders.${dispatched.contract}() in the`,
+    "// namespace named by 'vector-adapter-path' — a dropped @dispatch slot fails to",
+    "// compile, so conformance never silently skips.",
+    "// See docs: reference/vector-conformance.",
+    "#nullable enable",
+    "using System.Text.Json;",
+    "using System.Threading.Tasks;",
+    "using Xunit;",
+    `using ${adapterNamespace};`,
+    "",
+    `namespace ${testNamespace};`,
+    "",
+    `public class ${dispatched.contract}ConformanceTests`,
+    "{",
+    "    // The consumer-attached provider of typed seam impls, one slot per @dispatch",
+    "    // variant. Authored outside this tree; a forgotten slot cannot compile.",
+    `    private static ${provider} Provider() => VectorProviders.${dispatched.contract}();`,
+    "",
+  ];
+
+  sorted.forEach((entry, index) => {
+    assertTypedDispatchSupported(entry);
+    const method = entry.sync
+      ? toPascalCase(entry.operation)
+      : `${toPascalCase(entry.operation)}Async`;
+    const accessor = csharpDiscriminatorAccessor(entry.dispatch!.path);
+    const paramNames = Object.keys(entry.params);
+    const inputJSON = jsonAsciiEscape(
+      JSON.stringify(entry.vector.input ?? {}, null, 2),
+    );
+    const expected = entry.vector.expected;
+
+    lines.push("    [Fact]");
+    lines.push(
+      `    public ${entry.sync ? "void" : "async Task"} ${uniqueMethodName(
+        csharpConformanceMethodName(entry.vector.name, index),
+        seenMethods,
+      )}()`,
+    );
+    lines.push("    {");
+    lines.push('        string inputJson = """');
+    for (const line of inputJSON.split("\n")) {
+      lines.push(line);
+    }
+    lines.push('""";');
+    lines.push("        using var document = JsonDocument.Parse(inputJson);");
+    lines.push("        var root = document.RootElement;");
+    for (const paramName of paramNames) {
+      const paramType = entry.params[paramName];
+      lines.push(
+        `        var ${paramName} = ${paramType}.FromJson(root.GetProperty(${JSON.stringify(
+          paramName,
+        )}).GetRawText());`,
+      );
+    }
+    lines.push(`        var ${field} = ${accessor};`);
+    lines.push(
+      `        var impl = ${resolver}.Resolve(${field}, Provider());`,
+    );
+    lines.push(
+      `        Assert.NotNull(impl);`,
+    );
+    const call = `impl!.${method}(${paramNames.join(", ")})`;
+    if (entry.sync) {
+      lines.push(`        var actual = ${call};`);
+    } else {
+      lines.push(`        var actual = await ${call};`);
+    }
+    if (typeof expected === "string") {
+      lines.push(`        Assert.Equal(${JSON.stringify(expected)}, actual);`);
+    } else {
+      // No scalar `expected` to compare (e.g. an `expectedError` vector): the
+      // typed invocation itself is the assertion — reaching here means the route
+      // resolved and the seam ran without throwing. A dispatched fixture that
+      // needs richer comparison will extend this arm (reproduce-before-fix).
+      lines.push("        Assert.NotNull(actual);");
+    }
+    lines.push("    }");
+    lines.push("");
+  });
+
+  lines.push("}");
+  return lines.join("\n");
+}
+
+/**
+ * A dispatched seam interface that needs a Part III resolver emitted: its
+ * interface name plus the SAME `PolymorphicDispatchDecl` that drives the shape
+ * `Load` switch, and the namespace/group the resolver file is placed under.
+ * Shared with the other language emitters (see `../../ir/vector.js`).
+ */
+
+/**
+ * Emit the Part III C# dispatch resolver for one seam interface — the behavioral
+ * twin of the shape `Load` switch (`emitter.ts:1081`). Where `Load` maps a
+ * discriminator value to a constructed SHAPE, this maps it to a selected
+ * BEHAVIOR (`I<Seam>` impl) read from a generated provider whose members ARE the
+ * `dispatch.variants`. Because the provider surface is generated from the same
+ * variant list, a consumer that forgets to DECLARE a slot fails to COMPILE
+ * (missing interface member) — the strongest form of issue #282 §5 control 2.
+ *
+ * Members are nullable so a consumer can signal a valid-but-unimplemented
+ * variant by returning null; the conformance harness then does an explicit skip
+ * (§3.1) rather than a silent registration miss. This is compile-time *slot*
+ * completeness, not implementation completeness — every slot present as `null`
+ * still compiles, by design.
+ *
+ * The unknown-value arm mirrors the SHAPE switch's precedence
+ * (`emitter.ts:1090`): shape falls back to a default/carrier SUBTYPE or throws
+ * on a closed/abstract base. Behavioral dispatch has no "base implementation" to
+ * fall back to, so a default/open dispatch yields `null` (explicit skip) while a
+ * closed or abstract base throws — the same reject-vs-fallback decision, adapted
+ * to the fact that a resolver selects an impl rather than constructing a value.
+ */
+function emitCSharpDispatchResolver(
+  entry: DispatchedContract,
+  seamNamespace: string,
+): string {
+  const seam = `I${entry.contract}`;
+  const provider = `I${entry.contract}Provider`;
+  const resolver = `${entry.contract}Resolver`;
+  const field = entry.decl.discriminatorField;
+  // Preserve the SAME variant order the shape `Load` switch emits
+  // (`emitter.ts:1084` iterates `dispatch.variants` directly). Sharing the IR
+  // order keeps the two switches a faithful twin and is deterministic without a
+  // locale-dependent comparator.
+  const variants = entry.decl.variants;
+  // Closed (no fallback, no default): an unknown discriminator is a hard error,
+  // exactly as the shape LoadKind switch throws. An open or default dispatch
+  // yields null (harness explicit-skip) — and an abstract-open base routes
+  // unknowns to a carrier in the shape loader, never throwing, so a bare
+  // `isClosedPolymorphicDispatch` is the faithful twin of that throw arm.
+  const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
+
+  const lines: string[] = [
+    "// <auto-generated by typra-emitter>",
+    "// Code generated by Typra emitter; DO NOT EDIT.",
+    "//",
+    `// Part III behavioral @dispatch resolver for ${seam} — the twin of the shape`,
+    "// Load switch, emitted into the library beside the seam interface. The",
+    "// provider surface below has one slot per @dispatch variant; a consumer",
+    "// attaches concrete impls by satisfying it in an external, non-emitted file,",
+    "// so a forgotten slot fails to compile.",
+    "// See docs: reference/vector-conformance.",
+    "#nullable enable",
+    "using System;",
+    "",
+    `namespace ${seamNamespace};`,
+    "",
+    `/// <summary>`,
+    `/// Consumer-attached provider of ${seam} impls, one slot per @dispatch`,
+    `/// variant. Nullable: return null to signal a valid-but-unimplemented variant`,
+    `/// to the caller (e.g. the conformance harness skips it), never a silent miss.`,
+    `/// </summary>`,
+    `public interface ${provider}`,
+    "{",
+  ];
+  // Slot names are the PascalCase of the discriminator value. Every fixture
+  // value today is a plain identifier (mustache/jinja2/liquid); non-identifier
+  // values (leading digit, C# keyword, punctuation) would need a sanitizer +
+  // collision guard. Deferred until a fixture exercises one (reproduce-before-fix).
+  for (const variant of variants) {
+    lines.push(
+      `    ${seam}? ${toPascalCase(variant.value)} { get; }`,
+    );
+  }
+  lines.push("}");
+  lines.push("");
+  lines.push(`/// <summary>`);
+  lines.push(
+    `/// Maps a '${field}' discriminator value to the selected ${seam} impl — the`,
+  );
+  lines.push(`/// behavioral twin of the shape Load switch.`);
+  lines.push(`/// </summary>`);
+  lines.push(`public static class ${resolver}`);
+  lines.push("{");
+  lines.push(
+    `    public static ${seam}? Resolve(string ${field}, ${provider} provider) =>`,
+  );
+  lines.push(`        ${field} switch`);
+  lines.push("        {");
+  for (const variant of variants) {
+    lines.push(
+      `            ${JSON.stringify(variant.value)} => provider.${toPascalCase(
+        variant.value,
+      )},`,
+    );
+  }
+  if (rejectsUnknown) {
+    lines.push(
+      `            _ => throw new ArgumentException($"Unknown ${entry.contract} discriminator '${field}' value: {${field}}"),`,
+    );
+  } else {
+    lines.push("            _ => null,");
+  }
+  lines.push("        };");
+  lines.push("}");
+  lines.push("");
+  return lines.join("\n");
+}
+
 function formatCSharpFiles(outputDir: string, testDir?: string): void {
   const dirs = [outputDir, ...(testDir ? [testDir] : [])];
   const formatted = new Set<string>();

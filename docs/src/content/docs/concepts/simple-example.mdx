@@ -64,6 +64,10 @@ interface TodoRenderer {
 
 When you need transport projection, layer official TypeSpec HTTP decorators on the callable operation. Typra consumes that HTTP metadata; it does not invent a parallel routing vocabulary.
 
+:::caution[Preview — not production-ready]
+The HTTP transport projections shown below (`fastapi`, `starlette`, `httpx`, `fetch`) are experimental and their generated shape may still change. The stable core of Typra is the model surface — `load`/`save` and JSON/YAML helpers.
+:::
+
 ```typespec
 @route("/todos")
 interface TodoApi {

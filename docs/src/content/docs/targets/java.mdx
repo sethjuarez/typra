@@ -24,6 +24,10 @@ emit-targets:
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
 | `native-serialization` | Defaults to `"none"`. Set to `"jackson"` to emit Jackson serializers and deserializers that delegate to Typra load/save. |
 
+:::caution[Preview — not production-ready]
+`native-serialization: "jackson"` interop is experimental. It is not yet idempotency-locked under the output hygiene guard, and its generated shape may still change. The production-ready Java output is the core model surface — `load`/`save` and the `fromJson`/`toJson`/`fromYaml`/`toYaml` helpers.
+:::
+
 Generated Java surfaces include models with load, save, `fromJson`, `toJson`, `fromYaml`, `toYaml`, scalar coercion, enum handling, polymorphic dispatch, tests, and optional Jackson interop.
 
 ## Typical usage shape

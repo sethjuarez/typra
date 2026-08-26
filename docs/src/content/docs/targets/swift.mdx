@@ -66,6 +66,10 @@ Load and save also accept already-parsed values through `load(_:)` and `save(_:)
 
 ## Native Codable mode
 
+:::caution[Preview — not production-ready]
+`native-serialization: "codable"` interop is experimental. It is not yet idempotency-locked under the output hygiene guard, and its generated shape may still change. The production-ready Swift output is the core `TypraModel` surface — `load`/`save` and the `fromJSON`/`toJSON`/`fromYAML`/`toYAML` helpers.
+:::
+
 Set `native-serialization: "codable"` to make generated Swift models conform to `Codable`. The conformance is explicit and delegates through Typra `load` and `save`, so `JSONEncoder` and `JSONDecoder` follow the same wire names, discriminator dispatch, raw fallback preservation, defaults, and optional omission rules as the normal Typra path instead of relying on synthesized Swift behavior.
 
 ## Scalar coercion

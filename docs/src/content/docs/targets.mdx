@@ -18,6 +18,10 @@ Typra emits generated model surfaces, tests, metadata, and documentation from th
 | `Rust` | structs with `from_json`/`to_json`, `from_yaml`/`to_yaml`, provider wire mapping, optional case-insensitive enum parsing, and optional explicit serde impls. |
 | `Swift` | A SwiftPM package with `TypraModel` types, `fromJSON`/`toJSON`, `fromYAML`/`toYAML`, scalar coercion, polymorphic enums, provider wire mapping, optional explicit `Codable`, and XCTest tests. |
 
+:::caution[Preview — not production-ready]
+The optional `native-serialization` framework variants (`zod`, `pydantic`, `jackson`, `serde`, `codable`) and the HTTP transport projections (`fastapi`, `starlette`, `httpx`, `fetch`) are experimental. Several are not yet idempotency-locked under the output hygiene guard, and their generated shape may still change. Treat the core model surface — `load`/`save` plus JSON/YAML helpers — as the production-ready output.
+:::
+
 ## Reference targets
 
 | Target | Generated surface |
@@ -80,8 +84,8 @@ Target support is intentionally evidence-driven. The fixture suite validates gen
 | --- | --- |
 | `TypeScript`, `Python`, `Go` | Best fit when JSON/YAML helper behavior and scalar shorthand loading matter. |
 | `CSharp`, `Java` | Confirm package/namespace conventions before publishing generated output. Both include JSON and YAML helper surfaces. |
-| `Rust` | Choose `enum-parsing` deliberately; default behavior is case-sensitive. Use `native-serialization: "serde"` when consumers need serde interop. |
-| `Swift` | Emits a SwiftPM package with a Yams dependency for YAML; use `native-serialization: "codable"` when consumers need `JSONEncoder`/`JSONDecoder` interop. Requires a Swift toolchain to build and test. |
+| `Rust` | Choose `enum-parsing` deliberately; default behavior is case-sensitive. `native-serialization: "serde"` interop is a preview (see the note above). |
+| `Swift` | Emits a SwiftPM package with a Yams dependency for YAML; `native-serialization: "codable"` interop is a preview (see the note above). Requires a Swift toolchain to build and test. |
 | `Markdown` | Treat as generated reference output, not a replacement for product narrative docs. |
 | JSON AST | Use for tooling and review; do not treat it as a runtime API. |
 

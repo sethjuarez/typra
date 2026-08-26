@@ -160,6 +160,10 @@ This slice proves the architecture against local callable behavior before transp
 
 ## Transport IR
 
+:::caution[Preview — not production-ready]
+HTTP transport projection (`fastapi`, `starlette`, `httpx`, `fetch`) is experimental. The IR and generated route/consumer surfaces may still change. It builds on the stable callable/vector foundation but is not itself production-ready.
+:::
+
 HTTP transport projection consumes TypeSpec HTTP decorators; Typra does not define competing route, verb, parameter, or response decorators. The transport IR layers official `@typespec/http` metadata on top of callable IR by linking each routed operation back to its TypeSpec-native callable contract.
 
 The IR records the HTTP verb, path, URI template, path/query/header/cookie/body bindings, response status codes, response body type, and response content types. This keeps transport projection downstream of the callable/oracle architecture: target renderers can generate routers or controllers, but model parsing and serialization still route through Typra's canonical `load()` / `save()` semantics.

@@ -26,6 +26,10 @@ emit-targets:
 | `protocol-scaffolds` | Emits compile-only test scaffolds for generated protocols. |
 | `native-serialization` | `"serde"` emits feature-gated `Serialize`/`Deserialize` impls; `"none"` opts out. Omission keeps the default cfg-gated serde surface for compatibility. |
 
+:::caution[Preview — not production-ready]
+The explicit `native-serialization: "serde"` interop impls are experimental. They are not yet idempotency-locked under the output hygiene guard, and their generated shape may still change. The production-ready Rust output is the core model surface — `from_json`/`to_json`, `from_yaml`/`to_yaml`, and `load_from_value`/`to_value`.
+:::
+
 Generated Rust surfaces include serde-oriented model structures, `from_json`/`to_json` and `from_yaml`/`to_yaml` helpers, a fallible `try_load_from_value` for already-parsed values, provider wire mapping, and optional case-insensitive enum parsing.
 
 ## Typical usage shape
