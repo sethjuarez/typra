@@ -262,6 +262,37 @@ documented as best-effort per language.
 
 ---
 
+# Part III — typed `@dispatch` resolver (landed rail; conformance migration scoped)
+
+Part III (issue `sethjuarez/typra#282`, continuing `#280` II-A + `#281` II-B) moves
+behavioral `@dispatch` off the stringly-typed `Contract.operation#value` runtime
+dictionary and onto the **same `PolymorphicDispatchDecl` rail the emitter uses for
+SHAPES**. For each dispatched seam every language emits, as a **library** artifact, the
+twin of the shape `Load` switch: a **provider type** (one slot per `@dispatch` variant)
+plus a **completeness-checked resolver** (`resolve_<seam>(kind, provider)`) selecting the
+consumer-attached `I<Seam>` impl.
+
+Landed in Part III: the IR seam (`CallableDispatch.decl` →
+the discriminator model's `PolymorphicDispatchDecl`), provider + resolver emission for all
+7 runtimes, and a permanent per-language proof test asserting rendered target code —
+positive routing reproduces each vector's `expected`, and a missing provider slot **fails
+to compile** (C#/TS/Java/Rust/Swift) or **raises at collection** (Go/Python). Enforcement:
+compile-time for C#/TS/Java/Rust/Swift, runtime for Go/Python.
+
+Deliberately **retained** (Phase-3 decision, permitted by #282 §7): the `#value`
+conformance-harness runner. The resolvers were emitted **additively** — the emitted
+monolithic conformance harness still routes dispatched vectors through the `#value` dispatch
+branch, so deleting it without first migrating the emitted dispatched conformance to typed
+call sites would regress dispatched conformance. The undispatched single-adapter branch is
+untouched (no regression). Migrating the emitted dispatched conformance to typed call sites
+(per-interface files in namespace folders, §8) and retiring the dispatched `#value` branch is
+the scoped remaining Part III work; **#282 stays open** until it lands.
+
+Full Part III design, the Phase-3 decision rationale, and the explicit follow-up acceptance
+gates live in [`dispatch-typed-resolver-plan.md`](./dispatch-typed-resolver-plan.md).
+
+---
+
 # Sequencing
 
 1. **Runner extraction first (enabler).** Execute end-to-end across all 7 runtimes as one
