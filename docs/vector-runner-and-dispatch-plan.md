@@ -262,7 +262,7 @@ documented as best-effort per language.
 
 ---
 
-# Part III — typed `@dispatch` resolver (landed rail; conformance migration scoped)
+# Part III — typed `@dispatch` resolver (landed: rail + typed conformance)
 
 Part III (issue `sethjuarez/typra#282`, continuing `#280` II-A + `#281` II-B) moves
 behavioral `@dispatch` off the stringly-typed `Contract.operation#value` runtime
@@ -279,17 +279,22 @@ positive routing reproduces each vector's `expected`, and a missing provider slo
 to compile** (C#/TS/Java/Rust/Swift) or **raises at collection** (Go/Python). Enforcement:
 compile-time for C#/TS/Java/Rust/Swift, runtime for Go/Python.
 
-Deliberately **retained** (Phase-3 decision, permitted by #282 §7): the `#value`
-conformance-harness runner. The resolvers were emitted **additively** — the emitted
-monolithic conformance harness still routes dispatched vectors through the `#value` dispatch
-branch, so deleting it without first migrating the emitted dispatched conformance to typed
-call sites would regress dispatched conformance. The undispatched single-adapter branch is
-untouched (no regression). Migrating the emitted dispatched conformance to typed call sites
-(per-interface files in namespace folders, §8) and retiring the dispatched `#value` branch is
-the scoped remaining Part III work; **#282 stays open** until it lands.
+Also landed: the emitted **`@vector` conformance is now typed** for all 7 languages. Each
+language partitions its vectors — typed (polymorphic-`decl`) entries emit **per-interface
+conformance files in namespace folders** (§8 parity with the `@sample`/model-test
+convention) that import the consumer provider, call `resolve_<seam>`, and invoke the typed
+seam with typed input; the monolithic stringly runner + its `#value` dispatch branch are
+emitted **only when undispatched vectors remain**. A fully-dispatched group emits no
+stringly artifact (verified: zero `operation#value` routing in the emitted tree).
 
-Full Part III design, the Phase-3 decision rationale, and the explicit follow-up acceptance
-gates live in [`dispatch-typed-resolver-plan.md`](./dispatch-typed-resolver-plan.md).
+Deliberately **retained** (permitted by #282 §7): the `#value` runner **strictly as the
+undispatched safety net**. A `@dispatch` whose discriminator model is not polymorphic
+carries a path but no `decl`, so it stays on the stringly runner and its conformance is
+never silently dropped. The undispatched single-adapter branch is untouched (no regression).
+#282 is **closed** by this work.
+
+Full Part III design, the Phase-3 resolution rationale, and the acceptance gates live in
+[`dispatch-typed-resolver-plan.md`](./dispatch-typed-resolver-plan.md).
 
 ---
 

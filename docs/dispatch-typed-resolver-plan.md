@@ -1,7 +1,7 @@
 # Plan: Part III — typed `@dispatch` resolver (reusing the polymorphic-dispatch rail)
 
-Status: **rail landed, emitted-conformance migration scoped as the remaining Part III
-work.** This document is the source of truth for Part III of the behavioral-dispatch
+Status: **landed — typed rail + per-interface typed conformance migrated for all 7
+languages.** This document is the source of truth for Part III of the behavioral-dispatch
 investment. It continues Part II (`#280` II-A, `#281` II-B, both merged) and implements
 the typed-resolver design of issue **`sethjuarez/typra#282`**.
 
@@ -70,11 +70,12 @@ The §5 test contract is satisfied at both extremes by siblings: `dispatch-resol
 `dispatch-emission.closed-loop.test.ts` still locks the wrong-route decoy control against the
 emitted runtime harness.
 
-## Phase 3 decision: retain the `#value` conformance-harness runner (for now)
+## Phase 3 — typed conformance migrated; `#value` retained only as the undispatched net
 
-Issue #282 §7 explicitly leaves open: *"Decide whether to fully delete the `#value` runtime
-dictionary or retain it strictly for undispatched seams,"* under the constraint *"Undispatched
-seams: keep current behavior; no regression. Only dispatched seams change."*
+Issue #282 §7 left open: *"Decide whether to fully delete the `#value` runtime dictionary
+or retain it strictly for undispatched seams,"* under the constraint *"Undispatched seams:
+keep current behavior; no regression. Only dispatched seams change."* Part III resolves it:
+**the `#value` runtime dictionary is retained strictly for undispatched seams.**
 
 **Ground truth (established by reading the emitted harness):**
 
@@ -83,46 +84,44 @@ seams: keep current behavior; no regression. Only dispatched seams change."*
   a per-key adapter `Contract.operation#<value>` in a runtime-authored registry. Undispatched
   seams use a **separate else-branch** (single-adapter lookup) and never touch the dispatch
   branch.
-- The resolvers were emitted **additively**. The emitted **conformance harness**
-  (`VectorConformanceTests.<lang>` / `test_vector_conformance.py`, one monolithic file per
-  language) was **not** rewritten — it still routes dispatched vectors through the `#value`
-  dispatch branch. No emitted conformance code calls the emitted resolver; only the sibling
-  proof tests do.
-- The conformance model has the consumer author **runtime `VectorAdapter`s** (JSON-in/JSON-out
-  `invoke`). A typed emitted conformance that consumes the resolver instead needs typed seam
-  impls, typed input construction, and typed comparison — a **parallel harness model** and a
-  **consumer-authoring-contract change**, replicated across 7 languages, that also rewrites the
-  committed §5 closed-loop lock.
+- A `@dispatch` whose discriminator model is **not** polymorphic carries a path but **no
+  `decl`** (`isTypedDispatchEntry(entry) === Boolean(entry.dispatch?.decl)` is false). Such a
+  seam stays on the stringly `#value` runner so its conformance is never silently dropped —
+  this is why the dispatch branch is a required **undispatched safety net**, not dead code.
 
-**Decision.** Retain the `#value` path as the shared vector-conformance harness runner in this
-PR. Do **not** delete the dispatch branch and do **not** rewrite the 7 emitted conformance
-harnesses here, because deleting the branch without the conformance rewrite would **regress
-dispatched conformance** (the harness would lose its only routing for mustache-vs-jinja2), and
-the rewrite's regression surface (the whole conformance suite + validate goldens + the §5 lock)
-is disproportionate to land verified, deterministic, and idempotent (no growth of the #238
-deferral set) in one pass. "Undispatched behavior must not regress" is honored trivially — the
-undispatched else-branch is untouched.
+**What changed.** Each language's `@vector` conformance emitter now **partitions** its vectors:
+typed (polymorphic-`decl`) entries are emitted as **per-interface typed conformance files in
+namespace folders** (§8 file-layout parity with the `@sample`/model-test convention), and the
+monolithic stringly runner (`VectorConformanceTests` / `vector_conformance_test` /
+`test_vector_conformance`) + its `#value` dispatch branch are emitted **only when undispatched
+vectors remain**. For a fully-dispatched group (e.g. `dispatch-seam`) **no** stringly artifact
+is emitted at all — verified: the emitted tree contains zero `operation#value` routing and zero
+monolithic runner files.
 
-This PR therefore lands the **typed-resolver rail** (emission + per-language proofs) as the
-durable Part III output. It does **not** close #282: the emitted-conformance migration below is
-the remaining core deliverable.
+Each per-interface conformance file **imports the consumer-attached provider**, **calls the
+emitted `resolve_<seam>`** (the twin of the shape `Load` switch), and **invokes the typed seam**
+with typed input built from the emitted models' `FromJson`, reading the SAME discriminator the
+shape `Load` switch reads through the typed accessor chain. The consumer authors typed seam
+impls + a provider **value** outside the emitted tree (`VectorProviders.renderer()` /
+`renderer_provider` fixture / `vector_adapters::renderer_provider()` / `rendererProvider`).
 
-## Remaining Part III work (follow-up, keep #282 open)
+**Acceptance gates — all met:**
 
-Migrate the emitted **dispatched** conformance to typed call sites and retire the dispatched
-`#value` branch. Explicit acceptance gates (per §8 file-layout parity with the `@sample`/model
-convention — per-interface files in namespace folders):
-
-1. The emitted dispatched conformance **imports the provider**, **calls `resolve_<seam>`**, and
-   **invokes the typed seam** with typed input — for all 7 languages.
-2. No emitted **dispatched** conformance file contains `operation#value` (the dispatched branch
-   is gone); the **undispatched** single-adapter else-branch is preserved unchanged.
-3. The §5 wrong-route negative is re-expressed as a **typed** misroute control (replacing the
-   stringly closed-loop decoy), and the missing-attachment negatives (compile-fail /
-   collection-fail) remain green.
+1. The emitted dispatched conformance imports the provider, calls `resolve_<seam>`, and invokes
+   the typed seam with typed input — for all 7 languages (csharp, python, typescript, java,
+   swift, go, rust).
+2. No emitted **dispatched** conformance file contains `operation#value`; the **undispatched**
+   single-adapter else-branch (and its dispatch branch, for non-polymorphic `@dispatch`) is
+   preserved unchanged.
+3. The §5 negatives hold: the missing-attachment control fails to compile (C#/TS/Java/Rust/Swift)
+   or raises at collection/construction (Go/Python), and the wrong-route decoy stays locked in
+   `dispatch-emission.closed-loop.test.ts` (all 7 languages now assert typed call sites).
 4. Zero-diff double-regen; `npm test`, `npm run validate:fixtures`, `npm run lint` green; the
    #238 idempotency deferral set (rust/rust-serde/swift/swift-codable/java/java-jackson/
-   typescript-zod) does not grow.
+   typescript-zod) did not grow.
+
+Part III therefore lands **both** the typed-resolver rail (emission + per-language proofs) and
+the typed emitted-conformance migration, and closes #282.
 
 ## Hard constraints (unchanged from Parts I/II)
 
