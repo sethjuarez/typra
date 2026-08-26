@@ -6,6 +6,17 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [1.1.0](https://github.com/sethjuarez/typra/compare/v1.0.1...v1.1.0) (2026-08-26)
+
+
+### Features
+
+* **emitter:** emit symmetric fromWire(provider) for [@known](https://github.com/known)As wire mappings ([#276](https://github.com/sethjuarez/typra/issues/276)) ([f7ecba8](https://github.com/sethjuarez/typra/commit/f7ecba82d7984dfdca2a695bba5dcf5131abeebe))
+* **emitter:** generate requirement guard for [@vector](https://github.com/vector) conformance harnesses ([#275](https://github.com/sethjuarez/typra/issues/275)) ([7cfba88](https://github.com/sethjuarez/typra/commit/7cfba88294bc2819cf8742f5ef06fac5ec780755))
+* **emitter:** resolve [@dispatch](https://github.com/dispatch) discriminator access path in callable IR (Part II-A) ([#280](https://github.com/sethjuarez/typra/issues/280)) ([45fdf05](https://github.com/sethjuarez/typra/commit/45fdf05d5983e0dffe46bfd7fd15c49a021aac7f))
+* **emitter:** route [@dispatch](https://github.com/dispatch) by discriminator in emitted vector harness ([#281](https://github.com/sethjuarez/typra/issues/281)) ([bdd4ef9](https://github.com/sethjuarez/typra/commit/bdd4ef9e23d7a8b1875dd38172ff820fbac9a626))
+* **emitter:** typed [@dispatch](https://github.com/dispatch) resolver reusing the polymorphic-dispatch rail ([#283](https://github.com/sethjuarez/typra/issues/283)) ([c126d1f](https://github.com/sethjuarez/typra/commit/c126d1fcbe3abe96fb3fcf9af0bd0181cd652354))
+
 ## [1.0.1](https://github.com/sethjuarez/typra/compare/v1.0.0...v1.0.1) (2026-08-21)
 
 
