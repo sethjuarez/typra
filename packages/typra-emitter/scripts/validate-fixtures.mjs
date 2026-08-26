@@ -30,10 +30,14 @@ import {
 } from "./fixtures/conformance.mjs";
 import {
   runGeneratedTypeScriptCompile,
+  runGeneratedTypeScriptWebCompile,
   runGeneratedTypeScriptZodCompile,
+  runGeneratedTypeScriptZodWebCompile,
   runTypeScriptExecutableConformance,
   runTypeScriptGeneratedTests,
+  runTypeScriptWebRuntimeSmoke,
   runTypeScriptZodExecutableConformance,
+  runTypeScriptZodWebRuntimeSmoke,
 } from "./fixtures/targets/typescript.mjs";
 import {
   runPythonCompile,
@@ -97,6 +101,10 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "vector-adapters.author",
   "typescript.compile",
   "typescript-zod.compile",
+  "typescript.web-compile",
+  "typescript-zod.web-compile",
+  "typescript.web-runtime",
+  "typescript-zod.web-runtime",
   "typescript.runtime-neutrality",
   "typescript.generated-tests",
   "python.compile",
@@ -2134,6 +2142,10 @@ function runDeclaredValidationStages() {
       ["vector-adapters.author", authorVectorAdapters],
       ["typescript.compile", runGeneratedTypeScriptCompile],
       ["typescript-zod.compile", runGeneratedTypeScriptZodCompile],
+      ["typescript.web-compile", runGeneratedTypeScriptWebCompile],
+      ["typescript-zod.web-compile", runGeneratedTypeScriptZodWebCompile],
+      ["typescript.web-runtime", runTypeScriptWebRuntimeSmoke],
+      ["typescript-zod.web-runtime", runTypeScriptZodWebRuntimeSmoke],
       ["typescript.runtime-neutrality", assertTypeScriptRuntimeNeutrality],
       ["python.compile", () => runPythonCompile()],
       ["python_pydantic.compile", () => runPythonCompile("python_pydantic")],
