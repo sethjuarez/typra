@@ -38,11 +38,11 @@ import {
   TypeResolver,
 } from "../../testing/test-context.js";
 import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
+import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
 import {
-  isClosedPolymorphicDispatch,
-  PolymorphicDispatchDecl,
-} from "../../ir/declarations.js";
-import { CallableVectorSnapshotEntry } from "../../ir/vector.js";
+  collectDispatchedContracts,
+  DispatchedContract,
+} from "../../ir/vector.js";
 
 /**
  * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the
@@ -1096,47 +1096,8 @@ function emitCSharpVectorConformanceTest(
  * A dispatched seam interface that needs a Part III resolver emitted: its
  * interface name plus the SAME `PolymorphicDispatchDecl` that drives the shape
  * `Load` switch, and the namespace/group the resolver file is placed under.
+ * Shared with the other language emitters (see `../../ir/vector.js`).
  */
-interface DispatchedContract {
-  contract: string;
-  decl: PolymorphicDispatchDecl;
-  namespace: string;
-  group: string;
-}
-
-/**
- * Collect the distinct dispatched seam interfaces from the vector snapshot,
- * deduped by contract and sorted by `(namespace, contract)` for zero-diff
- * regen (issue #282 §8.5). Only entries whose `@dispatch` links to a lowered
- * `PolymorphicDispatchDecl` (Phase 0 IR edge) participate; undispatched seams
- * are skipped so their output stays byte-identical.
- */
-function collectDispatchedContracts(
-  entries: CallableVectorSnapshotEntry[],
-): DispatchedContract[] {
-  const byContract = new Map<string, DispatchedContract>();
-  for (const entry of entries) {
-    const decl = entry.dispatch?.decl;
-    if (!decl) continue;
-    // Key by (namespace, group, contract): the same seam name can legitimately
-    // recur in different namespaces, and each needs its own resolver file.
-    const key = `${entry.namespace}\u0000${entry.group}\u0000${entry.contract}`;
-    if (!byContract.has(key)) {
-      byContract.set(key, {
-        contract: entry.contract,
-        decl,
-        namespace: entry.namespace,
-        group: entry.group,
-      });
-    }
-  }
-  return [...byContract.values()].sort(
-    (left, right) =>
-      left.namespace.localeCompare(right.namespace) ||
-      left.group.localeCompare(right.group) ||
-      left.contract.localeCompare(right.contract),
-  );
-}
 
 /**
  * Emit the Part III C# dispatch resolver for one seam interface — the behavioral

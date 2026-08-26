@@ -8,6 +8,7 @@ import {
 import { getStateValue } from "../decorators.js";
 import { StateKeys, TypraEmitterOptions } from "../lib.js";
 import type { CallableContract, CallableDispatch } from "./callable.js";
+import type { PolymorphicDispatchDecl } from "./declarations.js";
 
 export interface VectorEntry {
   name?: string;
@@ -80,6 +81,53 @@ export interface CallableVectorSnapshot {
   emitter: "typra-emitter";
   version: 1;
   vectors: CallableVectorSnapshotEntry[];
+}
+
+/**
+ * One dispatched seam interface distilled from the vector snapshot: the seam
+ * contract name, the SAME lowered `PolymorphicDispatchDecl` that drives its
+ * shape `Load`/discriminator switch (Phase 0 IR edge), and its namespace/group
+ * so each language emitter can place the resolver in the seam's folder.
+ */
+export interface DispatchedContract {
+  contract: string;
+  decl: PolymorphicDispatchDecl;
+  namespace: string;
+  group: string;
+}
+
+/**
+ * Collect the distinct dispatched seam interfaces from the vector snapshot,
+ * deduped by `(namespace, group, contract)` — the same seam name can recur in
+ * different namespaces, and each needs its own resolver — and sorted for
+ * zero-diff regen (issue #282 §8.5). Only entries whose `@dispatch` links to a
+ * lowered `PolymorphicDispatchDecl` participate; undispatched seams are skipped
+ * so their output stays byte-identical. Shared by every language emitter so the
+ * Part III resolver rides the SAME rail as the shape discriminator switch.
+ */
+export function collectDispatchedContracts(
+  entries: CallableVectorSnapshotEntry[],
+): DispatchedContract[] {
+  const byContract = new Map<string, DispatchedContract>();
+  for (const entry of entries) {
+    const decl = entry.dispatch?.decl;
+    if (!decl) continue;
+    const key = `${entry.namespace}\u0000${entry.group}\u0000${entry.contract}`;
+    if (!byContract.has(key)) {
+      byContract.set(key, {
+        contract: entry.contract,
+        decl,
+        namespace: entry.namespace,
+        group: entry.group,
+      });
+    }
+  }
+  return [...byContract.values()].sort(
+    (left, right) =>
+      left.namespace.localeCompare(right.namespace) ||
+      left.group.localeCompare(right.group) ||
+      left.contract.localeCompare(right.contract),
+  );
 }
 
 export function lowerOperationVectors(

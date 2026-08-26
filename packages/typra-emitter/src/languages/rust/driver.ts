@@ -18,11 +18,11 @@ import {
   rustTestOptions,
 } from "../../testing/test-context.js";
 import { toSnakeCase } from "../../ir/utilities.js";
+import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
 import {
-  isClosedPolymorphicDispatch,
-  PolymorphicDispatchDecl,
-} from "../../ir/declarations.js";
-import { CallableVectorSnapshotEntry } from "../../ir/vector.js";
+  collectDispatchedContracts,
+  DispatchedContract,
+} from "../../ir/vector.js";
 import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
 import { emitRustFile as emitRustFileDecl, RUST_ALLOW_ATTR } from "./emitter.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
@@ -316,7 +316,7 @@ export const generateRust = async (
   // tracked follow-up (issue #282).
   const resolverModuleNames = new Map<string, string[]>();
   if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
-    for (const dispatched of collectRustDispatchedContracts(
+    for (const dispatched of collectDispatchedContracts(
       options!.callableVectors!.vectors,
     )) {
       const moduleName = `${toSnakeCase(dispatched.contract)}_resolver`;
@@ -1445,44 +1445,9 @@ function rustVectorSlug(
 /**
  * One dispatched seam contract: the discriminated interface plus the lowered
  * `PolymorphicDispatchDecl` its `@dispatch` resolves on, and the namespace/group
- * that places its resolver module in the crate tree.
+ * that places its resolver module in the crate tree. Shared with the other
+ * language emitters as `DispatchedContract` (see `../../ir/vector.js`).
  */
-interface RustDispatchedContract {
-  contract: string;
-  decl: PolymorphicDispatchDecl;
-  namespace: string;
-  group: string;
-}
-
-/**
- * Dedup the raw per-vector snapshot down to one entry per dispatched seam,
- * keyed by (namespace, group, contract) so the same seam name in different
- * namespaces gets its own resolver. Deterministic order for zero-diff regen.
- */
-function collectRustDispatchedContracts(
-  entries: CallableVectorSnapshotEntry[],
-): RustDispatchedContract[] {
-  const byContract = new Map<string, RustDispatchedContract>();
-  for (const entry of entries) {
-    const decl = entry.dispatch?.decl;
-    if (!decl) continue;
-    const key = `${entry.namespace}\u0000${entry.group}\u0000${entry.contract}`;
-    if (!byContract.has(key)) {
-      byContract.set(key, {
-        contract: entry.contract,
-        decl,
-        namespace: entry.namespace,
-        group: entry.group,
-      });
-    }
-  }
-  return [...byContract.values()].sort(
-    (left, right) =>
-      left.namespace.localeCompare(right.namespace) ||
-      left.group.localeCompare(right.group) ||
-      left.contract.localeCompare(right.contract),
-  );
-}
 
 /**
  * Emit the Part III behavioral @dispatch resolver for one seam — the Rust twin
@@ -1503,7 +1468,7 @@ function collectRustDispatchedContracts(
  * base, so a closed dispatch panics here too; a default/open dispatch has no
  * base impl and yields `None`.
  */
-function emitRustDispatchResolver(entry: RustDispatchedContract): string {
+function emitRustDispatchResolver(entry: DispatchedContract): string {
   const seam = entry.contract;
   const providerTrait = `${seam}Provider`;
   const field = entry.decl.discriminatorField;
