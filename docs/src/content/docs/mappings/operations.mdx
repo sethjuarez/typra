@@ -106,9 +106,10 @@ data conformance.
 
 ## Converting previous callable decorators
 
-Some existing Typra contracts may describe callable seams with model-level
-decorators. Convert those declarations to TypeSpec-native interfaces and
-operations before adding new coverage.
+The `@protocol` and `@method` model-level decorators were removed in Typra 2.0.0.
+Some existing Typra contracts may still describe callable seams with those
+model-level decorators. Convert those declarations to TypeSpec-native interfaces
+and operations before adding new coverage.
 
 | Previous decorator form | TypeSpec-native form |
 | --- | --- |

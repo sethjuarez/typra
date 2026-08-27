@@ -5,7 +5,6 @@ export {
   $abstract,
   $coerce,
   $factory,
-  $method,
   $runtimeCancellable,
   $sync,
   $effect,
@@ -13,7 +12,6 @@ export {
   $knownAs,
   $defaultFor,
   $parseAlias,
-  $protocol,
   $entryShorthand,
 } from "./decorators.js";
 export {

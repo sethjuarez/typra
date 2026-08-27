@@ -19,7 +19,6 @@ model Root {
 
 @@coerce(Reference, string, #{ id: "{value}", label: "coerced reference" }, "reference", "Load a reference from an id string.", "ref-1");
 @@factory(Reference, "named", #{ id: "{id}", label: "{label}" }, #{ id: "string", label: "string" });
-@@method(Reference, "display", "string", "Render the reference label.", #{ prefix: "string" }, true, true);
 model Reference {
   id: string;
   label?: string;
