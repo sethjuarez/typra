@@ -693,6 +693,7 @@ function assertFocusedFeatureFixtures() {
     "features/wire/main.tsp",
     "features/transport/main.tsp",
     "features/dispatch/main.tsp",
+    "features/dispatch-union-coerce/main.tsp",
   );
 
   for (const fixture of fixtures) {
