@@ -1419,13 +1419,13 @@ function emitCSharpDispatchResolver(
   lines.push(`public static class ${resolver}`);
   lines.push("{");
   lines.push(
-    `    public static ${seam}? Resolve(string ${field}, ${provider} provider) =>`,
+    `    public static ${seam}? Resolve(string ${field}, ${provider} registry) =>`,
   );
   lines.push(`        ${field} switch`);
   lines.push("        {");
   for (const variant of variants) {
     lines.push(
-      `            ${JSON.stringify(variant.value)} => provider.${toPascalCase(
+      `            ${JSON.stringify(variant.value)} => registry.${toPascalCase(
         variant.value,
       )},`,
     );

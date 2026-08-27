@@ -1026,12 +1026,12 @@ function emitJavaDispatchResolver(
     `public final class ${resolver} {`,
     `  private ${resolver}() {}`,
     "",
-    `  public static ${seam} resolve(String ${field}, ${provider} provider) {`,
+    `  public static ${seam} resolve(String ${field}, ${provider} registry) {`,
     `    switch (${field}) {`,
   ];
   for (const variant of variants) {
     lines.push(`      case ${JSON.stringify(variant.value)}:`);
-    lines.push(`        return provider.${javaMethodName(variant.value)}();`);
+    lines.push(`        return registry.${javaMethodName(variant.value)}();`);
   }
   lines.push("      default:");
   if (rejectsUnknown) {

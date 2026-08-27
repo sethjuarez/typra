@@ -283,7 +283,7 @@ describe("typed @dispatch resolver is a compile-time contract (TypeScript)", () 
       );
       assert.match(
         resolverSrc,
-        /export function resolveRenderer\(\s*kind: string,\s*provider: RendererProvider,\s*\): Renderer \| null/,
+        /export function resolveRenderer\(\s*kind: string,\s*registry: RendererProvider,\s*\): Renderer \| null/,
       );
       assert.match(resolverSrc, /case "mustache":/);
       // Closed dispatch: an unknown discriminator is a hard error, never null.

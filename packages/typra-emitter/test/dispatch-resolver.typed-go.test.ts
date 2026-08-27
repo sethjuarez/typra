@@ -333,9 +333,9 @@ describe("typed @dispatch resolver is a runtime-enforced contract (Go)", () => {
       assert.match(resolverSrc, /is missing @dispatch variant/);
       assert.match(
         resolverSrc,
-        /func ResolveRenderer\(kind string, provider RendererProvider\) \(Renderer, error\)/,
+        /func ResolveRenderer\(kind string, registry RendererProvider\) \(Renderer, error\)/,
       );
-      assert.match(resolverSrc, /case "mustache":\s*\n\s*return provider\.Mustache, nil/);
+      assert.match(resolverSrc, /case "mustache":\s*\n\s*return registry\.Mustache, nil/);
       // Closed dispatch: an unknown discriminator is a hard error, never a silent
       // nil miss.
       assert.match(

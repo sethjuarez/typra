@@ -832,12 +832,12 @@ function emitSwiftDispatchResolver(entry: DispatchedContract): string {
   lines.push(`public enum ${resolver} {`);
   const throwsClause = rejectsUnknown ? "throws " : "";
   lines.push(
-    `  public static func resolve(${param}: String, provider: any ${provider}) ${throwsClause}-> (any ${seam})? {`,
+    `  public static func resolve(${param}: String, registry: any ${provider}) ${throwsClause}-> (any ${seam})? {`,
   );
   lines.push(`    switch ${param} {`);
   for (const variant of variants) {
     lines.push(
-      `    case ${swiftStringLiteral(variant.value)}: return provider.${swiftPropertyName(
+      `    case ${swiftStringLiteral(variant.value)}: return registry.${swiftPropertyName(
         variant.value,
       )}`,
     );
@@ -1054,7 +1054,7 @@ function emitSwiftInterfaceConformanceTest(
       `    let ${swiftPropertyName(rawField)} = ${accessor}`,
       `    guard let impl = ${resolveTry}${resolver}.resolve(${swiftPropertyName(
         rawField,
-      )}: ${swiftPropertyName(rawField)}, provider: provider()) else {`,
+      )}: ${swiftPropertyName(rawField)}, registry: provider()) else {`,
       `      XCTFail(${swiftStringLiteral(
         `${vectorName}: no ${seam} attached for `,
       )} + ${swiftPropertyName(rawField)})`,

@@ -325,9 +325,9 @@ describe("typed @dispatch resolver is a compile-time contract (Rust)", () => {
       assert.match(resolverSrc, /fn liquid\(&self\) -> Option<&dyn Renderer>;/);
       assert.match(
         resolverSrc,
-        /pub fn resolve<'a>\(kind: &str, provider: &'a dyn RendererProvider\) -> Option<&'a dyn Renderer>/,
+        /pub fn resolve<'a>\(kind: &str, registry: &'a dyn RendererProvider\) -> Option<&'a dyn Renderer>/,
       );
-      assert.match(resolverSrc, /"mustache" => provider\.mustache\(\),/);
+      assert.match(resolverSrc, /"mustache" => registry\.mustache\(\),/);
       // Closed dispatch: an unknown discriminator is a hard error, never None.
       assert.match(resolverSrc, /other => panic!/);
 

@@ -156,7 +156,7 @@ const MAIN = [
   '  let agent = try Agent.load(input["agent"]!)',
   '  let inputs = try Inputs.load(input["inputs"]!)',
   '  let kind = (try agent.template.format.save())["kind"] as! String',
-  "  guard let renderer = try RendererResolver.resolve(kind: kind, provider: provider) else {",
+  "  guard let renderer = try RendererResolver.resolve(kind: kind, registry: provider) else {",
   '    print("FAIL \\(name): no impl attached for \\(kind)")',
   "    failures += 1",
   "    continue",
@@ -266,9 +266,9 @@ describe("typed @dispatch resolver is a compile-time contract (Swift)", () => {
       assert.match(resolverSrc, /var liquid: \(any Renderer\)\? \{ get \}/);
       assert.match(
         resolverSrc,
-        /public static func resolve\(kind: String, provider: any RendererProvider\) throws -> \(any Renderer\)\?/,
+        /public static func resolve\(kind: String, registry: any RendererProvider\) throws -> \(any Renderer\)\?/,
       );
-      assert.match(resolverSrc, /case "mustache": return provider\.mustache/);
+      assert.match(resolverSrc, /case "mustache": return registry\.mustache/);
       // Closed dispatch: an unknown discriminator is a hard error, never nil.
       assert.match(
         resolverSrc,

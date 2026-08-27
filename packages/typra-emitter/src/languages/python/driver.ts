@@ -2206,7 +2206,7 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
   lines.push("");
   lines.push("");
   lines.push(
-    `def resolve_${toSnakeCase(seam)}(${param}: str, provider: ${provider}) -> ${seam} | None:`,
+    `def resolve_${toSnakeCase(seam)}(${param}: str, registry: ${provider}) -> ${seam} | None:`,
   );
   if (rejectsUnknown) {
     lines.push(
@@ -2242,7 +2242,7 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
   variants.forEach((variant, index) => {
     const keyword = index === 0 ? "if" : "elif";
     lines.push(`    ${keyword} ${param} == ${JSON.stringify(variant.value)}:`);
-    lines.push(`        return provider.${slot(variant.value)}`);
+    lines.push(`        return registry.${slot(variant.value)}`);
   });
   if (rejectsUnknown) {
     lines.push("    raise ValueError(");

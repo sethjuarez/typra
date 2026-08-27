@@ -1161,13 +1161,13 @@ function emitTypeScriptDispatchResolver(entry: DispatchedContract): string {
     " */",
     `export function resolve${seam}(`,
     `  ${field}: string,`,
-    `  provider: ${provider},`,
+    `  registry: ${provider},`,
     `): ${seam} | null {`,
     `  switch (${field}) {`,
   ];
   for (const variant of variants) {
     lines.push(`    case ${JSON.stringify(variant.value)}:`);
-    lines.push(`      return provider[${JSON.stringify(variant.value)}];`);
+    lines.push(`      return registry[${JSON.stringify(variant.value)}];`);
   }
   if (rejectsUnknown) {
     lines.push("    default:");

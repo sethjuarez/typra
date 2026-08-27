@@ -207,4 +207,53 @@ describe("typed @vector conformance over a coerce-union discriminator with a bar
       }
     }
   });
+
+  // Bug #4 regression: when the @dispatch discriminator field is literally
+  // `provider` (Processor is `@dispatch(Model.provider)`), the per-interface
+  // resolver used to name BOTH its discriminator param and its registry param
+  // `provider` — a duplicate-argument SyntaxError (python) / non-compiling
+  // signature (rust/go/c#/java/ts) that aborted the whole conformance rail. The
+  // registry param is now the fixed `registry`, distinct from the field-named
+  // discriminator param, so `provider`-discriminated resolvers compile.
+  it("provider-discriminated resolver uses a distinct `registry` param (no duplicate `provider`)", () => {
+    const py = readFileSync(
+      path.join(output, "python", "_processor_resolver.py"),
+      "utf8",
+    );
+    assert.match(
+      py,
+      /def resolve_processor\(provider: str, registry: ProcessorProvider\)/,
+      `python provider-dispatch resolver must have distinct discriminator/registry params\n--- emitted ---\n${py}`,
+    );
+    assert.doesNotMatch(
+      py,
+      /def resolve_processor\(provider: str, provider:/,
+      "python provider-dispatch resolver must not emit a duplicate `provider` param",
+    );
+    assert.match(
+      py,
+      /if provider == "openai":\s*\n\s*return registry\.openai/,
+      "python resolver body must read the discriminator (`provider`) and route via the registry",
+    );
+
+    const rs = readFileSync(
+      path.join(output, "rust", "processor_resolver.rs"),
+      "utf8",
+    );
+    assert.match(
+      rs,
+      /pub fn resolve<'a>\(provider: &str, registry: &'a dyn ProcessorProvider\)/,
+      `rust provider-dispatch resolver must have distinct discriminator/registry params\n--- emitted ---\n${rs}`,
+    );
+    assert.doesNotMatch(
+      rs,
+      /\(provider: &str, provider:/,
+      "rust provider-dispatch resolver must not emit a duplicate `provider` param",
+    );
+    assert.match(
+      rs,
+      /"openai" => registry\.openai\(\),/,
+      "rust resolver body must route via the registry, not the shadowed discriminator",
+    );
+  });
 });

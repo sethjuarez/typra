@@ -1567,12 +1567,12 @@ function emitRustDispatchResolver(entry: DispatchedContract): string {
   );
   lines.push("/// the behavioral twin of the shape discriminator match.");
   lines.push(
-    `pub fn resolve<'a>(${toSnakeCase(field)}: &str, provider: &'a dyn ${providerTrait}) -> Option<&'a dyn ${seam}> {`,
+    `pub fn resolve<'a>(${toSnakeCase(field)}: &str, registry: &'a dyn ${providerTrait}) -> Option<&'a dyn ${seam}> {`,
   );
   lines.push(`    match ${toSnakeCase(field)} {`);
   for (const variant of variants) {
     lines.push(
-      `        ${JSON.stringify(variant.value)} => provider.${toSnakeCase(
+      `        ${JSON.stringify(variant.value)} => registry.${toSnakeCase(
         variant.value,
       )}(),`,
     );

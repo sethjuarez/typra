@@ -1731,10 +1731,10 @@ function emitFromWireMethod(type: TypeDecl, lines: string[]): void {
   lines.push("        }");
 
   lines.push("        inverse: dict[str, str] = {}");
-  lines.push("        for field, m in wire_map.items():");
+  lines.push("        for field_name, m in wire_map.items():");
   lines.push("            w = m.get(provider)");
   lines.push("            if w:");
-  lines.push("                inverse[w] = field");
+  lines.push("                inverse[w] = field_name");
   lines.push("        canonical: dict[str, Any] = {}");
   lines.push("        for k, v in data.items():");
   lines.push("            canonical[inverse.get(k, k)] = v");

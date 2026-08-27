@@ -489,12 +489,12 @@ function emitGoDispatchResolver(
     lines.push("// skip explicitly.");
   }
   lines.push(
-    `func Resolve${seam}(${goDispatchParam(rawField)} string, provider ${provider}) (${seam}, error) {`,
+    `func Resolve${seam}(${goDispatchParam(rawField)} string, registry ${provider}) (${seam}, error) {`,
   );
   lines.push(`\tswitch ${goDispatchParam(rawField)} {`);
   for (const variant of variants) {
     lines.push(`\tcase ${JSON.stringify(variant.value)}:`);
-    lines.push(`\t\treturn provider.${goFieldName(variant.value)}, nil`);
+    lines.push(`\t\treturn registry.${goFieldName(variant.value)}, nil`);
   }
   if (rejectsUnknown) {
     lines.push("\tdefault:");

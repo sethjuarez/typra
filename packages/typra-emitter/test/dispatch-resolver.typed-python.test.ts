@@ -246,9 +246,9 @@ describe("typed @dispatch resolver is a runtime-enforced contract (Python)", () 
       assert.match(resolverSrc, /is missing @dispatch variant/);
       assert.match(
         resolverSrc,
-        /def resolve_renderer\(kind: str, provider: RendererProvider\) -> Renderer \| None/,
+        /def resolve_renderer\(kind: str, registry: RendererProvider\) -> Renderer \| None/,
       );
-      assert.match(resolverSrc, /if kind == "mustache":\s*\n\s*return provider\.mustache/);
+      assert.match(resolverSrc, /if kind == "mustache":\s*\n\s*return registry\.mustache/);
       // Closed dispatch: an unknown discriminator is a hard error, never a
       // silent None miss.
       assert.match(
