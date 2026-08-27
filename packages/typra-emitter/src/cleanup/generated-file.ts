@@ -163,10 +163,50 @@ export async function emitGeneratedFile(
     : normalizedContent;
   recordGeneratedFile(context.program, filePath, marker, options.outputRoot);
 
-  await emitFile(context.program, {
-    path: filePath,
-    content: finalContent,
-  });
+  await writeGeneratedFileWithRetry(context, filePath, finalContent);
+}
+
+/**
+ * Transient filesystem errors an anti-virus / indexer can inflict on a freshly
+ * written file on Windows: the open handle the scanner holds surfaces as
+ * `UNKNOWN`/`EBUSY`/`EPERM`/`EACCES` on the emitter's own write. They are not a
+ * code defect and clear within a few milliseconds, so a bounded backoff makes a
+ * large multi-file emit self-heal instead of crashing mid-run (e.g. the observed
+ * `UNKNOWN: open …_context.py` while emitting hundreds of files under Defender).
+ */
+const TRANSIENT_WRITE_ERROR_CODES = new Set([
+  "UNKNOWN",
+  "EBUSY",
+  "EPERM",
+  "EACCES",
+]);
+const WRITE_RETRY_BACKOFFS_MS = [20, 40, 80, 160];
+
+async function writeGeneratedFileWithRetry(
+  context: EmitContext<TypraEmitterOptions>,
+  filePath: string,
+  content: string,
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await emitFile(context.program, { path: filePath, content });
+      return;
+    } catch (error) {
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? String((error as { code: unknown }).code)
+          : "";
+      if (
+        !TRANSIENT_WRITE_ERROR_CODES.has(code) ||
+        attempt >= WRITE_RETRY_BACKOFFS_MS.length
+      ) {
+        throw error;
+      }
+      await new Promise((r) =>
+        setTimeout(r, WRITE_RETRY_BACKOFFS_MS[attempt]),
+      );
+    }
+  }
 }
 
 export function manifestPath(

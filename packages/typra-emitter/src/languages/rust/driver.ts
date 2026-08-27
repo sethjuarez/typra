@@ -179,6 +179,23 @@ export const generateRust = async (
     }
   }
 
+  // Index every lowered type declaration by simple name. This is the global decl
+  // universe (all files), needed by two lowering-aware paths that must resolve a
+  // referenced type living in a DIFFERENT file:
+  //  1. the per-interface conformance emitter walks a @dispatch container path and
+  //     unwraps the Rust `Option<…>` intermediates it crosses;
+  //  2. the per-field load emitter expands a value-backed coerce union's bare-string
+  //     shorthand (`model:"gpt-4"` → `{"id":"gpt-4"}`) at load time by reading the
+  //     referenced type's string `@coerce` template — otherwise the value-backed
+  //     lowering stores the raw string and Rust alone diverges from every runtime
+  //     that hydrates a typed child on load.
+  const rustDeclsByName = new Map<string, TypeDecl>(
+    nodes
+      .filter((n) => !n.base)
+      .flatMap((n) => lowerFile(n, registry, polymorphicTypeNames).types)
+      .map((decl) => [decl.typeName.name, decl]),
+  );
+
   // Render context.rs
   const contextContent = emitRustContext("Prompty Context");
   await emitRustFile(
@@ -215,6 +232,7 @@ export const generateRust = async (
           cancellationTokenPath: emitTarget["cancellation-token-path"],
           nativeSerialization,
         },
+        rustDeclsByName,
       );
       const fileName = toSnakeCase(n.typeName.name) + ".rs";
       const outDir = group
@@ -293,16 +311,6 @@ export const generateRust = async (
     (options?.callableVectors?.vectors.length ?? 0) > 0
   ) {
     const allVectors = options!.callableVectors!.vectors;
-    // Index the lowered type declarations by simple name so the per-interface
-    // conformance emitter can walk a @dispatch container path and unwrap the
-    // Rust `Option<…>` intermediates it crosses (a required step to reach the
-    // lowered `serde_json::Value` union — the twin of the Swift `!` unwrap).
-    const rustDeclsByName = new Map<string, TypeDecl>(
-      nodes
-        .filter((n) => !n.base)
-        .flatMap((n) => lowerFile(n, registry, polymorphicTypeNames).types)
-        .map((decl) => [decl.typeName.name, decl]),
-    );
     // A `@dispatch` seam routes through the typed resolver rail (issue #282 §8):
     // its vectors get a per-interface, typed `${iface}_conformance_test.rs` file
     // that CONSUMES the emitted `${seam}_resolver`. Undispatched seams —
@@ -361,6 +369,7 @@ export const generateRust = async (
           emitTarget["import-path"] ?? "crate::model",
           emitTarget["vector-adapter-path"] ?? "vector_adapters.rs",
           rustDeclsByName,
+          polymorphicTypeNames,
         ),
         `${emitTarget["test-dir"]}/${dispatched.group}`,
         emitTarget["test-dir"],
@@ -2101,6 +2110,7 @@ function emitRustInterfaceConformanceTest(
   importPath: string,
   adapterPath: string,
   declsByName: Map<string, TypeDecl>,
+  polymorphicTypeNames: Set<string>,
 ): string {
   const seam = dispatched.contract;
   const providerTrait = `${seam}Provider`;
@@ -2159,6 +2169,7 @@ function emitRustInterfaceConformanceTest(
       entry.dispatch!.path,
       declsByName,
       entry.params[entry.dispatch!.path.split(".")[0]],
+      polymorphicTypeNames,
     );
     const label = entry.vector.name ?? entry.operation;
     const expected = entry.vector.expected;
@@ -2249,18 +2260,24 @@ function emitRustInterfaceConformanceTest(
  * a param local (guaranteed by assertTypedDispatchSupported); middle segments
  * navigate snake_case struct fields.
  *
- * Optionality-aware: an intermediate whose lowered `FieldDecl` is optional is a
- * Rust `Option<…>`, so it must be unwrapped with
- * `.as_ref().expect("<field> present")` before the next field access (or before
- * `.get(...)` when the optional field is itself the union). Walking the lowered
- * declarations from the parameter's root type keeps the unwrap faithful to the
- * model — a required field, or a field we cannot resolve, gets no unwrap. This is
- * the Rust twin of `swiftDiscriminatorAccessor`'s `!` force-unwrap.
+ * Optionality-aware AND lowering-aware: an intermediate whose lowered `FieldDecl`
+ * is a Rust `Option<…>` must be unwrapped with `.as_ref().expect("<field> present")`
+ * before the next field access. But a value-backed coerce/polymorphic-union field
+ * (`FormatConfig | string`, `Model | string`, `unknown`) lowers to a BARE
+ * `serde_json::Value` even when the schema marks it optional — Rust drops the
+ * `Option` because `Value::Null` is the absent sentinel (see `fieldType`). Such a
+ * field must therefore be read directly (`agent.model.get("provider")…`), never
+ * `.as_ref()`-unwrapped (E0599: no method `as_ref` on `serde_json::Value`). So the
+ * unwrap is gated on the LOWERED type actually being `Option<T>`: optional AND not
+ * value-backed. This is the Rust twin of `swiftDiscriminatorAccessor`'s `!` — but
+ * Swift keeps its optional through the lowering, so Swift unwraps where Rust must
+ * not. A required field, or a field we cannot resolve, gets no unwrap.
  */
 function rustDiscriminatorAccessor(
   path: string,
   declsByName: Map<string, TypeDecl>,
   rootTypeName: string | undefined,
+  polymorphicTypeNames: Set<string>,
 ): string {
   const segments = path.split(".");
   const rawField = segments[segments.length - 1];
@@ -2270,8 +2287,19 @@ function rustDiscriminatorAccessor(
   for (const segment of containerSegments) {
     const field = currentType?.fields.find((f) => f.name === segment);
     const access = rustFieldName(segment);
+    // A value-backed complex field (polymorphic/coerce union or `unknown`) lowers
+    // to a bare `serde_json::Value`, so its optionality is erased — read it
+    // directly. Only a genuinely `Option<T>`-lowered field is unwrapped.
+    const fieldTypeName =
+      field?.category.kind === "complex" ||
+      field?.category.kind === "collection_complex"
+        ? field.category.typeName
+        : undefined;
+    const isValueBacked =
+      fieldTypeName !== undefined &&
+      (polymorphicTypeNames.has(fieldTypeName) || fieldTypeName === "unknown");
     parts.push(
-      field?.isOptional
+      field?.isOptional && !isValueBacked
         ? `${access}.as_ref().expect(${JSON.stringify(`${segment} present`)})`
         : access,
     );

@@ -348,6 +348,7 @@ export function emitRustFile(
   polymorphicTypeNames: Set<string>,
   childToParent: Map<string, string> = new Map(),
   options: RustEmitterOptions = {},
+  declsByName: Map<string, TypeDecl> = new Map(),
 ): string {
   const lines: string[] = [];
   const hasNonProtocol = file.types.some((t) => !t.isProtocol);
@@ -469,6 +470,7 @@ export function emitRustFile(
     visitor,
     polymorphicTypeNames,
     lines,
+    declsByName,
   );
 
   if (options.nativeSerialization !== "none") {
@@ -930,6 +932,7 @@ function emitImpl(
   visitor: ExprVisitor,
   polymorphicTypeNames: Set<string>,
   lines: string[],
+  declsByName: Map<string, TypeDecl> = new Map(),
 ): void {
   const name = type.typeName.name;
   lines.push("");
@@ -959,6 +962,7 @@ function emitImpl(
     baseFieldNames,
     polymorphicTypeNames,
     lines,
+    declsByName,
   );
   emitInputValidation(type, childTypes, lines);
   if (
@@ -1362,6 +1366,7 @@ function emitLoadFromValue(
   baseFieldNames: Set<string>,
   polymorphicTypeNames: Set<string>,
   lines: string[],
+  declsByName: Map<string, TypeDecl> = new Map(),
 ): void {
   lines.push(`    /// Load ${name} from a \`serde_json::Value\`.`);
   lines.push("    ///");
@@ -1419,13 +1424,14 @@ function emitLoadFromValue(
       baseFieldNames,
       polymorphicTypeNames,
       lines,
+      declsByName,
     );
   } else {
     // Simple struct construction
     lines.push("        Self {");
     for (const a of type.load.assignments) {
       lines.push(
-        `            ${rustFieldName(a.fieldName)}: ${loadExpr(a, polymorphicTypeNames)},`,
+        `            ${rustFieldName(a.fieldName)}: ${loadExpr(a, polymorphicTypeNames, declsByName)},`,
       );
     }
     lines.push("        }");
@@ -1697,6 +1703,7 @@ function emitPolymorphicLoad(
   baseFieldNames: Set<string>,
   polymorphicTypeNames: Set<string>,
   lines: string[],
+  declsByName: Map<string, TypeDecl> = new Map(),
 ): void {
   const dispatch = type.polymorphicDispatch!;
   const discSnake = rustFieldName(dispatch.discriminatorField);
@@ -1731,7 +1738,7 @@ function emitPolymorphicLoad(
         `            "${variant.value}" => ${enumName}::${variantName} {`,
       );
       for (const field of variantFields) {
-        const assignment = variantLoadExpr(field, name, polymorphicTypeNames);
+        const assignment = variantLoadExpr(field, name, polymorphicTypeNames, declsByName);
         lines.push(
           `                ${rustFieldName(field.name)}: ${assignment},`,
         );
@@ -1777,7 +1784,7 @@ function emitPolymorphicLoad(
     } else {
       lines.push(`            _ => ${enumName}::${variantName} {`);
       for (const field of variantFields) {
-        const assignment = variantLoadExpr(field, name, polymorphicTypeNames);
+        const assignment = variantLoadExpr(field, name, polymorphicTypeNames, declsByName);
         lines.push(
           `                ${rustFieldName(field.name)}: ${assignment},`,
         );
@@ -1828,7 +1835,7 @@ function emitPolymorphicLoad(
     // Skip discriminator — it's stored in the enum field
     if (a.fieldName === dispatch.discriminatorField) continue;
     lines.push(
-      `            ${rustFieldName(a.fieldName)}: ${loadExpr(a, polymorphicTypeNames)},`,
+      `            ${rustFieldName(a.fieldName)}: ${loadExpr(a, polymorphicTypeNames, declsByName)},`,
     );
   }
   lines.push(`            ${discSnake}: ${discSnake},`);
@@ -2789,9 +2796,36 @@ function rustDictValueType(valueType: string): string {
 // Load expression rendering (per-field)
 // ============================================================================
 
+/**
+ * Build the `serde_json::json!({...})` expansion for a value-backed coerce union's
+ * bare-string shorthand, mirroring the referenced type's string `@coerce` template.
+ *
+ * A value-backed field (`FormatConfig | string`, `Model | string`) lowers to a bare
+ * `serde_json::Value`; its load path must expand `"gpt-4"` → `{"id":"gpt-4"}` (Model)
+ * or `"mustache"` → `{"kind":"mustache"}` (FormatConfig) so `load_from_value` matches
+ * every other runtime, all of which hydrate a typed child on load. Returns the json!
+ * body bound against a `&str s`, or `null` when the referenced type has no string
+ * coercion (then the caller stores the raw Value unchanged).
+ */
+function valueBackedCoerceExpansion(
+  typeName: string,
+  declsByName: Map<string, TypeDecl>,
+): string | null {
+  const decl = declsByName.get(typeName);
+  const coercion = decl?.load.coercions.find((c) => c.scalarType === "string");
+  if (!coercion || coercion.assignments.length === 0) return null;
+  const entries = coercion.assignments.map((a) =>
+    a.isInput
+      ? `"${a.fieldName}": s`
+      : `"${a.fieldName}": ${JSON.stringify(a.literalValue ?? "")}`,
+  );
+  return `serde_json::json!({ ${entries.join(", ")} })`;
+}
+
 function loadExpr(
   a: LoadAssignment,
   polymorphicTypeNames: Set<string>,
+  declsByName: Map<string, TypeDecl> = new Map(),
 ): string {
   const key = a.sourceName;
   const cat = a.category;
@@ -2812,6 +2846,16 @@ function loadExpr(
       return scalarLoadExpr(key, cat.scalarType, a.isOptional);
     case "complex": {
       if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
+        // A value-backed coerce union lowers to a bare `serde_json::Value`, so a
+        // bare-string shorthand (`model: "gpt-4"`, `format: "mustache"`) would be
+        // stored RAW — the one runtime that skips load-time coercion, diverging
+        // from Go/Python/TS/C#/Java/Swift which all hydrate a typed child on load.
+        // Expand the shorthand here through the referenced type's string `@coerce`
+        // template so the stored Value is always the canonical object.
+        const expansion = valueBackedCoerceExpansion(cat.typeName, declsByName);
+        if (expansion) {
+          return `value.get("${key}").map(|v| if let Some(s) = v.as_str() { ${expansion} } else { v.clone() }).unwrap_or(serde_json::Value::Null)`;
+        }
         // Struct fields keep Value::Null as the "absent" sentinel (see fieldType).
         return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
       }
@@ -2950,6 +2994,7 @@ function variantLoadExpr(
   field: FieldDecl,
   parentTypeName: string,
   polymorphicTypeNames: Set<string>,
+  declsByName: Map<string, TypeDecl> = new Map(),
 ): string {
   // Delegate to the same patterns as base field loading, but with "value" as the source
   const key = field.name;
@@ -2969,9 +3014,16 @@ function variantLoadExpr(
       return scalarLoadExpr(key, cat.scalarType, field.isOptional);
     case "complex": {
       if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
+        // Same load-time coerce expansion as `loadExpr` (see there): a value-backed
+        // coerce union inside a variant must also canonicalize its bare-string
+        // shorthand rather than store the raw string.
+        const expansion = valueBackedCoerceExpansion(cat.typeName, declsByName);
+        const mapped = expansion
+          ? `value.get("${key}").map(|v| if let Some(s) = v.as_str() { ${expansion} } else { v.clone() })`
+          : `value.get("${key}").cloned()`;
         return field.isOptional
-          ? `value.get("${key}").cloned()`
-          : `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
+          ? mapped
+          : `${mapped}.unwrap_or(serde_json::Value::Null)`;
       }
       if (field.isOptional) {
         return `value.get("${key}").filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx))`;
