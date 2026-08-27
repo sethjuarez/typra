@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [2.0.1](https://github.com/sethjuarez/typra/compare/v2.0.0...v2.0.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **emitter:** correct optional and coerce-union discriminator reads in conformance ([#293](https://github.com/sethjuarez/typra/issues/293)) ([cfda53b](https://github.com/sethjuarez/typra/commit/cfda53b422c884aa2a56b63bb3da7e5b481541ec))
+
 ## [2.0.0](https://github.com/sethjuarez/typra/compare/v1.2.2...v2.0.0) (2026-08-27)
 
 
