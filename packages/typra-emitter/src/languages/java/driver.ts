@@ -1200,6 +1200,20 @@ function emitJavaVectorConformanceTest(
  * model tests, this class exposes a static `run()` orchestrated by
  * `TypraGeneratedTests`.
  */
+/**
+ * FQN-qualify the JDK collection types in a mapped Java type expression. The
+ * per-interface conformance class declares NO imports, so a bare `Map<...>` or
+ * `List<...>` (e.g. from a `Record<unknown>` op param mapping to
+ * `Map<String, Object>`) fails to compile there. Rewriting the leading type name
+ * to its FQN (`java.util.Map` / `java.util.List`) matches the Processor path,
+ * which already qualifies. The word boundary keeps `LinkedHashMap<` untouched.
+ */
+function javaFqnCollectionType(javaType: string): string {
+  return javaType
+    .replace(/\bMap</g, "java.util.Map<")
+    .replace(/\bList</g, "java.util.List<");
+}
+
 function emitJavaInterfaceConformanceTest(
   dispatched: DispatchedContract,
   entries: CallableVectorSnapshotEntry[],
@@ -1293,7 +1307,11 @@ function emitJavaInterfaceConformanceTest(
       } else {
         // Non-model param (scalar, `Record<unknown>`, optional, array) cast from
         // the parsed map into the mapped Java type the seam signature expects.
-        const javaType = javaScalarType(entry.params[paramName]);
+        // FQN-qualify JDK collections: this conformance class imports nothing, so
+        // a bare `Map<...>` (e.g. `Record<unknown>`) would not resolve here.
+        const javaType = javaFqnCollectionType(
+          javaScalarType(entry.params[paramName]),
+        );
         lines.push(`    ${javaType} ${local} = (${javaType}) input.get(${key});`);
       }
     }

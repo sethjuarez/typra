@@ -1537,6 +1537,36 @@ function emitNumericCoercionBridge(
 }
 
 /**
+ * Build the discriminator assignment for a coercion that lands a value the
+ * dispatch cannot resolve to a named variant at emit time — either the object
+ * branch's non-matching literal or the bare-string input branch's runtime
+ * `value`. Both route to the union's total fallback arm: the declared default
+ * variant (e.g. `CustomFormat`) carries the raw discriminator name, an open
+ * union falls to `Unknown`, and a closed union with neither uses `default()`.
+ * `kindNameExpr` is the Rust expression producing the `*_name` String — a
+ * `"literal".to_string()` for the object branch, the bound `value` for input.
+ */
+function discriminatorFallbackAssignment(
+  dispatch: NonNullable<TypeDecl["polymorphicDispatch"]>,
+  enumName: string,
+  discSnake: string,
+  kindNameExpr: string,
+  typeName: string,
+): string {
+  if (dispatch.defaultVariant) {
+    const isSelfRef = dispatch.defaultVariant.isSelfReference;
+    const dvName = isSelfRef
+      ? "Custom"
+      : dispatch.defaultVariant.typeName.name.replace(typeName, "") || "Custom";
+    return `${discSnake}: ${enumName}::${dvName} { ${discSnake}_name: ${kindNameExpr}, raw: serde_json::Map::new() }`;
+  }
+  if (!isClosedPolymorphicDispatch(dispatch)) {
+    return `${discSnake}: ${enumName}::Unknown { ${discSnake}_name: ${kindNameExpr}, raw: serde_json::Map::new() }`;
+  }
+  return `${discSnake}: ${enumName}::default()`;
+}
+
+/**
  * Build the `return <Type> { ... };` statement for one coercion branch.
  */
 function coercionReturnStatement(
@@ -1556,6 +1586,21 @@ function coercionReturnStatement(
   const fieldAssignments = c.assignments.map((a) => {
     const snake = rustFieldName(a.fieldName);
     if (a.isInput) {
+      // The discriminator carrying a runtime input string (a coerce-union
+      // bare-string shorthand, e.g. `"jinja2"`) has no `From<String>` for the
+      // `*Kind` enum, so `value.into()` fails to compile. Route it through the
+      // same total fallback the object branch uses — the default variant
+      // (`CustomFormat`) stores the raw `value` as its discriminator name.
+      if (dispatch && a.fieldName === discField) {
+        const discSnake = toSnakeCase(discField);
+        return discriminatorFallbackAssignment(
+          dispatch,
+          enumName,
+          discSnake,
+          "value",
+          typeName,
+        );
+      }
       // Check if the target field is optional or an enum
       const targetField = type.fields.find((f) => f.name === a.fieldName);
       const isOptional = targetField?.isOptional ?? false;
@@ -1608,19 +1653,15 @@ function coercionReturnStatement(
         }
         return `${discSnake}: ${enumName}::${variantName} { ..Default::default() }`;
       }
-      // Otherwise use the wildcard/custom variant
-      if (dispatch.defaultVariant) {
-        const isSelfRef = dispatch.defaultVariant.isSelfReference;
-        const dvName = isSelfRef
-          ? "Custom"
-          : dispatch.defaultVariant.typeName.name.replace(typeName, "") ||
-            "Custom";
-        return `${discSnake}: ${enumName}::${dvName} { ${discSnake}_name: "${a.literalValue}".to_string(), raw: serde_json::Map::new() }`;
-      }
-      if (!isClosedPolymorphicDispatch(dispatch)) {
-        return `${discSnake}: ${enumName}::Unknown { ${discSnake}_name: "${a.literalValue}".to_string(), raw: serde_json::Map::new() }`;
-      }
-      return `${discSnake}: ${enumName}::default()`;
+      // Otherwise use the wildcard/custom variant (total fallback shared with
+      // the input branch): default variant, else open `Unknown`, else default().
+      return discriminatorFallbackAssignment(
+        dispatch,
+        enumName,
+        discSnake,
+        `"${a.literalValue}".to_string()`,
+        typeName,
+      );
     }
     const targetField = type.fields.find((f) => f.name === a.fieldName);
     const literalExpr = `"${a.literalValue}".to_string()`;

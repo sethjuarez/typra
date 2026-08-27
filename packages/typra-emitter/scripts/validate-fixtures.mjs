@@ -696,6 +696,7 @@ function assertFocusedFeatureFixtures() {
     "features/dispatch-union-coerce/main.tsp",
     "features/dispatch-vector-params/main.tsp",
     "features/dispatch-vector-coerce/main.tsp",
+    "features/dispatch-target-regression/main.tsp",
   );
 
   for (const fixture of fixtures) {

@@ -100,8 +100,8 @@ const CASES: Array<{
     mustInclude: [
       '@SuppressWarnings("unchecked")',
       'String template = (String) input.get("template");',
-      'Map<String, Object> inputs = (Map<String, Object>) input.get("inputs");',
-      'Map<String, Object> context = (Map<String, Object>) input.get("context");',
+      'java.util.Map<String, Object> inputs = (java.util.Map<String, Object>) input.get("inputs");',
+      'java.util.Map<String, Object> context = (java.util.Map<String, Object>) input.get("context");',
     ],
   },
   {

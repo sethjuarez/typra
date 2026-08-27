@@ -982,6 +982,19 @@ function emitGoVectorRunner(adapterImportPath: string): string {
 }
 
 /**
+ * Render a JSON payload as a Go source string literal. Go raw-string literals
+ * (backtick-delimited) keep the JSON readable, but a payload containing a
+ * backtick — e.g. a ```python markdown fence in vector input — would TERMINATE
+ * the raw string mid-literal and fail to compile. When the payload contains a
+ * backtick, fall back to a Go interpreted (double-quoted) literal instead:
+ * `JSON.stringify` produces a JSON string whose escaping (\" \\ \n \t \uXXXX)
+ * is a valid Go interpreted string literal, so the byte content is preserved.
+ */
+function goEmbeddedStringLiteral(raw: string): string {
+  return raw.includes("`") ? JSON.stringify(raw) : `\`${raw}\``;
+}
+
+/**
  * Emit the thin Go `@vector` conformance harness. It authors NO interpreter
  * logic: it imports the shared `vectorrunner` package plus the runtime-authored
  * `vectoradapters` package, loads the authored seam tables from the latter, and
@@ -1057,7 +1070,7 @@ function emitGoVectorConformanceTest(
       : "";
     lines.push(
       `func ${goVectorSlug(index, entry)}(t *testing.T) {`,
-      `\tvectorJSON := \`${vectorJSON}\``,
+      `\tvectorJSON := ${goEmbeddedStringLiteral(vectorJSON)}`,
       "\tvar vector map[string]any",
       "\tif err := json.Unmarshal([]byte(vectorJSON), &vector); err != nil {",
       '\t\tt.Fatalf("failed to decode vector: %v", err)',
@@ -1136,7 +1149,7 @@ function emitGoInterfaceConformanceTest(
     lines.push(
       `func ${uniqueGoTestName(dispatched.contract, entry, index, seen)}(t *testing.T) {`,
     );
-    lines.push(`\tinputJSON := \`${inputJSON}\``);
+    lines.push(`\tinputJSON := ${goEmbeddedStringLiteral(inputJSON)}`);
     lines.push("\tvar payload map[string]any");
     lines.push(
       "\tif err := json.Unmarshal([]byte(inputJSON), &payload); err != nil {",

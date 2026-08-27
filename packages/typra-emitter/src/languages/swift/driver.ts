@@ -45,6 +45,7 @@ import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
+  type TypeDecl,
 } from "../../ir/declarations.js";
 import {
   assertTypedDispatchSupported,
@@ -109,6 +110,12 @@ export const generateSwift = async (
   );
   const declarationUniverse = Array.from(fileDecls.values()).flatMap(
     (file) => file.types,
+  );
+  // Index the lowered type declarations by simple name so the per-interface
+  // conformance emitter can walk a @dispatch container path and force-unwrap the
+  // Swift optionals it crosses (a required step to reach `.save()` on the union).
+  const swiftDeclsByName = new Map<string, TypeDecl>(
+    declarationUniverse.map((decl) => [decl.typeName.name, decl]),
   );
   await emitSwiftGeneratedFile(
     context,
@@ -242,6 +249,7 @@ export const generateSwift = async (
           ifaceVectors,
           moduleName,
           adapterEnum,
+          swiftDeclsByName,
         ),
         outDir,
         outputDir,
@@ -979,6 +987,7 @@ function emitSwiftInterfaceConformanceTest(
   entries: CallableVectorSnapshotEntry[],
   moduleName: string,
   adapterEnum: string,
+  declsByName: Map<string, TypeDecl>,
 ): string {
   // Reference the seam / resolver / provider by their EMITTED Swift spelling so
   // the test's type references cannot drift from the library declarations.
@@ -1030,7 +1039,12 @@ function emitSwiftInterfaceConformanceTest(
     assertTypedDispatchSupported(entry);
     const method = swiftFunctionName(entry.operation);
     const paramNames = Object.keys(entry.params);
-    const accessor = swiftDiscriminatorAccessor(entry.dispatch!.path, rawField);
+    const accessor = swiftDiscriminatorAccessor(
+      entry.dispatch!.path,
+      rawField,
+      declsByName,
+      entry.params[entry.dispatch!.path.split(".")[0]],
+    );
     const inputLiteral = swiftPayloadLiteral(
       JSON.stringify(entry.vector.input ?? {}),
     );
@@ -1108,12 +1122,30 @@ function emitSwiftInterfaceConformanceTest(
  * union's serialized form — `try (agent.template.format.save())["kind"] as!
  * String`. The container is navigated with the models' sanitized property names;
  * the dict key is the raw wire discriminator field.
+ *
+ * Optionality-aware: Swift optionals along the container path must be
+ * force-unwrapped to reach `.save()`, so a segment whose lowered `FieldDecl` is
+ * optional emits `agent.template!.format`. Walking the lowered declarations from
+ * the parameter's root type keeps the `!` placement faithful to the model — a
+ * non-optional field, or a field we cannot resolve, gets no `!`.
  */
-function swiftDiscriminatorAccessor(path: string, rawField: string): string {
+function swiftDiscriminatorAccessor(
+  path: string,
+  rawField: string,
+  declsByName: Map<string, TypeDecl>,
+  rootTypeName: string | undefined,
+): string {
   const segments = path.split(".");
   const head = swiftPropertyName(segments[0]);
-  const rest = segments.slice(1, -1).map(swiftPropertyName);
-  const container = [head, ...rest].join(".");
+  const containerSegments = segments.slice(1, -1);
+  let currentType = rootTypeName ? declsByName.get(rootTypeName) : undefined;
+  const parts = [head];
+  for (const segment of containerSegments) {
+    const field = currentType?.fields.find((f) => f.name === segment);
+    parts.push(`${swiftPropertyName(segment)}${field?.isOptional ? "!" : ""}`);
+    currentType = field ? declsByName.get(field.typeName.name) : undefined;
+  }
+  const container = parts.join(".");
   return `try (${container}.save())[${swiftStringLiteral(rawField)}] as! String`;
 }
 
