@@ -112,6 +112,12 @@ model Agent {
   name: string;
 
   @doc("The template; `template.format.kind` is the render dispatch key. OPTIONAL → Swift `agent.template!`.")
+  // The @sample carries the optional `template` into the per-model conformance
+  // payload (synthesis otherwise omits optionals), and pins `format` as a bare
+  // string — the coerce-union shorthand. That drives the Go per-model conformance
+  // to read the discriminator off the lowered `interface{}` field (Go BUG 2): a
+  // direct `.Format.Kind` would not compile, so the read must type-assert + Save.
+  @sample(#{ template: #{ content: "Hello {{name}}", format: "mustache" } })
   template?: Template;
 
   @doc("The model; `model.provider` is the process dispatch key. OPTIONAL → Swift `agent.model!`.")
