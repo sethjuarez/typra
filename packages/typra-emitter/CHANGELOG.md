@@ -6,6 +6,17 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [2.0.0](https://github.com/sethjuarez/typra/compare/v1.2.2...v2.0.0) (2026-08-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* retire @protocol and @method decorators + language-target emitter fixes (2.0.0)
+
+### Features
+
+* retire [@protocol](https://github.com/protocol) and [@method](https://github.com/method) decorators + language-target emitter fixes (2.0.0) ([1ea0df1](https://github.com/sethjuarez/typra/commit/1ea0df16aac9ab1226253a96d82b3f07c54115a7))
+
 ## [1.2.2](https://github.com/sethjuarez/typra/compare/v1.2.1...v1.2.2) (2026-08-27)
 
 
