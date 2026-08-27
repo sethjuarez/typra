@@ -176,7 +176,11 @@ describe("Swift polymorphic enums", () => {
       source,
       /case unknown\(\[String: Any\]\)|case \.unknown/,
     );
-    assert.match(source, /expected: "non-blank string"/);
+    // Open union with a declared default variant: an absent/blank discriminator
+    // normalizes to "" and routes to the `.customTool` default (matching the
+    // @dispatch rail) instead of throwing, so the coerce shorthand hydrates.
+    assert.match(source, /let discriminator = object\["kind"\] as\? String \?\? ""/);
+    assert.doesNotMatch(source, /expected: "non-blank string"/);
     assert.match(
       source,
       /public var tool: Tool = \.customTool\(CustomTool\(\), \[:\]\)/,
@@ -207,14 +211,15 @@ describe("Swift polymorphic enums", () => {
       new Set(["Connection"]),
     );
     assert.match(source, /case unknown\(\[String: Any\]\)/);
-    assert.match(
+    // Open union whose only fallback is the self-referencing base (no declared
+    // `*` variant): an absent/blank discriminator names no variant and is
+    // rejected up front. Tolerance is reserved for a DECLARED wildcard variant.
+    assert.match(source, /expected: "non-blank string"/);
+    assert.doesNotMatch(
       source,
-      /let discriminator = try TypraRuntime\.string\(object\["kind"\] \?\? NSNull\(\), field: "kind"\)/,
+      /let discriminator = object\["kind"\] as\? String \?\? ""/,
     );
-    assert.match(
-      source,
-      /if discriminator\.isEmpty \{\s+throw TypraRuntimeError\.invalidField\(field: context\.at\("kind"\)\.path, expected: "non-blank string"\)/,
-    );
+    // Unknown NON-blank discriminators still flow to the `.unknown` carrier.
     assert.match(source, /default: return \.unknown\(object\)/);
     assert.match(source, /case \.unknown\(let value\): return value/);
   });

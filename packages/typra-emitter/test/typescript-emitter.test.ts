@@ -725,8 +725,19 @@ describe("TypeScript open polymorphic preservation", () => {
       source,
       /protected static cloneRawValue\(value: unknown\): unknown/,
     );
-    assert.match(source, /const discriminator = discriminatorValue;/);
+    // Open union whose only fallback is the self-referencing base (no declared
+    // `*` variant): an absent/blank/non-string discriminator names no variant
+    // and is rejected up front. Tolerance is reserved for a DECLARED wildcard.
+    assert.match(
+      source,
+      /expected non-blank string/,
+    );
+    assert.doesNotMatch(
+      source,
+      /const discriminator =\s*typeof discriminatorValue === "string" \? discriminatorValue : "";/,
+    );
     assert.doesNotMatch(source, /discriminatorValue\)\.toLowerCase\(\)/);
+    // Unknown NON-blank discriminators still route to the self-referencing base.
     assert.match(source, /if \(instance\.constructor === Connection\) \{/);
     assert.match(
       source,

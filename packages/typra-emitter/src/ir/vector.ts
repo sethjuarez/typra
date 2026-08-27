@@ -9,6 +9,7 @@ import { getStateValue } from "../decorators.js";
 import { StateKeys, TypraEmitterOptions } from "../lib.js";
 import type { CallableContract, CallableDispatch } from "./callable.js";
 import type { PolymorphicDispatchDecl } from "./declarations.js";
+import { scalarRuntimeKind } from "./scalar-kinds.js";
 
 export interface VectorEntry {
   name?: string;
@@ -142,6 +143,70 @@ export function isTypedDispatchEntry(
   entry: CallableVectorSnapshotEntry,
 ): boolean {
   return Boolean(entry.dispatch?.decl);
+}
+
+/**
+ * A dispatched `@vector` seam-op parameter, classified for the TYPED
+ * per-interface conformance emitters. That driver reconstructs each op input
+ * from the vector JSON: a MODEL param is decoded through the emitted model
+ * loader (`Model.load` / `Model::from_json` / `fixtures.LoadModel` / ...), but a
+ * NON-model param — a scalar (`string`), a generic map (`Record<unknown>`), an
+ * optional (`T?`), or an array (`T[]`) — has no such loader. Emitting its raw
+ * TypeSpec spelling (`Record<unknown>`, `Record<unknown>?`) as a type reference
+ * AND as a `<Type>.load(...)` receiver produces uncompilable output in every
+ * runtime (`use crate::model::{Record<unknown>?}` breaks `cargo fmt`;
+ * `string.load(...)` has no such method). Non-model params must instead be
+ * mapped to the target language type + decoded with the native JSON facility,
+ * exactly as the per-model test path already does for fields. The driver
+ * classifies each param here first.
+ */
+export interface CallableParamShape {
+  /** The raw callable type spelling, e.g. `Agent`, `string`, `Record<unknown>?`. */
+  raw: string;
+  /** `raw` with a single trailing `?` and/or `[]` stripped. */
+  base: string;
+  optional: boolean;
+  array: boolean;
+  /** True when `base` names a model/user type (not a scalar, map, or `unknown`). */
+  isModel: boolean;
+  /**
+   * True only for a BARE model reference (neither optional nor an array). The
+   * typed model loader is emitted for exactly this shape; every other shape —
+   * including scalars, maps, and optional/array types — rides the native-decode
+   * path, since no per-type loader exists for it.
+   */
+  bareModel: boolean;
+}
+
+/**
+ * Classify a callable param's raw type spelling (from `typeToCallableName`) as a
+ * model reference or a plain (native-decode) type. Mirrors the model-vs-plain
+ * split in `extractMethodTypeRefs` (`ir/lower.ts`): a param is a model reference
+ * unless its base is a known scalar, a generic (`Record<...>` / `dictionary`),
+ * or an untyped intrinsic (`unknown` / `any` / `void`).
+ */
+export function classifyCallableParam(raw: string): CallableParamShape {
+  let base = raw.trim();
+  const optional = base.endsWith("?");
+  if (optional) base = base.slice(0, -1);
+  const array = base.endsWith("[]");
+  if (array) base = base.slice(0, -2);
+  const isPlain =
+    base === "void" ||
+    base === "unknown" ||
+    base === "any" ||
+    base === "dictionary" ||
+    base.includes("<") ||
+    scalarRuntimeKind(base) !== null;
+  const isModel = !isPlain;
+  return {
+    raw,
+    base,
+    optional,
+    array,
+    isModel,
+    bareModel: isModel && !optional && !array,
+  };
 }
 
 /** Detect a `{ "$env" | "$file" | "$json": "<string>" }` runtime input ref. */

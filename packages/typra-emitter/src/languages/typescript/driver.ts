@@ -4,7 +4,10 @@ import { enumerateTypes, TypeNode, BaseTestContext } from "../../ir/ast.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { TypeScriptExprVisitor } from "./visitor.js";
-import { emitTypeScriptFile as emitTypeScriptFileDecl } from "./emitter.js";
+import {
+  emitTypeScriptFile as emitTypeScriptFileDecl,
+  returnType as tsProtocolType,
+} from "./emitter.js";
 import {
   emitTypeScriptContext,
   emitTypeScriptIndex,
@@ -20,6 +23,7 @@ import {
   CallableVectorSnapshotEntry,
   isTypedDispatchEntry,
   assertTypedDispatchSupported,
+  classifyCallableParam,
 } from "../../ir/vector.js";
 import {
   buildBaseTestContext,
@@ -872,11 +876,15 @@ function emitTypeScriptInterfaceConformanceTest(
   const sorted = [...entries].sort((left, right) =>
     (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
   );
-  // Distinct param model types, in first-seen order, for a stable model import.
+  // Distinct MODEL param types, in first-seen order, for a stable model import.
+  // Non-model params (scalars, `Record<unknown>`, optionals) are cast from the
+  // parsed payload against the mapped TS type and need no import.
   const modelTypes: string[] = [];
   for (const entry of sorted) {
     for (const type of Object.values(entry.params)) {
-      if (!modelTypes.includes(type)) modelTypes.push(type);
+      if (classifyCallableParam(type).bareModel && !modelTypes.includes(type)) {
+        modelTypes.push(type);
+      }
     }
   }
 
@@ -919,11 +927,21 @@ function emitTypeScriptInterfaceConformanceTest(
       `    const payload = JSON.parse(${inputLiteral}) as Record<string, unknown>;`,
     );
     for (const paramName of paramNames) {
-      lines.push(
-        `    const ${paramName} = ${entry.params[paramName]}.load(payload[${JSON.stringify(
-          paramName,
-        )}] as Record<string, unknown>);`,
-      );
+      const shape = classifyCallableParam(entry.params[paramName]);
+      const key = JSON.stringify(paramName);
+      if (shape.bareModel) {
+        lines.push(
+          `    const ${paramName} = ${entry.params[paramName]}.load(payload[${key}] as Record<string, unknown>);`,
+        );
+      } else {
+        // Non-model params (scalars, `Record<unknown>`, optionals) are cast from
+        // the parsed payload to the mapped TS type the seam signature expects.
+        lines.push(
+          `    const ${paramName} = payload[${key}] as ${tsProtocolType(
+            entry.params[paramName],
+          )};`,
+        );
+      }
     }
     lines.push(
       `    const ${field} = ${accessor};`,

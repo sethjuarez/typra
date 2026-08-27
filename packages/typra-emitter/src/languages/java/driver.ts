@@ -21,6 +21,7 @@ import {
   CallableVectorSnapshotEntry,
   isTypedDispatchEntry,
   assertTypedDispatchSupported,
+  classifyCallableParam,
 } from "../../ir/vector.js";
 import {
   buildBaseTestContext,
@@ -32,6 +33,7 @@ import {
   emitJavaMethodHelper,
   emitJavaUnknownCarrier,
   ensureJavaEditableSeamMarker,
+  javaScalarType,
 } from "./emitter.js";
 import {
   emitJavaContext,
@@ -1237,7 +1239,16 @@ function emitJavaInterfaceConformanceTest(
     );
     const expected = entry.vector.expected;
     const vectorName = entry.vector.name ?? `vector ${index}`;
+    // A generic cast (`(Map<String, Object>) input.get(...)`) is unchecked; guard
+    // the method so the conformance class compiles clean under -Xlint:unchecked.
+    const needsUnchecked = paramNames.some((paramName) => {
+      const shape = classifyCallableParam(entry.params[paramName]);
+      return !shape.bareModel && javaScalarType(entry.params[paramName]).includes("<");
+    });
 
+    if (needsUnchecked) {
+      lines.push('  @SuppressWarnings("unchecked")');
+    }
     lines.push(
       `  private static void ${javaVectorSlug(index, entry)}() throws Exception {`,
       "    StringBuilder sb = new StringBuilder();",
@@ -1246,13 +1257,19 @@ function emitJavaInterfaceConformanceTest(
       "    java.util.Map<?, ?> input = (java.util.Map<?, ?>) payload;",
     );
     for (const paramName of paramNames) {
-      lines.push(
-        `    ${entry.params[paramName]} ${locals.get(
-          paramName,
-        )} = ${entry.params[paramName]}.load(input.get(${JSON.stringify(
-          paramName,
-        )}), null);`,
-      );
+      const shape = classifyCallableParam(entry.params[paramName]);
+      const local = locals.get(paramName);
+      const key = JSON.stringify(paramName);
+      if (shape.bareModel) {
+        lines.push(
+          `    ${entry.params[paramName]} ${local} = ${entry.params[paramName]}.load(input.get(${key}), null);`,
+        );
+      } else {
+        // Non-model param (scalar, `Record<unknown>`, optional, array) cast from
+        // the parsed map into the mapped Java type the seam signature expects.
+        const javaType = javaScalarType(entry.params[paramName]);
+        lines.push(`    ${javaType} ${local} = (${javaType}) input.get(${key});`);
+      }
     }
     lines.push(
       `    String ${fieldLocal} = ${accessor};`,

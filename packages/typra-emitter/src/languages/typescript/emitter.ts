@@ -115,7 +115,7 @@ function paramType(typeStr: string): string {
   return TYPE_MAP[typeStr] || typeStr;
 }
 
-function returnType(typeStr: string): string {
+export function returnType(typeStr: string): string {
   if (typeStr.endsWith("?")) {
     const inner = typeStr.slice(0, -1);
     return `${returnType(inner)} | null`;
@@ -1311,23 +1311,39 @@ function emitPolymorphicDispatch(
   carrier?: string,
 ): void {
   const isClosed = isClosedPolymorphicDispatch(dispatch);
+  // Only a DECLARED wildcard `*` variant (a default variant that is NOT a base
+  // self-reference) makes an absent/blank/non-string discriminator route to that
+  // catch-all via the `default` arm, so the coerce shorthand (object with no
+  // discriminator) still hydrates. A closed union, an abstract open union with
+  // only an unknown carrier, AND a non-abstract open union that falls back to its
+  // own base by self-reference all still reject absent/blank up front — a blank
+  // discriminator names no variant. Unknown NON-blank discriminators route to the
+  // declared default / self-reference base / carrier below regardless.
+  const hasFallback =
+    dispatch.defaultVariant != null && !dispatch.defaultVariant.isSelfReference;
   lines.push(
     `  private static loadKind(data: Record<string, unknown>, context?: LoadContext): ${parentName} {`,
   );
   lines.push(
     `    const discriminatorValue = data["${dispatch.discriminatorField}"];`,
   );
-  lines.push('    if (typeof discriminatorValue !== "string") {');
-  lines.push(
-    `      throw new Error("Invalid ${parentName} discriminator field '${dispatch.discriminatorField}': expected non-blank string");`,
-  );
-  lines.push("    }");
-  lines.push('    if (discriminatorValue === "") {');
-  lines.push(
-    `      throw new Error("Invalid ${parentName} discriminator field '${dispatch.discriminatorField}': expected non-blank string");`,
-  );
-  lines.push("    }");
-  lines.push("    const discriminator = discriminatorValue;");
+  if (hasFallback) {
+    lines.push(
+      '    const discriminator = typeof discriminatorValue === "string" ? discriminatorValue : "";',
+    );
+  } else {
+    lines.push('    if (typeof discriminatorValue !== "string") {');
+    lines.push(
+      `      throw new Error("Invalid ${parentName} discriminator field '${dispatch.discriminatorField}': expected non-blank string");`,
+    );
+    lines.push("    }");
+    lines.push('    if (discriminatorValue === "") {');
+    lines.push(
+      `      throw new Error("Invalid ${parentName} discriminator field '${dispatch.discriminatorField}': expected non-blank string");`,
+    );
+    lines.push("    }");
+    lines.push("    const discriminator = discriminatorValue;");
+  }
   lines.push("    switch (discriminator) {");
 
   for (const v of dispatch.variants) {

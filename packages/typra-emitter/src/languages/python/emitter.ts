@@ -1488,6 +1488,17 @@ function emitPolymorphicDispatch(
 ): void {
   const discSnake = toSnakeCase(dispatch.discriminatorField);
   const isClosed = isClosedPolymorphicDispatch(dispatch);
+  // Only a DECLARED wildcard `*` subtype (a default variant that is NOT a base
+  // self-reference) makes an absent/blank/non-string discriminator route to that
+  // catch-all, so the coerce shorthand (e.g. `{id: ...}` with no provider) still
+  // hydrates. A closed union, an abstract open union with only an unknown carrier,
+  // AND a non-abstract open union that falls back to its own base by
+  // self-reference all still reject an absent/blank discriminator up front — a
+  // blank discriminator names no variant. Unknown NON-blank discriminators route
+  // to the declared default / self-reference base / carrier below regardless.
+  const hasFallback = Boolean(
+    dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference,
+  );
   lines.push("    @staticmethod");
   lines.push(
     `    def load_${discSnake}(data: dict, context: LoadContext | None) -> "${parentName}":`,
@@ -1496,13 +1507,19 @@ function emitPolymorphicDispatch(
   lines.push(
     `        discriminator_raw = data.get("${dispatch.discriminatorField}") if data is not None else None`,
   );
-  lines.push(
-    '        if not isinstance(discriminator_raw, str) or discriminator_raw == "":',
-  );
-  lines.push(
-    `            raise ValueError("Invalid ${parentName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`,
-  );
-  lines.push("        discriminator_value = discriminator_raw");
+  if (hasFallback) {
+    lines.push('        discriminator_value = ""');
+    lines.push("        if isinstance(discriminator_raw, str):");
+    lines.push("            discriminator_value = discriminator_raw");
+  } else {
+    lines.push(
+      '        if not isinstance(discriminator_raw, str) or discriminator_raw == "":',
+    );
+    lines.push(
+      `            raise ValueError("Invalid ${parentName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`,
+    );
+    lines.push("        discriminator_value = discriminator_raw");
+  }
 
   for (let i = 0; i < dispatch.variants.length; i++) {
     const v = dispatch.variants[i];
@@ -1511,31 +1528,42 @@ function emitPolymorphicDispatch(
     lines.push(`            return ${v.typeName.name}.load(data, context)`);
   }
 
-  // Default handling — matches template whitespace exactly
+  // Default handling — matches template whitespace exactly. When there are no
+  // known variant branches (a wildcard-only union whose sole child is the `*`
+  // carrier / self-reference), there is no `if`/`elif` for an `else` to attach
+  // to, so the default action is emitted unconditionally instead of dangling an
+  // `else:` (which would be a syntax error).
+  const hasBranches = dispatch.variants.length > 0;
+  const body: string[] = [];
   if (dispatch.defaultVariant) {
-    lines.push("");
-    lines.push("        else:");
     if (dispatch.defaultVariant.isSelfReference) {
-      lines.push(`            # create new instance (stop recursion)`);
-      lines.push(`            return ${parentName}()`);
+      body.push(`# create new instance (stop recursion)`);
+      body.push(`return ${parentName}()`);
     } else {
-      lines.push("");
-      lines.push(`            # load default instance`);
-      lines.push(
-        `            return ${dispatch.defaultVariant.typeName.name}.load(data, context)`,
+      body.push(`# load default instance`);
+      body.push(
+        `return ${dispatch.defaultVariant.typeName.name}.load(data, context)`,
       );
     }
   } else if (carrier) {
-    lines.push("");
-    lines.push("        else:");
-    lines.push(`            # absorb unrecognized discriminator`);
-    lines.push(`            return ${carrier}.load(data, context)`);
+    body.push(`# absorb unrecognized discriminator`);
+    body.push(`return ${carrier}.load(data, context)`);
   } else {
-    lines.push("");
-    lines.push("        else:");
-    lines.push(
-      `            raise ValueError(f"Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: {discriminator_value}")`,
+    body.push(
+      `raise ValueError(f"Unknown ${parentName} discriminator field '${dispatch.discriminatorField}' value: {discriminator_value}")`,
     );
+  }
+
+  lines.push("");
+  if (hasBranches) {
+    lines.push("        else:");
+    for (const line of body) {
+      lines.push(`            ${line}`);
+    }
+  } else {
+    for (const line of body) {
+      lines.push(`        ${line}`);
+    }
   }
 
   lines.push("");

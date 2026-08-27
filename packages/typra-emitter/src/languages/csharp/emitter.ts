@@ -272,7 +272,7 @@ export function emitCSharpEnum(enumDef: EnumDef, namespace: string): string {
 // ============================================================================
 
 /** Map a protocol type string to a C# type. */
-function protocolCSharpType(typeStr: string): string {
+export function protocolCSharpType(typeStr: string): string {
   // Handle array types
   if (typeStr.endsWith("[]")) {
     const inner = typeStr.slice(0, -2);
@@ -1069,14 +1069,30 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
     `    private static ${typeName} LoadKind(Dictionary<string, object?> data, LoadContext? context)`,
   );
   lines.push("    {");
-  lines.push(
-    `        if (!data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) || discriminatorValue is not string discriminator || discriminator == "")`,
-  );
-  lines.push("        {");
-  lines.push(
-    `            throw new ArgumentException("Invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string");`,
-  );
-  lines.push("        }");
+  // The up-front guard rejects an absent/blank discriminator unless there is a
+  // DECLARED wildcard `*` variant (a default variant that is NOT a base
+  // self-reference) to route it to: that catch-all absorbs absent/blank (matching
+  // the @dispatch rail) so the coerce shorthand (object with no discriminator)
+  // still hydrates. A closed union, an abstract open union with only an unknown
+  // carrier, AND a non-abstract open union that falls back to its own base by
+  // self-reference all still reject absent/blank up front — a blank discriminator
+  // names no variant. Unknown non-blank values still route via the `_` arm.
+  const throwsOnUnknown =
+    !dispatch.defaultVariant || dispatch.defaultVariant.isSelfReference;
+  if (throwsOnUnknown) {
+    lines.push(
+      `        if (!data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) || discriminatorValue is not string discriminator || discriminator == "")`,
+    );
+    lines.push("        {");
+    lines.push(
+      `            throw new ArgumentException("Invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string");`,
+    );
+    lines.push("        }");
+  } else {
+    lines.push(
+      `        var discriminator = data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) && discriminatorValue is string discriminatorString ? discriminatorString : "";`,
+    );
+  }
   lines.push("");
   lines.push("        return discriminator switch");
   lines.push("        {");
