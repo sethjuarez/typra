@@ -27,6 +27,10 @@ import { generate } from "../src/generate.js";
 //                succeed and `agent.model.provider` must resolve. The `*` subtype
 //                lowers to the decl's fallback `defaultVariant`.
 //   - Parser   : CLOSED union; a second field-IS-coerce-target seam.
+//   - Embedder : OPEN union (`string` member) but NO `*` wildcard subtype —
+//                proves an open union always yields a fallback: with no `*`
+//                subtype the base model self-references (isSelfReference:true);
+//                only a CLOSED union has defaultVariant null.
 
 const FIXTURE = path.resolve(
   process.cwd(),
@@ -176,5 +180,37 @@ describe("coerce-aware @dispatch: discriminators through `T | string` union para
     assert.deepEqual(sortedTypeNames(decl), ["ChatParser", "CompletionParser"]);
     assert.equal(decl.isClosed, true);
     assert.equal(decl.defaultVariant, null);
+  });
+
+  it("resolves the embed discriminator through an OPEN union with NO `*` wildcard — open (isClosed:false) yet no fallback (defaultVariant:null)", () => {
+    const dispatch = dispatches.get("Embedder");
+    assert.ok(dispatch, "Embedder must carry dispatch metadata");
+    assert.deepEqual(dispatch.discriminator, {
+      model: "Embedding",
+      field: "provider",
+    });
+    assert.equal(dispatch.path, "agent.embedding.provider");
+
+    const decl = dispatch.decl;
+    assert.ok(decl, "Embedder dispatch must lower a PolymorphicDispatchDecl");
+    assert.equal(decl.discriminatorField, "provider");
+    // Bare `string` member keeps the set open...
+    assert.equal(decl.isClosed, false);
+    assert.deepEqual(sortedValues(decl), ["local", "remote"]);
+    assert.deepEqual(sortedTypeNames(decl), ["LocalEmbedding", "RemoteEmbedding"]);
+    // ...and with no `*` subtype the base model itself becomes the fallback: the
+    // defaultVariant is a SELF-REFERENCE to `Embedding` (isSelfReference: true),
+    // NOT null. Contrast the Executor case, whose `CustomModel { provider: "*" }`
+    // lowers to a distinct fallback subtype (isSelfReference: false). So an open
+    // union always yields a fallback slot — an explicit `*` subtype when present,
+    // otherwise the discriminator base itself — while only a CLOSED union has no
+    // fallback (defaultVariant: null).
+    const fallback = decl.defaultVariant as {
+      typeName: { name: string };
+      isSelfReference: boolean;
+    };
+    assert.ok(fallback, "open union must yield a fallback defaultVariant");
+    assert.equal(fallback.typeName.name, "Embedding");
+    assert.equal(fallback.isSelfReference, true);
   });
 });
