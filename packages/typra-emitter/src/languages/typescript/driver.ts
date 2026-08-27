@@ -16,7 +16,10 @@ import {
 } from "./scaffolding.js";
 import { emitTypeScriptTest } from "./test-emitter.js";
 import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
-import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
+import {
+  isClosedPolymorphicDispatch,
+  dispatchDefaultSlotBase,
+} from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
   DispatchedContract,
@@ -1127,6 +1130,17 @@ function emitTypeScriptDispatchResolver(entry: DispatchedContract): string {
   // in the shape loader, never throwing, so a bare `isClosedPolymorphicDispatch`
   // is the faithful twin of that throw arm.
   const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
+  // An open dispatch with a declared wildcard child (`CustomModel { provider:
+  // "*" }`) gains an optional default slot; an unknown discriminator routes to
+  // it instead of yielding null — the behavioral twin of the shape loader's
+  // `*`-tolerant fallback. Closed / open-self-reference keeps its throw/null arm.
+  const defaultSlotBase = dispatchDefaultSlotBase(entry.decl);
+  const defaultSlot = defaultSlotBase
+    ? `${defaultSlotBase[0].toLowerCase()}${defaultSlotBase.slice(1)}`
+    : null;
+  const providerType = defaultSlot
+    ? `Record<${kindType}, ${seam} | null> & { ${defaultSlot}?: ${seam} | null }`
+    : `Record<${kindType}, ${seam} | null>`;
   const kindUnion = variants
     .map((variant) => JSON.stringify(variant.value))
     .join(" | ");
@@ -1153,7 +1167,7 @@ function emitTypeScriptDispatchResolver(entry: DispatchedContract): string {
     ` * A Record over ${kindType} forces every slot to be DECLARED (a missing key is a`,
     " * compile error); a null value signals a valid-but-unimplemented variant.",
     " */",
-    `export type ${provider} = Record<${kindType}, ${seam} | null>;`,
+    `export type ${provider} = ${providerType};`,
     "",
     "/**",
     ` * Map a '${field}' discriminator value to the selected ${seam} impl — the`,
@@ -1176,6 +1190,9 @@ function emitTypeScriptDispatchResolver(entry: DispatchedContract): string {
       `        \`Unknown ${seam} discriminator field '${field}' value: \${${field}}\`,`,
     );
     lines.push("      );");
+  } else if (defaultSlot) {
+    lines.push("    default:");
+    lines.push(`      return registry.${defaultSlot} ?? null;`);
   } else {
     lines.push("    default:");
     lines.push("      return null;");

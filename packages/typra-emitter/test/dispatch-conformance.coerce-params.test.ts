@@ -256,4 +256,58 @@ describe("typed @vector conformance over a coerce-union discriminator with a bar
       "rust resolver body must route via the registry, not the shadowed discriminator",
     );
   });
+
+  // Issue #2 (open-union `*` defaultVariant lowering): Model is an OPEN union
+  // (`openai`, `azure`, string) with a declared wildcard child
+  // `CustomModel { provider: "*" }`. The resolver must lower that default into a
+  // dedicated `custom` registry slot and route an UNKNOWN discriminator to it
+  // (the behavioral twin of the shape loader's `*`-tolerant fallback), instead
+  // of dropping it with `return None` / `_ => None`. Prompty's
+  // `provider: "anthropic"` (unknown) vectors depend on this catch-all.
+  it("open-union resolver lowers the `*` defaultVariant into a `custom` fallback slot", () => {
+    const py = readFileSync(
+      path.join(output, "python", "_processor_resolver.py"),
+      "utf8",
+    );
+    assert.match(
+      py,
+      /custom: Processor \| None = None/,
+      `python open-union resolver must expose an optional \`custom\` default slot\n--- emitted ---\n${py}`,
+    );
+    assert.match(
+      py,
+      /custom=impls\.get\("custom"\),/,
+      "python provider builder must populate the `custom` slot optionally",
+    );
+    assert.match(
+      py,
+      /return registry\.custom\s*$/m,
+      "python resolver fallback must route an unknown discriminator to the `custom` slot",
+    );
+    assert.doesNotMatch(
+      py,
+      /^\s*return None\s*$/m,
+      "python open-union resolver must not drop the unknown discriminator with `return None`",
+    );
+
+    const rs = readFileSync(
+      path.join(output, "rust", "processor_resolver.rs"),
+      "utf8",
+    );
+    assert.match(
+      rs,
+      /fn custom\(&self\) -> Option<&dyn Processor>;/,
+      `rust open-union provider trait must declare a \`custom\` catch-all method\n--- emitted ---\n${rs}`,
+    );
+    assert.match(
+      rs,
+      /_ => registry\.custom\(\),/,
+      "rust resolver fallback must route an unknown discriminator to the `custom` slot",
+    );
+    assert.doesNotMatch(
+      rs,
+      /_ => None,/,
+      "rust open-union resolver must not drop the unknown discriminator with `_ => None`",
+    );
+  });
 });

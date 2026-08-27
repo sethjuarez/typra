@@ -41,7 +41,10 @@ import { ExprVisitor, renderObjectLiteral } from "../../ir/visitor.js";
 import { PythonExprVisitor } from "./visitor.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { toSnakeCase } from "../../ir/utilities.js";
-import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
+import {
+  isClosedPolymorphicDispatch,
+  dispatchDefaultSlotBase,
+} from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
   DispatchedContract,
@@ -2137,6 +2140,14 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
   // Raise on an unknown discriminator exactly when the shape load switch does —
   // a closed dispatch with no default (_TemplateFormat.load_kind else arm).
   const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
+  // An open dispatch with a declared wildcard child (`CustomModel { provider:
+  // "*" }`) routes an unknown discriminator to a default `custom` registry slot,
+  // the behavioral twin of the shape loader's `*`-tolerant fallback. Closed
+  // dispatch / open self-reference has no distinct child slot — keep raise/None.
+  const defaultSlotBase = dispatchDefaultSlotBase(entry.decl);
+  const defaultSlot = defaultSlotBase
+    ? pyDispatchIdentifier(toSnakeCase(defaultSlotBase) || "custom")
+    : null;
   const slot = (value: string): string =>
     pyDispatchIdentifier(toSnakeCase(value) || "value");
 
@@ -2178,6 +2189,14 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
     // slot. Explicit ``None`` still marks a valid-but-unimplemented variant.
     lines.push(`    ${slot(variant.value)}: ${seam} | None`);
   }
+  if (defaultSlot) {
+    // The wildcard/default slot is OPTIONAL — an unknown discriminator routes
+    // here, but a consumer that attaches no catch-all still gets a valid
+    // provider (the slot stays ``None``, so unknown -> unimplemented).
+    lines.push(
+      `    ${defaultSlot}: ${seam} | None = None`,
+    );
+  }
   lines.push("");
   lines.push("");
   lines.push(
@@ -2202,6 +2221,10 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
   for (const variant of variants) {
     lines.push(`        ${slot(variant.value)}=impls[${JSON.stringify(variant.value)}],`);
   }
+  if (defaultSlot) {
+    // Optional: a consumer may omit the catch-all. ``.get`` keeps it ``None``.
+    lines.push(`        ${defaultSlot}=impls.get(${JSON.stringify(defaultSlot)}),`);
+  }
   lines.push("    )");
   lines.push("");
   lines.push("");
@@ -2222,6 +2245,21 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
       "    (possibly ``None`` for a valid-but-unimplemented variant) for the caller",
     );
     lines.push("    to skip explicitly, never a silent miss.");
+    lines.push('    """');
+  } else if (defaultSlot) {
+    lines.push(
+      `    """Map a '${rawField}' discriminator to the attached ${seam} impl — the`,
+    );
+    lines.push(
+      "    behavioral twin of the shape discriminator load switch. A known variant",
+    );
+    lines.push(
+      "    returns its slot; an unknown discriminator routes to the wildcard",
+    );
+    lines.push(
+      `    \`\`${defaultSlot}\`\` default slot (the declared \`\`*\`\` child), mirroring the`,
+    );
+    lines.push("    shape loader's `*`-tolerant fallback — never a silent miss.");
     lines.push('    """');
   } else {
     lines.push(
@@ -2250,6 +2288,8 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
       `        f"Unknown ${seam} discriminator field '${rawField}' value: {${param}}"`,
     );
     lines.push("    )");
+  } else if (defaultSlot) {
+    lines.push(`    return registry.${defaultSlot}`);
   } else {
     lines.push("    return None");
   }
