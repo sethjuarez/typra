@@ -1126,7 +1126,7 @@ function assertStaticFixtureCoverage() {
     path.join("generated", "fixtures", "python", "_WireOptions.py"),
     "def to_wire(self, provider: str)",
     "def from_wire(",
-    "inverse[w] = field",
+    "inverse[w] = field_name",
     "canonical[inverse.get(k, k)] = v",
     "return WireOptions.load(canonical, context)",
     "max_completion_tokens",

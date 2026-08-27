@@ -282,9 +282,9 @@ describe("typed @dispatch resolver is a compile-time contract (C#)", () => {
       assert.match(resolverSrc, /IRenderer\? Liquid \{ get; \}/);
       assert.match(
         resolverSrc,
-        /public static IRenderer\? Resolve\(string kind, IRendererProvider provider\)/,
+        /public static IRenderer\? Resolve\(string kind, IRendererProvider registry\)/,
       );
-      assert.match(resolverSrc, /"mustache" => provider\.Mustache,/);
+      assert.match(resolverSrc, /"mustache" => registry\.Mustache,/);
       // Closed dispatch: an unknown discriminator is a hard error, never null.
       assert.match(resolverSrc, /_ => throw new ArgumentException/);
 

@@ -207,4 +207,107 @@ describe("typed @vector conformance over a coerce-union discriminator with a bar
       }
     }
   });
+
+  // Bug #4 regression: when the @dispatch discriminator field is literally
+  // `provider` (Processor is `@dispatch(Model.provider)`), the per-interface
+  // resolver used to name BOTH its discriminator param and its registry param
+  // `provider` — a duplicate-argument SyntaxError (python) / non-compiling
+  // signature (rust/go/c#/java/ts) that aborted the whole conformance rail. The
+  // registry param is now the fixed `registry`, distinct from the field-named
+  // discriminator param, so `provider`-discriminated resolvers compile.
+  it("provider-discriminated resolver uses a distinct `registry` param (no duplicate `provider`)", () => {
+    const py = readFileSync(
+      path.join(output, "python", "_processor_resolver.py"),
+      "utf8",
+    );
+    assert.match(
+      py,
+      /def resolve_processor\(provider: str, registry: ProcessorProvider\)/,
+      `python provider-dispatch resolver must have distinct discriminator/registry params\n--- emitted ---\n${py}`,
+    );
+    assert.doesNotMatch(
+      py,
+      /def resolve_processor\(provider: str, provider:/,
+      "python provider-dispatch resolver must not emit a duplicate `provider` param",
+    );
+    assert.match(
+      py,
+      /if provider == "openai":\s*\n\s*return registry\.openai/,
+      "python resolver body must read the discriminator (`provider`) and route via the registry",
+    );
+
+    const rs = readFileSync(
+      path.join(output, "rust", "processor_resolver.rs"),
+      "utf8",
+    );
+    assert.match(
+      rs,
+      /pub fn resolve<'a>\(provider: &str, registry: &'a dyn ProcessorProvider\)/,
+      `rust provider-dispatch resolver must have distinct discriminator/registry params\n--- emitted ---\n${rs}`,
+    );
+    assert.doesNotMatch(
+      rs,
+      /\(provider: &str, provider:/,
+      "rust provider-dispatch resolver must not emit a duplicate `provider` param",
+    );
+    assert.match(
+      rs,
+      /"openai" => registry\.openai\(\),/,
+      "rust resolver body must route via the registry, not the shadowed discriminator",
+    );
+  });
+
+  // Issue #2 (open-union `*` defaultVariant lowering): Model is an OPEN union
+  // (`openai`, `azure`, string) with a declared wildcard child
+  // `CustomModel { provider: "*" }`. The resolver must lower that default into a
+  // dedicated `custom` registry slot and route an UNKNOWN discriminator to it
+  // (the behavioral twin of the shape loader's `*`-tolerant fallback), instead
+  // of dropping it with `return None` / `_ => None`. Prompty's
+  // `provider: "anthropic"` (unknown) vectors depend on this catch-all.
+  it("open-union resolver lowers the `*` defaultVariant into a `custom` fallback slot", () => {
+    const py = readFileSync(
+      path.join(output, "python", "_processor_resolver.py"),
+      "utf8",
+    );
+    assert.match(
+      py,
+      /custom: Processor \| None = None/,
+      `python open-union resolver must expose an optional \`custom\` default slot\n--- emitted ---\n${py}`,
+    );
+    assert.match(
+      py,
+      /custom=impls\.get\("custom"\),/,
+      "python provider builder must populate the `custom` slot optionally",
+    );
+    assert.match(
+      py,
+      /return registry\.custom\s*$/m,
+      "python resolver fallback must route an unknown discriminator to the `custom` slot",
+    );
+    assert.doesNotMatch(
+      py,
+      /^\s*return None\s*$/m,
+      "python open-union resolver must not drop the unknown discriminator with `return None`",
+    );
+
+    const rs = readFileSync(
+      path.join(output, "rust", "processor_resolver.rs"),
+      "utf8",
+    );
+    assert.match(
+      rs,
+      /fn custom\(&self\) -> Option<&dyn Processor>;/,
+      `rust open-union provider trait must declare a \`custom\` catch-all method\n--- emitted ---\n${rs}`,
+    );
+    assert.match(
+      rs,
+      /_ => registry\.custom\(\),/,
+      "rust resolver fallback must route an unknown discriminator to the `custom` slot",
+    );
+    assert.doesNotMatch(
+      rs,
+      /_ => None,/,
+      "rust open-union resolver must not drop the unknown discriminator with `_ => None`",
+    );
+  });
 });

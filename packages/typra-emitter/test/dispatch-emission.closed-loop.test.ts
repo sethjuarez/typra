@@ -165,7 +165,7 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
           ),
           mustInclude: [
             // consumes the emitted resolver, not a stringly composite key
-            /guard let impl = try RendererResolver\.resolve\(kind: kind, provider: provider\(\)\)/,
+            /guard let impl = try RendererResolver\.resolve\(kind: kind, registry: provider\(\)\)/,
             // reads the SAME discriminator off the typed union's serialized form
             // (a Swift union is an enum with no stored discriminator property)
             /let kind = try \(agent\.template\.format\.save\(\)\)\["kind"\] as! String/,

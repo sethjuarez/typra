@@ -253,7 +253,7 @@ describe("typed @dispatch resolver is a compile-time contract (Java)", () => {
       assert.match(providerSrc, /Renderer liquid\(\);/);
       assert.match(
         resolverSrc,
-        /public static Renderer resolve\(String kind, RendererProvider provider\)/,
+        /public static Renderer resolve\(String kind, RendererProvider registry\)/,
       );
       assert.match(resolverSrc, /case "mustache":/);
       // Closed dispatch: an unknown discriminator is a hard error, never null.
