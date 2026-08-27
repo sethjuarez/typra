@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [1.2.1](https://github.com/sethjuarez/typra/compare/v1.2.0...v1.2.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **emitter:** non-model [@vector](https://github.com/vector) conformance param mapping + open-union loader fallback ([#287](https://github.com/sethjuarez/typra/issues/287)) ([5b3ca3e](https://github.com/sethjuarez/typra/commit/5b3ca3ec242cb00b31520fa87d9c5e94dcce5a37))
+
 ## [1.2.0](https://github.com/sethjuarez/typra/compare/v1.1.0...v1.2.0) (2026-08-27)
 
 
