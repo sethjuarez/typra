@@ -1,6 +1,7 @@
 import {
   KNOWN_TEST_FAILURES,
   assertKnownTestFailures,
+  commandExists,
   execFileSync,
   existsSync,
   fail,
@@ -595,6 +596,126 @@ export function runRustUnknownAbstractConformance() {
   } finally {
     if (existsSync(targetDir)) {
       rmSync(targetDir, { recursive: true, force: true });
+    }
+  }
+}
+
+export function runRustDispatchRegressionCompile(context) {
+  // Regression compile gate: the coerce-union + optional-field target bugs
+  // (BUG1/BUG2/BUG3 and the 2.0.0 raw-string/import/unwrap defects) all surface
+  // ONLY as compile errors in the generated SEAM conformance tests for a fixture
+  // that couples an optional intermediate with a discriminated coerce union. The
+  // integration fixture lacks that seam, so those bugs were never compiled in
+  // typra CI — only downstream. This gate closes that gap by generating the
+  // dispatch-target-regression fixture with tests, attaching compile-only
+  // provider doubles, and `cargo build --tests` (compile, do not run).
+  if (!commandExists("cargo")) {
+    context.skip("cargo is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "dispatch-target-regression",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-rust-regression-"));
+  const targetDir = mkdtempSync(
+    path.join(tmpdir(), "typra-rust-regression-target-"),
+  );
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "rust",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.DispatchTargetRegression.Root",
+        "--deterministic",
+        "--no-format",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "rust");
+    if (!existsSync(sourceDir)) {
+      fail("Rust dispatch-target-regression gate: no rust output generated.");
+      return;
+    }
+    // Attach the committed compile-only provider doubles next to the emitted
+    // seam conformance tests (they include it via #[path = "vector_adapters.rs"]).
+    writeFileSync(
+      path.join(sourceDir, "tests", "vector_adapters.rs"),
+      readFileSync(
+        path.join(fixtureDir, "vector-adapters", "rust", "vector_adapters.rs"),
+        "utf8",
+      ),
+    );
+    writeFileSync(
+      path.join(sourceDir, "Cargo.toml"),
+      [
+        "[package]",
+        'name = "dispatch_target_regression"',
+        'version = "0.0.0"',
+        'edition = "2021"',
+        "autotests = false",
+        "",
+        "[dependencies]",
+        'async-trait = "0.1"',
+        'serde = { version = "1", features = ["derive"] }',
+        'serde_json = "1"',
+        'serde_yaml = "0.9"',
+        "",
+        "[dev-dependencies]",
+        'tokio = { version = "1", features = ["macros", "rt"] }',
+        "",
+        "[features]",
+        "serde = []",
+        "",
+        "[lib]",
+        'path = "lib.rs"',
+        "",
+      ].join("\n"),
+    );
+    // The generated seam tests import `crate::model::*`; the per-model tests
+    // import `crate::*`. Re-export the model at the crate root so both resolve,
+    // and pull the emitted test tree in under cfg(test).
+    writeFileSync(
+      path.join(sourceDir, "lib.rs"),
+      [
+        '#[path = "mod.rs"]',
+        "pub mod model;",
+        "pub use model::*;",
+        "",
+        "#[cfg(test)]",
+        '#[path = "tests/main.rs"]',
+        "mod conformance;",
+        "",
+      ].join("\n"),
+    );
+    try {
+      execFileSync("cargo", ["build", "--tests"], {
+        cwd: sourceDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+      });
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Rust dispatch-target-regression compile gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    for (const dir of [outRoot, targetDir]) {
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   }
 }

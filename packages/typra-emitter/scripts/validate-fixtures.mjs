@@ -50,6 +50,7 @@ import {
   runGoTests,
 } from "./fixtures/targets/go.mjs";
 import {
+  runRustDispatchRegressionCompile,
   runRustExecutableConformance,
   runRustTests,
   runRustUnknownAbstractConformance,
@@ -115,6 +116,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "python_pydantic.generated-tests",
   "go.generated-tests",
   "rust.generated-tests",
+  "rust.dispatch-regression-compile",
   "rust-serde.generated-tests",
   "swift.generated-tests",
   "swift-codable.generated-tests",
@@ -2146,6 +2148,10 @@ function runDeclaredValidationStages() {
       ["go.generated-tests", runGoTests],
       ["rust.generated-tests", () => runRustTests()],
       [
+        "rust.dispatch-regression-compile",
+        (context) => runRustDispatchRegressionCompile(context),
+      ],
+      [
         "rust-serde.generated-tests",
         () => runRustTests("rust-serde", "fixtures_serde"),
       ],
@@ -2168,6 +2174,7 @@ function runDeclaredValidationStages() {
     allowedSkips: {
       ...idempotencyAllowedSkips(),
       "typescript.runtime-neutrality": "no TypeScript targets generated",
+      "rust.dispatch-regression-compile": "cargo is not available",
     },
   });
 }
