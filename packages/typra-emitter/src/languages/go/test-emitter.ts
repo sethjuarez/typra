@@ -174,7 +174,7 @@ function emitStructuredValidations(
     }
 
     if (!prop.isScalar && prop.type && typeof value === "string") {
-      emitShorthandObjectValidation(lines, expr, fieldName, value, prop.type);
+      emitShorthandObjectValidation(lines, expr, fieldName, value, prop.type, pkg);
       continue;
     }
 
@@ -226,7 +226,7 @@ function emitStructuredValidations(
       typeof value === "object" &&
       !Array.isArray(value)
     ) {
-      emitNestedObjectValidation(lines, expr, fieldName, value, prop.type);
+      emitNestedObjectValidation(lines, expr, fieldName, value, prop.type, pkg);
     }
   }
 }
@@ -237,6 +237,7 @@ function emitShorthandObjectValidation(
   fieldName: string,
   expected: string,
   node: TypeNode,
+  pkg: string,
 ): void {
   const shorthandField = findStringCoercionField(node);
   if (!shorthandField) return;
@@ -248,12 +249,49 @@ function emitShorthandObjectValidation(
     buildGoFieldNames(node.properties.map((prop) => prop.name)).get(
       shorthandField,
     ) ?? goFieldName(shorthandField);
+  // A coerce-union whose target is polymorphic lowers to a Go `interface{}` field
+  // with no exported discriminator accessor, so `${expr}.${targetField}` (e.g.
+  // `.Kind`) does not compile. Read the discriminator off the serialized form —
+  // the twin of `goDiscriminatorAccessor` and the union's own Save switch.
+  if ((node.childTypes.length ?? 0) > 0) {
+    emitScalarSampleValidation(
+      lines,
+      goSaveDiscriminatorRead(expr, shorthandField, pkg),
+      `${fieldName}.${targetField}`,
+      expected,
+      false,
+    );
+    return;
+  }
   emitScalarSampleValidation(
     lines,
     `${expr}.${targetField}`,
     `${fieldName}.${targetField}`,
     expected,
     targetProp?.isOptional ?? false,
+  );
+}
+
+/**
+ * Read a coerce-union discriminator off a LOADED `interface{}` field for the
+ * per-model conformance harness. A polymorphic coerce-union lowers to Go
+ * `interface{}` with no exported discriminator accessor, so — mirroring both the
+ * typed seam's `goDiscriminatorAccessor` and the union's own Save switch — assert
+ * the concrete value to the anonymous Save interface and read the raw wire field
+ * off the serialized map. `pkg` is the imported model package (SaveContext lives
+ * there); the model test package is `${pkg}_test`.
+ */
+function goSaveDiscriminatorRead(
+  expr: string,
+  discriminatorKey: string,
+  pkg: string,
+): string {
+  return (
+    `${expr}.(interface {\n` +
+    `\t\tSave(*${pkg}.SaveContext) map[string]interface{}\n` +
+    `\t}).Save(${pkg}.NewSaveContext())[${JSON.stringify(
+      discriminatorKey,
+    )}].(string)`
   );
 }
 
@@ -425,6 +463,7 @@ function emitNestedObjectValidation(
   fieldName: string,
   value: Record<string, any>,
   node: TypeNode,
+  pkg: string,
 ): void {
   const fieldNames = buildGoFieldNames(
     node.properties.map((prop) => prop.name),
@@ -439,13 +478,27 @@ function emitNestedObjectValidation(
       if (!prop.isScalar && prop.type) {
         const shorthandField = findStringCoercionField(prop.type);
         if (shorthandField) {
-          const targetProp = prop.type.properties.find(
-            (candidate) => candidate.name === shorthandField,
-          );
           const targetField =
             buildGoFieldNames(
               prop.type.properties.map((candidate) => candidate.name),
             ).get(shorthandField) ?? goFieldName(shorthandField);
+          // A coerce-union whose target is polymorphic lowers to a Go
+          // `interface{}` field, so `${nestedExpr}.${targetField}` (e.g. `.Kind`)
+          // does not compile. Read the discriminator off the serialized form —
+          // the twin of `goDiscriminatorAccessor` and the union's Save switch.
+          if ((prop.type.childTypes.length ?? 0) > 0) {
+            emitScalarSampleValidation(
+              lines,
+              goSaveDiscriminatorRead(nestedExpr, shorthandField, pkg),
+              `${fieldName}.${nestedField}.${targetField}`,
+              expected,
+              false,
+            );
+            continue;
+          }
+          const targetProp = prop.type.properties.find(
+            (candidate) => candidate.name === shorthandField,
+          );
           emitScalarSampleValidation(
             lines,
             `${nestedExpr}.${targetField}`,

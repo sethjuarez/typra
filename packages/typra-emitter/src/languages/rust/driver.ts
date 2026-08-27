@@ -21,6 +21,7 @@ import { toSnakeCase } from "../../ir/utilities.js";
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
+  type TypeDecl,
 } from "../../ir/declarations.js";
 import {
   assertTypedDispatchSupported,
@@ -292,6 +293,16 @@ export const generateRust = async (
     (options?.callableVectors?.vectors.length ?? 0) > 0
   ) {
     const allVectors = options!.callableVectors!.vectors;
+    // Index the lowered type declarations by simple name so the per-interface
+    // conformance emitter can walk a @dispatch container path and unwrap the
+    // Rust `Option<…>` intermediates it crosses (a required step to reach the
+    // lowered `serde_json::Value` union — the twin of the Swift `!` unwrap).
+    const rustDeclsByName = new Map<string, TypeDecl>(
+      nodes
+        .filter((n) => !n.base)
+        .flatMap((n) => lowerFile(n, registry, polymorphicTypeNames).types)
+        .map((decl) => [decl.typeName.name, decl]),
+    );
     // A `@dispatch` seam routes through the typed resolver rail (issue #282 §8):
     // its vectors get a per-interface, typed `${iface}_conformance_test.rs` file
     // that CONSUMES the emitted `${seam}_resolver`. Undispatched seams —
@@ -349,6 +360,7 @@ export const generateRust = async (
           ifaceVectors,
           emitTarget["import-path"] ?? "crate::model",
           emitTarget["vector-adapter-path"] ?? "vector_adapters.rs",
+          rustDeclsByName,
         ),
         `${emitTarget["test-dir"]}/${dispatched.group}`,
         emitTarget["test-dir"],
@@ -2088,6 +2100,7 @@ function emitRustInterfaceConformanceTest(
   entries: CallableVectorSnapshotEntry[],
   importPath: string,
   adapterPath: string,
+  declsByName: Map<string, TypeDecl>,
 ): string {
   const seam = dispatched.contract;
   const providerTrait = `${seam}Provider`;
@@ -2142,7 +2155,11 @@ function emitRustInterfaceConformanceTest(
     assertTypedDispatchSupported(entry);
     const paramNames = Object.keys(entry.params);
     const method = toSnakeCase(entry.operation);
-    const accessor = rustDiscriminatorAccessor(entry.dispatch!.path);
+    const accessor = rustDiscriminatorAccessor(
+      entry.dispatch!.path,
+      declsByName,
+      entry.params[entry.dispatch!.path.split(".")[0]],
+    );
     const label = entry.vector.name ?? entry.operation;
     const expected = entry.vector.expected;
     const input = (entry.vector.input ?? {}) as Record<string, unknown>;
@@ -2231,14 +2248,36 @@ function emitRustInterfaceConformanceTest(
  * union then read the raw wire field via `.get(field).as_str()`. The path head is
  * a param local (guaranteed by assertTypedDispatchSupported); middle segments
  * navigate snake_case struct fields.
+ *
+ * Optionality-aware: an intermediate whose lowered `FieldDecl` is optional is a
+ * Rust `Option<…>`, so it must be unwrapped with
+ * `.as_ref().expect("<field> present")` before the next field access (or before
+ * `.get(...)` when the optional field is itself the union). Walking the lowered
+ * declarations from the parameter's root type keeps the unwrap faithful to the
+ * model — a required field, or a field we cannot resolve, gets no unwrap. This is
+ * the Rust twin of `swiftDiscriminatorAccessor`'s `!` force-unwrap.
  */
-function rustDiscriminatorAccessor(path: string): string {
+function rustDiscriminatorAccessor(
+  path: string,
+  declsByName: Map<string, TypeDecl>,
+  rootTypeName: string | undefined,
+): string {
   const segments = path.split(".");
   const rawField = segments[segments.length - 1];
-  const container = [
-    rustFieldName(segments[0]),
-    ...segments.slice(1, -1).map((segment) => rustFieldName(segment)),
-  ].join(".");
+  const containerSegments = segments.slice(1, -1);
+  let currentType = rootTypeName ? declsByName.get(rootTypeName) : undefined;
+  const parts = [rustFieldName(segments[0])];
+  for (const segment of containerSegments) {
+    const field = currentType?.fields.find((f) => f.name === segment);
+    const access = rustFieldName(segment);
+    parts.push(
+      field?.isOptional
+        ? `${access}.as_ref().expect(${JSON.stringify(`${segment} present`)})`
+        : access,
+    );
+    currentType = field ? declsByName.get(field.typeName.name) : undefined;
+  }
+  const container = parts.join(".");
   return `${container}\n        .get(${JSON.stringify(
     rawField,
   )})\n        .and_then(|v| v.as_str())\n        .expect("discriminator present")`;
