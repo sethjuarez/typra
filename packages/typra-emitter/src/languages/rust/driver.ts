@@ -25,11 +25,13 @@ import {
   collectDispatchedContracts,
   DispatchedContract,
   isTypedDispatchEntry,
+  classifyCallableParam,
 } from "../../ir/vector.js";
 import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
 import {
   emitRustFile as emitRustFileDecl,
   RUST_ALLOW_ATTR,
+  protocolRustType,
 } from "./emitter.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
 import {
@@ -2077,11 +2079,16 @@ function emitRustInterfaceConformanceTest(
   const sorted = [...entries].sort((left, right) =>
     (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
   );
-  // Import the seam plus every param type it operates on, deduped and sorted so
-  // the `use` line is deterministic.
+  // Import the seam plus every MODEL param type it operates on, deduped and
+  // sorted so the `use` line is deterministic. Non-model params (scalars,
+  // `Record<unknown>`, optionals, arrays) have no importable symbol — their raw
+  // TypeSpec spelling would break `cargo fmt` — so they are decoded inline
+  // against the mapped Rust type instead.
   const typeNames = new Set<string>([seam]);
   for (const entry of sorted) {
-    for (const typeName of Object.values(entry.params)) typeNames.add(typeName);
+    for (const typeName of Object.values(entry.params)) {
+      if (classifyCallableParam(typeName).bareModel) typeNames.add(typeName);
+    }
   }
   const importedTypes = [...typeNames].sort();
   const seen = new Map<string, number>();
@@ -2134,15 +2141,30 @@ function emitRustInterfaceConformanceTest(
     lines.push("    let ctx = LoadContext::default();");
     for (const paramName of paramNames) {
       const paramType = entry.params[paramName];
+      const shape = classifyCallableParam(paramType);
       const local = rustFieldName(paramName);
       const paramJson = JSON.stringify(input[paramName] ?? {}, null, 2);
-      lines.push(`    let ${local} = ${paramType}::from_json(`);
-      lines.push(`        r####"`);
-      lines.push(paramJson);
-      lines.push(`"####,`);
-      lines.push("        &ctx,");
-      lines.push("    )");
-      lines.push(`    .expect(${JSON.stringify(`${paramName} parses`)});`);
+      if (shape.bareModel) {
+        lines.push(`    let ${local} = ${paramType}::from_json(`);
+        lines.push(`        r####"`);
+        lines.push(paramJson);
+        lines.push(`"####,`);
+        lines.push("        &ctx,");
+        lines.push("    )");
+        lines.push(`    .expect(${JSON.stringify(`${paramName} parses`)});`);
+      } else {
+        // A non-model seam param (scalar, `Record<unknown>`, optional, array) has
+        // no generated `from_json`; decode it into the mapped Rust type with
+        // serde — the same type the seam trait signature uses for the param.
+        lines.push(
+          `    let ${local}: ${protocolRustType(paramType)} = serde_json::from_str(`,
+        );
+        lines.push(`        r####"`);
+        lines.push(paramJson);
+        lines.push(`"####,`);
+        lines.push("    )");
+        lines.push(`    .expect(${JSON.stringify(`${paramName} parses`)});`);
+      }
     }
     lines.push(`    let kind = ${accessor};`);
     lines.push(`    let provider = vector_adapters::${providerFactory}();`);

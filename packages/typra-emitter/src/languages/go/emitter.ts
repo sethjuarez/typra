@@ -657,6 +657,21 @@ function emitPolymorphicDispatch(
   lines: string[],
 ): void {
   const isClosed = isClosedPolymorphicDispatch(dispatch);
+  const defaultVariant = dispatch.defaultVariant;
+  // A union tolerates an absent/blank discriminator only when it declares an
+  // explicit `*` wildcard carrier (declaredDefault: a default variant that is NOT
+  // a base self-reference): that catch-all absorbs absent/blank/unknown, so the
+  // coerce shorthand (map with no discriminator) hydrates. Closed unions, abstract
+  // open carriers, AND non-abstract open unions that fall back to their own base
+  // by self-reference all reject absent/blank up front — a blank discriminator
+  // names no variant. Unknown NON-blank values still fall through to the declared
+  // carrier / self-reference base construction below.
+  const declaredDefault =
+    defaultVariant && !defaultVariant.isSelfReference
+      ? defaultVariant
+      : undefined;
+  const hasFallback = Boolean(declaredDefault);
+
   lines.push("\t// Handle polymorphic types based on discriminator");
   lines.push("\tif m, ok := data.(map[string]interface{}); ok {");
   lines.push(
@@ -664,11 +679,13 @@ function emitPolymorphicDispatch(
   );
   lines.push("\t\t\tswitch discriminator := discriminator.(type) {");
   lines.push("\t\t\tcase string:");
-  lines.push('\t\t\t\tif discriminator == "" {');
-  lines.push(
-    `\t\t\t\t\treturn nil, fmt.Errorf("invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`,
-  );
-  lines.push("\t\t\t\t}");
+  if (!hasFallback) {
+    lines.push('\t\t\t\tif discriminator == "" {');
+    lines.push(
+      `\t\t\t\t\treturn nil, fmt.Errorf("invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`,
+    );
+    lines.push("\t\t\t\t}");
+  }
   lines.push("\t\t\t\tswitch discriminator {");
 
   for (const variant of dispatch.variants) {
@@ -676,15 +693,15 @@ function emitPolymorphicDispatch(
     lines.push(`\t\t\t\t\treturn Load${variant.typeName.name}(data, ctx)`);
   }
 
-  // Default variant
-  if (dispatch.defaultVariant) {
-    if (!dispatch.defaultVariant.isSelfReference) {
-      lines.push("\t\t\t\tdefault:");
-      lines.push(
-        `\t\t\t\t\treturn Load${dispatch.defaultVariant.typeName.name}(data, ctx)`,
-      );
-    }
-  } else if (isClosed) {
+  // Default (unknown/blank string) variant. A declared `*` carrier absorbs it; a
+  // self-referential default falls through to base construction below; a closed
+  // union with no default rejects the unknown value.
+  if (declaredDefault) {
+    lines.push("\t\t\t\tdefault:");
+    lines.push(
+      `\t\t\t\t\treturn Load${declaredDefault.typeName.name}(data, ctx)`,
+    );
+  } else if (isClosed && !defaultVariant) {
     lines.push("\t\t\t\tdefault:");
     lines.push(
       `\t\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: %s", discriminator)`,
@@ -692,25 +709,47 @@ function emitPolymorphicDispatch(
   }
 
   lines.push("\t\t\t\t}");
-  if (isClosed && !dispatch.defaultVariant) {
+  // Non-string discriminator. Route to a declared carrier when present; a
+  // self-referential default falls through to base construction; otherwise
+  // reject (closed: unknown value; abstract open carrier: blank string).
+  if (declaredDefault) {
     lines.push("\t\t\tdefault:");
     lines.push(
-      `\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: %v", discriminator)`,
+      `\t\t\t\treturn Load${declaredDefault.typeName.name}(data, ctx)`,
     );
-  } else {
-    lines.push("\t\t\tdefault:");
-    lines.push(
-      `\t\t\t\treturn nil, fmt.Errorf("invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`,
-    );
+  } else if (!hasFallback) {
+    if (isClosed) {
+      lines.push("\t\t\tdefault:");
+      lines.push(
+        `\t\t\t\treturn nil, fmt.Errorf("unknown ${typeName} discriminator field '${dispatch.discriminatorField}' value: %v", discriminator)`,
+      );
+    } else {
+      lines.push("\t\t\tdefault:");
+      lines.push(
+        `\t\t\t\treturn nil, fmt.Errorf("invalid ${typeName} discriminator field '${dispatch.discriminatorField}': expected non-blank string")`,
+      );
+    }
   }
   lines.push("\t\t\t}");
-  lines.push("\t\t} else {");
-  lines.push(
-    `\t\t\treturn nil, fmt.Errorf("missing ${typeName} discriminator property: ${dispatch.discriminatorField}")`,
-  );
-  lines.push("\t\t}");
+  // Absent discriminator. A declared carrier absorbs it; a self-referential
+  // default falls through to base construction below; otherwise reject.
+  if (declaredDefault) {
+    lines.push("\t\t} else {");
+    lines.push(
+      `\t\t\treturn Load${declaredDefault.typeName.name}(data, ctx)`,
+    );
+    lines.push("\t\t}");
+  } else if (!hasFallback) {
+    lines.push("\t\t} else {");
+    lines.push(
+      `\t\t\treturn nil, fmt.Errorf("missing ${typeName} discriminator property: ${dispatch.discriminatorField}")`,
+    );
+    lines.push("\t\t}");
+  } else {
+    lines.push("\t\t}");
+  }
   lines.push("\t}");
-  if (isClosed && !dispatch.defaultVariant) {
+  if (isClosed && !defaultVariant) {
     lines.push(
       `\treturn nil, fmt.Errorf("invalid ${typeName} discriminator property '${dispatch.discriminatorField}': expected non-blank string")`,
     );
@@ -2057,7 +2096,7 @@ function goMethodReturnType(returns: string): string {
 // ============================================================================
 
 /** Map a protocol type string to a Go type. */
-function protocolGoType(typeStr: string): string {
+export function protocolGoType(typeStr: string): string {
   // Handle nullable types
   if (typeStr.endsWith("?")) {
     const inner = typeStr.slice(0, -1);

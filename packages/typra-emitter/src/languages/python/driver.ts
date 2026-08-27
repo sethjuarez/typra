@@ -48,6 +48,7 @@ import {
   CallableVectorSnapshotEntry,
   isTypedDispatchEntry,
   assertTypedDispatchSupported,
+  classifyCallableParam,
 } from "../../ir/vector.js";
 import { scalarRuntimeKind } from "../../ir/scalar-kinds.js";
 import {
@@ -843,11 +844,15 @@ function emitPythonInterfaceConformanceTest(
   const sorted = [...entries].sort((left, right) =>
     (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
   );
-  // Distinct param model types, in first-seen order, for a stable model import.
+  // Distinct MODEL param types, in first-seen order, for a stable model import.
+  // Non-model params (scalars, dict, optionals) arrive already decoded from
+  // json.loads and need no import.
   const modelTypes: string[] = [];
   for (const entry of sorted) {
     for (const type of Object.values(entry.params)) {
-      if (!modelTypes.includes(type)) modelTypes.push(type);
+      if (classifyCallableParam(type).bareModel && !modelTypes.includes(type)) {
+        modelTypes.push(type);
+      }
     }
   }
 
@@ -904,11 +909,20 @@ function emitPythonInterfaceConformanceTest(
       "    )",
     );
     for (const paramName of paramNames) {
-      lines.push(
-        `    ${paramName} = ${entry.params[paramName]}.load(payload[${JSON.stringify(
-          paramName,
-        )}])`,
-      );
+      const shape = classifyCallableParam(entry.params[paramName]);
+      const key = JSON.stringify(paramName);
+      if (shape.bareModel) {
+        lines.push(`    ${paramName} = ${entry.params[paramName]}.load(payload[${key}])`);
+      } else {
+        // Non-model params (scalars, dict, optionals) are already the right
+        // native Python type after json.loads; pass them through. An optional
+        // param tolerates an absent key.
+        lines.push(
+          shape.optional
+            ? `    ${paramName} = payload.get(${key})`
+            : `    ${paramName} = payload[${key}]`,
+        );
+      }
     }
     lines.push(
       `    ${field} = ${accessor}`,

@@ -21,7 +21,7 @@ import {
   lowerType,
   collectPolymorphicTypeNames,
 } from "../../ir/lower.js";
-import { emitGoFileContent } from "./emitter.js";
+import { emitGoFileContent, protocolGoType } from "./emitter.js";
 import { formatGoSource } from "./go-format.js";
 import { emitGoContext } from "./scaffolding.js";
 import { emitGoTest } from "./test-emitter.js";
@@ -37,6 +37,7 @@ import {
   collectDispatchedContracts,
   DispatchedContract,
   isTypedDispatchEntry,
+  classifyCallableParam,
 } from "../../ir/vector.js";
 import {
   collectProtocolNodes,
@@ -1103,17 +1104,33 @@ function emitGoInterfaceConformanceTest(
     lines.push('\t\tt.Fatalf("failed to decode vector input: %v", err)');
     lines.push("\t}");
     for (const paramName of paramNames) {
-      const paramType = goFieldName(entry.params[paramName]);
-      lines.push(
-        `\t${paramName}, err := fixtures.Load${paramType}(payload[${JSON.stringify(
-          paramName,
-        )}], fixtures.NewLoadContext())`,
-      );
-      lines.push("\tif err != nil {");
-      lines.push(
-        `\t\tt.Fatalf("${paramName} parse: %v", err)`,
-      );
-      lines.push("\t}");
+      const shape = classifyCallableParam(entry.params[paramName]);
+      const key = JSON.stringify(paramName);
+      if (shape.bareModel) {
+        const paramType = goFieldName(entry.params[paramName]);
+        lines.push(
+          `\t${paramName}, err := fixtures.Load${paramType}(payload[${key}], fixtures.NewLoadContext())`,
+        );
+        lines.push("\tif err != nil {");
+        lines.push(`\t\tt.Fatalf("${paramName} parse: %v", err)`);
+        lines.push("\t}");
+      } else {
+        // Non-model param (scalar, `Record<unknown>`, optional, array) decoded
+        // into the mapped Go type via a JSON round-trip. Scoped braces keep the
+        // marshal/unmarshal errors from colliding with the seam-resolve `err`.
+        lines.push(`\tvar ${paramName} ${protocolGoType(entry.params[paramName])}`);
+        lines.push("\t{");
+        lines.push(`\t\t${paramName}Bytes, marshalErr := json.Marshal(payload[${key}])`);
+        lines.push("\t\tif marshalErr != nil {");
+        lines.push(`\t\t\tt.Fatalf("${paramName} marshal: %v", marshalErr)`);
+        lines.push("\t\t}");
+        lines.push(
+          `\t\tif unmarshalErr := json.Unmarshal(${paramName}Bytes, &${paramName}); unmarshalErr != nil {`,
+        );
+        lines.push(`\t\t\tt.Fatalf("${paramName} parse: %v", unmarshalErr)`);
+        lines.push("\t\t}");
+        lines.push("\t}");
+      }
     }
     lines.push(`\t${goDispatchParam(rawField)} := ${accessor}`);
     lines.push(

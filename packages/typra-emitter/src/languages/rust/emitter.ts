@@ -1166,20 +1166,38 @@ function emitInputValidation(
   emitFieldInputValidation(type, baseAssignments, lines, "        ");
   if (type.polymorphicDispatch) {
     const dispatch = type.polymorphicDispatch;
-    lines.push(
-      `        let discriminator = value.get("${dispatch.discriminatorField}")`,
-    );
-    lines.push(
-      `            .ok_or_else(|| "Missing ${type.typeName.name} discriminator property: '${dispatch.discriminatorField}'".to_string())?;`,
-    );
-    lines.push("        let discriminator = match discriminator {");
-    lines.push(
-      "            serde_json::Value::String(value) if !value.is_empty() => value.as_str(),",
-    );
-    lines.push(
-      `            _ => return Err("Invalid ${type.typeName.name} discriminator field '${dispatch.discriminatorField}': expected non-blank string".to_string()),`,
-    );
-    lines.push("        };");
+    const declaredDefault =
+      dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference;
+    if (declaredDefault) {
+      // Open union with a DECLARED wildcard `*` variant: tolerate an absent/blank
+      // discriminator and route the missing/blank value to its fallback (`_`)
+      // arm — the same catch-all the load path selects via `unwrap_or("")`.
+      // Erroring here would make the coerce shorthand (object with no
+      // discriminator) fail validation.
+      lines.push(
+        `        let discriminator = value.get("${dispatch.discriminatorField}").and_then(|candidate| candidate.as_str()).unwrap_or("");`,
+      );
+    } else {
+      // Closed union, abstract open carrier, or a non-abstract open union that
+      // falls back to its own base by self-reference: an absent/blank/non-string
+      // discriminator cannot name a variant and is rejected up front. (A closed
+      // union has additionally been rejected by validate_discriminator() above.)
+      // Unknown NON-blank values still pass and route to the `_` arm below.
+      lines.push(
+        `        let discriminator = value.get("${dispatch.discriminatorField}")`,
+      );
+      lines.push(
+        `            .ok_or_else(|| "Missing ${type.typeName.name} discriminator property: '${dispatch.discriminatorField}'".to_string())?;`,
+      );
+      lines.push("        let discriminator = match discriminator {");
+      lines.push(
+        "            serde_json::Value::String(value) if !value.is_empty() => value.as_str(),",
+      );
+      lines.push(
+        `            _ => return Err("Invalid ${type.typeName.name} discriminator field '${dispatch.discriminatorField}': expected non-blank string".to_string()),`,
+      );
+      lines.push("        };");
+    }
     lines.push("        match discriminator {");
     for (const variant of dispatch.variants) {
       const childType = childTypes.find(
@@ -2498,7 +2516,7 @@ function methodReturnType(method: MethodStubDecl): string {
 // ============================================================================
 
 /** Map a protocol type string to a Rust type. */
-function protocolRustType(typeStr: string): string {
+export function protocolRustType(typeStr: string): string {
   // Handle nullable types
   if (typeStr.endsWith("?")) {
     const inner = typeStr.slice(0, -1);

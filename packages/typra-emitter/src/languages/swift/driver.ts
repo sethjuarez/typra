@@ -40,7 +40,7 @@ import {
   swiftStringLiteral,
   swiftTypeName,
 } from "./identifiers.js";
-import { SWIFT_TYPE_MAP } from "./types.js";
+import { SWIFT_TYPE_MAP, swiftType } from "./types.js";
 import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
 import { isClosedPolymorphicDispatch } from "../../ir/declarations.js";
 import {
@@ -49,6 +49,7 @@ import {
   collectDispatchedContracts,
   DispatchedContract,
   isTypedDispatchEntry,
+  classifyCallableParam,
 } from "../../ir/vector.js";
 
 export const swiftTypeMapper: Record<string, string> = SWIFT_TYPE_MAP;
@@ -1030,12 +1031,24 @@ function emitSwiftInterfaceConformanceTest(
       "    }",
     );
     for (const paramName of paramNames) {
+      const shape = classifyCallableParam(entry.params[paramName]);
       const local = swiftPropertyName(paramName);
-      lines.push(
-        `    let ${local} = try ${entry.params[paramName]}.load(input[${swiftStringLiteral(
-          paramName,
-        )}]!)`,
-      );
+      const key = swiftStringLiteral(paramName);
+      if (shape.bareModel) {
+        lines.push(`    let ${local} = try ${entry.params[paramName]}.load(input[${key}]!)`);
+      } else if (shape.optional) {
+        // Optional non-model param: tolerate an absent key, casting to the mapped
+        // (non-optional) Swift element type when present.
+        lines.push(
+          `    let ${local} = input[${key}] as? ${swiftType(
+            entry.params[paramName].replace(/\?$/, ""),
+          )}`,
+        );
+      } else {
+        // Non-model param (scalar, `Record<unknown>`, array) cast from the parsed
+        // JSON object into the mapped Swift type the seam signature expects.
+        lines.push(`    let ${local} = input[${key}] as! ${swiftType(entry.params[paramName])}`);
+      }
     }
     lines.push(
       `    let ${swiftPropertyName(rawField)} = ${accessor}`,

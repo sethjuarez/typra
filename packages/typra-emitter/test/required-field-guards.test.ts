@@ -8,15 +8,15 @@
  * struct/class initializer default. A fabricated value must never substitute for a missing
  * required field.
  *
- * The fix has two halves:
- *
- *  - TypeScript, Python, C#, Go and Java model an open discriminated base as a real base
- *    class, so the guard inside the wildcard carrier is now unconditional, and dispatch rejects
- *    a missing, blank, null, or wrong-type discriminator before any fallback is considered.
- *
- *  - Swift and Rust model fallback/base instances as enum carriers, so discriminator validation
- *    happens before enum routing and rejects invalid discriminator states rather than fabricating
- *    a value. Valid non-empty fallback values still have a representable carrier.
+ * The guard is now unconditional inside the wildcard carrier's own load path across all seven
+ * targets. Crucially, this holds even after the open-union loader fallback (Bug #2): a union
+ * with a default variant no longer rejects an absent/blank/non-string discriminator up front,
+ * but normalizes it to "" and routes it to the default variant -- here the `*` carrier
+ * GuardCustomTool. Because the carrier still runs its own required-field guard, the
+ * no-fabrication guarantee is preserved: only the error *site* moves, from a discriminator
+ * reject to the carrier's `missing required field` diagnostic. Closed unions (no default
+ * variant) still reject an invalid discriminator up front -- see the dispatch-loader-fallback
+ * and declarations suites for that gating.
  */
 
 import { describe, it } from "node:test";
@@ -336,7 +336,7 @@ describe("shared optional absence/default policy", () => {
 });
 
 describe("missing required complex fields always fail load", () => {
-  it("TypeScript guards unconditionally", () => {
+  it("TypeScript routes an invalid discriminator to the wildcard carrier, which still guards", () => {
     const code = emitTypeScriptFile(file, new TypeScriptExprVisitor(registry));
 
     assert.match(
@@ -351,13 +351,20 @@ describe("missing required complex fields always fail load", () => {
       code,
       /typeof data\["kind"\] === "string" && data\["kind"\] !== ""/,
     );
-    assert.match(
+    // Open union with a `*` carrier: an absent/non-string discriminator normalizes
+    // to "" and routes to the carrier rather than being rejected up front.
+    assert.doesNotMatch(
       code,
       /Invalid GuardTool discriminator field 'kind': expected non-blank string/,
     );
+    assert.match(
+      code,
+      /const discriminator = typeof discriminatorValue === "string" \? discriminatorValue : "";/,
+    );
+    assert.match(code, /return GuardCustomTool\.load\(data, context\);/);
   });
 
-  it("Python guards unconditionally", () => {
+  it("Python routes an invalid discriminator to the wildcard carrier, which still guards", () => {
     const code = emitPythonFile(file, new PythonExprVisitor(registry));
 
     assert.match(
@@ -369,10 +376,16 @@ describe("missing required complex fields always fail load", () => {
       /context\.at\('connection'\)\.path\}: missing required field/,
     );
     assert.doesNotMatch(code, /isinstance\(data\.get\("kind"\), str\)/);
-    assert.match(
+    assert.doesNotMatch(
       code,
       /Invalid GuardTool discriminator field 'kind': expected non-blank string/,
     );
+    assert.match(code, /discriminator_value = ""/);
+    assert.match(
+      code,
+      /if isinstance\(discriminator_raw, str\):\s*\n\s*discriminator_value = discriminator_raw/,
+    );
+    assert.match(code, /return GuardCustomTool\.load\(data, context\)/);
   });
 
   it("C# guards unconditionally", () => {
@@ -399,7 +412,7 @@ describe("missing required complex fields always fail load", () => {
     );
   });
 
-  it("C# dispatch rejects invalid discriminator states", () => {
+  it("C# dispatch routes an invalid discriminator to the wildcard carrier", () => {
     const code = emitCSharpClass(
       file.types.find((candidate) => candidate.typeName.name === "GuardTool")!,
       "Test",
@@ -409,13 +422,18 @@ describe("missing required complex fields always fail load", () => {
         file.types.find((candidate) => candidate.typeName.name === name),
     );
 
-    assert.match(
+    assert.doesNotMatch(
       code,
       /Invalid GuardTool discriminator field 'kind': expected non-blank string/,
     );
+    assert.match(
+      code,
+      /var discriminator = data\.TryGetValue\("kind", out var discriminatorValue\) && discriminatorValue is string discriminatorString \? discriminatorString : "";/,
+    );
+    assert.match(code, /_ => GuardCustomTool\.Load\(data, context\),/);
   });
 
-  it("Go guards unconditionally", () => {
+  it("Go routes an invalid discriminator to the wildcard carrier, which still guards", () => {
     const code = emitGoFileContent(
       file.types,
       "fixtures",
@@ -431,13 +449,14 @@ describe("missing required complex fields always fail load", () => {
     );
     assert.match(code, /ctx\.At\("connection"\)\.Path\)/);
     assert.doesNotMatch(code, /hasDiscriminator := m\["kind"\]/);
-    assert.match(
+    assert.doesNotMatch(
       code,
       /invalid GuardTool discriminator field 'kind': expected non-blank string/,
     );
+    assert.match(code, /return LoadGuardCustomTool\(data, ctx\)/);
   });
 
-  it("Java guards unconditionally", () => {
+  it("Java routes an invalid discriminator to the wildcard carrier, which still guards", () => {
     const code = emitJavaFileContent(
       file.types,
       "fixtures",
@@ -454,11 +473,12 @@ describe("missing required complex fields always fail load", () => {
       code,
       /ctx\.at\("connection"\)\.path \+ ": missing required field"/,
     );
-    assert.match(code, /discriminator instanceof String discriminatorString/);
+    assert.match(code, /discriminator instanceof String discriminatorRaw/);
     assert.doesNotMatch(code, /String\.valueOf\(discriminator\)/);
+    assert.match(code, /return GuardCustomTool\.load\(data, ctx\);/);
   });
 
-  it("Swift rejects invalid discriminator states and preserves wildcard fallback payload", () => {
+  it("Swift routes an invalid discriminator to the wildcard carrier and preserves fallback payload", () => {
     const code = emitSwiftFile(
       file,
       new SwiftExprVisitor(registry),
@@ -473,11 +493,7 @@ describe("missing required complex fields always fail load", () => {
       code,
       /context\.at\("connection"\)\.path \+ ": missing required field"/,
     );
-    assert.match(
-      code,
-      /let discriminator = try TypraRuntime\.string\(object\["kind"\] \?\? NSNull\(\), field: "kind"\)/,
-    );
-    assert.match(code, /if discriminator\.isEmpty \{/);
+    assert.match(code, /let discriminator = object\["kind"\] as\? String \?\? ""/);
     assert.doesNotMatch(
       code,
       /if let discriminator = object\["kind"\] as\? String, !discriminator\.isEmpty \{/,
@@ -486,9 +502,13 @@ describe("missing required complex fields always fail load", () => {
       code,
       /case guardCustomTool\(GuardCustomTool, \[String: Any\]\)/,
     );
+    assert.match(
+      code,
+      /default: return \.guardCustomTool\(try GuardCustomTool\.load\(normalizedData, context: context\), object\)/,
+    );
   });
 
-  it("Rust rejects invalid discriminator states before fallback", () => {
+  it("Rust routes an invalid discriminator to the wildcard carrier, which still guards", () => {
     const code = emitRustFile(
       file,
       new RustExprVisitor(registry),
@@ -504,10 +524,11 @@ describe("missing required complex fields always fail load", () => {
       code,
       /as_str\(\)\)\.is_some_and\(\|discriminator\| !discriminator\.is_empty\(\)\)/,
     );
-    assert.match(
+    assert.doesNotMatch(
       code,
       /Invalid GuardTool discriminator field 'kind': expected non-blank string/,
     );
+    assert.match(code, /_ => GuardToolKind::GuardCustomTool \{/);
   });
 
   it("Rust exposes a fallible try_load_from_value routed through validate_input_at (#210)", () => {

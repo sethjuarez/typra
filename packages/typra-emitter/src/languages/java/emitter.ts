@@ -686,13 +686,28 @@ function emitPolymorphicDispatch(
   lines.push(
     `      Object discriminator = dispatchMap.get("${escapeJava(dispatch.discriminatorField)}");`,
   );
-  lines.push(
-    "      if (!(discriminator instanceof String discriminatorString) || discriminatorString.isEmpty()) {",
-  );
-  lines.push(
-    `        throw new IllegalArgumentException("Invalid ${typeName} discriminator field '${escapeJava(dispatch.discriminatorField)}': expected non-blank string");`,
-  );
-  lines.push("      }");
+  if (!dispatch.defaultVariant || dispatch.defaultVariant.isSelfReference) {
+    // Closed union, an abstract open union whose only fallback is an unknown
+    // carrier, OR a non-abstract open union that falls back to its own base by
+    // self-reference: an absent/blank discriminator cannot name a variant and is
+    // rejected up front. Unknown NON-blank values still flow to the switch's
+    // default (closed → throw; carrier/self-reference → base construction).
+    lines.push(
+      "      if (!(discriminator instanceof String discriminatorString) || discriminatorString.isEmpty()) {",
+    );
+    lines.push(
+      `        throw new IllegalArgumentException("Invalid ${typeName} discriminator field '${escapeJava(dispatch.discriminatorField)}': expected non-blank string");`,
+    );
+    lines.push("      }");
+  } else {
+    // Open union with a DECLARED wildcard `*` variant: an absent/blank
+    // discriminator normalizes to "" and flows to the switch's default arm — the
+    // same catch-all the @dispatch rail selects — so the coerce shorthand (map
+    // with no discriminator) hydrates instead of throwing.
+    lines.push(
+      "      String discriminatorString = discriminator instanceof String discriminatorRaw ? discriminatorRaw : \"\";",
+    );
+  }
   lines.push("      switch (discriminatorString) {");
   for (const variant of dispatch.variants) {
     lines.push(`        case "${escapeJava(variant.value)}":`);
@@ -1369,7 +1384,7 @@ function javaFieldType(
   void polymorphicTypeNames;
 }
 
-function javaScalarType(typeName: string): string {
+export function javaScalarType(typeName: string): string {
   if (typeName.endsWith("[]")) {
     return `List<${javaScalarType(typeName.slice(0, -2))}>`;
   }

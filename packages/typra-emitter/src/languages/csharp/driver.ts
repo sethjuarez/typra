@@ -18,6 +18,7 @@ import {
   emitCSharpClass,
   emitCSharpEnum,
   isCSharpSinglePrecision,
+  protocolCSharpType,
 } from "./emitter.js";
 import { emitCSharpContext, emitCSharpUtils } from "./scaffolding.js";
 import { emitCSharpTest } from "./test-emitter.js";
@@ -45,6 +46,7 @@ import {
   CallableVectorSnapshotEntry,
   isTypedDispatchEntry,
   assertTypedDispatchSupported,
+  classifyCallableParam,
 } from "../../ir/vector.js";
 
 /**
@@ -1271,11 +1273,29 @@ function emitCSharpInterfaceConformanceTest(
     lines.push("        var root = document.RootElement;");
     for (const paramName of paramNames) {
       const paramType = entry.params[paramName];
-      lines.push(
-        `        var ${paramName} = ${paramType}.FromJson(root.GetProperty(${JSON.stringify(
-          paramName,
-        )}).GetRawText());`,
-      );
+      const shape = classifyCallableParam(paramType);
+      const key = JSON.stringify(paramName);
+      if (shape.bareModel) {
+        lines.push(
+          `        var ${paramName} = ${paramType}.FromJson(root.GetProperty(${key}).GetRawText());`,
+        );
+      } else if (shape.optional) {
+        // Optional non-model param: tolerate an absent property, decoding into
+        // the mapped (nullable) C# type when present.
+        lines.push(
+          `        var ${paramName} = root.TryGetProperty(${key}, out var ${paramName}El)`,
+          `            ? JsonSerializer.Deserialize<${protocolCSharpType(paramType)}>(${paramName}El.GetRawText())`,
+          `            : default;`,
+        );
+      } else {
+        // Non-model param (scalar, `Record<unknown>`, array) decoded into the
+        // mapped C# type the seam signature expects.
+        lines.push(
+          `        var ${paramName} = JsonSerializer.Deserialize<${protocolCSharpType(
+            paramType,
+          )}>(root.GetProperty(${key}).GetRawText());`,
+        );
+      }
     }
     lines.push(`        var ${field} = ${accessor};`);
     lines.push(

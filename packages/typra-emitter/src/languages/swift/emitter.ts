@@ -249,14 +249,30 @@ function emitPolymorphicEnum(
   lines.push(
     `    let object = try TypraRuntime.object(normalizedData, typeName: ${swiftStringLiteral(typeName)})`,
   );
-  lines.push(
-    `    let discriminator = try TypraRuntime.string(object[${swiftStringLiteral(dispatch.discriminatorField)}] ?? NSNull(), field: ${swiftStringLiteral(dispatch.discriminatorField)})`,
-  );
-  lines.push("    if discriminator.isEmpty {");
-  lines.push(
-    `      throw TypraRuntimeError.invalidField(field: context.at(${swiftStringLiteral(dispatch.discriminatorField)}).path, expected: "non-blank string")`,
-  );
-  lines.push("    }");
+  if (!dispatch.defaultVariant || dispatch.defaultVariant.isSelfReference) {
+    // Closed union, an abstract open union whose only fallback is the `.unknown`
+    // carrier, OR a non-abstract open union that falls back to its own base by
+    // self-reference: an absent/blank/non-string discriminator cannot name a
+    // variant and is rejected up front. Unknown NON-blank values still flow to
+    // the switch default (closed → throw; carrier/self-reference → base).
+    lines.push(
+      `    let discriminator = try TypraRuntime.string(object[${swiftStringLiteral(dispatch.discriminatorField)}] ?? NSNull(), field: ${swiftStringLiteral(dispatch.discriminatorField)})`,
+    );
+    lines.push("    if discriminator.isEmpty {");
+    lines.push(
+      `      throw TypraRuntimeError.invalidField(field: context.at(${swiftStringLiteral(dispatch.discriminatorField)}).path, expected: "non-blank string")`,
+    );
+    lines.push("    }");
+  } else {
+    // Open union with a DECLARED wildcard `*` variant: read the discriminator
+    // without throwing so an absent/blank/non-string value normalizes to "" and
+    // routes to the switch default — the same catch-all the @dispatch rail
+    // selects — letting the coerce shorthand (object with no discriminator)
+    // hydrate instead of throwing.
+    lines.push(
+      `    let discriminator = object[${swiftStringLiteral(dispatch.discriminatorField)}] as? String ?? ""`,
+    );
+  }
   lines.push("    switch discriminator {");
   for (const variant of dispatch.variants) {
     lines.push(
