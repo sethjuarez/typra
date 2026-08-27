@@ -6,6 +6,18 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [1.2.0](https://github.com/sethjuarez/typra/compare/v1.1.0...v1.2.0) (2026-08-27)
+
+
+### Features
+
+* **emitter:** resolve [@dispatch](https://github.com/dispatch) discriminator through coerce-canonical union arms ([#286](https://github.com/sethjuarez/typra/issues/286)) ([cd8e58d](https://github.com/sethjuarez/typra/commit/cd8e58de7c5a9e3ed3764ffec83347e3fa3a680b))
+
+
+### Bug Fixes
+
+* **emitter:** parse YAML without a CommonJS require so the TypeScript library loads on the web ([#284](https://github.com/sethjuarez/typra/issues/284)) ([052c3cb](https://github.com/sethjuarez/typra/commit/052c3cbd57e196cd8352a7af1fd51e647ca55266))
+
 ## [1.1.0](https://github.com/sethjuarez/typra/compare/v1.0.1...v1.1.0) (2026-08-26)
 
 
