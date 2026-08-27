@@ -13,11 +13,9 @@ import {
   $defaultFor,
   $factory,
   $knownAs,
-  $method,
   $effect,
   $optionalOperation,
   $parseAlias,
-  $protocol,
   $runtimeCancellable,
   $sample,
   $sync,
@@ -134,15 +132,13 @@ describe("TypeSpec decorators", () => {
     assert.equal(diagnostics[0].code, "typra-emitter-sample-name-mismatch");
   });
 
-  it("records model marker decorators", () => {
+  it("records the abstract model marker decorator", () => {
     const { context, program } = createContext();
     const target = { kind: "Model", name: "Fixture" } as Type;
 
     $abstract(context, target as never);
-    $protocol(context, target as never);
 
     assert.equal(getStateScalar(program, StateKeys.abstracts, target), true);
-    assert.equal(getStateScalar(program, StateKeys.protocols, target), true);
   });
 
   it("records coercions and reports non-scalar coercion targets", () => {
@@ -178,7 +174,7 @@ describe("TypeSpec decorators", () => {
     assert.equal(diagnostics[0].code, "typra-emitter-coerce-scalar-type");
   });
 
-  it("records factory and method metadata", () => {
+  it("records factory metadata", () => {
     const { context, program } = createContext();
     const target = { kind: "Model", name: "FixtureReference" } as Type;
 
@@ -189,33 +185,9 @@ describe("TypeSpec decorators", () => {
       { id: "{id}" },
       { id: "string" },
     );
-    $method(
-      context,
-      target as never,
-      "display",
-      "string",
-      "Render label",
-      { prefix: "string" },
-      true,
-      true,
-      { runtimeCancellable: true, atomic: true, nonFatal: true },
-    );
 
     assert.deepEqual(getStateValue(program, StateKeys.factories, target), [
       { name: "named", sets: { id: "{id}" }, params: { id: "string" } },
-    ]);
-    assert.deepEqual(getStateValue(program, StateKeys.methods, target), [
-      {
-        name: "display",
-        returns: "string",
-        description: "Render label",
-        params: { prefix: "string" },
-        optional: true,
-        sync: true,
-        runtimeCancellable: true,
-        atomic: true,
-        nonFatal: true,
-      },
     ]);
   });
 

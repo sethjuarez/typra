@@ -403,9 +403,6 @@ export const resolveModel = (
     node.isAbstract =
       getStateScalar<boolean>(program, StateKeys.abstracts, innerModel) ||
       false;
-    node.isProtocol =
-      getStateScalar<boolean>(program, StateKeys.protocols, innerModel) ||
-      false;
     node.entryShorthand =
       getStateScalar<string>(program, StateKeys.entryShorthands, innerModel) ||
       null;
@@ -418,15 +415,10 @@ export const resolveModel = (
       StateKeys.coercions,
       innerModel,
     );
-    // factory and method stubs
+    // factory stubs
     node.factories = getStateValue<FactoryEntry>(
       program,
       StateKeys.factories,
-      innerModel,
-    );
-    node.methods = getStateValue<MethodEntry>(
-      program,
-      StateKeys.methods,
       innerModel,
     );
     node.group = extractGroup(getNodeFilePath(innerModel.node));
@@ -443,8 +435,6 @@ export const resolveModel = (
     );
     node.isAbstract =
       getStateScalar<boolean>(program, StateKeys.abstracts, model) || false;
-    node.isProtocol =
-      getStateScalar<boolean>(program, StateKeys.protocols, model) || false;
     node.entryShorthand =
       getStateScalar<string>(program, StateKeys.entryShorthands, model) || null;
     node.isError = isErrorModel(program, model);
@@ -456,15 +446,10 @@ export const resolveModel = (
       StateKeys.coercions,
       model,
     );
-    // factory and method stubs
+    // factory stubs
     node.factories = getStateValue<FactoryEntry>(
       program,
       StateKeys.factories,
-      model,
-    );
-    node.methods = getStateValue<MethodEntry>(
-      program,
-      StateKeys.methods,
       model,
     );
     node.group = extractGroup(getNodeFilePath(model.node));

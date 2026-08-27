@@ -564,7 +564,6 @@ union FixtureMode {
 
 @@coerce(FixtureReference, string, #{ id: "{value}", label: "coerced reference" }, "reference", "Load a reference from an id string.", "ref-coerced");
 @@factory(FixtureReference, "named", #{ id: "{id}", label: "{label}" }, #{ id: "string", label: "string" });
-@@method(FixtureReference, "display", "string", "Render the reference label.", #{ prefix: "string" }, true, true);
 model FixtureReference {
   @sample(#{ id: "ref-1" })
   id: string;

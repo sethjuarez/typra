@@ -45,35 +45,6 @@ extern dec factory(
 );
 
 /**
- * Declares a method stub on the target model. Method stubs are
- * stub-generated — the emitter produces the signature in the generated file
- * and a create-if-missing extension file where the body must be hand-written.
- * This enforces that every runtime implements the method (compile/test failure
- * if missing) while allowing language-idiomatic implementations.
- *
- * The optional `params` parameter specifies method parameters (name → type string).
- * When used on `@protocol` models, params drive the generated interface method
- * signatures.
- *
- * @example
- * ```typespec
- * @@method("text", "string", "Concatenate all TextPart values joined by newline")
- * @@method("render", "string", "Render template with inputs", #{ agent: "Prompty", template: "string", inputs: "Record<unknown>" })
- * @@method("invoke", "Result", "Invoke with native cancellation", #{ request: "Request" }, false, false, #{ runtimeCancellable: true })
- * ```
- */
-extern dec method(
-  target: Model,
-  name: valueof string,
-  returns: valueof string,
-  description?: valueof string,
-  params?: valueof unknown,
-  optional?: valueof boolean,
-  sync?: valueof boolean,
-  options?: valueof unknown
-);
-
-/**
  * Marks an operation as accepting host/runtime cancellation outside the logical
  * serialized contract. Target emitters project this to native cancellation
  * parameters such as AbortSignal, CancellationToken, context.Context, or a
@@ -200,13 +171,6 @@ extern dec defaultFor(target: ModelProperty, provider: valueof string, defaultVa
  * ```
  */
 extern dec parseAlias(target: Union, canonical: valueof string, aliases: valueof unknown);
-
-/**
- * Marks the target model as a protocol interface. Protocol interfaces define
- * the pipeline stage contracts (renderer, parser, executor, processor). The
- * emitter generates language-appropriate interface/trait/protocol definitions.
- */
-extern dec protocol(target: Model);
 
 /**
  * Declares that a seam `interface` is resolved by behavioral polymorphic
