@@ -681,6 +681,7 @@ function assertFocusedFeatureFixtures() {
         .join("/"),
     ),
     "features/samples/main.tsp",
+    "features/serialization/main.tsp",
     "features/vectors/main.tsp",
     "features/model-shapes/main.tsp",
     "features/scalars/main.tsp",
@@ -799,6 +800,106 @@ function assertFocusedFeatureFixtures() {
             `Focused vectors fixture did not preserve expected vector payload: ${expected}`,
           );
         }
+      }
+    }
+
+    if (featureName === "serialization") {
+      // The generic loop renders markdown to prove the fixture compiles; opt-in
+      // serialization is a target-specific behavior, so assert on rendered Go
+      // (the golden-reference runtime). Red-first gate for issue #306.
+      const goRoot = path.join(outputRoot, "go-render");
+      try {
+        execFileSync(
+          process.execPath,
+          [
+            path.join(packageRoot, "dist", "src", "cli.js"),
+            "--output",
+            goRoot,
+            "--targets",
+            "go",
+            "--spec",
+            fixture,
+            "--root-object",
+            "Typra.Fixtures.Features.Serialization.Root",
+            "--no-tests",
+            "--no-format",
+            "--deterministic",
+          ],
+          { cwd: packageRoot, stdio: "pipe" },
+        );
+      } catch (error) {
+        const output =
+          `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+        fail(
+          `Serialization fixture failed to render Go:\n${output || error.message}`,
+        );
+      }
+
+      const readGo = (name) => {
+        const file = path.join(goRoot, "go", name);
+        return existsSync(file) ? readFileSync(file, "utf8") : "";
+      };
+      const root = readGo("root.go");
+      const detached = readGo("detached.go");
+      const bodyOf = (source, header) => {
+        // Function bodies close with a column-0 `}`; inner blocks are indented,
+        // so `\n}` matches only the terminal brace.
+        const start = source.indexOf(header);
+        if (start < 0) return "";
+        const end = source.indexOf("\n}", start);
+        return end < 0 ? source.slice(start) : source.slice(start, end + 2);
+      };
+
+      // Opt-in: a `@serializable` root emits load + save over its closure.
+      if (
+        !root.includes("func LoadRoot(") ||
+        !root.includes("func (obj Root) Save(")
+      ) {
+        fail("@serializable Root must emit load/save.");
+      }
+      // Negative: a `@sample`-only, unreachable model emits NO load/save —
+      // `@sample` alone never implies serialization intent.
+      if (
+        detached.includes("func LoadDetached(") ||
+        detached.includes("func (obj Detached) Save(")
+      ) {
+        fail("@sample-only Detached must NOT emit load/save.");
+      }
+      // A non-serialized Go file must not request unused serialization imports.
+      if (
+        detached.includes("encoding/json") ||
+        detached.includes("gopkg.in/yaml.v3")
+      ) {
+        fail(
+          "Non-serialized Go file must not import encoding/json or gopkg.in/yaml.v3.",
+        );
+      }
+      // No test file for a non-serialized type.
+      if (existsSync(path.join(goRoot, "go", "detached_test.go"))) {
+        fail("@sample-only Detached must NOT emit a test file.");
+      }
+
+      // @sensitive field withholding is a per-direction omission on the
+      // participating type (the closure stays total).
+      const saveBody = bodyOf(root, "func (obj Root) Save(");
+      const loadBody = bodyOf(root, "func LoadRoot(");
+      // `@sensitive("save")` — write-only secret: loaded, never saved.
+      if (saveBody.includes('"apiKey"')) {
+        fail('@sensitive("save") apiKey must be omitted from save.');
+      }
+      if (!loadBody.includes('"apiKey"')) {
+        fail('@sensitive("save") apiKey must remain loadable.');
+      }
+      // bare `@sensitive` — withheld from both directions.
+      if (saveBody.includes('"scratch"') || loadBody.includes('"scratch"')) {
+        fail("bare @sensitive scratch must be omitted from load and save.");
+      }
+      // `@sensitive("load")` — save-only: persisted but never reloaded.
+      if (!saveBody.includes('"computedAt"')) {
+        fail('@sensitive("load") computedAt must remain savable.');
+      }
+      if (loadBody.includes('"computedAt"')) {
+        fail('@sensitive("load") computedAt must be omitted from load.');
       }
     }
 

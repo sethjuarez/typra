@@ -20,6 +20,7 @@ import {
   lowerFile,
   lowerType,
   collectPolymorphicTypeNames,
+  computeSerializationClosure,
 } from "../../ir/lower.js";
 import { emitGoFileContent, protocolGoType } from "./emitter.js";
 import { formatGoSource } from "./go-format.js";
@@ -104,8 +105,12 @@ export const generateGo = async (
       scalarCoercibleTypeNames.add(n.typeName.name);
     }
   }
+  // Compute the serialization closure once for the whole compilation. Types
+  // outside it emit no load/save (serialization is opt-in via `@serializable`).
+  const serializationClosure = computeSerializationClosure(nodes, registry);
+
   const declarationUniverse = nodes.map((n) =>
-    lowerType(n, registry, polymorphicTypeNames),
+    lowerType(n, registry, polymorphicTypeNames, serializationClosure),
   );
 
   // Emit context file (LoadContext/SaveContext utilities)
@@ -124,7 +129,12 @@ export const generateGo = async (
   for (const n of nodes) {
     // Skip child types - they're rendered with their parent
     if (!n.base) {
-      const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
+      const fileDecl = lowerFile(
+        n,
+        registry,
+        polymorphicTypeNames,
+        serializationClosure,
+      );
       // Go stays flat: pass group as a header comment only, no subfolder emission
       const fileContent = emitGoFileContent(
         fileDecl.types,
@@ -146,8 +156,14 @@ export const generateGo = async (
       );
     }
 
-    // Emit test file for each type (skip protocols — they have no data to test)
-    if (emitTarget["test-dir"] && !n.isProtocol) {
+    // Emit test file for each type (skip protocols — they have no data to
+    // test — and non-serialized types, whose tests would reference load/save
+    // functions that are no longer emitted).
+    if (
+      emitTarget["test-dir"] &&
+      !n.isProtocol &&
+      serializationClosure.has(n.typeName.name)
+    ) {
       const importPath = emitTarget["import-path"] || packageName;
       const fieldNames = buildGoFieldNames(
         collectInheritedPropertyNames(n, registry),

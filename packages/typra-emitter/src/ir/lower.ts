@@ -63,19 +63,25 @@ import {
  * @param node - The base TypeNode (must not have a parent — i.e., `node.base === null`)
  * @param registry - TypeRegistry for resolving type references
  * @param polymorphicTypeNames - Set of type names that are polymorphic bases
+ * @param serializationClosure - Set of simple names in the serialization closure
+ *   of some `@serializable` root; types outside it emit no load/save. When
+ *   omitted, all types serialize (legacy behavior for direct callers/tests).
  */
 export function lowerFile(
   node: TypeNode,
   registry: TypeRegistry,
   polymorphicTypeNames?: Set<string>,
+  serializationClosure?: Set<string>,
 ): FileDecl {
   const polyNames =
     polymorphicTypeNames ?? collectPolymorphicTypeNames(node, registry);
 
   // Lower all types in this file (parent + children)
   const types: TypeDecl[] = [
-    lowerType(node, registry, polyNames),
-    ...node.childTypes.map((ct) => lowerType(ct, registry, polyNames)),
+    lowerType(node, registry, polyNames, serializationClosure),
+    ...node.childTypes.map((ct) =>
+      lowerType(ct, registry, polyNames, serializationClosure),
+    ),
   ];
 
   // Resolve file-level imports
@@ -120,6 +126,137 @@ export function collectPolymorphicTypeNames(
   return names;
 }
 
+/**
+ * Compute the serialization closure across a set of root nodes.
+ *
+ * Serialization is opt-in: the roots are the models marked `@serializable`,
+ * plus every model that appears as a seam operation parameter or return type
+ * (those are serialization boundaries the emitter's own vector/conformance
+ * harness loads and saves). From each root the closure grows by:
+ *   (a) transitive property reachability — every referenced model type is
+ *       pulled in so nested shapes can load/save (including dictionary/`Record`
+ *       value models, whose element type is carried out-of-band in
+ *       `dictValueType`),
+ *   (b) discriminated variant expansion — every child of a genuine
+ *       `@discriminator` base is pulled in so polymorphic load/save stays total,
+ *       and
+ *   (c) base-chain inheritance — a serialized derived model reaches its base(s),
+ *       whose load/save its own generated methods delegate to.
+ *
+ * Plain `extends` subclasses of a NON-discriminated base are NOT auto-pulled:
+ * `childTypes` holds every derived model, so expansion is gated on the node
+ * actually being a discriminated base (`discriminator && childTypes.length`),
+ * mirroring {@link TypeNode.retrievePolymorphicTypes} and
+ * {@link collectPolymorphicTypeNames}.
+ *
+ * A field withheld from BOTH directions (`@sensitive` with no arguments, i.e.
+ * least-privilege) carries no reachability: the type it references is only
+ * pulled in if some other, non-fully-withheld path reaches it. Field-level
+ * per-direction withholding does not remove a type from the closure — it is a
+ * property-level omission handled during emission, not a closure hole, so
+ * polymorphic load stays total. The closure is deliberately direction-agnostic:
+ * a participating type receives the full load+save capability (never half), so
+ * the union of load- and save-reachability is the correct membership set.
+ *
+ * The returned set contains the simple names of every type that participates in
+ * serialization, matching the emitter-wide simple-name gating convention
+ * (`collectPolymorphicTypeNames`). Types absent from it emit no load/save. The
+ * walk is cycle-safe (the closure set doubles as the visited set) and resolves
+ * referenced types via `prop.type` first, falling back to the registry by name
+ * so reachability survives the build-time `.type` cycle-prevention gap (a
+ * repeated element type carries `.type` only on its first occurrence).
+ */
+export function computeSerializationClosure(
+  nodes: TypeNode[],
+  registry: TypeRegistry,
+): Set<string> {
+  const closure = new Set<string>();
+
+  function isFullyWithheld(prop: PropertyNode): boolean {
+    return (
+      prop.sensitive.includes("load") && prop.sensitive.includes("save")
+    );
+  }
+
+  function visit(node: TypeNode): void {
+    const name = node.typeName.name;
+    if (closure.has(name)) return;
+    closure.add(name);
+
+    // (c) base-chain inheritance
+    if (node.base) {
+      const base = registry.get(node.base.name);
+      if (base) visit(base);
+    }
+
+    // (b) discriminated variant expansion (genuine `@discriminator` bases only)
+    if (node.discriminator && node.childTypes.length > 0) {
+      for (const child of node.childTypes) {
+        visit(child);
+      }
+    }
+
+    // (a) transitive property reachability
+    for (const prop of node.properties) {
+      if (isFullyWithheld(prop)) continue;
+      const referenced =
+        prop.type ??
+        (prop.dictValueType
+          ? registry.get(prop.dictValueType)
+          : undefined) ??
+        registry.get(prop.typeName.name);
+      if (referenced) visit(referenced);
+    }
+  }
+
+  for (const root of nodes) {
+    if (root.serializable) visit(root);
+  }
+
+  // Seam operation boundaries are serialization boundaries. Every model that
+  // appears as a seam operation parameter or return type is loaded/saved by the
+  // emitter's own generated vector/conformance harness (e.g. `InputsFromJSON`,
+  // `LoadInputs`), so it must carry load/save even when no `@serializable` root
+  // reaches it through the property graph. Seed the closure from every seam
+  // method's parameter and return type names (transitively, via `visit`). Names
+  // that don't resolve to a model in the registry (scalars, `unknown`,
+  // `Record<...>`, `void`) are skipped.
+  for (const node of nodes) {
+    for (const method of node.methods) {
+      const typeStrings = [method.returns, ...Object.values(method.params)];
+      for (const typeString of typeStrings) {
+        for (const candidate of extractModelTypeNames(typeString)) {
+          const referenced = registry.get(candidate);
+          if (referenced) visit(referenced);
+        }
+      }
+    }
+  }
+
+  return closure;
+}
+
+/**
+ * Extract candidate model type names from a callable type string as produced by
+ * the callable-contract lowering (e.g. `"Message[]"`, `"Model | string"`,
+ * `"Inputs?"`, `"Record<unknown>"`). Splits union alternates and strips the
+ * optional (`?`) and array (`[]`) markers so the bare names can be resolved
+ * against the type registry. Scalars, `unknown`, `void`, and `Record<...>`
+ * intentionally fall through as non-model names (they simply won't resolve).
+ */
+function extractModelTypeNames(typeString: string): string[] {
+  const names: string[] = [];
+  for (const alternate of typeString.split("|")) {
+    let token = alternate.trim();
+    while (token.endsWith("?") || token.endsWith("[]")) {
+      token = token.endsWith("?") ? token.slice(0, -1) : token.slice(0, -2);
+      token = token.trim();
+    }
+    if (token.length > 0) names.push(token);
+  }
+  return names;
+}
+
 // ============================================================================
 // Type lowering
 // ============================================================================
@@ -131,6 +268,7 @@ export function lowerType(
   node: TypeNode,
   registry: TypeRegistry,
   polymorphicTypeNames: Set<string>,
+  serializationClosure?: Set<string>,
 ): TypeDecl {
   const fields = node.properties.map((p) =>
     lowerField(p, polymorphicTypeNames),
@@ -154,6 +292,14 @@ export function lowerType(
   const load = lowerLoad(node, fields, polymorphicDispatch);
   const save = lowerSave(node, fields);
 
+  // Serialization is opt-in: a type emits load/save only when it is in the
+  // serialization closure of some `@serializable` root. When no closure is
+  // supplied (direct API/test callers), default to true to preserve legacy
+  // behavior; real emit runs always thread the closure from the driver.
+  const serialized = serializationClosure
+    ? serializationClosure.has(node.typeName.name)
+    : true;
+
   return {
     typeName: node.typeName,
     base: node.base,
@@ -165,6 +311,7 @@ export function lowerType(
     coercionProperty,
     load,
     save,
+    serialized,
     factories,
     collectionHelpers,
     polymorphicDispatch,
@@ -286,20 +433,25 @@ function lowerLoad(
     };
   });
 
-  // Per-property load assignments
-  const assignments: LoadAssignment[] = fields.map((f) => ({
-    sourceName: f.name,
-    fieldName: f.name,
-    category: f.category,
-    isOptional: f.isOptional,
-    hasExplicitDefault: f.hasExplicitDefault,
-    parentTypeName: node.typeName.name,
-    enumName: f.enumName,
-    allowedValues: f.allowedValues,
-    parseAliases: f.parseAliases,
-    defaultValue: f.defaultValue,
-    isOpenEnum: f.isOpenEnum,
-  }));
+  // Per-property load assignments. Fields withheld from the load direction
+  // (`@sensitive` / `@sensitive("load")`) are omitted from the load body while
+  // remaining real struct fields — the closure stays total, only the property
+  // is skipped during deserialization.
+  const assignments: LoadAssignment[] = fields
+    .filter((_f, i) => !node.properties[i]?.sensitive.includes("load"))
+    .map((f) => ({
+      sourceName: f.name,
+      fieldName: f.name,
+      category: f.category,
+      isOptional: f.isOptional,
+      hasExplicitDefault: f.hasExplicitDefault,
+      parentTypeName: node.typeName.name,
+      enumName: f.enumName,
+      allowedValues: f.allowedValues,
+      parseAliases: f.parseAliases,
+      defaultValue: f.defaultValue,
+      isOpenEnum: f.isOpenEnum,
+    }));
 
   return {
     coercions,
@@ -317,16 +469,21 @@ function lowerLoad(
  * Lower the save/serialization method specification.
  */
 function lowerSave(node: TypeNode, fields: FieldDecl[]): SaveDecl {
-  const assignments: SaveAssignment[] = fields.map((f) => ({
-    targetName: f.name,
-    fieldName: f.name,
-    category: f.category,
-    isOptional: f.isOptional,
-    hasExplicitDefault: f.hasExplicitDefault,
-    parentTypeName: node.typeName.name,
-    enumName: f.enumName,
-    isOpenEnum: f.isOpenEnum,
-  }));
+  // Fields withheld from the save direction (`@sensitive` / `@sensitive("save")`,
+  // e.g. a write-only secret) are omitted from the save body while remaining real
+  // struct fields.
+  const assignments: SaveAssignment[] = fields
+    .filter((_f, i) => !node.properties[i]?.sensitive.includes("save"))
+    .map((f) => ({
+      targetName: f.name,
+      fieldName: f.name,
+      category: f.category,
+      isOptional: f.isOptional,
+      hasExplicitDefault: f.hasExplicitDefault,
+      parentTypeName: node.typeName.name,
+      enumName: f.enumName,
+      isOpenEnum: f.isOpenEnum,
+    }));
 
   return {
     assignments,

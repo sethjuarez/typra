@@ -761,3 +761,50 @@ export function $entryShorthand(
 
   setStateScalar(context, StateKeys.entryShorthands, target, fieldName);
 }
+
+// ============================================================================
+// Serialization capability decorators (@serializable, @sensitive)
+// ============================================================================
+
+/** A serialization direction a field may be withheld from. */
+export type SerializationDirection = "load" | "save";
+
+/**
+ * Marks a model as a serialization root. Only records the intent; the emitter
+ * derives the serialized set (transitive property reach + discriminated variant
+ * expansion) from every `@serializable` root during IR lowering.
+ */
+export function $serializable(context: DecoratorContext, target: Model) {
+  setStateScalar(context, StateKeys.serializable, target, true);
+}
+
+/**
+ * Withholds a field from the named serialization direction(s). Records the set
+ * of directions the field is excluded from; an empty argument list defaults to
+ * both directions (least-privilege / fail-closed). Repeated applications (e.g. a
+ * direct decorator plus an augment) are merged by set union so a later
+ * application can only ever tighten — never relax — the withheld set.
+ */
+export function $sensitive(
+  context: DecoratorContext,
+  target: ModelProperty,
+  ...directions: (SerializationDirection | StringValue)[]
+) {
+  const named = directions.map((direction) =>
+    typeof direction === "object" && direction !== null && "value" in direction
+      ? (direction as StringValue).value
+      : (direction as string),
+  ) as SerializationDirection[];
+  const withheld: SerializationDirection[] =
+    named.length > 0 ? named : ["load", "save"];
+  const existing =
+    getStateScalar<SerializationDirection[]>(
+      context.program,
+      StateKeys.sensitive,
+      target,
+    ) ?? [];
+  const merged = Array.from(
+    new Set<SerializationDirection>([...existing, ...withheld]),
+  );
+  setStateScalar(context, StateKeys.sensitive, target, merged);
+}

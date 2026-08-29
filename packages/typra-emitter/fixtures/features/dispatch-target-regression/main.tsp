@@ -198,6 +198,7 @@ interface Processor {
 }
 
 @doc("Fixture root aggregating the dispatched-seam graph.")
+@serializable
 model Root {
   @doc("The agent whose optional template + model carry the dispatch discriminators behind coerced unions.")
   agent: Agent;

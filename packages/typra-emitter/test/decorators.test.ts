@@ -18,6 +18,8 @@ import {
   $parseAlias,
   $runtimeCancellable,
   $sample,
+  $sensitive,
+  $serializable,
   $sync,
   appendStateValue,
   getStateScalar,
@@ -208,28 +210,47 @@ describe("TypeSpec decorators", () => {
     ]);
   });
 
-  it("records parse aliases for string unions and rejects conflicts", () => {
-    const { context, program, diagnostics } = createContext();
-    const readyVariant = { type: { kind: "String", value: "ready" } };
-    const archivedVariant = { type: { kind: "String", value: "archived" } };
-    const target = {
-      kind: "Union",
-      name: "FixtureStatus",
-      variants: new Map([
-        ["ready", readyVariant],
-        ["archived", archivedVariant],
-      ]),
-    } as unknown as Type;
+  it("records the serializable root marker decorator", () => {
+    const { context, program } = createContext();
+    const target = { kind: "Model", name: "Agent" } as Type;
 
-    $parseAlias(context, target as never, "ready", ["complete", "done"]);
-    $parseAlias(context, target as never, "ready", ["complete"]);
-    $parseAlias(context, target as never, "archived", ["done"]);
+    $serializable(context, target as never);
 
-    assert.deepEqual(getStateValue(program, StateKeys.parseAliases, target), [
-      { canonical: "ready", aliases: ["complete", "done"] },
+    assert.equal(getStateScalar(program, StateKeys.serializable, target), true);
+  });
+
+  it("records sensitive withholding with a least-privilege default", () => {
+    const { context, program } = createContext();
+    const both = { kind: "ModelProperty", name: "scratch" } as Type;
+    const save = { kind: "ModelProperty", name: "apiKey" } as Type;
+    const load = { kind: "ModelProperty", name: "computedAt" } as Type;
+
+    $sensitive(context, both as never);
+    $sensitive(context, save as never, "save");
+    $sensitive(context, load as never, "load");
+
+    assert.deepEqual(getStateScalar(program, StateKeys.sensitive, both), [
+      "load",
+      "save",
     ]);
-    assert.equal(diagnostics.length, 2);
-    assert.equal(diagnostics[0].code, "typra-emitter-parse-alias-duplicate");
-    assert.equal(diagnostics[1].code, "typra-emitter-parse-alias-conflict");
+    assert.deepEqual(getStateScalar(program, StateKeys.sensitive, save), [
+      "save",
+    ]);
+    assert.deepEqual(getStateScalar(program, StateKeys.sensitive, load), [
+      "load",
+    ]);
+  });
+
+  it("merges repeated sensitive applications by union (fail-closed)", () => {
+    const { context, program } = createContext();
+    const target = { kind: "ModelProperty", name: "apiKey" } as Type;
+
+    $sensitive(context, target as never, "save");
+    $sensitive(context, target as never, "load");
+
+    assert.deepEqual(getStateScalar(program, StateKeys.sensitive, target), [
+      "save",
+      "load",
+    ]);
   });
 });

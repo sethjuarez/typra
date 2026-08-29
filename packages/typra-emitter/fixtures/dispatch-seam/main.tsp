@@ -117,6 +117,7 @@ interface Renderer {
 }
 
 @doc("Fixture root aggregating the dispatched-seam graph.")
+@serializable
 model Root {
   @doc("The agent whose template carries the dispatch discriminator.")
   agent: Agent;

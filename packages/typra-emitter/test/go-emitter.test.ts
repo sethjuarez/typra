@@ -38,6 +38,7 @@ function typeWith(coercions: CoercionDecl[]): TypeDecl {
       hasContextHooks: false,
     },
     save: { assignments: [], hasBase: false, hasContextHooks: false },
+    serialized: true,
     factories: [],
     collectionHelpers: [],
     polymorphicDispatch: null,

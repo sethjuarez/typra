@@ -26,6 +26,7 @@ import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 function typeDecl(name: string): TypeDecl {
   return {
     typeName: { namespace: "Test", name },
+    serialized: true,
     base: null,
     isAbstract: false,
     isProtocol: false,

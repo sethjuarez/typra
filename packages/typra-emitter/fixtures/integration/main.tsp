@@ -5,6 +5,7 @@ import "./model/pipeline/canonical-ports.tsp";
 
 namespace Typra.Fixtures;
 
+@serializable
 model FixtureRoot {
   @sample(#{ name: "fixture-root" })
   @doc("Required scalar field")
@@ -79,6 +80,7 @@ model FixtureRoot {
 }
 
 @doc("Typed record values must preserve their declared value type.")
+@serializable
 model FixtureTypedRecords {
   @sample(#{ counts: #{ alpha: 1, beta: 2 } })
   @doc("A record whose values are declared scalar integers")
@@ -99,6 +101,7 @@ backend that drops "" on save and rehydrates a missing required string as "" rou
 green while its output is wrong. Only cross-language comparison catches it, which is why
 these live in the conformance corpus rather than in a per-target test.
 """)
+@serializable
 model FixtureZeroValues {
   @sample(#{ emptyText: "" })
   @doc("Required string at its zero value")
@@ -139,6 +142,7 @@ ones included. That implementation passes both, because each required key was pr
 it was handed. Catching it needs an assertion that saves a natively constructed value rather than
 one parsed from this document, which the conformance runners cannot express today. Tracked on #113.
 """)
+@serializable
 model FixtureOptionalStates {
   @sample(#{ presentText: "present" })
   @doc("Optional string present at a non-zero value")
@@ -184,6 +188,7 @@ The oracle rounds to 6dp, so a mismatch that survives normalization is genuine, 
 below 5e-7 is invisible to it. Detecting a narrowing to float32 would need a value float32 cannot
 represent; none of these qualify, so that is not covered here.
 """)
+@serializable
 model FixtureNumericBounds {
   @sample(#{ int32Min: -2147483648 })
   @doc("Signed 32-bit integer at its minimum")
@@ -236,6 +241,7 @@ Not covered here: multi-scalar grapheme clusters and unpaired combining marks, w
 Unicode this case simply does not contain, and lone surrogates and overlong encodings, which are
 malformed input and belong with error-path assertions rather than with round-trip ones.
 """)
+@serializable
 model FixtureAdversarialText {
   @sample(#{ tabbed: "column\tseparated" })
   @doc("Embedded TAB, which RFC 8259 requires be escaped rather than copied")
@@ -296,6 +302,7 @@ or the wrong type are a separate negative-conformance axis: they must fail befor
 open-fallback dispatch can run. Preservation of undeclared extra fields alongside an unrecognized
 discriminator is likewise a separate axis and is not covered here.
 """)
+@serializable
 model FixtureDiscriminatorEdges {
   @sample(#{ wildcardSelected: #{ kind: "vendor-extension", name: "wildcard-selected tool", connection: #{ kind: "custom", endpoint: "https://example.test" }, config: #{ enabled: true } } })
   @doc("Unrecognized kind absorbed by a wildcard subtype carrying a required complex field")
@@ -314,6 +321,7 @@ model FixtureDiscriminatorEdges {
   namedOpenUnknown: FixtureNamedOpenBase;
 }
 
+@serializable
 model FixtureCardinalityItem {
   @sample(#{ name: "alpha" })
   @doc("Key of this entry when the collection is written in its keyed map form")
@@ -374,6 +382,7 @@ executable conformance payload exercise object-form loading without relying on k
 Array order remains part of the contract and is asserted by repeatedTags and mixedContent.
 Duplicate names within a keyed collection are a further separate axis and are not covered here.
 """)
+@serializable
 model FixtureCollectionCardinality {
   @sample(#{ repeatedTags: #["alpha", "beta", "alpha"] })
   @doc("Scalar array at many carrying a repeat, so ordering and duplicates both have to survive")
@@ -443,6 +452,7 @@ a full object so that a failure in this class names nesting depth alone. fallbac
 likewise omitted, because a union of a base and its Named wrapper is carried as raw JSON
 rather than dispatched, which would mix an untyped path into a class about typed dispatch.
 """)
+@serializable
 model FixtureDeepNesting {
   @sample(#{ propertyTree: #{ kind: "object", name: "tree-root", description: "root of the nested tree", additionalProperties: #{ kind: "array", name: "level-one-array", items: #{ kind: "union", name: "level-two-union", anyOf: #[#{ kind: "string", name: "level-three-string", required: true }, #{ kind: "object", name: "level-three-object", additionalProperties: #{ kind: "integer", name: "level-four-integer", nullable: true } }] } } } })
   @doc("Recursive polymorphic tree five dispatch levels deep with a collection in the chain")
@@ -453,6 +463,7 @@ model FixtureDeepNesting {
   branchTrees: FixtureProperty[];
 }
 
+@serializable
 model FixtureOwner {
   @sample(#{ id: "owner-1" })
   id: string;
@@ -461,6 +472,7 @@ model FixtureOwner {
   displayName?: string;
 }
 
+@serializable
 model FixtureUnknownRecords {
   @sample(#{ requiredValues: #{ value: "required", nullable: null } })
   requiredValues: Record<unknown>;
@@ -469,6 +481,7 @@ model FixtureUnknownRecords {
   optionalValues?: Record<unknown>;
 }
 
+@serializable
 model FixtureToolRequest {
   @sample(#{ id: "call-a" })
   id: string;
@@ -477,12 +490,14 @@ model FixtureToolRequest {
   name: string;
 }
 
+@serializable
 model FixtureCheckpoint {
   @sample(#{ pendingToolRequests: #[#{ id: "call-a", name: "echo" }, #{ id: "call-b", name: "echo" }] })
   pendingToolRequests: FixtureToolRequest[];
 }
 
 @discriminator("kind")
+@serializable
 model FixtureContent {
   kind: FixtureContentKind;
 }
@@ -520,6 +535,7 @@ model AudioContent extends FixtureContent {
 
 @abstract
 @discriminator("kind")
+@serializable
 model FixtureAbstractContent {
   kind: FixtureAbstractContentKind;
 }
@@ -534,6 +550,7 @@ model FixtureAbstractTextContent extends FixtureAbstractContent {
 }
 
 @doc("Locks default synthesis for polymorphic union fields, including the abstract closed union that declares no unknown case.")
+@serializable
 model FixturePolymorphicDefaults {
   @sample(#{ requiredAbstractContent: #{ kind: "text", text: "closed union required field" } })
   @doc("Required field of an abstract closed union; must default to a declared variant, never an undeclared unknown case")
@@ -564,6 +581,7 @@ union FixtureMode {
 
 @@coerce(FixtureReference, string, #{ id: "{value}", label: "coerced reference" }, "reference", "Load a reference from an id string.", "ref-coerced");
 @@factory(FixtureReference, "named", #{ id: "{id}", label: "{label}" }, #{ id: "string", label: "string" });
+@serializable
 model FixtureReference {
   @sample(#{ id: "ref-1" })
   id: string;
@@ -573,6 +591,7 @@ model FixtureReference {
 }
 
 @discriminator("kind")
+@serializable
 model FixtureTool {
   kind: string;
 
@@ -585,6 +604,7 @@ model FixtureTool {
 
 }
 
+@serializable
 model FixtureBinding {
   name?: string;
 
@@ -594,27 +614,33 @@ model FixtureBinding {
 
 @@coerce(FixtureBinding, string, #{ source: "{value}" }, "binding", "Load a binding from shorthand.", "input");
 
+@serializable
 model FixtureNamedPayload {
   name?: string;
   payload: unknown;
 }
 
+@serializable
 model FixtureNamedPayloadCollection {
   items: Record<FixtureNamedPayload> | Named<FixtureNamedPayload>[];
 }
 
+@serializable
 model FixtureNamedProfile {
   properties: Record<FixtureNamedPayload> | Named<FixtureNamedPayload>[];
 }
 
+@serializable
 model FixtureNamedInputs {
   profile: FixtureNamedProfile;
 }
 
+@serializable
 model FixtureNamedRoot {
   inputs: FixtureNamedInputs;
 }
 
+@serializable
 model FixtureBindingTool {
   kind: "function";
 
@@ -659,6 +685,7 @@ model FixtureCustomTool extends FixtureTool {
   config?: Record<unknown>;
 }
 
+@serializable
 model FixtureToolbox {
   @sample(#{ tools: #[#{ kind: "function", name: "search", command: "search --query", parameters: #[#{ name: "query", kind: "string", required: true }] }] })
   tools: Record<FixtureTool> | Named<FixtureTool>[];
@@ -692,11 +719,13 @@ model FixtureToolbox {
   inheritedListBindingTool: FixtureTool;
 }
 
+@serializable
 model FixtureShortcut {
   @sample(#{ reference: "ref-shortcut" })
   reference: FixtureReference;
 }
 
+@serializable
 model FixtureInput {
   @sample(#{ name: "input" })
   name: string;
@@ -705,22 +734,26 @@ model FixtureInput {
   defaultValue?: unknown;
 }
 
+@serializable
 model FixtureInputSet {
   @sample(#{ inputs: #[#{ name: "input", defaultValue: "fallback" }] })
   inputs: FixtureInput[];
 }
 
+@serializable
 model FixtureStopOptions {
   @sample(#{ stopSequences: #["\n"] })
   stopSequences: string[];
 }
 
+@serializable
 model FixtureMultilineWhitespace {
   @sample(#{ value: "first line with trailing space \nsecond line\n" })
   @sample(#{ value: "first line with two spaces  \n\n  \nlast line with three spaces   \n" })
   value: string;
 }
 
+@serializable
 model FixturePromptyWhitespace {
   @sample(#{ value: "system:\nYou are helpful.\n\nKeep this space \nPreserve ordinary lines.\nKeep this too \nuser:{{question}}" })
   value: string;
@@ -737,6 +770,7 @@ model Named<T> {
   ...T;
 }
 
+@serializable
 model FixtureBagItem {
   @sample(#{ name: "alpha" })
   name: string;
@@ -753,6 +787,7 @@ model FixtureBagItem {
 // wrapper) is left unresolved, so keyed-collection codegen must be tracked structurally or
 // the 2nd field silently degrades to array-only save/load (map-form input → empty, DATA
 // LOSS). `secondItems` proves both fields emit identical name-keyed MAP save + dual-form load.
+@serializable
 model FixtureBag {
   @sample(#{ items: #[#{ name: "alpha", note: "first" }] })
   items: Record<FixtureBagItem> | Named<FixtureBagItem>[];
@@ -765,11 +800,13 @@ model FixtureBag {
 // the collection name. Proving that needs an array whose element type carries a REQUIRED
 // COMPLEX field, because that is what raises a pathful diagnostic from inside the element.
 // `entries[1].detail` also proves the index composes with further nested segments.
+@serializable
 model FixtureIndexedDetail {
   @sample(#{ code: "detail-code" })
   code: string;
 }
 
+@serializable
 model FixtureIndexedEntry {
   @sample(#{ label: "entry-label" })
   label: string;
@@ -777,6 +814,7 @@ model FixtureIndexedEntry {
   detail: FixtureIndexedDetail;
 }
 
+@serializable
 model FixtureIndexedList {
   @sample(#{ entries: #[#{ label: "entry-label", detail: #{ code: "detail-code" } }] })
   entries: FixtureIndexedEntry[];
@@ -788,6 +826,7 @@ model FixtureIndexedList {
 // `#[derive(serde::Serialize)]` would instead emit `"note": null` / `"extras": null`
 // (Option::None → null, empty Vec → []), diverging from canonical — which is exactly
 // why every data struct must route serde through to_value/load_from_value, not a derive.
+@serializable
 model FixtureOmit {
   @sample(#{ label: "present" })
   @doc("Required scalar; the optional fields below are deliberately unset in the sample.")
@@ -804,6 +843,7 @@ model FixtureOmit {
 }
 
 @doc("Locks that a required complex field carrying no @sample of its own still appears in generated sample payloads. The emitters' required-complex validation rejects a payload that omits such a field, so omitting it makes a generated test unable to pass its own generated validation.")
+@serializable
 model FixtureRequiredComplexSample {
   @sample(#{ label: "required-complex" })
   @doc("Sampled scalar; at least one sampled property is needed for any example to be generated.")
@@ -817,6 +857,7 @@ model FixtureRequiredComplexSample {
 }
 
 @doc("Target of the unsampled required reference above; its own samples are what the synthesized payload is built from.")
+@serializable
 model FixtureRequiredComplexDetail {
   @sample(#{ code: "detail-code" })
   code: string;
@@ -825,11 +866,13 @@ model FixtureRequiredComplexDetail {
   retries?: int32;
 }
 
+@serializable
 model FixtureOptionalDefaults {
   mode?: string = "auto";
 }
 
 @error
+@serializable
 model FixtureInvokerError {
   message: string;
   component: string;
@@ -840,6 +883,7 @@ model FixtureInvokerError {
 // - optional collections must be unwrapped before assertions,
 // - polymorphic roots must be pattern-matched before payload access,
 // - compound coercion fields must validate their typed nested value.
+@serializable
 model ModelInfo {
   @sample(#{ inputModalities: #["text"] })
   inputModalities?: string[];
@@ -856,6 +900,7 @@ model ModelInfo {
 }
 
 @discriminator("kind")
+@serializable
 model FixtureConnection {
   @sample(#{ kind: "custom", endpoint: "https://example.test" })
   kind: string;
@@ -871,6 +916,7 @@ model FixtureCustomConnection extends FixtureConnection {
 @doc("An abstract base over an open discriminator. Abstract means the base is not directly instantiable; open means an unrecognized kind must still be absorbed losslessly rather than rejected. Locks that backends do not conflate the two.")
 @abstract
 @discriminator("kind")
+@serializable
 model FixtureAbstractOpenConnection {
   @sample(#{ kind: "managed", resourceId: "managed-resource-1" })
   kind: string;
@@ -888,6 +934,7 @@ model FixtureManagedConnection extends FixtureAbstractOpenConnection {
 
 @doc("A non-abstract base over a CLOSED discriminator union that permits a value no subtype claims. The unclaimed value must load as the base type rather than erroring, because a closed union is not the same thing as an exhaustive dispatch. Regression coverage for issue #37.")
 @discriminator("kind")
+@serializable
 model FixtureUnclaimedBase {
   @sample(#{ kind: "plain" })
   kind: FixtureUnclaimedKind;
@@ -910,6 +957,7 @@ model FixtureClaimedVariant extends FixtureUnclaimedBase {
 
 @doc("A base whose discriminator is a NAMED union admitting arbitrary strings. Locks that an unrecognized kind round-trips losslessly through a named open enum discriminator. NOTE: this does NOT reproduce issue #38 — resolveUnionProperty classifies a union of string literals plus bare string as `scalar`, never `complex`, so the pre-validation branch #38 describes is unreachable from TypeSpec source. See the comment on issue #38.")
 @discriminator("kind")
+@serializable
 model FixtureNamedOpenBase {
   @sample(#{ kind: "vendor-specific" })
   kind: FixtureNamedOpenKind;
@@ -931,11 +979,13 @@ model FixtureNamedOpenVariant extends FixtureNamedOpenBase {
 }
 
 @@coerce(McpApprovalConfig, string, #{ kind: "{value}" }, "config", "Load an approval config from its kind.", "always");
+@serializable
 model McpApprovalConfig {
   @sample(#{ kind: "never" })
   kind: string;
 }
 
+@serializable
 model McpApprovalMode {
   @sample(#{ config: "always" })
   config: McpApprovalConfig;
@@ -951,6 +1001,7 @@ model McpApprovalMode {
 // first declared field — `kind` — which the model's own validator then rejects.
 @@entryShorthand(FixtureProperty, "default");
 @discriminator("kind")
+@serializable
 model FixtureProperty {
   kind: string;
 
@@ -1019,6 +1070,7 @@ model FixtureUnionProperty extends FixtureProperty {
 @@knownAs(WireOptions.maxOutputTokens, "anthropic", "max_tokens");
 @@knownAs(WireOptions.temperature, "openai", "temperature");
 @@defaultFor(WireOptions.temperature, "openai", 0.2);
+@serializable
 model WireOptions {
   @sample(#{ maxOutputTokens: 256 })
   maxOutputTokens?: int32;
