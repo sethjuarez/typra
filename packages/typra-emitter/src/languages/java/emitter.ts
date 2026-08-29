@@ -272,11 +272,15 @@ function emitType(
   lines.push("");
 
   emitOpenEnumAliasParsers(type.fields, lines);
-  emitLoad(type, lines, polymorphicTypeNames, inheritedFields);
-  emitSave(type, lines, polymorphicTypeNames, inheritedFields);
-  if (type.wire) {
-    emitToWire(type.wire, lines);
-    emitFromWire(type.typeName.name, type.wire, lines);
+  // Serialization surface (load/save + wire wrappers) is opt-in: emitted only
+  // when the type is in the serialization closure of a `@serializable` root.
+  if (type.serialized) {
+    emitLoad(type, lines, polymorphicTypeNames, inheritedFields);
+    emitSave(type, lines, polymorphicTypeNames, inheritedFields);
+    if (type.wire) {
+      emitToWire(type.wire, lines);
+      emitFromWire(type.typeName.name, type.wire, lines);
+    }
   }
 
   function collectInheritedFields(
@@ -300,9 +304,11 @@ function emitType(
     return fields;
   }
 
-  emitSerializationHelpers(typeName, lines);
-  if (nativeSerialization === "jackson") {
-    emitJacksonHelpers(typeName, lines);
+  if (type.serialized) {
+    emitSerializationHelpers(typeName, lines);
+    if (nativeSerialization === "jackson") {
+      emitJacksonHelpers(typeName, lines);
+    }
   }
   for (const factory of type.factories) {
     emitFactory(typeName, factory, visitor, lines);
@@ -368,7 +374,7 @@ export function emitJavaUnknownCarrier(
   packageName: string,
   nativeSerialization: JavaNativeSerialization = "none",
 ): { filename: string; source: string } | undefined {
-  if (!needsUnknownCarrier(type)) {
+  if (!type.serialized || !needsUnknownCarrier(type)) {
     return undefined;
   }
   const parent = javaTypeName(type.typeName.name);

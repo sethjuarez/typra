@@ -31,7 +31,11 @@ import {
   isTypedDispatchEntry,
   classifyCallableParam,
 } from "../../ir/vector.js";
-import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
+import {
+  lowerFile,
+  collectPolymorphicTypeNames,
+  computeSerializationClosure,
+} from "../../ir/lower.js";
 import {
   emitRustFile as emitRustFileDecl,
   RUST_ALLOW_ATTR,
@@ -189,10 +193,18 @@ export const generateRust = async (
   //     referenced type's string `@coerce` template — otherwise the value-backed
   //     lowering stores the raw string and Rust alone diverges from every runtime
   //     that hydrates a typed child on load.
+  // Serialization is opt-in via `@serializable`: compute the closure once and
+  // thread it so only its members emit load/save.
+  const serializationClosure = computeSerializationClosure(nodes, registry);
+
   const rustDeclsByName = new Map<string, TypeDecl>(
     nodes
       .filter((n) => !n.base)
-      .flatMap((n) => lowerFile(n, registry, polymorphicTypeNames).types)
+      .flatMap(
+        (n) =>
+          lowerFile(n, registry, polymorphicTypeNames, serializationClosure)
+            .types,
+      )
       .map((decl) => [decl.typeName.name, decl]),
   );
 
@@ -221,7 +233,12 @@ export const generateRust = async (
   for (const n of nodes) {
     if (!n.base) {
       const group = n.group || "";
-      const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
+      const fileDecl = lowerFile(
+        n,
+        registry,
+        polymorphicTypeNames,
+        serializationClosure,
+      );
       const fileContent = emitRustFileDecl(
         fileDecl,
         visitor,

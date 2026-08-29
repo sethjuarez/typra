@@ -497,48 +497,53 @@ function emitType(
     );
   }
 
-  // load() method
-  lines.push("");
-  emitLoadMethod(type, lines);
-
-  // Collection helpers (between load and polymorphic dispatch)
-  for (const helper of type.collectionHelpers) {
-    emitCollectionLoadHelper(name, helper, lines);
+  // Serialization surface (load/save + collection helpers, polymorphic
+  // dispatch, format wrappers) is opt-in: emitted only when the type is in the
+  // serialization closure of a `@serializable` root.
+  if (type.serialized) {
+    // load() method
     lines.push("");
-    emitCollectionSaveHelper(name, helper, lines);
-  }
+    emitLoadMethod(type, lines);
 
-  // Polymorphic dispatch
-  if (type.polymorphicDispatch) {
+    // Collection helpers (between load and polymorphic dispatch)
+    for (const helper of type.collectionHelpers) {
+      emitCollectionLoadHelper(name, helper, lines);
+      lines.push("");
+      emitCollectionSaveHelper(name, helper, lines);
+    }
+
+    // Polymorphic dispatch
+    if (type.polymorphicDispatch) {
+      lines.push("");
+      lines.push("");
+      emitPolymorphicDispatch(
+        name,
+        type.polymorphicDispatch,
+        type.isAbstract,
+        lines,
+        needsUnknownCarrier(type) ? unknownCarrierName(name) : undefined,
+      );
+    }
+
+    // save() method
     lines.push("");
-    lines.push("");
-    emitPolymorphicDispatch(
-      name,
-      type.polymorphicDispatch,
-      type.isAbstract,
-      lines,
-      needsUnknownCarrier(type) ? unknownCarrierName(name) : undefined,
-    );
-  }
+    emitSaveMethod(type, lines);
 
-  // save() method
-  lines.push("");
-  emitSaveMethod(type, lines);
+    // to_wire() method (only when wire mappings exist)
+    if (type.wire) {
+      emitToWireMethod(type, lines);
+      emitFromWireMethod(type, lines);
+    }
 
-  // to_wire() method (only when wire mappings exist)
-  if (type.wire) {
-    emitToWireMethod(type, lines);
-    emitFromWireMethod(type, lines);
-  }
+    // to_yaml() method
+    emitToYaml(name, lines);
 
-  // to_yaml() method
-  emitToYaml(name, lines);
+    // to_json() method
+    emitToJson(name, lines);
 
-  // to_json() method
-  emitToJson(name, lines);
-
-  if (usePydantic) {
-    emitPydanticInteropMethods(name, lines);
+    if (usePydantic) {
+      emitPydanticInteropMethods(name, lines);
+    }
   }
 
   // Factory methods
@@ -552,7 +557,7 @@ function emitType(
 
   lines.push("");
 
-  if (needsUnknownCarrier(type)) {
+  if (type.serialized && needsUnknownCarrier(type)) {
     emitUnknownCarrier(type, lines, options);
   }
 

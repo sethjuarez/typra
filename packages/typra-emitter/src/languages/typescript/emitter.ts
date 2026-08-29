@@ -311,7 +311,7 @@ function emitType(
   lines.push(
     `  static readonly shorthandProperty: string | undefined = ${shorthand};`,
   );
-  if (emitZod) {
+  if (emitZod && type.serialized) {
     emitZodSchemas(type, lines, allTypes);
   }
   lines.push("");
@@ -343,21 +343,25 @@ function emitType(
   // Constructor
   emitConstructor(type, lines);
 
-  // //#region Load Methods
-  lines.push("  //#region Load Methods");
-  lines.push("");
+  // Serialization surface (load region) is opt-in: emitted only when the type
+  // is in the serialization closure of a `@serializable` root.
+  if (type.serialized) {
+    // //#region Load Methods
+    lines.push("  //#region Load Methods");
+    lines.push("");
 
-  // load() static method
-  emitLoadMethod(type, lines);
+    // load() static method
+    emitLoadMethod(type, lines);
 
-  // Polymorphic dispatch
-  if (type.polymorphicDispatch) {
-    emitPolymorphicDispatch(
-      name,
-      type.polymorphicDispatch,
-      lines,
-      needsUnknownCarrier(type) ? unknownCarrierName(name) : undefined,
-    );
+    // Polymorphic dispatch
+    if (type.polymorphicDispatch) {
+      emitPolymorphicDispatch(
+        name,
+        type.polymorphicDispatch,
+        lines,
+        needsUnknownCarrier(type) ? unknownCarrierName(name) : undefined,
+      );
+    }
   }
 
   function emitRawCloneMethod(lines: string[]): void {
@@ -379,37 +383,42 @@ function emitType(
     lines.push("");
   }
 
-  // Collection helpers
-  for (const helper of type.collectionHelpers) {
-    emitCollectionLoadHelper(name, helper, lines);
-    emitCollectionSaveHelper(name, helper, lines);
+  // Serialization surface (collection helpers + save region + format wrappers)
+  // is opt-in: emitted only when the type is in the serialization closure of a
+  // `@serializable` root.
+  if (type.serialized) {
+    // Collection helpers
+    for (const helper of type.collectionHelpers) {
+      emitCollectionLoadHelper(name, helper, lines);
+      emitCollectionSaveHelper(name, helper, lines);
+    }
+
+    lines.push("  //#endregion");
+    lines.push("");
+
+    // //#region Save Methods
+    lines.push("  //#region Save Methods");
+    lines.push("");
+
+    // save() instance method
+    emitSaveMethod(type, lines);
+
+    // toWire() / fromWire() methods (only if wire mappings exist)
+    if (type.wire !== null) {
+      emitToWireMethod(type, lines);
+      emitFromWireMethod(name, type, lines);
+    }
+
+    // toYaml / toJson
+    emitToYaml(name, lines);
+    emitToJson(name, lines);
+
+    // fromJson / fromYaml
+    emitFromJson(name, type, lines);
+    emitFromYaml(name, type, lines);
+
+    lines.push("  //#endregion");
   }
-
-  lines.push("  //#endregion");
-  lines.push("");
-
-  // //#region Save Methods
-  lines.push("  //#region Save Methods");
-  lines.push("");
-
-  // save() instance method
-  emitSaveMethod(type, lines);
-
-  // toWire() / fromWire() methods (only if wire mappings exist)
-  if (type.wire !== null) {
-    emitToWireMethod(type, lines);
-    emitFromWireMethod(name, type, lines);
-  }
-
-  // toYaml / toJson
-  emitToYaml(name, lines);
-  emitToJson(name, lines);
-
-  // fromJson / fromYaml
-  emitFromJson(name, type, lines);
-  emitFromYaml(name, type, lines);
-
-  lines.push("  //#endregion");
 
   // Factory methods
   if (type.factories.length > 0) {
@@ -423,7 +432,7 @@ function emitType(
 
   lines.push("}");
 
-  if (needsUnknownCarrier(type)) {
+  if (type.serialized && needsUnknownCarrier(type)) {
     emitUnknownCarrier(type, lines);
   }
 
@@ -432,7 +441,7 @@ function emitType(
     emitMethodHelpersInterface(type, lines);
   }
 
-  if (emitZod) {
+  if (emitZod && type.serialized) {
     lines.push("");
     lines.push(`export type ${name}Wire = z.infer<typeof ${name}.wireSchema>;`);
   }

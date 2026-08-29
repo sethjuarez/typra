@@ -428,6 +428,7 @@ function emitCoercingType(
     polymorphicDispatch: null,
     methods: [],
     wire: null,
+    serialized: true,
   } as unknown as TypeDecl;
 
   const file = {
@@ -581,6 +582,7 @@ describe("rust emitter — provider wire mapping", () => {
           },
         ],
       },
+      serialized: true,
     } as unknown as TypeDecl;
 
     const file = {

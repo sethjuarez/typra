@@ -58,7 +58,11 @@ import {
   buildBaseTestContext,
   pythonTestOptions,
 } from "../../testing/test-context.js";
-import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
+import {
+  lowerFile,
+  collectPolymorphicTypeNames,
+  computeSerializationClosure,
+} from "../../ir/lower.js";
 import { emitPythonFile as emitPythonFileDecl } from "./emitter.js";
 import { formatPythonSource } from "./python-format.js";
 import {
@@ -195,6 +199,10 @@ export const generatePython = async (
     }
   }
 
+  // Serialization is opt-in via `@serializable`: compute the closure once and
+  // thread it so only its members emit load/save.
+  const serializationClosure = computeSerializationClosure(nodes, registry);
+
   // Group nodes by their semantic group folder
   const groupMap = new Map<string, TypeNode[]>();
   for (const n of nodes) {
@@ -221,7 +229,12 @@ export const generatePython = async (
     // Skip child types - they're rendered with their parent
     if (!n.base) {
       const group = n.group || "";
-      const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
+      const fileDecl = lowerFile(
+        n,
+        registry,
+        polymorphicTypeNames,
+        serializationClosure,
+      );
       const fileContent = emitPythonFileDecl(fileDecl, visitor, group, {
         cancellationTokenPath: emitTarget["cancellation-token-path"],
         nativeSerialization,

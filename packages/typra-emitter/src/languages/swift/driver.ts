@@ -5,7 +5,11 @@ import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import { BaseTestContext, enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { TypeRegistry } from "../../ir/expansion.js";
-import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
+import {
+  lowerFile,
+  collectPolymorphicTypeNames,
+  computeSerializationClosure,
+} from "../../ir/lower.js";
 import {
   buildBaseTestContext,
   swiftTestOptions,
@@ -102,10 +106,13 @@ export const generateSwift = async (
     ? toSwiftPackagePath(relative(outputDir, testRoot))
     : undefined;
   const rootNodes = nodes.filter((n) => !n.base);
+  // Serialization is opt-in via `@serializable`: compute the closure once and
+  // thread it so only its members emit load/save.
+  const serializationClosure = computeSerializationClosure(nodes, registry);
   const fileDecls = new Map(
     rootNodes.map((n) => [
       `${n.typeName.namespace}.${n.typeName.name}`,
-      lowerFile(n, registry, polymorphicTypeNames),
+      lowerFile(n, registry, polymorphicTypeNames, serializationClosure),
     ]),
   );
   const declarationUniverse = Array.from(fileDecls.values()).flatMap(

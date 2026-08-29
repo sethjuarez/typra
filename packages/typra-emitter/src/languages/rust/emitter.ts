@@ -823,6 +823,13 @@ function emitStruct(
  * remains fully intact and is used by the explicit from_json/to_json helpers.
  */
 function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
+  // The manual serde impl delegates to the canonical to_value/load_from_value,
+  // which are only emitted for types in the serialization closure of a
+  // `@serializable` root. Skip the impl for non-serialized types so it never
+  // references methods that were gated out.
+  if (!type.serialized) {
+    return;
+  }
   const name = type.typeName.name;
   const reason = type.polymorphicDispatch
     ? `the \`${type.polymorphicDispatch.discriminatorField}\` discriminator round-trips to its exact wire value`
@@ -945,25 +952,29 @@ function emitImpl(
   lines.push("    }");
   lines.push("");
 
-  // from_json()
-  emitFromJson(name, type, lines);
+  // Serialization load surface is opt-in: emitted only when the type is in the
+  // serialization closure of a `@serializable` root.
+  if (type.serialized) {
+    // from_json()
+    emitFromJson(name, type, lines);
 
-  // from_yaml()
-  emitFromYaml(name, type, lines);
+    // from_yaml()
+    emitFromYaml(name, type, lines);
 
-  // try_load_from_value() — fallible sibling of load_from_value (#210)
-  emitTryLoadFromValue(name, type, lines);
+    // try_load_from_value() — fallible sibling of load_from_value (#210)
+    emitTryLoadFromValue(name, type, lines);
 
-  // load_from_value()
-  emitLoadFromValue(
-    name,
-    type,
-    childTypes,
-    baseFieldNames,
-    polymorphicTypeNames,
-    lines,
-    declsByName,
-  );
+    // load_from_value()
+    emitLoadFromValue(
+      name,
+      type,
+      childTypes,
+      baseFieldNames,
+      polymorphicTypeNames,
+      lines,
+      declsByName,
+    );
+  }
   emitInputValidation(type, childTypes, lines);
   if (
     type.polymorphicDispatch &&
@@ -977,24 +988,28 @@ function emitImpl(
     emitKindStr(type, childTypes, lines);
   }
 
-  // to_value()
-  emitToValue(
-    name,
-    type,
-    childTypes,
-    baseFieldNames,
-    polymorphicTypeNames,
-    lines,
-  );
+  // Serialization save surface is opt-in: emitted only when the type is in the
+  // serialization closure of a `@serializable` root.
+  if (type.serialized) {
+    // to_value()
+    emitToValue(
+      name,
+      type,
+      childTypes,
+      baseFieldNames,
+      polymorphicTypeNames,
+      lines,
+    );
 
-  // to_json() / to_yaml()
-  emitToJson(name, lines);
-  emitToYaml(name, lines);
+    // to_json() / to_yaml()
+    emitToJson(name, lines);
+    emitToYaml(name, lines);
 
-  // to_wire() (only when wire mappings exist)
-  if (type.wire) {
-    emitToWireMethod(type, lines);
-    emitFromWireMethod(type, lines);
+    // to_wire() (only when wire mappings exist)
+    if (type.wire) {
+      emitToWireMethod(type, lines);
+      emitFromWireMethod(type, lines);
+    }
   }
 
   // Dict accessor helpers (only for dict-category fields, not scalar value types)

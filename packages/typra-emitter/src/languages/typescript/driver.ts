@@ -15,7 +15,11 @@ import {
   emitEslintConfig,
 } from "./scaffolding.js";
 import { emitTypeScriptTest } from "./test-emitter.js";
-import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
+import {
+  lowerFile,
+  collectPolymorphicTypeNames,
+  computeSerializationClosure,
+} from "../../ir/lower.js";
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
@@ -136,6 +140,10 @@ export const generateTypeScript = async (
     }
   }
 
+  // Serialization is opt-in via `@serializable`: compute the closure once and
+  // thread it so only its members emit load/save.
+  const serializationClosure = computeSerializationClosure(nodes, registry);
+
   // Group root nodes by their semantic group folder
   const groupMap = new Map<string, TypeNode[]>();
   for (const n of nodes) {
@@ -154,7 +162,12 @@ export const generateTypeScript = async (
     }
 
     const group = n.group || "";
-    const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
+    const fileDecl = lowerFile(
+      n,
+      registry,
+      polymorphicTypeNames,
+      serializationClosure,
+    );
     const code = emitTypeScriptFileDecl(fileDecl, visitor, tsNamespace, group, {
       nativeSerialization,
     });
@@ -173,7 +186,12 @@ export const generateTypeScript = async (
   // Emit group index.ts files
   for (const [group, groupNodes] of groupMap) {
     if (!group) continue;
-    const groupIndexCode = emitTypeScriptGroupIndex(group, groupNodes, emitZod);
+    const groupIndexCode = emitTypeScriptGroupIndex(
+      group,
+      groupNodes,
+      emitZod,
+      serializationClosure,
+    );
     await emitTypeScriptFile(
       context,
       "index.ts",
@@ -379,6 +397,7 @@ export const generateTypeScript = async (
     indexContext.baseTypes,
     indexContext.types,
     emitZod,
+    serializationClosure,
   );
   await emitTypeScriptFile(
     context,

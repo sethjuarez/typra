@@ -11,7 +11,11 @@ import {
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { TypeRegistry } from "../../ir/expansion.js";
-import { collectPolymorphicTypeNames, lowerFile } from "../../ir/lower.js";
+import {
+  collectPolymorphicTypeNames,
+  lowerFile,
+  computeSerializationClosure,
+} from "../../ir/lower.js";
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import { projectNamespace } from "../../ir/namespace.js";
 import {
@@ -110,8 +114,11 @@ export const generateJava = async (
     emitTarget,
   }).packageName!;
   const polymorphicTypeNames = collectPolymorphicTypeNames(node, registry);
+  // Serialization is opt-in via `@serializable`: compute the closure once and
+  // thread it so only its members emit load/save.
+  const serializationClosure = computeSerializationClosure(nodes, registry);
   const fileDecls = nodes.map((n) =>
-    lowerFile(n, registry, polymorphicTypeNames),
+    lowerFile(n, registry, polymorphicTypeNames, serializationClosure),
   );
   const allTypeDecls = fileDecls.flatMap((fileDecl) => fileDecl.types);
 

@@ -219,7 +219,14 @@ export function emitTypeScriptIndex(
   baseTypes: TypeNode[],
   _types: TypeNode[],
   includeWireTypes = false,
+  serializedNames?: Set<string>,
 ): string {
+  // A `${name}Wire` alias only exists when the model emitted its zod schemas,
+  // which is itself gated on the model being in a `@serializable` closure.
+  // Mirror that here so the barrel never re-exports a Wire alias that the model
+  // file did not emit. Undefined closure = legacy/test callers → include all.
+  const wireExportable = (name: string): boolean =>
+    includeWireTypes && (!serializedNames || serializedNames.has(name));
   const lines: string[] = [];
   lines.push("// Copyright (c) Microsoft. All rights reserved.");
   lines.push(
@@ -249,9 +256,9 @@ export function emitTypeScriptIndex(
             type.typeName.name,
             ...type.childTypes.map((c) => c.typeName.name),
           ];
-          const typeExports = includeWireTypes
-            ? exports.map((name) => `${name}Wire`)
-            : [];
+          const typeExports = exports
+            .filter((name) => wireExportable(name))
+            .map((name) => `${name}Wire`);
           lines.push("");
           lines.push(`${exportKeyword} {`);
           for (const name of exports) {
@@ -267,7 +274,7 @@ export function emitTypeScriptIndex(
           lines.push(
             `${exportKeyword} { ${type.typeName.name} } from "./${toKebabCase(type.typeName.name)}";`,
           );
-          if (includeWireTypes && !type.isProtocol) {
+          if (!type.isProtocol && wireExportable(type.typeName.name)) {
             lines.push(
               `export type { ${type.typeName.name}Wire } from "./${toKebabCase(type.typeName.name)}";`,
             );
@@ -287,16 +294,19 @@ export function emitTypeScriptIndex(
           lines.push(
             `${exportKeyword} { ${allNames.join(", ")} } from "./${group}/${toKebabCase(type.typeName.name)}";`,
           );
-          if (includeWireTypes && !type.isProtocol) {
+          const wireNames = !type.isProtocol
+            ? allNames.filter((name) => wireExportable(name))
+            : [];
+          if (wireNames.length > 0) {
             lines.push(
-              `export type { ${allNames.map((name) => `${name}Wire`).join(", ")} } from "./${group}/${toKebabCase(type.typeName.name)}";`,
+              `export type { ${wireNames.map((name) => `${name}Wire`).join(", ")} } from "./${group}/${toKebabCase(type.typeName.name)}";`,
             );
           }
         } else {
           lines.push(
             `${exportKeyword} { ${type.typeName.name} } from "./${group}/${toKebabCase(type.typeName.name)}";`,
           );
-          if (includeWireTypes && !type.isProtocol) {
+          if (!type.isProtocol && wireExportable(type.typeName.name)) {
             lines.push(
               `export type { ${type.typeName.name}Wire } from "./${group}/${toKebabCase(type.typeName.name)}";`,
             );
@@ -319,7 +329,12 @@ export function emitTypeScriptGroupIndex(
   group: string,
   groupNodes: TypeNode[],
   includeWireTypes = false,
+  serializedNames?: Set<string>,
 ): string {
+  // Mirror the model file's zod/`@serializable` gating so the group barrel never
+  // re-exports a Wire alias the model file did not emit. Undefined = include all.
+  const wireExportable = (name: string): boolean =>
+    includeWireTypes && (!serializedNames || serializedNames.has(name));
   const lines: string[] = [];
   lines.push("// Copyright (c) Microsoft. All rights reserved.");
   lines.push(
@@ -339,16 +354,19 @@ export function emitTypeScriptGroupIndex(
         lines.push(`  ${name},`);
       }
       lines.push(`} from "./${toKebabCase(type.typeName.name)}";`);
-      if (includeWireTypes && !type.isProtocol) {
+      const wireNames = !type.isProtocol
+        ? allNames.filter((name) => wireExportable(name))
+        : [];
+      if (wireNames.length > 0) {
         lines.push(
-          `export type { ${allNames.map((name) => `${name}Wire`).join(", ")} } from "./${toKebabCase(type.typeName.name)}";`,
+          `export type { ${wireNames.map((name) => `${name}Wire`).join(", ")} } from "./${toKebabCase(type.typeName.name)}";`,
         );
       }
     } else {
       lines.push(
         `${exportKeyword} { ${type.typeName.name} } from "./${toKebabCase(type.typeName.name)}";`,
       );
-      if (includeWireTypes && !type.isProtocol) {
+      if (!type.isProtocol && wireExportable(type.typeName.name)) {
         lines.push(
           `export type { ${type.typeName.name}Wire } from "./${toKebabCase(type.typeName.name)}";`,
         );

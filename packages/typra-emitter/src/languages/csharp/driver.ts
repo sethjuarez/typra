@@ -13,7 +13,11 @@ import { execFileSync } from "child_process";
 import { existsSync, readdirSync } from "fs";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { CSharpExprVisitor } from "./visitor.js";
-import { lowerType, collectPolymorphicTypeNames } from "../../ir/lower.js";
+import {
+  lowerType,
+  collectPolymorphicTypeNames,
+  computeSerializationClosure,
+} from "../../ir/lower.js";
 import {
   emitCSharpClass,
   emitCSharpEnum,
@@ -133,7 +137,12 @@ export const generateCsharp = async (
 
   // Build Declaration IR once (loop-invariant)
   const polyNames = collectPolymorphicTypeNames(allTypes[0], registry);
-  const allTypeDecls = nodes.map((nd) => lowerType(nd, registry, polyNames));
+  // Serialization is opt-in via `@serializable`: compute the closure once and
+  // thread it so only its members emit load/save.
+  const serializationClosure = computeSerializationClosure(nodes, registry);
+  const allTypeDecls = nodes.map((nd) =>
+    lowerType(nd, registry, polyNames, serializationClosure),
+  );
   const findTypeDecl = (name: string) =>
     allTypeDecls.find((t) => t.typeName.name === name);
 
@@ -188,7 +197,7 @@ export const generateCsharp = async (
   }
 
   for (const n of nodes) {
-    const typeDecl = lowerType(n, registry, polyNames);
+    const typeDecl = lowerType(n, registry, polyNames, serializationClosure);
     const classCode = emitCSharpClass(
       typeDecl,
       csharpNamespace,
