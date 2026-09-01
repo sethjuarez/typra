@@ -9,6 +9,8 @@
 // closure, so the entrypoint decodes via Note.FromJson and compares via ToJson).
 #nullable enable
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Typra.Fixtures.Features.TypedSeamConformance;
 using Xunit;
@@ -41,6 +43,18 @@ file sealed class ReviserImpl : IReviser
     }
 }
 
+/// <summary>A real typed Collator impl — reverses the notes, each passing
+/// through unchanged. The notes arrive decoded (per-element Note.FromJson);
+/// return a List&lt;Note&gt; so the entrypoint's per-element ToJson compare stays
+/// canonical.</summary>
+file sealed class CollatorImpl : ICollator
+{
+    public Task<List<Note>> CollateAsync(List<Note> notes)
+    {
+        return Task.FromResult(notes.AsEnumerable().Reverse().ToList());
+    }
+}
+
 public class TypedConformanceTests
 {
     [Fact]
@@ -53,5 +67,11 @@ public class TypedConformanceTests
     public async Task ReviserTypedConformance()
     {
         await VectorConformance.RunReviserConformanceAsync(new ReviserImpl());
+    }
+
+    [Fact]
+    public async Task CollatorTypedConformance()
+    {
+        await VectorConformance.RunCollatorConformanceAsync(new CollatorImpl());
     }
 }
