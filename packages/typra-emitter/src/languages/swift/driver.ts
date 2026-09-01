@@ -58,7 +58,7 @@ import {
   DispatchedContract,
   isTypedDispatchEntry,
   classifyCallableParam,
-  isScalarSeamEntry,
+  isTypedSeamEntry,
 } from "../../ir/vector.js";
 
 export const swiftTypeMapper: Record<string, string> = SWIFT_TYPE_MAP;
@@ -289,16 +289,20 @@ export const generateSwift = async (
     }
 
     // Typed conformance ENTRYPOINT (issue #511 Cat 1 / typra#306, Track A): for
-    // every scalar-eligible plain seam, emit `run<Seam>Conformance<S: <Seam>>` in
+    // every eligible plain seam, emit `run<Seam>Conformance<S: <Seam>>` in
     // the library module. It runs the seam's vectors by calling the impl DIRECTLY
     // — no VectorAdapters registry, no string keys, no per-op marshalling double.
     // The generic constraint `S: <Seam>` makes the Swift compiler prove the
     // consumer's type implements the whole seam protocol, so completeness is a
     // COMPILE error, not a runtime lookup. Emitted additively beside the stringly
-    // runner; scalar-only first slice keeps it zero-diff on real surfaces whose
-    // eligible plain seams take model shapes.
-    const conformanceEntries =
-      options!.callableVectors!.vectors.filter(isScalarSeamEntry);
+    // runner. Phase 2 widens eligibility from scalar-only to model-in/model-out
+    // seams whose boundary models live in the `@serializable` closure (see
+    // `isTypedSeamEntry`): a model param decodes via `<Model>.load(...)` and a
+    // model return compares through `try actual.save()`, keeping it zero-diff on
+    // real surfaces.
+    const conformanceEntries = options!.callableVectors!.vectors.filter(
+      (entry) => isTypedSeamEntry(entry, serializationClosure),
+    );
     if (conformanceEntries.length > 0) {
       await emitSwiftGeneratedFile(
         context,
@@ -1145,17 +1149,20 @@ function emitSwiftInterfaceConformanceTest(
 }
 
 /**
- * Emit the typed `@vector` conformance ENTRYPOINT for plain (undispatched) scalar
+ * Emit the typed `@vector` conformance ENTRYPOINT for plain (undispatched)
  * seams (issue #511 Cat 1 / typra#306 Track A) — the Swift twin of the TS
  * `run<Seam>Conformance`. For each seam this emits a library-level
  * `public func run<Seam>Conformance<S: <Seam>>(_ seam: S) async throws` that
- * decodes each vector's inputs, calls the seam method DIRECTLY, and asserts the
- * result reproduces `expected` (or that `expectedError` is thrown). The generic
+ * decodes each vector's inputs (scalars force-cast off the parsed JSON, models
+ * via the emitted `<Model>.load(...)`), calls the seam method DIRECTLY, and
+ * asserts the result reproduces `expected` (models serialize back through
+ * `try actual.save()`) or that `expectedError` is thrown. The generic
  * constraint `S: <Seam>` makes the compiler oblige the consumer's type to
  * implement the whole seam protocol, so a forgotten op fails to COMPILE — the
  * idiomatic replacement for the stringly VectorAdapters registry + per-op
  * marshalling double. Lives in the library module (throws instead of depending on
- * XCTest); scalar-only first slice so params/returns are JSON-native.
+ * XCTest). Eligibility covers scalar and `@serializable`-closure model seams
+ * (see `isTypedSeamEntry`).
  */
 function emitSwiftVectorConformanceEntrypoint(
   entries: CallableVectorSnapshotEntry[],
@@ -1243,12 +1250,23 @@ function emitSwiftVectorConformanceEntrypoint(
       );
       lines.push("    }");
       for (const paramName of paramNames) {
+        const shape = classifyCallableParam(entry.params[paramName]);
         const local = swiftPropertyName(paramName);
         const key = swiftStringLiteral(paramName);
-        lines.push(
-          `    let ${local} = input[${key}] as! ${swiftType(entry.params[paramName])}`,
-        );
+        if (shape.bareModel) {
+          // A model param in the `@serializable` closure decodes into its emitted
+          // struct via `<Model>.load(...)`; scalars stay a direct force-cast off
+          // the parsed JSON object.
+          lines.push(
+            `    let ${local} = try ${entry.params[paramName]}.load(input[${key}]!)`,
+          );
+        } else {
+          lines.push(
+            `    let ${local} = input[${key}] as! ${swiftType(entry.params[paramName])}`,
+          );
+        }
       }
+      const returnsModel = classifyCallableParam(entry.returns).bareModel;
 
       if (entry.vector.expectedError !== undefined) {
         lines.push("    var caught: Error? = nil");
@@ -1289,8 +1307,13 @@ function emitSwiftVectorConformanceEntrypoint(
           lines.push(
             "    let expected = try JSONSerialization.jsonObject(with: expectedData, options: [.fragmentsAllowed])",
           );
+          // A model result serializes back through its emitted `save()` before
+          // canonicalization; a scalar goes straight to canonical JSON.
+          const actualCanonical = returnsModel
+            ? "seamConformanceCanonicalJSON(try actual.save())"
+            : "seamConformanceCanonicalJSON(actual)";
           lines.push(
-            "    guard try seamConformanceCanonicalJSON(actual) == seamConformanceCanonicalJSON(expected) else {",
+            `    guard try ${actualCanonical} == seamConformanceCanonicalJSON(expected) else {`,
           );
           lines.push(
             `      throw SeamConformanceError(${swiftStringLiteral(

@@ -26,8 +26,23 @@ private struct TransformerImpl: Transformer {
   }
 }
 
+// A model-in/model-out seam impl: proves the typed entrypoint decodes the Note
+// param via the emitted `Note.load(...)` and serializes the Note result back
+// through `try actual.save()`. Uppercases the title and returns the value.
+private struct ReviserImpl: Reviser {
+  func revise(note: Note) async throws -> Note {
+    var revised = note
+    revised.title = note.title.uppercased()
+    return revised
+  }
+}
+
 final class TypedConformanceTests: XCTestCase {
   func testTransformerTypedConformance() async throws {
     try await runTransformerConformance(TransformerImpl())
+  }
+
+  func testReviserTypedConformance() async throws {
+    try await runReviserConformance(ReviserImpl())
   }
 }
