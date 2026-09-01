@@ -45,6 +45,7 @@ import {
   runPythonExecutableConformance,
   runPythonGeneratedTests,
   runPythonRuffCheck,
+  runPythonVectorConformanceCompile,
 } from "./fixtures/targets/python.mjs";
 import {
   runGoExecutableConformance,
@@ -119,6 +120,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "python_pydantic.lint",
   "python.generated-tests",
   "python_pydantic.generated-tests",
+  "python.vector-conformance-compile",
   "go.generated-tests",
   "go.vector-bridge-compile",
   "go.vector-conformance-compile",
@@ -2259,6 +2261,10 @@ function runDeclaredValidationStages() {
         "python_pydantic.generated-tests",
         () => runPythonGeneratedTests("python_pydantic", "fixtures_pydantic"),
       ],
+      [
+        "python.vector-conformance-compile",
+        (context) => runPythonVectorConformanceCompile(context),
+      ],
       ["go.generated-tests", runGoTests],
       [
         "go.vector-bridge-compile",
@@ -2304,6 +2310,7 @@ function runDeclaredValidationStages() {
       "rust.vector-conformance-compile": "cargo is not available",
       "go.vector-bridge-compile": "go is not available",
       "go.vector-conformance-compile": "go is not available",
+      "python.vector-conformance-compile": "uv is not available",
     },
   });
 }
