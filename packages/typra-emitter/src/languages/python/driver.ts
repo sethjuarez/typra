@@ -305,9 +305,11 @@ export const generatePython = async (
     // eligibility from scalar-only to model-in/model-out seams whose boundary
     // models live in the `@serializable` closure (see `isTypedSeamEntry`): a
     // model param decodes via `<Model>.load(...)` and a model return compares
-    // through `result.save()`, keeping it zero-diff on real surfaces.
+    // through `result.save()`, keeping it zero-diff on real surfaces. Phase 2
+    // array parity (`{ arrays: true }`) further admits `Model[]` seams — the
+    // decode/compare become per-element `.load()` / `.save()` comprehensions.
     const conformanceEntries = options!.callableVectors!.vectors.filter(
-      (entry) => isTypedSeamEntry(entry, serializationClosure),
+      (entry) => isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
     );
     if (conformanceEntries.length > 0) {
       await emitPythonFile(
@@ -1032,13 +1034,22 @@ function emitPythonVectorConformanceEntrypoint(
   // the barrel too: a model param decodes via `<Model>.load(...)` and a model
   // return serializes via `result.save()` for the canonical compare. Scalars and
   // `Record<unknown>` arrive already decoded from json.loads and need no import.
+  // Array-of-model param/return import the ELEMENT model — the decode/compare is
+  // a per-element `<Model>.load(...)` / `item.save()` comprehension.
   const modelTypeNames = new Set<string>();
   for (const entry of entries) {
     for (const type of Object.values(entry.params)) {
-      if (classifyCallableParam(type).bareModel) modelTypeNames.add(type);
+      const shape = classifyCallableParam(type);
+      if (shape.bareModel) modelTypeNames.add(type);
+      else if (shape.array && shape.isModel && !shape.optional) {
+        modelTypeNames.add(shape.base);
+      }
     }
-    if (classifyCallableParam(entry.returns).bareModel) {
+    const returnShape = classifyCallableParam(entry.returns);
+    if (returnShape.bareModel) {
       modelTypeNames.add(entry.returns);
+    } else if (returnShape.array && returnShape.isModel && !returnShape.optional) {
+      modelTypeNames.add(returnShape.base);
     }
   }
   const importNames = [
@@ -1093,18 +1104,28 @@ function emitPythonVectorConformanceEntrypoint(
       for (const paramName of paramNames) {
         const decoded = `json.loads(${jsonLiteral(input[paramName] ?? null)})`;
         // A model param in the `@serializable` closure decodes into its emitted
-        // class via `<Model>.load(...)`; scalars / `Record<unknown>` pass through
-        // as the native json.loads value.
-        lines.push(
-          classifyCallableParam(entry.params[paramName]).bareModel
-            ? `    ${paramName} = ${entry.params[paramName]}.load(${decoded})`
-            : `    ${paramName} = ${decoded}`,
-        );
+        // class via `<Model>.load(...)`; an array-of-model param decodes
+        // element-wise via a comprehension; scalars / `Record<unknown>` pass
+        // through as the native json.loads value.
+        const paramShape = classifyCallableParam(entry.params[paramName]);
+        if (paramShape.bareModel) {
+          lines.push(`    ${paramName} = ${entry.params[paramName]}.load(${decoded})`);
+        } else if (paramShape.array && paramShape.isModel && !paramShape.optional) {
+          lines.push(
+            `    ${paramName} = [${paramShape.base}.load(item) for item in ${decoded}]`,
+          );
+        } else {
+          lines.push(`    ${paramName} = ${decoded}`);
+        }
       }
       const call = `seam.${method}(${paramNames.join(", ")})`;
       // A model return serializes back to a plain dict via `result.save()` for the
-      // canonical json.dumps compare; a scalar return compares directly.
-      const returnsModel = classifyCallableParam(entry.returns).bareModel;
+      // canonical json.dumps compare; an array-of-model return serializes
+      // element-wise; a scalar return compares directly.
+      const returnShape = classifyCallableParam(entry.returns);
+      const returnsModel = returnShape.bareModel;
+      const returnsModelArray =
+        returnShape.array && returnShape.isModel && !returnShape.optional;
 
       if (hasExpectedError) {
         lines.push("    caught = None");
@@ -1133,7 +1154,11 @@ function emitPythonVectorConformanceEntrypoint(
         lines.push("    if inspect.isawaitable(result):");
         lines.push("        result = asyncio.run(result)");
         if (entry.vector.expected !== undefined) {
-          const actual = returnsModel ? "result.save()" : "result";
+          const actual = returnsModel
+            ? "result.save()"
+            : returnsModelArray
+              ? "[item.save() for item in result]"
+              : "result";
           lines.push(`    expected = json.loads(${jsonLiteral(entry.vector.expected)})`);
           lines.push(
             `    assert json.dumps(${actual}, sort_keys=True) == json.dumps(` +

@@ -12,8 +12,9 @@
 # collect (the red-first signal). The @runtime_checkable isinstance assertion
 # checks that every op is present at runtime; a static checker enforces it from
 # the Protocol annotation on run_<seam>_conformance.
-from fixtures import Note, Reviser, Transformer
+from fixtures import Collator, Note, Reviser, Transformer
 from fixtures.vector_conformance import (
+    run_collator_conformance,
     run_reviser_conformance,
     run_transformer_conformance,
 )
@@ -41,6 +42,18 @@ class ReviserImpl:
         return self.revise(note)
 
 
+class CollatorImpl:
+    # An array-in / array-out seam: reverse the notes, each passing through
+    # unchanged. The notes arrive as a decoded list[Note] (per-element
+    # Note.load); return a list[Note] so the entrypoint's per-element `.save()`
+    # compare stays canonical.
+    def collate(self, notes: list[Note]) -> list[Note]:
+        return list(reversed(notes))
+
+    async def collate_async(self, notes: list[Note]) -> list[Note]:
+        return self.collate(notes)
+
+
 def test_transformer_typed_conformance():
     impl = TransformerImpl()
     assert isinstance(impl, Transformer)
@@ -51,3 +64,9 @@ def test_reviser_typed_conformance():
     impl = ReviserImpl()
     assert isinstance(impl, Reviser)
     run_reviser_conformance(impl)
+
+
+def test_collator_typed_conformance():
+    impl = CollatorImpl()
+    assert isinstance(impl, Collator)
+    run_collator_conformance(impl)
