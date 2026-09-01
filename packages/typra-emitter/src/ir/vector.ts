@@ -67,6 +67,18 @@ export interface CallableVectorSnapshotEntry {
    */
   sync: boolean;
   /**
+   * Operation classification carried from the seam op's `optional`/cancellation
+   * decorators. `runtimeCancellable` marks an op whose runtime-native signature
+   * takes a leading cancellation argument (e.g. Go `ctx context.Context`), and
+   * `optional` marks an op the seam may omit. Both are threaded so a downstream
+   * emitter (e.g. the typed adapter bridge) can EXCLUDE ops whose native call
+   * shape it cannot yet reproduce, instead of emitting a call that fails to
+   * compile. Undispatched, non-cancellable, non-optional ops keep the simplest
+   * `Method(params...) (T, error)` shape the bridge relies on.
+   */
+  runtimeCancellable?: boolean;
+  optional?: boolean;
+  /**
    * Present when the vector's owning seam interface is decorated with
    * `@dispatch`. Carries the discriminator identity plus the deterministic
    * field-access path (e.g. `agent.template.format.kind`) the conformance
@@ -318,6 +330,10 @@ export function buildCallableVectorSnapshot(
             params: operation.params,
             returns: operation.returns,
             sync: operation.sync,
+            ...(operation.runtimeCancellable
+              ? { runtimeCancellable: operation.runtimeCancellable }
+              : {}),
+            ...(operation.optional ? { optional: operation.optional } : {}),
             ...(contract.dispatch ? { dispatch: contract.dispatch } : {}),
             vector,
           })),
@@ -343,4 +359,28 @@ export async function emitCallableVectorSnapshot(
 
 function vectorSnapshotKey(entry: CallableVectorSnapshotEntry): string {
   return `${entry.contract}:${entry.operation}:${entry.vector.name ?? ""}`;
+}
+
+/**
+ * Language-agnostic eligibility gate for the typed adapter bridge. A bridge
+ * constructor turns a consumer's typed seam impl into the `vectoradapters.Adapter`
+ * the conformance runner already consumes, replacing the hand-authored per-op
+ * marshalling `Invoke` closure. It is emittable only when the op's native call
+ * shape is the plain `Method(params...) (T, error)` the bridge reproduces:
+ *
+ *  - `dispatch` seams already ride the typed `@dispatch` resolver rail — the
+ *    bridge is for the 17 UNdispatched plain seams, so dispatched ops are out.
+ *  - `runtimeCancellable` ops carry a leading native cancellation arg (Go
+ *    `ctx context.Context`); the bridge does not thread one yet, so calling the
+ *    impl would drop an argument and fail to compile. Excluded until the bridge
+ *    learns to pass a cancellation token.
+ *  - `optional` ops the seam may omit can carry a different native return/error
+ *    shape; excluded conservatively for the first slice.
+ *
+ * The comparator, normalization, `expectedError`, `requires` gating and waivers
+ * ALL stay in the runner (the bridge only decodes → calls → returns), so this
+ * predicate governs solely whether the CALL shape is reproducible.
+ */
+export function isBridgeEligible(entry: CallableVectorSnapshotEntry): boolean {
+  return !entry.dispatch && !entry.runtimeCancellable && !entry.optional;
 }

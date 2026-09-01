@@ -23,6 +23,9 @@ Options:
   --no-tests               Skip generating test files
   --no-format              Skip running formatters
   --deterministic          Emit stable generated metadata for CI verification
+  --import-path <path>     Model import path override (single-target module gates)
+  --package-name <name>    Package name override (Go/Java/Swift; single-target gates)
+  --vector-adapter-path <path>  vectoradapters import path override (Go; single-target gates)
   -h, --help               Show this help message
 
 Examples:
@@ -61,6 +64,9 @@ async function main() {
       "no-tests": { type: "boolean", default: false },
       "no-format": { type: "boolean", default: false },
       deterministic: { type: "boolean", default: false },
+      "import-path": { type: "string" },
+      "package-name": { type: "string" },
+      "vector-adapter-path": { type: "string" },
       help: { type: "boolean", short: "h" },
     },
     allowPositionals: true,
@@ -122,6 +128,9 @@ async function main() {
     generateTests: !values["no-tests"],
     format: !values["no-format"],
     deterministic: values.deterministic,
+    importPath: values["import-path"],
+    packageName: values["package-name"],
+    vectorAdapterPath: values["vector-adapter-path"],
   });
 
   if (result.success) {

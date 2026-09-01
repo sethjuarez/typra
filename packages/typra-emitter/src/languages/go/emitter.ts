@@ -2132,22 +2132,28 @@ function goMethodReturnType(returns: string): string {
 // ============================================================================
 
 /** Map a protocol type string to a Go type. */
-export function protocolGoType(typeStr: string): string {
+export function protocolGoType(typeStr: string, modelQualifier?: string): string {
   // Handle nullable types
   if (typeStr.endsWith("?")) {
     const inner = typeStr.slice(0, -1);
-    return `*${protocolGoType(inner)}`;
+    return `*${protocolGoType(inner, modelQualifier)}`;
   }
   // Handle array types
   if (typeStr.endsWith("[]")) {
     const inner = typeStr.slice(0, -2);
-    return `[]${protocolGoType(inner)}`;
+    return `[]${protocolGoType(inner, modelQualifier)}`;
   }
   if (typeStr === "Record<unknown>" || typeStr === "dictionary")
     return "map[string]interface{}";
   if (typeStr === "unknown" || typeStr === "any") return "interface{}";
   if (typeStr === "void") return "";
-  return GO_TYPE_MAP[typeStr] || typeStr;
+  const mapped = GO_TYPE_MAP[typeStr];
+  if (mapped) return mapped;
+  // A bare model/enum name resolves in the MODEL package. When the caller renders
+  // the reference from ANOTHER package (e.g. the vectorbridge package), prefix it
+  // with the model import alias so `Message` becomes `fixtures.Message`. Within
+  // the model package itself the qualifier is omitted and output is unchanged.
+  return modelQualifier ? `${modelQualifier}.${typeStr}` : typeStr;
 }
 
 function goProtocolReturn(method: MethodStubDecl): string {

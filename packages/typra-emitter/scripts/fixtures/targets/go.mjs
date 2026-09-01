@@ -1,16 +1,21 @@
 import {
   KNOWN_TEST_FAILURES,
   assertKnownTestFailures,
+  commandExists,
   execFileSync,
   existsSync,
   fail,
   failures,
   generatedRoot,
   mkdirp,
+  mkdtempSync,
+  packageRoot,
   path,
+  readFileSync,
   rmSync,
   runCommand,
   runGoFormatCheck,
+  tmpdir,
   unlinkSync,
   walkFiles,
   writeFileSync,
@@ -540,5 +545,116 @@ export function runGoExecutableConformance() {
       }
     }
     rmSync(path.join(sourceDir, "cmd"), { recursive: true, force: true });
+  }
+}
+
+export function runGoVectorBridgeCompile(context) {
+  // Red-first gate for the typed adapter bridge (issue #511 Cat 1, typra#306
+  // Track A). A plain (undispatched) `@vector` seam has no discriminator, so its
+  // emitted conformance test looks the impl up in the consumer-authored
+  // `vectoradapters` registry — historically forcing every consumer to
+  // hand-author a per-op marshalling closure (the ~7×-duplicated bulk). The
+  // emitter now emits a `vectorbridge` package whose constructors turn a typed
+  // seam impl into that decoded-invoke func, so the consumer registers one line
+  // instead. This gate generates the plain-seam-bridge fixture WITH tests,
+  // attaches the committed consumer double (which registers via
+  // `bridged(vectorbridge.TransformerTransform(impl))`), and RUNS the emitted
+  // suite — proving both that the bridge compiles (on `main`, the double's
+  // `vectorbridge` reference would not resolve) and that it decodes/invokes
+  // correctly end-to-end without an import cycle (vectoradapters → vectorbridge
+  // → model, never back).
+  if (!commandExists("go")) {
+    context.skip("go is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "plain-seam-bridge",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-go-bridge-"));
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "go",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.PlainSeamBridge.Root",
+        "--deterministic",
+        "--no-format",
+        // Module-prefixed import paths so the multi-package tree (model +
+        // vectoradapters + vectorbridge + vectorrunner) co-resolves in one Go
+        // module, mirroring the integration tspconfig.
+        "--import-path",
+        "fixtures",
+        "--package-name",
+        "fixtures",
+        "--vector-adapter-path",
+        "fixtures/vectoradapters",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "go");
+    if (!existsSync(sourceDir)) {
+      fail("Go vector-bridge gate: no go output generated.");
+      return;
+    }
+    if (!existsSync(path.join(sourceDir, "vectorbridge", "bridge.go"))) {
+      fail(
+        "Go vector-bridge gate: emitter did not emit vectorbridge/bridge.go for the plain seam.",
+      );
+      return;
+    }
+    // Attach the committed consumer double as the vectoradapters package.
+    const adaptersDir = path.join(sourceDir, "vectoradapters");
+    mkdirp(adaptersDir);
+    writeFileSync(
+      path.join(adaptersDir, "adapters.go"),
+      readFileSync(
+        path.join(fixtureDir, "vector-adapters", "go", "adapters.go"),
+        "utf8",
+      ),
+    );
+    writeFileSync(
+      path.join(sourceDir, "go.mod"),
+      [
+        "module fixtures",
+        "",
+        "go 1.22",
+        "",
+        "require gopkg.in/yaml.v3 v3.0.1",
+        "",
+      ].join("\n"),
+    );
+    try {
+      runCommand(
+        "Go vector-bridge module dependency resolution",
+        "go",
+        ["mod", "tidy"],
+        { cwd: sourceDir },
+      );
+      execFileSync("go", ["test", "./..."], {
+        cwd: sourceDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Go vector-bridge compile/run gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    if (existsSync(outRoot)) {
+      rmSync(outRoot, { recursive: true, force: true });
+    }
   }
 }

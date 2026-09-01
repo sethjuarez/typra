@@ -113,6 +113,26 @@ export interface GenerateOptions {
    * @default false
    */
   deterministic?: boolean;
+
+  /**
+   * Module import path override for the emitted model package, applied to every
+   * target. Only meaningful for a single-target run (e.g. a focused compile
+   * gate) where the generated multi-package tree must resolve under one module.
+   */
+  importPath?: string;
+
+  /**
+   * Package name override (Go/Java/Swift), applied to every target. Pairs with
+   * `importPath` so a single-target gate produces a self-consistent module.
+   */
+  packageName?: string;
+
+  /**
+   * Vector-adapter import path override (Go), applied to every target. Lets a
+   * single-target gate give the runtime-authored `vectoradapters` package a
+   * module-relative path so emitted runner/bridge imports resolve.
+   */
+  vectorAdapterPath?: string;
 }
 
 /**
@@ -154,6 +174,9 @@ export async function generate(
     generateTests = true,
     format = true,
     deterministic = false,
+    importPath,
+    packageName,
+    vectorAdapterPath,
   } = options;
   const targetNames = Array.isArray(targets) ? targets : Object.keys(targets);
   const unsupportedTargets = targetNames.filter(
@@ -193,6 +216,7 @@ export async function generate(
     outputDir,
     generateTests,
     format,
+    { importPath, packageName, vectorAdapterPath },
   );
   const nativeSerializationErrors =
     validateNativeSerializationTargets(emitTargets);
@@ -274,12 +298,20 @@ function buildEmitTargets(
   baseOutput: string,
   generateTests: boolean,
   format: boolean,
+  overrides: {
+    importPath?: string;
+    packageName?: string;
+    vectorAdapterPath?: string;
+  } = {},
 ): Array<{
   type: string;
   "output-dir": string;
   "test-dir"?: string;
   format?: boolean;
   namespace?: string;
+  "import-path"?: string;
+  "package-name"?: string;
+  "vector-adapter-path"?: string;
   "enum-parsing"?: "case-sensitive" | "case-insensitive";
   "native-serialization"?:
     | "none"
@@ -290,6 +322,15 @@ function buildEmitTargets(
     | "standard-schema"
     | "codable";
 }> {
+  // Single-target module overrides, applied to every emitted target so a focused
+  // compile gate can produce a self-consistent, resolvable multi-package module.
+  const moduleOverrides = {
+    ...(overrides.importPath ? { "import-path": overrides.importPath } : {}),
+    ...(overrides.packageName ? { "package-name": overrides.packageName } : {}),
+    ...(overrides.vectorAdapterPath
+      ? { "vector-adapter-path": overrides.vectorAdapterPath }
+      : {}),
+  };
   if (Array.isArray(targets)) {
     // Simple array of target names - use default directories
     return targets.map((target) => ({
@@ -299,6 +340,7 @@ function buildEmitTargets(
         ? path.join(baseOutput, target, "tests")
         : undefined,
       format,
+      ...moduleOverrides,
     }));
   } else {
     // Object with per-target configuration
@@ -310,6 +352,7 @@ function buildEmitTargets(
       namespace: opts.namespace,
       "enum-parsing": opts.enumParsing,
       "native-serialization": opts.nativeSerialization,
+      ...moduleOverrides,
     }));
   }
 }
