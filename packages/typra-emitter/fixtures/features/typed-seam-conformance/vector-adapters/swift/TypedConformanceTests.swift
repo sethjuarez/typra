@@ -37,6 +37,15 @@ private struct ReviserImpl: Reviser {
   }
 }
 
+// An array-of-model-in/array-of-model-out seam impl: proves the typed entrypoint
+// decodes each `[Note]` element via `Note.load(...)` and serializes the `[Note]`
+// result back through `try $0.save()`. Reverses the array.
+private struct CollatorImpl: Collator {
+  func collate(notes: [Note]) async throws -> [Note] {
+    return notes.reversed()
+  }
+}
+
 final class TypedConformanceTests: XCTestCase {
   func testTransformerTypedConformance() async throws {
     try await runTransformerConformance(TransformerImpl())
@@ -44,5 +53,9 @@ final class TypedConformanceTests: XCTestCase {
 
   func testReviserTypedConformance() async throws {
     try await runReviserConformance(ReviserImpl())
+  }
+
+  func testCollatorTypedConformance() async throws {
+    try await runCollatorConformance(CollatorImpl())
   }
 }

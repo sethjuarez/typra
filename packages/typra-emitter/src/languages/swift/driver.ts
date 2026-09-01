@@ -301,7 +301,7 @@ export const generateSwift = async (
     // model return compares through `try actual.save()`, keeping it zero-diff on
     // real surfaces.
     const conformanceEntries = options!.callableVectors!.vectors.filter(
-      (entry) => isTypedSeamEntry(entry, serializationClosure),
+      (entry) => isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
     );
     if (conformanceEntries.length > 0) {
       await emitSwiftGeneratedFile(
@@ -1260,13 +1260,22 @@ function emitSwiftVectorConformanceEntrypoint(
           lines.push(
             `    let ${local} = try ${entry.params[paramName]}.load(input[${key}]!)`,
           );
+        } else if (shape.array && shape.isModel && !shape.optional) {
+          // An array-of-model param decodes element-wise through the same
+          // `<Model>.load(...)` into `[Model]` — map over the parsed JSON array.
+          lines.push(
+            `    let ${local} = try (input[${key}]! as! [Any]).map { try ${shape.base}.load($0) }`,
+          );
         } else {
           lines.push(
             `    let ${local} = input[${key}] as! ${swiftType(entry.params[paramName])}`,
           );
         }
       }
-      const returnsModel = classifyCallableParam(entry.returns).bareModel;
+      const returnShape = classifyCallableParam(entry.returns);
+      const returnsModel = returnShape.bareModel;
+      const returnsModelArray =
+        returnShape.array && returnShape.isModel && !returnShape.optional;
 
       if (entry.vector.expectedError !== undefined) {
         lines.push("    var caught: Error? = nil");
@@ -1311,7 +1320,9 @@ function emitSwiftVectorConformanceEntrypoint(
           // canonicalization; a scalar goes straight to canonical JSON.
           const actualCanonical = returnsModel
             ? "seamConformanceCanonicalJSON(try actual.save())"
-            : "seamConformanceCanonicalJSON(actual)";
+            : returnsModelArray
+              ? "seamConformanceCanonicalJSON(try actual.map { try $0.save() })"
+              : "seamConformanceCanonicalJSON(actual)";
           lines.push(
             `    guard try ${actualCanonical} == seamConformanceCanonicalJSON(expected) else {`,
           );
