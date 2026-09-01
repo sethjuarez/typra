@@ -378,9 +378,11 @@ export const generateRust = async (
     // and deleting that seam's `vector_adapters` registration. Phase 2 widens
     // eligibility from scalar-only to model-in/model-out seams whose boundary
     // models are in the `@serializable` closure (their `from_json` loader exists);
-    // scalar seams remain eligible unconditionally (superset).
+    // scalar seams remain eligible unconditionally (superset). Phase 2 array
+    // parity (`{ arrays: true }`) further admits `Model[]` seams — decoded/compared
+    // element-wise through the same serde-free `from_json` loader.
     const entrypointEligible = allVectors.filter((entry) =>
-      isTypedSeamEntry(entry, serializationClosure),
+      isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
     );
     if (entrypointEligible.length > 0) {
       await emitRustFile(
@@ -2210,16 +2212,20 @@ function emitRustVectorConformanceEntrypoint(
     );
     const fn = `run_${toSnakeCase(seam)}_conformance`;
     const seamIsAsync = entries.some((entry) => !entry.sync);
+    // A model-decode type is a bare model OR an array-of-model; both round-trip
+    // each element through the model's serde-free `from_json` loader (no native
+    // `Deserialize` on the plain target), so both need a `LoadContext`.
+    const needsModelDecode = (typeRef: string): boolean => {
+      const shape = classifyCallableParam(typeRef);
+      return shape.bareModel || (shape.array && shape.isModel && !shape.optional);
+    };
     // A `LoadContext` is needed whenever a vector must decode a model through its
-    // `from_json` loader — either a bare-model PARAM or an expected bare-model
-    // RETURN (the serde-free `ReturnType::from_json(expected)` compare).
+    // `from_json` loader — a bare-model or array-of-model PARAM, or an expected
+    // bare-model / array-of-model RETURN (the serde-free compare).
     const needsCtx = entries.some(
       (entry) =>
-        Object.values(entry.params).some(
-          (paramType) => classifyCallableParam(paramType).bareModel,
-        ) ||
-        (entry.vector.expected !== undefined &&
-          classifyCallableParam(entry.returns).bareModel),
+        Object.values(entry.params).some(needsModelDecode) ||
+        (entry.vector.expected !== undefined && needsModelDecode(entry.returns)),
     );
 
     lines.push(
@@ -2270,6 +2276,29 @@ function emitRustVectorConformanceEntrypoint(
           lines.push("            &ctx,");
           lines.push("        )");
           lines.push(`        .expect(${JSON.stringify(`${paramName} parses`)});`);
+        } else if (shape.array && shape.isModel && !shape.optional) {
+          // Array-of-model param: parse the outer JSON array to values, then decode
+          // each element through the model's serde-free `from_json` loader (the
+          // plain target has no `Deserialize` for `Vec<Model>`), collecting a
+          // `Vec<Model>`. Symmetric with the array-of-model RETURN compare below.
+          const elem = `${importPath}::${shape.base}`;
+          lines.push(`        let ${local}: Vec<${elem}> = {`);
+          lines.push("            let items: Vec<Value> = serde_json::from_str(");
+          lines.push(`                r####"`);
+          lines.push(paramJson);
+          lines.push(`"####,`);
+          lines.push("            )");
+          lines.push(`            .expect(${JSON.stringify(`${paramName} parses`)});`);
+          lines.push("            items");
+          lines.push("                .iter()");
+          lines.push(
+            `                .map(|item| ${elem}::from_json(&item.to_string(), &ctx)`,
+          );
+          lines.push(
+            `                    .expect(${JSON.stringify(`${paramName} element parses`)}))`,
+          );
+          lines.push("                .collect()");
+          lines.push("        };");
         } else {
           lines.push(
             `        let ${local}: ${protocolRustType(paramType)} = serde_json::from_str(`,
@@ -2332,9 +2361,39 @@ function emitRustVectorConformanceEntrypoint(
                 `${label} misrouted`,
               )});`,
             );
+          } else if (returnShape.array && returnShape.isModel && !returnShape.optional) {
+            // Array-of-model return: build the expected `Vec<Model>` element-wise
+            // through the model's serde-free loader and compare with the plain
+            // `PartialEq` lifted over `Vec` — `actual` has no `Serialize`, so the
+            // scalar `serde_json::to_value(actual)` path would not compile.
+            const elem = `${importPath}::${returnShape.base}`;
+            lines.push(`        let expected: Vec<${elem}> = {`);
+            lines.push("            let items: Vec<Value> = serde_json::from_str(");
+            lines.push(`                r####"`);
+            lines.push(expectedJson);
+            lines.push(`"####,`);
+            lines.push("            )");
+            lines.push(
+              `            .expect(${JSON.stringify(`${label}: expected parses`)});`,
+            );
+            lines.push("            items");
+            lines.push("                .iter()");
+            lines.push(
+              `                .map(|item| ${elem}::from_json(&item.to_string(), &ctx)`,
+            );
+            lines.push(
+              `                    .expect(${JSON.stringify(
+                `${label}: expected element parses`,
+              )}))`,
+            );
+            lines.push("                .collect()");
+            lines.push("        };");
+            lines.push(
+              `        assert_eq!(actual, expected, ${JSON.stringify(
+                `${label} misrouted`,
+              )});`,
+            );
           } else {
-            // Scalar return: `actual` is a JSON-native primitive, so the canonical
-            // `serde_json::to_value` round-trip compares structurally.
             lines.push(
               `        let actual_value = serde_json::to_value(actual).expect(${JSON.stringify(
                 `${label}: serialize`,

@@ -12,7 +12,7 @@
 //
 // The gate attaches this file as a test module of the generated crate.
 
-use crate::model::{Note, Reviser, Transformer};
+use crate::model::{Collator, Note, Reviser, Transformer};
 
 /// A minimal real seam implementation: trims, and rejects the literal "boom".
 struct TransformerImpl;
@@ -56,4 +56,28 @@ impl Reviser for ReviserImpl {
 #[tokio::test]
 async fn reviser_typed_vectors_pass() {
     crate::model::vector_conformance::run_reviser_conformance(&ReviserImpl).await;
+}
+
+/// A minimal real ARRAY-in / ARRAY-out seam: reverses the notes, each note
+/// passing through unchanged. The typed entrypoint decodes the `notes` param
+/// and the expected `Vec<Note>` element-wise through `Note::from_json` and
+/// asserts equality with `Vec<Note>`'s `PartialEq` — no `Serialize` on the
+/// target model.
+struct CollatorImpl;
+
+#[async_trait::async_trait]
+impl Collator for CollatorImpl {
+    async fn collate(
+        &self,
+        notes: &Vec<Note>,
+    ) -> Result<Vec<Note>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut reversed = notes.clone();
+        reversed.reverse();
+        Ok(reversed)
+    }
+}
+
+#[tokio::test]
+async fn collator_typed_vectors_pass() {
+    crate::model::vector_conformance::run_collator_conformance(&CollatorImpl).await;
 }
