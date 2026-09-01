@@ -66,6 +66,7 @@ import {
   runCSharpExecutableConformance,
   runCSharpGeneratedTests,
   runCSharpProtocolScaffoldBuild,
+  runCSharpVectorConformanceCompile,
 } from "./fixtures/targets/csharp.mjs";
 import {
   runJavaBuild,
@@ -136,6 +137,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "csharp.consumer-nullability-build",
   "csharp.generated-tests",
   "csharp.protocol-scaffold-build",
+  "csharp.vector-conformance-compile",
   "java.build",
   "java.generated-tests",
   "java-jackson.build",
@@ -2299,6 +2301,10 @@ function runDeclaredValidationStages() {
       ["csharp.consumer-nullability-build", runCSharpConsumerNullabilityBuild],
       ["csharp.generated-tests", runCSharpGeneratedTests],
       ["csharp.protocol-scaffold-build", runCSharpProtocolScaffoldBuild],
+      [
+        "csharp.vector-conformance-compile",
+        (context) => runCSharpVectorConformanceCompile(context),
+      ],
       ["java.build", runJavaBuild],
       ["java.generated-tests", runJavaGeneratedTests],
       ["java-jackson.build", runJavaJacksonBuild],
@@ -2318,6 +2324,7 @@ function runDeclaredValidationStages() {
       "go.vector-conformance-compile": "go is not available",
       "python.vector-conformance-compile": "uv is not available",
       "swift.vector-conformance-compile": "swift is not available",
+      "csharp.vector-conformance-compile": "dotnet is not available",
     },
   });
 }

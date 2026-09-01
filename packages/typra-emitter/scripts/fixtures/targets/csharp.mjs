@@ -10,7 +10,9 @@ import {
   generatedRoot,
   mkdirSync,
   mkdtempSync,
+  packageRoot,
   path,
+  readFileSync,
   rmSync,
   runCommand,
   tmpdir,
@@ -598,6 +600,141 @@ export function runCSharpExecutableConformance() {
       }
     }
     for (const tempDir of [binDir, objDir]) {
+      if (existsSync(tempDir)) {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    }
+  }
+}
+
+export function runCSharpVectorConformanceCompile(context) {
+  // Red-first gate for the typed conformance ENTRYPOINT (issue #511 Cat 1,
+  // typra#306 Track A). The emitter emits `VectorConformance.Run<Seam>-
+  // ConformanceAsync(seam)` into the LIBRARY beside the seam interface; a
+  // consumer migrates a plain seam off the stringly VectorRunner registry by
+  // authoring only a real ITransformer impl and one typed call. This gate
+  // proves that path stands ALONE: generate the typed-seam-conformance fixture,
+  // DROP the stringly-rail `tests/` package (VectorRunner + the monolithic
+  // VectorConformanceTests that need a hand-authored Conformance adapter), attach
+  // the committed typed double, and `dotnet test`.
+  //
+  // Red-first: if the entrypoint is not emitted, VectorConformance.cs does not
+  // exist and the double cannot resolve the entrypoint — so this fails on `main`.
+  if (!commandExists("dotnet")) {
+    context.skip("dotnet is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "typed-seam-conformance",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-csharp-typedseam-"));
+  const buildRoot = mkdtempSync(path.join(tmpdir(), "typra-csharp-typedseam-o-"));
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "csharp",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.TypedSeamConformance.Root",
+        "--deterministic",
+        "--no-format",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "csharp");
+    if (!existsSync(sourceDir)) {
+      fail("C# typed-seam-conformance gate: no csharp output generated.");
+      return;
+    }
+    if (!existsSync(path.join(sourceDir, "VectorConformance.cs"))) {
+      fail(
+        "C# typed-seam-conformance gate: emitter did not emit " +
+          "VectorConformance.cs (the typed conformance entrypoint). The " +
+          "committed double cannot resolve VectorConformance — this is the " +
+          "red-first signal.",
+      );
+      return;
+    }
+    // The typed entrypoint stands alone: drop the stringly rail (VectorRunner +
+    // the monolithic VectorConformanceTests) that would otherwise need a
+    // hand-authored Conformance adapter namespace to compile.
+    const stringlyTests = path.join(sourceDir, "tests");
+    if (existsSync(stringlyTests)) {
+      rmSync(stringlyTests, { recursive: true, force: true });
+    }
+    // Attach the committed typed double + a validation stubs shim (any hydration
+    // `I<Type>Helpers` a consumer would implement), then a single test csproj
+    // that compiles the emitted library + entrypoint + double and runs xUnit.
+    writeFileSync(
+      path.join(sourceDir, "TypedConformanceTests.cs"),
+      readFileSync(
+        path.join(fixtureDir, "vector-adapters", "csharp", "TypedConformanceTests.cs"),
+        "utf8",
+      ),
+    );
+    writeFileSync(
+      path.join(sourceDir, "TypraTypedSeamConformance.Stubs.cs"),
+      buildCSharpValidationStubs(sourceDir),
+    );
+    const projectPath = path.join(
+      sourceDir,
+      "TypraTypedSeamConformance.csproj",
+    );
+    writeFileSync(
+      projectPath,
+      [
+        '<Project Sdk="Microsoft.NET.Sdk">',
+        "  <PropertyGroup>",
+        `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
+        "    <Nullable>enable</Nullable>",
+        "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>",
+        "    <ImplicitUsings>enable</ImplicitUsings>",
+        "    <IsTestProject>true</IsTestProject>",
+        "    <IsPackable>false</IsPackable>",
+        "  </PropertyGroup>",
+        "  <ItemGroup>",
+        '    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />',
+        '    <PackageReference Include="xunit" Version="2.9.3" />',
+        '    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />',
+        '    <PackageReference Include="YamlDotNet" Version="16.3.0" />',
+        "  </ItemGroup>",
+        "</Project>",
+        "",
+      ].join("\n"),
+    );
+    try {
+      execFileSync(
+        "dotnet",
+        [
+          "test",
+          projectPath,
+          "--nologo",
+          "--verbosity",
+          "quiet",
+          "-p:BaseOutputPath=" + `${path.join(buildRoot, "bin")}${path.sep}`,
+          "-p:BaseIntermediateOutputPath=" +
+            `${path.join(buildRoot, "obj")}${path.sep}`,
+        ],
+        { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `C# typed-seam-conformance compile/run gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    for (const tempDir of [outRoot, buildRoot]) {
       if (existsSync(tempDir)) {
         rmSync(tempDir, { recursive: true, force: true });
       }
