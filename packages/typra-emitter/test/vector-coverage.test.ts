@@ -279,6 +279,51 @@ describe("vector adapter coverage gate", () => {
     assert.deepEqual(result.covered, ["Revise.revise", MODEL_OP]);
     assertPartition(result);
   });
+
+  it("does NOT type-cover an array-of-model seam even when the element type is serializable", () => {
+    // Guard for the model-parity slice's deferred boundary. The typed
+    // conformance entrypoint currently emits a decode/compare only for a BARE
+    // model (`Model`), not for `Model[]` or `Model?` — the drivers have no
+    // per-element array decode yet. So an op whose param OR return is an
+    // array-of-model must stay OFF the typed rail (adapter/waiver/missing), even
+    // when the element model is in the serializable closure. Flipping this to
+    // typed before the array-of-model driver slice ships would let a consumer
+    // delete a double the runtime cannot yet decode. When that slice lands with
+    // real driver support, this assertion flips red-first (like the scalar->model
+    // flip did) and becomes a typed-covered case.
+    const snap: CallableVectorSnapshot = {
+      emitter: "typra-emitter",
+      version: 1,
+      serializedTypes: ["Note"],
+      vectors: [
+        {
+          contract: "Bundle",
+          namespace: "Typra.Sample",
+          group: "",
+          operation: "pack",
+          params: { notes: "Note[]" },
+          returns: "Note[]",
+          sync: false,
+          vector: { operation: "pack", stage: "callable", input: {}, expected: [] },
+        },
+      ],
+    };
+    const missing = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    assert.equal(missing.ok, false);
+    assert.deepEqual(missing.typed, []);
+    assert.deepEqual(missing.missing, ["Bundle.pack"]);
+
+    // It CAN still be covered the honest way — a hand adapter or an explicit
+    // waiver — since it is a genuine, not-yet-emittable seam.
+    const adapted = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: ["Bundle.pack"],
+    });
+    assert.ok(adapted.ok);
+    assert.deepEqual(adapted.covered, ["Bundle.pack"]);
+    assert.deepEqual(adapted.typed, []);
+    assertPartition(adapted);
+  });
 });
 
 // Every operation lands in exactly one bucket (no double-count, no drop).
