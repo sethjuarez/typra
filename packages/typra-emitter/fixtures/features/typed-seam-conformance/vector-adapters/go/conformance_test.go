@@ -59,3 +59,24 @@ var _ fixtures.Reviser = ReviserImpl{}
 func TestReviserTypedVectors(t *testing.T) {
 	vectorconformance.RunReviserConformance(t, ReviserImpl{})
 }
+
+// CollatorImpl is a minimal real ARRAY-in / ARRAY-out MODEL seam: it reverses the
+// order of the notes, each note passing through unchanged. The emitted entrypoint
+// decodes the `notes` param via `json.Unmarshal` into `[]fixtures.Note` and
+// compares the returned `[]Note` via `json.Marshal` + `reflect.DeepEqual` — the
+// same generic json codec that handles a bare model, lifted over the slice.
+type CollatorImpl struct{}
+
+func (CollatorImpl) Collate(notes []fixtures.Note) ([]fixtures.Note, error) {
+	reversed := make([]fixtures.Note, 0, len(notes))
+	for i := len(notes) - 1; i >= 0; i-- {
+		reversed = append(reversed, notes[i])
+	}
+	return reversed, nil
+}
+
+var _ fixtures.Collator = CollatorImpl{}
+
+func TestCollatorTypedVectors(t *testing.T) {
+	vectorconformance.RunCollatorConformance(t, CollatorImpl{})
+}

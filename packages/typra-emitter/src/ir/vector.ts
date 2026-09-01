@@ -434,19 +434,36 @@ export function isScalarSeamEntry(entry: CallableVectorSnapshotEntry): boolean {
  * is never pressured into `@serializable` solely to unlock conformance.
  *
  * Superset of {@link isScalarSeamEntry}: a fully-scalar seam is eligible regardless
- * of the closure (scalars carry native JSON codecs). Optional and array-of-model
- * shapes stay deferred to later parity slices, so a bare `Model?` or `Model[]`
- * param/return is still excluded here.
+ * of the closure (scalars carry native JSON codecs).
+ *
+ * `opts.arrays` (Phase 2 array parity) additionally admits an `Model[]` param or
+ * return whose ELEMENT model is in the closure — the entrypoint decodes/compares
+ * each element through the same per-model loader lifted over the sequence. It is
+ * OPT-IN per driver: a target enables it only once its entrypoint emission grows
+ * the element-wise array branch, and the coverage gate enables it only after all
+ * targets do, so an array seam is never reported covered before every runtime can
+ * decode it. Optional (`Model?`) shapes stay deferred regardless.
  */
 export function isTypedSeamEntry(
   entry: CallableVectorSnapshotEntry,
   serializedTypeNames: ReadonlySet<string>,
+  opts: { arrays?: boolean } = {},
 ): boolean {
   if (!isBridgeEligible(entry)) return false;
   const isTyped = (typeRef: string): boolean => {
     const shape = classifyCallableParam(typeRef);
     if (scalarRuntimeKind(shape.base) !== null) return true;
-    return shape.bareModel && serializedTypeNames.has(shape.base);
+    if (shape.bareModel && serializedTypeNames.has(shape.base)) return true;
+    if (
+      opts.arrays &&
+      shape.array &&
+      !shape.optional &&
+      shape.isModel &&
+      serializedTypeNames.has(shape.base)
+    ) {
+      return true;
+    }
+    return false;
   };
   return Object.values(entry.params).every(isTyped) && isTyped(entry.returns);
 }

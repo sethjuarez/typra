@@ -304,11 +304,13 @@ export const generateGo = async (
     // closure (see `isTypedSeamEntry`). Go decodes params with `json.Unmarshal`
     // and compares via `json.Marshal` + `reflect.DeepEqual`, and every model
     // carries `json:` struct tags, so the model path rides the SAME code as the
-    // scalar path — no serde-free branch (unlike the plain Rust target). Emitted
+    // scalar path — no serde-free branch (unlike the plain Rust target). The same
+    // generic json codec lifts over sequences, so `{ arrays: true }` (Phase 2
+    // array parity) admits `Model[]` seams with ZERO extra emission here. Emitted
     // as a sibling PACKAGE `vectorconformance` (like the runner/bridge) because a
     // Go directory holds only one non-test package.
     const conformanceEntries = allVectors.filter((entry) =>
-      isTypedSeamEntry(entry, serializationClosure),
+      isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
     );
     if (conformanceEntries.length > 0) {
       await emitGoFile(

@@ -94,6 +94,36 @@ interface Reviser {
   revise(note: Note): Note;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 2 (array parity): a plain seam that takes an ARRAY of a model and
+// returns an ARRAY of a model. The typed entrypoint decodes each `Note[]`
+// element through `Note`'s emitted loader and compares the returned `Note[]`
+// element-wise (the plain-derive `PartialEq` lifts over `Vec`/slice/list). This
+// is the shape prompty's `Renderer.renderSegments(): RenderSegment[]` and
+// `Parser.parse(): Message[]` seams need; `Note` already earns its loader via
+// the `@serializable` `Root` graph, so no type is minted solely for conformance.
+// ---------------------------------------------------------------------------
+
+@doc("Array-in / array-out plain seam: single implementation, no discriminator.")
+interface Collator {
+  @vector(#{
+    name: "reverse-pair",
+    stage: "callable",
+    input: #{
+      notes: #[#{ title: "first", body: "1" }, #{ title: "second", body: "2" }],
+    },
+    expected: #[#{ title: "second", body: "2" }, #{ title: "first", body: "1" }],
+  })
+  @vector(#{
+    name: "reverse-empty",
+    stage: "callable",
+    input: #{ notes: #[] },
+    expected: #[],
+  })
+  @doc("Reverse the order of the notes; each note passes through unchanged.")
+  collate(notes: Note[]): Note[];
+}
+
 @doc("Fixture root aggregating the plain-seam graph.")
 @serializable
 model Root {
