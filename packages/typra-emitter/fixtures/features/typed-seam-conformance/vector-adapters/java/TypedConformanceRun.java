@@ -37,10 +37,25 @@ public final class TypedConformanceRun {
     }
   }
 
+  // An array-in/array-out seam impl: proves the typed entrypoint decodes the
+  // List<Note> param via per-element `Note.load(...)` and serializes the
+  // List<Note> result element-wise through `toJson()`. Reverses the notes, each
+  // passing through unchanged.
+  static final class CollatorImpl implements Collator {
+    @Override
+    public java.util.List<Note> collate(java.util.List<Note> notes) {
+      java.util.List<Note> reversed = new java.util.ArrayList<>(notes);
+      java.util.Collections.reverse(reversed);
+      return reversed;
+    }
+  }
+
   public static void main(String[] args) throws Exception {
     VectorConformance.runTransformerConformance(new TransformerImpl());
     System.out.println("PASS TransformerTypedConformance");
     VectorConformance.runReviserConformance(new ReviserImpl());
     System.out.println("PASS ReviserTypedConformance");
+    VectorConformance.runCollatorConformance(new CollatorImpl());
+    System.out.println("PASS CollatorTypedConformance");
   }
 }

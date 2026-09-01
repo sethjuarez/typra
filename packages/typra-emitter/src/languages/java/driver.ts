@@ -379,11 +379,12 @@ export const generateJava = async (
   // eligibility from scalar-only to model-in/model-out seams whose boundary
   // models live in the `@serializable` closure (see `isTypedSeamEntry`): a model
   // param decodes via `<Model>.load(...)` and a model return compares through
-  // `actual.toJson()`, keeping it zero-diff on real surfaces. Emitted additively
-  // beside the stringly runner.
+  // `actual.toJson()`, keeping it zero-diff on real surfaces. Phase 2 array
+  // parity (`{ arrays: true }`) further admits `Model[]` seams — decoded/compared
+  // element-wise into `List<Model>`. Emitted additively beside the stringly runner.
   if (emitTarget["output-dir"] && (options?.callableVectors?.vectors.length ?? 0) > 0) {
     const conformanceEntries = options!.callableVectors!.vectors.filter(
-      (entry) => isTypedSeamEntry(entry, serializationClosure),
+      (entry) => isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
     );
     if (conformanceEntries.length > 0) {
       await emitJavaFile(
@@ -1528,6 +1529,16 @@ function emitJavaVectorConformanceEntrypoint(
           lines.push(
             `      ${shape.base} ${local} = ${shape.base}.load(input.get(${key}), new LoadContext());`,
           );
+        } else if (shape.array && shape.isModel && !shape.optional) {
+          // An array-of-model param decodes element-wise through the same
+          // `<Model>.load(...)` into the seam's `List<Model>` — iterate the
+          // parsed JSON array (a `List<?>` of maps), no unchecked cast.
+          lines.push(
+            `      java.util.List<${shape.base}> ${local} = new java.util.ArrayList<>();`,
+            `      for (Object __item : (java.util.List<?>) input.get(${key})) {`,
+            `        ${local}.add(${shape.base}.load(__item, new LoadContext()));`,
+            "      }",
+          );
         } else {
           const javaType = javaFqnCollectionType(
             javaScalarType(entry.params[paramName]),
@@ -1536,7 +1547,10 @@ function emitJavaVectorConformanceEntrypoint(
         }
       }
       const callArgs = paramNames.map((paramName) => locals.get(paramName)).join(", ");
-      const returnsModel = classifyCallableParam(entry.returns).bareModel;
+      const returnShape = classifyCallableParam(entry.returns);
+      const returnsModel = returnShape.bareModel;
+      const returnsModelArray =
+        returnShape.array && returnShape.isModel && !returnShape.optional;
 
       if (hasExpectedError) {
         lines.push("      Throwable caught = null;");
@@ -1561,13 +1575,20 @@ function emitJavaVectorConformanceEntrypoint(
         }
       } else {
         // A model return is held in its typed local so it serializes through the
-        // emitted wire-correct `actual.toJson()`; a scalar return stays `Object`
-        // and round-trips through `TypraJson.stringify`.
-        lines.push(
-          returnsModel
-            ? `      ${classifyCallableParam(entry.returns).base} actual = seam.${method}(${callArgs});`
-            : `      Object actual = seam.${method}(${callArgs});`,
-        );
+        // emitted wire-correct `actual.toJson()`; an array-of-model return is held
+        // as `List<Model>` and serialized element-wise; a scalar return stays
+        // `Object` and round-trips through `TypraJson.stringify`.
+        if (returnsModelArray) {
+          lines.push(
+            `      java.util.List<${returnShape.base}> actual = seam.${method}(${callArgs});`,
+          );
+        } else {
+          lines.push(
+            returnsModel
+              ? `      ${returnShape.base} actual = seam.${method}(${callArgs});`
+              : `      Object actual = seam.${method}(${callArgs});`,
+          );
+        }
         if (entry.vector.expected !== undefined) {
           const expectedChunks = javaPayloadLiteralChunks(
             JSON.stringify(entry.vector.expected),
@@ -1579,9 +1600,26 @@ function emitJavaVectorConformanceEntrypoint(
           lines.push(
             "      Object expected = TypraJson.parse(expectedJson.toString());",
           );
-          const actualJson = returnsModel
-            ? "actual.toJson()"
-            : "TypraJson.stringify(actual)";
+          let actualJson: string;
+          if (returnsModelArray) {
+            // Join each element's wire-correct `toJson()` into a JSON array, then
+            // canonicalize through TypraJson so member order matches the expected
+            // side (which is `TypraJson.stringify(expected)`).
+            lines.push(
+              '      StringBuilder __actualJson = new StringBuilder("[");',
+              "      for (int __i = 0; __i < actual.size(); __i++) {",
+              '        if (__i > 0) __actualJson.append(",");',
+              "        __actualJson.append(actual.get(__i).toJson());",
+              "      }",
+              '      __actualJson.append("]");',
+            );
+            actualJson =
+              "TypraJson.stringify(TypraJson.parse(__actualJson.toString()))";
+          } else {
+            actualJson = returnsModel
+              ? "actual.toJson()"
+              : "TypraJson.stringify(actual)";
+          }
           lines.push(
             `      if (!${actualJson}.equals(TypraJson.stringify(expected)))`,
             `        throw new AssertionError(${JSON.stringify(`${label} misrouted`)});`,
