@@ -10,8 +10,11 @@
 // `runTransformerConformance` import resolves only when the emitter emits
 // `vector-conformance.ts`; on `main` it does not exist, so this file fails to
 // compile (the red-first signal).
-import type { Transformer } from "./index";
-import { runTransformerConformance } from "./vector-conformance";
+import type { Note, Reviser, Transformer } from "./index";
+import {
+  runReviserConformance,
+  runTransformerConformance,
+} from "./vector-conformance";
 
 class TransformerImpl implements Transformer {
   async transform(text: string): Promise<string> {
@@ -22,8 +25,21 @@ class TransformerImpl implements Transformer {
   }
 }
 
+// A model-in / model-out seam: upper-case the note title, pass the body through.
+// The emitted entrypoint decodes the `note` param with `JSON.parse(...) as Note`
+// and compares the returned `Note` with a `JSON.parse(JSON.stringify(actual))`
+// round-trip. Mutate and return the typed input so the result stays a `Note`
+// (the closure model is a class; an object literal would miss its methods).
+class ReviserImpl implements Reviser {
+  async revise(note: Note): Promise<Note> {
+    note.title = note.title.toUpperCase();
+    return note;
+  }
+}
+
 async function main(): Promise<void> {
   await runTransformerConformance(new TransformerImpl());
+  await runReviserConformance(new ReviserImpl());
   console.log("TYPED_CONFORMANCE_OK");
 }
 
