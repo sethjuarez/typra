@@ -41,3 +41,21 @@ var _ fixtures.Transformer = TransformerImpl{}
 func TestTransformerTypedVectors(t *testing.T) {
 	vectorconformance.RunTransformerConformance(t, TransformerImpl{})
 }
+
+// ReviserImpl is a minimal real MODEL-in / MODEL-out seam: it upper-cases the
+// note title and passes the body through. The emitted entrypoint decodes the
+// `note` param via `json.Unmarshal` into `fixtures.Note` and compares the
+// returned `Note` via `json.Marshal` + `reflect.DeepEqual` — the same code path
+// as a scalar seam, because every generated model carries `json:` struct tags.
+type ReviserImpl struct{}
+
+func (ReviserImpl) Revise(note fixtures.Note) (fixtures.Note, error) {
+	note.Title = strings.ToUpper(note.Title)
+	return note, nil
+}
+
+var _ fixtures.Reviser = ReviserImpl{}
+
+func TestReviserTypedVectors(t *testing.T) {
+	vectorconformance.RunReviserConformance(t, ReviserImpl{})
+}

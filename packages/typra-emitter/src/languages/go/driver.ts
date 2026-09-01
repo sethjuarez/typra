@@ -42,7 +42,7 @@ import {
   DispatchedContract,
   isTypedDispatchEntry,
   isBridgeEligible,
-  isScalarSeamEntry,
+  isTypedSeamEntry,
   classifyCallableParam,
 } from "../../ir/vector.js";
 import {
@@ -295,15 +295,21 @@ export const generateGo = async (
     }
 
     // Typed conformance ENTRYPOINT (issue #511 Cat 1 / typra#306, Track A): for
-    // every scalar-eligible plain seam, emit `Run<Seam>Conformance(t, seam)` that
+    // every eligible plain seam, emit `Run<Seam>Conformance(t, seam)` that
     // runs the seam's vectors by calling the impl DIRECTLY — no registry, no
     // string keys, no per-op marshalling double. Requiring `fixtures.<Seam>` makes
     // the compiler prove every op is implemented (completeness at compile time).
-    // Scalar-only for the first slice (see `isScalarSeamEntry`), keeping it
-    // additive and zero-diff on real surfaces whose eligible plain seams take
-    // model shapes. Emitted as a sibling PACKAGE `vectorconformance` (like the
-    // runner/bridge) because a Go directory holds only one non-test package.
-    const conformanceEntries = allVectors.filter(isScalarSeamEntry);
+    // Scalar seams are eligible unconditionally; Phase 2 widens eligibility to
+    // model-in/model-out seams whose boundary models live in the `@serializable`
+    // closure (see `isTypedSeamEntry`). Go decodes params with `json.Unmarshal`
+    // and compares via `json.Marshal` + `reflect.DeepEqual`, and every model
+    // carries `json:` struct tags, so the model path rides the SAME code as the
+    // scalar path — no serde-free branch (unlike the plain Rust target). Emitted
+    // as a sibling PACKAGE `vectorconformance` (like the runner/bridge) because a
+    // Go directory holds only one non-test package.
+    const conformanceEntries = allVectors.filter((entry) =>
+      isTypedSeamEntry(entry, serializationClosure),
+    );
     if (conformanceEntries.length > 0) {
       await emitGoFile(
         context,
