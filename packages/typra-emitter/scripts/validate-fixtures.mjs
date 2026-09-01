@@ -35,6 +35,7 @@ import {
   runGeneratedTypeScriptZodWebCompile,
   runTypeScriptExecutableConformance,
   runTypeScriptGeneratedTests,
+  runTypeScriptVectorConformanceCompile,
   runTypeScriptWebRuntimeSmoke,
   runTypeScriptZodExecutableConformance,
   runTypeScriptZodWebRuntimeSmoke,
@@ -111,6 +112,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "typescript-zod.web-runtime",
   "typescript.runtime-neutrality",
   "typescript.generated-tests",
+  "typescript.vector-conformance-compile",
   "python.compile",
   "python_pydantic.compile",
   "python.lint",
@@ -2248,6 +2250,10 @@ function runDeclaredValidationStages() {
       ["python.lint", () => runPythonRuffCheck()],
       ["python_pydantic.lint", () => runPythonRuffCheck("python_pydantic")],
       ["typescript.generated-tests", runTypeScriptGeneratedTests],
+      [
+        "typescript.vector-conformance-compile",
+        runTypeScriptVectorConformanceCompile,
+      ],
       ["python.generated-tests", () => runPythonGeneratedTests()],
       [
         "python_pydantic.generated-tests",

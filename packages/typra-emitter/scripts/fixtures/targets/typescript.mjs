@@ -5,8 +5,11 @@ import {
   existsSync,
   fail,
   generatedRoot,
+  mkdirp,
+  mkdtempSync,
   packageRoot,
   path,
+  readFileSync,
   rmSync,
   unlinkSync,
   walkFiles,
@@ -769,6 +772,149 @@ export function runTypeScriptZodExecutableConformance() {
     }
     if (existsSync(outDir)) {
       rmSync(outDir, { recursive: true, force: true });
+    }
+  }
+}
+
+export function runTypeScriptVectorConformanceCompile() {
+  // Red-first gate for the typed conformance ENTRYPOINT (issue #511 Cat 1,
+  // typra#306 Track A). The emitter emits `run<Seam>Conformance(seam)` into the
+  // model output-dir as `vector-conformance.ts`; a consumer migrates a plain seam
+  // off the stringly `vector-adapters` registry by authoring only a real
+  // `implements <Seam>` and one typed call. This gate proves that path stands
+  // ALONE: generate the typed-seam-conformance fixture, EXCLUDE the stringly-rail
+  // test tree (the vector-runner + vector-conformance.test that need a
+  // hand-authored vector-adapters module), attach the committed typed double,
+  // tsc-compile the model + entrypoint + double to JS, and RUN it so the vectors
+  // actually execute.
+  //
+  // Red-first: if the entrypoint is not emitted, `vector-conformance.ts` does not
+  // exist and the double's `import { runTransformerConformance }` fails to
+  // compile — so this gate fails on `main`.
+  const tscCli = findTypeScriptCli(packageRoot);
+  if (!tscCli) return;
+
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "typed-seam-conformance",
+  );
+  // Generate INSIDE the package tree so Node/tsc module resolution climbs to the
+  // repo-root node_modules (the emitted model's `context.ts` imports `yaml`).
+  const outRoot = mkdtempSync(path.join(packageRoot, ".typra-ts-typedseam-"));
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "typescript",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.TypedSeamConformance.Root",
+        "--deterministic",
+        "--no-format",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "typescript");
+    if (!existsSync(sourceDir)) {
+      fail("TypeScript typed-seam-conformance gate: no typescript output generated.");
+      return;
+    }
+    if (!existsSync(path.join(sourceDir, "vector-conformance.ts"))) {
+      fail(
+        "TypeScript typed-seam-conformance gate: emitter did not emit " +
+          "vector-conformance.ts (the typed conformance entrypoint). The committed " +
+          "double cannot import runTransformerConformance — this is the red-first " +
+          "signal.",
+      );
+      return;
+    }
+    // Attach the committed typed double at the model root so its relative imports
+    // (`./index`, `./vector-conformance`) resolve.
+    const doublePath = path.join(sourceDir, "conformance.run.ts");
+    writeFileSync(
+      doublePath,
+      readFileSync(
+        path.join(
+          fixtureDir,
+          "vector-adapters",
+          "typescript",
+          "conformance.run.ts",
+        ),
+        "utf8",
+      ),
+    );
+    // The typed entrypoint stands alone: exclude the stringly rail (the tests/
+    // subtree + any *.test.ts) that would otherwise need a hand-authored
+    // vector-adapters module and test-runner ambient globals to compile.
+    const sourceFiles = walkFiles(
+      sourceDir,
+      (file) =>
+        file.endsWith(".ts") &&
+        !file.endsWith(".test.ts") &&
+        !file.includes(`${path.sep}tests${path.sep}`) &&
+        !file.includes(`${path.sep}.typra-conformance${path.sep}`),
+    );
+    const configPath = path.join(sourceDir, "tsconfig.conformance.json");
+    const compiledDir = path.join(sourceDir, ".typra-conformance");
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2022",
+            module: "commonjs",
+            moduleResolution: "node",
+            esModuleInterop: true,
+            skipLibCheck: true,
+            strict: true,
+            types: ["node"],
+            typeRoots: typeScriptTypeRoots(tscCli),
+            lib: ["ES2022"],
+            outDir: compiledDir,
+            rootDir: sourceDir,
+          },
+          files: sourceFiles,
+        },
+        null,
+        2,
+      ),
+    );
+    try {
+      execFileSync(process.execPath, [tscCli, "-p", configPath], {
+        cwd: packageRoot,
+        stdio: "pipe",
+      });
+      writeFileSync(
+        path.join(compiledDir, "package.json"),
+        JSON.stringify({ type: "commonjs" }, null, 2),
+      );
+      const output = execFileSync(
+        process.execPath,
+        [path.join(compiledDir, "conformance.run.js")],
+        { cwd: compiledDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      ).trim();
+      if (!output.includes("TYPED_CONFORMANCE_OK")) {
+        fail(
+          `TypeScript typed-seam-conformance run did not report success:\n${output}`,
+        );
+      }
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `TypeScript typed-seam-conformance compile/run gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    if (existsSync(outRoot)) {
+      rmSync(outRoot, { recursive: true, force: true });
     }
   }
 }
