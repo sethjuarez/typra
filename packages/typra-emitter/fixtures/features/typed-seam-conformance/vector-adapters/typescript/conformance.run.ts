@@ -10,8 +10,9 @@
 // `runTransformerConformance` import resolves only when the emitter emits
 // `vector-conformance.ts`; on `main` it does not exist, so this file fails to
 // compile (the red-first signal).
-import type { Note, Reviser, Transformer } from "./index";
+import type { Collator, Note, Reviser, Transformer } from "./index";
 import {
+  runCollatorConformance,
   runReviserConformance,
   runTransformerConformance,
 } from "./vector-conformance";
@@ -37,9 +38,21 @@ class ReviserImpl implements Reviser {
   }
 }
 
+// An array-in / array-out seam: reverse the notes, each passing through
+// unchanged. The emitted entrypoint decodes the `notes` param with
+// `JSON.parse(...) as Note[]` and compares the returned `Note[]` with the same
+// `JSON.parse(JSON.stringify(actual))` round-trip — the structural cast and
+// compare lift over arrays with no per-element handling.
+class CollatorImpl implements Collator {
+  async collate(notes: Note[]): Promise<Note[]> {
+    return [...notes].reverse();
+  }
+}
+
 async function main(): Promise<void> {
   await runTransformerConformance(new TransformerImpl());
   await runReviserConformance(new ReviserImpl());
+  await runCollatorConformance(new CollatorImpl());
   console.log("TYPED_CONFORMANCE_OK");
 }
 

@@ -314,9 +314,12 @@ export const generateTypeScript = async (
       // model-in/model-out seams whose boundary models live in the `@serializable`
       // closure (see `isTypedSeamEntry`); a model param decodes via a structural
       // `JSON.parse(input) as <Model>` cast and the return compares through the
-      // same `JSON.parse(JSON.stringify(actual))` round-trip as a scalar.
+      // same `JSON.parse(JSON.stringify(actual))` round-trip as a scalar. Phase 2
+      // array parity (`{ arrays: true }`) further admits `Model[]` seams — the
+      // structural `as <Model>[]` cast and round-trip compare lift over arrays
+      // unchanged.
       const conformanceEntries = allVectors.filter((entry) =>
-        isTypedSeamEntry(entry, serializationClosure),
+        isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
       );
       if (conformanceEntries.length > 0) {
         await emitTypeScriptFile(
@@ -937,11 +940,16 @@ function emitTypeScriptVectorConformanceEntrypoint(
   // Collect bare-model PARAM types (e.g. `Note`) referenced by `JSON.parse(...)
   // as <Model>` casts; they must be imported from the barrel alongside the seam
   // interfaces or tsc cannot resolve the cast. Scalar params need no import.
+  // Array-of-model params (`Note[]`) import the ELEMENT model — the cast is
+  // `as Note[]`, so `Note` (not `Note[]`) is the barrel symbol.
   const modelTypeNames = new Set<string>();
   for (const entry of entries) {
     for (const paramType of Object.values(entry.params)) {
-      if (classifyCallableParam(paramType).bareModel) {
+      const shape = classifyCallableParam(paramType);
+      if (shape.bareModel) {
         modelTypeNames.add(tsProtocolType(paramType));
+      } else if (shape.array && shape.isModel && !shape.optional) {
+        modelTypeNames.add(tsProtocolType(shape.base));
       }
     }
   }
