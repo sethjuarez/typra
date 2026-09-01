@@ -74,6 +74,7 @@ import {
   runJavaGeneratedTests,
   runJavaJacksonBuild,
   runJavaJacksonGeneratedTests,
+  runJavaVectorConformanceCompile,
 } from "./fixtures/targets/java.mjs";
 import {
   runSwiftCodableExecutableConformance,
@@ -140,6 +141,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "csharp.vector-conformance-compile",
   "java.build",
   "java.generated-tests",
+  "java.vector-conformance-compile",
   "java-jackson.build",
   "java-jackson.generated-tests",
   ...IDEMPOTENCY_TARGETS.map((target) => target.stageId),
@@ -2307,6 +2309,10 @@ function runDeclaredValidationStages() {
       ],
       ["java.build", runJavaBuild],
       ["java.generated-tests", runJavaGeneratedTests],
+      [
+        "java.vector-conformance-compile",
+        (context) => runJavaVectorConformanceCompile(context),
+      ],
       ["java-jackson.build", runJavaJacksonBuild],
       ["java-jackson.generated-tests", runJavaJacksonGeneratedTests],
       ...IDEMPOTENCY_TARGETS.map((target) => [
@@ -2325,6 +2331,7 @@ function runDeclaredValidationStages() {
       "python.vector-conformance-compile": "uv is not available",
       "swift.vector-conformance-compile": "swift is not available",
       "csharp.vector-conformance-compile": "dotnet is not available",
+      "java.vector-conformance-compile": "javac is not available",
     },
   });
 }
