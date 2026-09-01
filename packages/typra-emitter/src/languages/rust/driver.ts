@@ -2177,6 +2177,16 @@ function emitRustVectorConformanceEntrypoint(
   // model-parity entries survive (a local `isScalarSeamEntry` re-filter would drop
   // them, since it has no view of the serialization closure).
   const eligible = vectors.vectors;
+  // This file is emitted as a library MODULE of the model crate (`output-dir`),
+  // so it must reference sibling types CRATE-RELATIVE. `importPath` is the
+  // EXTERNAL path (e.g. `fixtures_serde::model`) used by out-of-crate test
+  // crates; rebase its leading crate-name segment onto `crate` for in-crate use
+  // (`crate::model`). A path already rooted at `crate` passes through unchanged.
+  const inCrate = (() => {
+    const segments = importPath.replace(/^::/, "").split("::");
+    if (segments[0] !== "crate") segments[0] = "crate";
+    return segments.join("::");
+  })();
   // Group eligible vectors by seam contract; a seam's entrypoint carries all of
   // its eligible vectors so `S: <Seam>` enforces the WHOLE seam is implemented.
   const bySeam = new Map<string, CallableVectorSnapshotEntry[]>();
@@ -2238,10 +2248,10 @@ function emitRustVectorConformanceEntrypoint(
       `/// from a test, e.g. \`${fn}(&${seam}Impl).await;\` (or without \`.await\` when sync).`,
     );
     lines.push(
-      `pub ${seamIsAsync ? "async " : ""}fn ${fn}<S: ${importPath}::${seam} + ?Sized>(seam: &S) {`,
+      `pub ${seamIsAsync ? "async " : ""}fn ${fn}<S: ${inCrate}::${seam} + ?Sized>(seam: &S) {`,
     );
     if (needsCtx) {
-      lines.push(`    let ctx = ${importPath}::context::LoadContext::default();`);
+      lines.push(`    let ctx = ${inCrate}::context::LoadContext::default();`);
     }
 
     entries.forEach((entry) => {
@@ -2269,7 +2279,7 @@ function emitRustVectorConformanceEntrypoint(
         const local = rustFieldName(paramName);
         const paramJson = JSON.stringify(input[paramName] ?? {}, null, 2);
         if (shape.bareModel) {
-          lines.push(`        let ${local} = ${importPath}::${paramType}::from_json(`);
+          lines.push(`        let ${local} = ${inCrate}::${paramType}::from_json(`);
           lines.push(`            r####"`);
           lines.push(paramJson);
           lines.push(`"####,`);
@@ -2281,7 +2291,7 @@ function emitRustVectorConformanceEntrypoint(
           // each element through the model's serde-free `from_json` loader (the
           // plain target has no `Deserialize` for `Vec<Model>`), collecting a
           // `Vec<Model>`. Symmetric with the array-of-model RETURN compare below.
-          const elem = `${importPath}::${shape.base}`;
+          const elem = `${inCrate}::${shape.base}`;
           lines.push(`        let ${local}: Vec<${elem}> = {`);
           lines.push("            let items: Vec<Value> = serde_json::from_str(");
           lines.push(`                r####"`);
@@ -2346,7 +2356,7 @@ function emitRustVectorConformanceEntrypoint(
             // `Serialize` on `actual`, so `serde_json::to_value(actual)` would not
             // compile. Symmetric with the bare-model PARAM decode above.
             lines.push(
-              `        let expected = ${importPath}::${returnShape.base}::from_json(`,
+              `        let expected = ${inCrate}::${returnShape.base}::from_json(`,
             );
             lines.push(`            r####"`);
             lines.push(expectedJson);
@@ -2366,7 +2376,7 @@ function emitRustVectorConformanceEntrypoint(
             // through the model's serde-free loader and compare with the plain
             // `PartialEq` lifted over `Vec` — `actual` has no `Serialize`, so the
             // scalar `serde_json::to_value(actual)` path would not compile.
-            const elem = `${importPath}::${returnShape.base}`;
+            const elem = `${inCrate}::${returnShape.base}`;
             lines.push(`        let expected: Vec<${elem}> = {`);
             lines.push("            let items: Vec<Value> = serde_json::from_str(");
             lines.push(`                r####"`);

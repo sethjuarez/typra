@@ -309,7 +309,8 @@ export const generateTypeScript = async (
       // string keys, no per-op marshalling double. Typing the parameter as the
       // emitted `<Seam>` interface makes tsc prove every op is implemented
       // (completeness at compile time). Emitted into the model output-dir as a
-      // reusable module (imports only node:assert + the model barrel), additively
+      // reusable module (imports only the model barrel + an inlined assert, no
+      // Node builtins), additively
       // beside the stringly runner. Phase 2 widens eligibility from scalar-only to
       // model-in/model-out seams whose boundary models live in the `@serializable`
       // closure (see `isTypedSeamEntry`); a model param decodes via a structural
@@ -912,14 +913,16 @@ function emitTypeScriptVectorConformanceTest(
  * the emitted `<Seam>` interface makes `tsc` prove every op is implemented, so
  * completeness is a COMPILE-TIME guarantee rather than a runtime map lookup.
  *
- * Framework-agnostic: it depends only on `node:assert/strict` and the model
- * barrel (a type-only import), so it carries no test-runner or vector-adapter
- * dependency and is emitted ADDITIVELY beside the stringly runner — an unmigrated
- * seam keeps its `vector-adapters.ts`; this entrypoint is simply an available
- * helper until a typed test calls it. Phase 2 widens eligibility from scalar-only
- * to model-in/model-out seams whose boundary models live in the `@serializable`
- * closure (shared `isTypedSeamEntry`); TS interfaces are structural, so a model
- * param/return rides the SAME `JSON.parse`/`deepStrictEqual` code as a scalar.
+ * Runtime-neutral: it depends only on the model barrel (a type-only import) plus
+ * a tiny inlined assert — no `node:assert`, no Node builtins — so the shipped
+ * library stays importable from web/edge/Deno. It carries no test-runner or
+ * vector-adapter dependency and is emitted ADDITIVELY beside the stringly runner
+ * — an unmigrated seam keeps its `vector-adapters.ts`; this entrypoint is simply
+ * an available helper until a typed test calls it. Phase 2 widens eligibility
+ * from scalar-only to model-in/model-out seams whose boundary models live in the
+ * `@serializable` closure (shared `isTypedSeamEntry`); TS interfaces are
+ * structural, so a model param/return rides the SAME `JSON.parse` /
+ * canonical-compare code as a scalar.
  */
 function emitTypeScriptVectorConformanceEntrypoint(
   entries: CallableVectorSnapshotEntry[],
@@ -966,12 +969,35 @@ function emitTypeScriptVectorConformanceEntrypoint(
     "// replacement for the stringly vector-adapters registry + per-op marshalling",
     "// double. Typing the parameter as the emitted <Seam> interface makes tsc prove",
     "// every op is implemented, so completeness is checked at COMPILE time, not by a",
-    "// runtime map lookup. Depends only on node:assert + the model barrel (no",
-    "// vector-adapters, so no cycle); emitted additively beside the stringly runner.",
+    "// runtime map lookup. Depends only on the model barrel + a tiny inlined",
+    "// assert (no Node builtins), so the shipped library stays runtime-neutral for",
+    "// web/edge/Deno consumers; emitted additively beside the stringly runner.",
     "// See docs: reference/vector-conformance.",
     "",
-    'import assert from "node:assert/strict";',
     `import type { ${importNames.join(", ")} } from "./index";`,
+    "",
+    "// Runtime-neutral assert shims (no `node:assert`): the entrypoint ships inside",
+    "// the library, so it must not import Node builtins. `seamConformanceCanonical`",
+    "// gives order-insensitive deep equality by sorting object keys — matching",
+    "// `assert.deepStrictEqual` semantics for the plain-JSON vector payloads.",
+    "function seamConformanceAssert(condition: boolean, message: string): void {",
+    "  if (!condition) throw new Error(message);",
+    "}",
+    "function seamConformanceCanonical(value: unknown): string {",
+    "  if (value === null || typeof value !== \"object\") {",
+    "    return JSON.stringify(value ?? null);",
+    "  }",
+    "  if (Array.isArray(value)) {",
+    "    return `[${value.map(seamConformanceCanonical).join(\",\")}]`;",
+    "  }",
+    "  const record = value as Record<string, unknown>;",
+    "  const parts: string[] = [];",
+    "  for (const key of Object.keys(record).sort()) {",
+    "    const encoded = seamConformanceCanonical(record[key]);",
+    "    parts.push(`${JSON.stringify(key)}:${encoded}`);",
+    "  }",
+    "  return `{${parts.join(\",\")}}`;",
+    "}",
     "",
   ];
 
@@ -1003,10 +1029,14 @@ function emitTypeScriptVectorConformanceEntrypoint(
       lines.push("  {");
       for (const paramName of paramNames) {
         const tsType = tsProtocolType(entry.params[paramName]);
+        // Two lines so neither the internal formatter nor prettier wraps the
+        // decode: the (unbreakable) JSON string literal sits alone, and the
+        // short `JSON.parse(...) as T` cast stays well under the print width.
         lines.push(
-          `    const ${paramName} = JSON.parse(${jsonLiteral(
-            input[paramName] ?? null,
-          )}) as ${tsType};`,
+          `    const ${paramName}Json = ${jsonLiteral(input[paramName] ?? null)};`,
+        );
+        lines.push(
+          `    const ${paramName} = JSON.parse(${paramName}Json) as ${tsType};`,
         );
       }
       const call = `seam.${method}(${paramNames.join(", ")})`;
@@ -1019,7 +1049,7 @@ function emitTypeScriptVectorConformanceEntrypoint(
         lines.push("      caught = error;");
         lines.push("    }");
         lines.push(
-          `    assert.ok(caught !== undefined, ${JSON.stringify(
+          `    seamConformanceAssert(caught !== undefined, ${JSON.stringify(
             `${label}: expected an error`,
           )});`,
         );
@@ -1028,7 +1058,7 @@ function emitTypeScriptVectorConformanceEntrypoint(
             "    const message = String((caught as { message?: unknown })?.message ?? caught);",
           );
           lines.push(
-            `    assert.ok(message.includes(${JSON.stringify(
+            `    seamConformanceAssert(message.includes(${JSON.stringify(
               entry.vector.expectedError,
             )}), ${JSON.stringify(`${label}: error message mismatch`)});`,
           );
@@ -1040,7 +1070,7 @@ function emitTypeScriptVectorConformanceEntrypoint(
             `    const expected = JSON.parse(${jsonLiteral(entry.vector.expected)});`,
           );
           lines.push(
-            `    assert.deepStrictEqual(JSON.parse(JSON.stringify(actual)), expected, ${JSON.stringify(
+            `    seamConformanceAssert(seamConformanceCanonical(JSON.parse(JSON.stringify(actual))) === seamConformanceCanonical(expected), ${JSON.stringify(
               `${label} misrouted`,
             )});`,
           );

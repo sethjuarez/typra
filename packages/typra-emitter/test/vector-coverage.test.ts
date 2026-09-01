@@ -280,17 +280,14 @@ describe("vector adapter coverage gate", () => {
     assertPartition(result);
   });
 
-  it("does NOT type-cover an array-of-model seam even when the element type is serializable", () => {
-    // Guard for the model-parity slice's deferred boundary. The typed
-    // conformance entrypoint currently emits a decode/compare only for a BARE
-    // model (`Model`), not for `Model[]` or `Model?` — the drivers have no
-    // per-element array decode yet. So an op whose param OR return is an
-    // array-of-model must stay OFF the typed rail (adapter/waiver/missing), even
-    // when the element model is in the serializable closure. Flipping this to
-    // typed before the array-of-model driver slice ships would let a consumer
-    // delete a double the runtime cannot yet decode. When that slice lands with
-    // real driver support, this assertion flips red-first (like the scalar->model
-    // flip did) and becomes a typed-covered case.
+  it("type-covers an array-of-model seam when the element type is serializable", () => {
+    // The array-of-model slice landed across all 7 runtimes: the typed
+    // conformance entrypoint now emits a per-element decode/compare for
+    // `Model[]` params and returns whose element model is in the `@serializable`
+    // closure. So an op whose param/return is an array-of-serializable-model is
+    // typed-covered — the flip that lets prompty delete its `RenderSegment[]` /
+    // `Message[]` doubles. (This assertion flipped red-first when the drivers
+    // gained array support, exactly as the scalar->model flip did.)
     const snap: CallableVectorSnapshot = {
       emitter: "typra-emitter",
       version: 1,
@@ -308,19 +305,54 @@ describe("vector adapter coverage gate", () => {
         },
       ],
     };
+    const covered = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    assert.ok(covered.ok);
+    assert.deepEqual(covered.typed, ["Bundle.pack"]);
+    assert.deepEqual(covered.covered, []);
+    assert.deepEqual(covered.missing, []);
+    assertPartition(covered);
+  });
+
+  it("does NOT type-cover an optional-model seam even when the element type is serializable", () => {
+    // Guard for the NEXT deferred boundary. The typed conformance entrypoint
+    // emits a decode/compare for a bare model (`Model`) and an array-of-model
+    // (`Model[]`), but NOT for an optional model (`Model?`) — the drivers have no
+    // null-carrier decode yet. So an op whose param OR return is `Model?` must
+    // stay OFF the typed rail (adapter/waiver/missing), even when the model is in
+    // the serializable closure. Flipping this to typed before the optional-model
+    // driver slice ships would let a consumer delete a double the runtime cannot
+    // yet decode. When that slice lands with real driver support, this assertion
+    // flips red-first and becomes a typed-covered case.
+    const snap: CallableVectorSnapshot = {
+      emitter: "typra-emitter",
+      version: 1,
+      serializedTypes: ["Note"],
+      vectors: [
+        {
+          contract: "Bundle",
+          namespace: "Typra.Sample",
+          group: "",
+          operation: "peek",
+          params: { note: "Note?" },
+          returns: "Note?",
+          sync: false,
+          vector: { operation: "peek", stage: "callable", input: {}, expected: null },
+        },
+      ],
+    };
     const missing = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
     assert.equal(missing.ok, false);
     assert.deepEqual(missing.typed, []);
-    assert.deepEqual(missing.missing, ["Bundle.pack"]);
+    assert.deepEqual(missing.missing, ["Bundle.peek"]);
 
     // It CAN still be covered the honest way — a hand adapter or an explicit
     // waiver — since it is a genuine, not-yet-emittable seam.
     const adapted = evaluateVectorAdapterCoverage({
       snapshot: snap,
-      adapterKeys: ["Bundle.pack"],
+      adapterKeys: ["Bundle.peek"],
     });
     assert.ok(adapted.ok);
-    assert.deepEqual(adapted.covered, ["Bundle.pack"]);
+    assert.deepEqual(adapted.covered, ["Bundle.peek"]);
     assert.deepEqual(adapted.typed, []);
     assertPartition(adapted);
   });
