@@ -356,6 +356,65 @@ describe("vector adapter coverage gate", () => {
     assert.deepEqual(adapted.typed, []);
     assertPartition(adapted);
   });
+
+  it("does NOT let a partially-typed seam read as fully typed-covered", () => {
+    // Seam-level guardrail (parent's ask): a seam whose ops are a MIX of
+    // typed-eligible and not-yet-eligible must never present as a whole
+    // typed-covered seam, or a consumer could delete the double while one op
+    // still rides its adapter. Coverage is classified per-OP, so the eligible
+    // op lands in `typed` and the ineligible one in `missing` — and because
+    // `ok` requires zero `missing`, the seam cannot pass verify until EVERY op
+    // is covered. This is strictly stronger than a seam-level flag: render AND
+    // renderSegments must both be eligible before prompty may retire Renderer.
+    const snap: CallableVectorSnapshot = {
+      emitter: "typra-emitter",
+      version: 1,
+      serializedTypes: ["Note"],
+      vectors: [
+        {
+          contract: "Bundle",
+          namespace: "Typra.Sample",
+          group: "",
+          operation: "pack",
+          params: { notes: "Note[]" },
+          returns: "Note[]",
+          sync: false,
+          vector: { operation: "pack", stage: "callable", input: {}, expected: [] },
+        },
+        {
+          contract: "Bundle",
+          namespace: "Typra.Sample",
+          group: "",
+          operation: "peek",
+          params: { note: "Note?" },
+          returns: "Note?",
+          sync: false,
+          vector: { operation: "peek", stage: "callable", input: {}, expected: null },
+        },
+      ],
+    };
+
+    // With no adapter for the ineligible op, the seam is INCOMPLETE: the
+    // array-of-model op is typed, the optional-model op is missing, ok=false.
+    const partial = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    assert.equal(partial.ok, false);
+    assert.deepEqual(partial.typed, ["Bundle.pack"]);
+    assert.deepEqual(partial.missing, ["Bundle.peek"]);
+    assertPartition(partial);
+
+    // The ONLY way the whole seam passes is covering EVERY op: the eligible op
+    // via the typed rail, the not-yet-eligible one via a hand adapter (or an
+    // explicit waiver). Then — and only then — is the seam retirable.
+    const complete = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: ["Bundle.peek"],
+    });
+    assert.ok(complete.ok);
+    assert.deepEqual(complete.typed, ["Bundle.pack"]);
+    assert.deepEqual(complete.covered, ["Bundle.peek"]);
+    assert.deepEqual(complete.missing, []);
+    assertPartition(complete);
+  });
 });
 
 // Every operation lands in exactly one bucket (no double-count, no drop).
