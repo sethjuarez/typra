@@ -10,17 +10,21 @@ import {
 } from "../src/ir/vector-coverage.js";
 
 // A snapshot with a deliberate mix of coverage sources:
-//   - Echo.echo (string -> string)      : scalar seam -> the emitted typed
+//   - Echo.echo (string -> string)       : scalar seam -> the emitted typed
 //     conformance entrypoint covers it, so NO hand adapter is required.
-//   - Sum.sum   (int32[] -> int32)      : scalar seam (array-of-scalar) -> also
+//   - Sum.sum   (int32[] -> int32)       : scalar seam (array-of-scalar) -> also
 //     typed-covered.
-//   - Store.put ({ doc: Doc } -> void)  : model param -> NOT expressible by the
-//     scalar-only typed rail, so it can only be covered by a hand adapter or an
-//     explicit waiver.
+//   - Revise.revise ({ note: Note } -> Note) : model in/out whose boundary model
+//     `Note` IS in the `@serializable` closure (`serializedTypes`), so the typed
+//     entrypoint decodes/compares it through the emitted loader -> typed-covered.
+//   - Vault.seal ({ secret: Secret } -> Secret) : model in/out whose boundary
+//     model `Secret` is NOT serializable, so the typed rail has no decode
+//     primitive; it can only be covered by a hand adapter or an explicit waiver.
 function snapshot(): CallableVectorSnapshot {
   return {
     emitter: "typra-emitter",
     version: 1,
+    serializedTypes: ["Note"],
     vectors: [
       {
         contract: "Echo",
@@ -59,64 +63,102 @@ function snapshot(): CallableVectorSnapshot {
         vector: { operation: "sum", stage: "callable", input: {}, expected: 0 },
       },
       {
-        contract: "Store",
+        contract: "Revise",
         namespace: "Typra.Sample",
         group: "",
-        operation: "put",
-        params: { doc: "Doc" },
-        returns: "void",
+        operation: "revise",
+        params: { note: "Note" },
+        returns: "Note",
         sync: false,
-        vector: { operation: "put", stage: "callable", input: {}, expected: null },
+        vector: { operation: "revise", stage: "callable", input: {}, expected: {} },
+      },
+      {
+        contract: "Vault",
+        namespace: "Typra.Sample",
+        group: "",
+        operation: "seal",
+        params: { secret: "Secret" },
+        returns: "Secret",
+        sync: false,
+        vector: { operation: "seal", stage: "callable", input: {}, expected: {} },
       },
     ],
   };
 }
 
+// Ops covered by the emitted typed entrypoint (scalar + serializable-model),
+// sorted. `Vault.seal` is deliberately excluded: `Secret` is not serializable.
+const TYPED_OPS = ["Echo.echo", "Revise.revise", "Sum.sum"];
 const SCALAR_OPS = ["Echo.echo", "Sum.sum"];
-const MODEL_OP = "Store.put";
+const MODEL_TYPED_OP = "Revise.revise";
+// A model op the scalar OR serializable-model typed rail cannot express: it must
+// be covered by a hand adapter or an explicit waiver.
+const MODEL_OP = "Vault.seal";
 
 describe("vector adapter coverage gate", () => {
   it("collapses vectors to the distinct operations that must be covered", () => {
     const result = evaluateVectorAdapterCoverage({
       snapshot: snapshot(),
-      adapterKeys: ["Store.put"],
+      adapterKeys: ["Vault.seal"],
     });
-    assert.deepEqual(result.operations, ["Echo.echo", "Store.put", "Sum.sum"]);
+    assert.deepEqual(result.operations, [
+      "Echo.echo",
+      "Revise.revise",
+      "Sum.sum",
+      "Vault.seal",
+    ]);
   });
 
-  it("auto-covers a scalar seam via the emitted typed entrypoint, no adapter needed", () => {
-    // The whole point of issue #511 Cat 1: a scalar seam is covered by the
-    // emitted typed conformance entrypoint, so the consumer can delete its hand
-    // adapter and still pass verify.
+  it("auto-covers scalar and serializable-model seams via the typed entrypoint, no adapter needed", () => {
+    // The whole point of issue #511 Cat 1 (+ the model parity slice): a seam
+    // exercised by the emitted typed conformance entrypoint — scalar, or a
+    // model-in/model-out seam whose boundary models are serializable — is
+    // covered without a hand adapter, so the consumer can delete its double and
+    // still pass verify.
     const result = evaluateVectorAdapterCoverage({
       snapshot: snapshot(),
-      // Only the model op is hand-covered; the scalar ops carry NO adapter.
-      adapterKeys: ["Store.put"],
+      // Only the non-serializable model op is hand-covered; the rest carry NO
+      // adapter and ride the typed rail.
+      adapterKeys: ["Vault.seal"],
     });
     assert.ok(result.ok);
-    assert.deepEqual(result.typed, SCALAR_OPS);
+    assert.deepEqual(result.typed, TYPED_OPS);
     assert.deepEqual(result.covered, [MODEL_OP]);
     assert.deepEqual(result.missing, []);
+    assert.ok(result.typed.includes(MODEL_TYPED_OP));
+  });
+
+  it("does NOT type-cover a model seam whose boundary type is outside the serializable closure", () => {
+    // Honest reuse invariant: `Secret` is not in `serializedTypes`, so the typed
+    // entrypoint has no loader to decode/compare it and the seam stays off the
+    // typed rail — it needs a hand adapter or an explicit waiver.
+    const result = evaluateVectorAdapterCoverage({
+      snapshot: snapshot(),
+      adapterKeys: [],
+    });
+    assert.equal(result.ok, false);
+    assert.ok(!result.typed.includes(MODEL_OP));
+    assert.deepEqual(result.missing, [MODEL_OP]);
   });
 
   it("keeps a hand adapter authoritative over the typed rail (no double-count)", () => {
-    // A scalar op that ALSO has a hand adapter stays in `covered`, not `typed`:
-    // adapters registered today keep their classification (no-drop), and each op
-    // lands in exactly one bucket (no double-count).
+    // A typed-eligible op that ALSO has a hand adapter stays in `covered`, not
+    // `typed`: adapters registered today keep their classification (no-drop), and
+    // each op lands in exactly one bucket (no double-count).
     const result = evaluateVectorAdapterCoverage({
       snapshot: snapshot(),
-      adapterKeys: ["Echo.echo", "Store.put"],
+      adapterKeys: ["Echo.echo", "Vault.seal"],
     });
     assert.ok(result.ok);
     assert.deepEqual(result.covered, ["Echo.echo", MODEL_OP]);
-    assert.deepEqual(result.typed, ["Sum.sum"]);
+    assert.deepEqual(result.typed, ["Revise.revise", "Sum.sum"]);
     assertPartition(result);
   });
 
   it("accepts a bare operation name as covering a contract-qualified vector", () => {
     const result = evaluateVectorAdapterCoverage({
       snapshot: snapshot(),
-      adapterKeys: ["put"],
+      adapterKeys: ["seal"],
     });
     assert.ok(result.ok);
     assert.deepEqual(result.covered, [MODEL_OP]);
@@ -124,44 +166,45 @@ describe("vector adapter coverage gate", () => {
   });
 
   it("fails when a NON-typed operation has neither an adapter nor a waiver", () => {
-    // The model op cannot ride the scalar-only typed rail, so without an adapter
-    // or waiver it is a genuine gap.
+    // The non-serializable model op cannot ride the typed rail, so without an
+    // adapter or waiver it is a genuine gap.
     const result = evaluateVectorAdapterCoverage({
       snapshot: snapshot(),
       adapterKeys: [],
     });
     assert.equal(result.ok, false);
     assert.deepEqual(result.missing, [MODEL_OP]);
-    // The scalar ops are still covered via the typed rail even while the model
-    // op is missing.
-    assert.deepEqual(result.typed, SCALAR_OPS);
-    assert.match(formatVectorAdapterCoverageFailure(result), /Store\.put/);
+    // The typed ops are still covered via the typed rail even while the model op
+    // is missing.
+    assert.deepEqual(result.typed, TYPED_OPS);
+    assert.match(formatVectorAdapterCoverageFailure(result), /Vault\.seal/);
   });
 
   it("treats an enumerated waiver as acceptable coverage for a non-typed op", () => {
     const result = evaluateVectorAdapterCoverage({
       snapshot: snapshot(),
       adapterKeys: [],
-      waiverKeys: ["Store.put"],
+      waiverKeys: ["Vault.seal"],
     });
     assert.ok(result.ok);
     assert.deepEqual(result.waived, [MODEL_OP]);
-    assert.deepEqual(result.typed, SCALAR_OPS);
+    assert.deepEqual(result.typed, TYPED_OPS);
     assert.deepEqual(result.missing, []);
     assertPartition(result);
   });
 
-  it("prefers the typed rail over a redundant waiver for a scalar op", () => {
-    // A waiver on a scalar op is redundant now that the typed rail covers it;
-    // the honest classification is `typed`, and the waiver simply drops out. The
-    // op stays OK either way (no-drop) — it is merely reclassified.
+  it("prefers the typed rail over a redundant waiver for a typed op", () => {
+    // A waiver on a typed-eligible op is redundant now that the typed rail covers
+    // it; the honest classification is `typed`, and the waiver simply drops out.
+    // The op stays OK either way (no-drop) — it is merely reclassified.
     const result = evaluateVectorAdapterCoverage({
       snapshot: snapshot(),
-      adapterKeys: ["Store.put"],
-      waiverKeys: ["Echo.echo"],
+      adapterKeys: ["Vault.seal"],
+      waiverKeys: ["Echo.echo", "Revise.revise"],
     });
     assert.ok(result.ok);
     assert.ok(result.typed.includes("Echo.echo"));
+    assert.ok(result.typed.includes(MODEL_TYPED_OP));
     assert.deepEqual(result.waived, []);
     assertPartition(result);
   });
@@ -187,7 +230,7 @@ describe("vector adapter coverage gate", () => {
     // or an enumerated waiver. Adding the typed rail must never move such an op
     // out of the OK set — it only ever rescues would-be-missing ops.
     const snap = snapshot();
-    const adapterKeys = ["Store.put"];
+    const adapterKeys = ["Vault.seal"];
     const waiverKeys: string[] = [];
 
     // The set an old adapter/waiver-only gate would consider covered.
@@ -215,8 +258,25 @@ describe("vector adapter coverage gate", () => {
     for (const op of legacyOk) {
       assert.ok(newOk.has(op), `${op} must remain covered`);
     }
-    // And coverage strictly expanded (the scalar ops are newly OK).
+    // And coverage strictly expanded (the scalar + serializable-model ops are
+    // newly OK).
     assert.ok(newOk.size > legacyOk.size);
+    assertPartition(result);
+  });
+
+  it("degrades to scalar-only coverage when serializedTypes is absent (old snapshot)", () => {
+    // A snapshot emitted before the field existed lacks `serializedTypes`. The
+    // model seams then have no known loader, so only the scalar ops ride the
+    // typed rail — a safe, strictly-narrower classification.
+    const snap = snapshot();
+    delete (snap as { serializedTypes?: string[] }).serializedTypes;
+    const result = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: ["Vault.seal", "Revise.revise"],
+    });
+    assert.ok(result.ok);
+    assert.deepEqual(result.typed, SCALAR_OPS);
+    assert.deepEqual(result.covered, ["Revise.revise", MODEL_OP]);
     assertPartition(result);
   });
 });

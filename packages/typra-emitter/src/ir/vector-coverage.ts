@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft. All rights reserved.
 
 import type { CallableVectorSnapshot } from "./vector.js";
-import { isScalarSeamEntry } from "./vector.js";
+import { isTypedSeamEntry } from "./vector.js";
 
 /**
  * Static coverage gate for the enforced @vector conformance tier.
@@ -15,13 +15,17 @@ import { isScalarSeamEntry } from "./vector.js";
  * the purpose of the tier, so wildcards are rejected.
  *
  * As of issue #511 Cat 1 there is a SECOND, code-verified way for an operation
- * to be covered: a scalar seam (every param and the return JSON-native scalar)
- * is exercised by the EMITTED typed conformance entrypoint, so it needs no hand
- * adapter at all. Such operations are reported in their own `typed` bucket.
- * Classification is additive and strictly expanding: an adapter registered
- * today keeps its `covered` classification (adapters stay authoritative), and
- * the typed rail only ever rescues operations that would otherwise be `missing`
- * (or made a waiver redundant). Each operation lands in exactly one bucket.
+ * to be covered: a seam exercised by the EMITTED typed conformance entrypoint
+ * needs no hand adapter at all. Eligibility (`isTypedSeamEntry`) covers a scalar
+ * seam (every param and the return JSON-native scalar) and, as of the model
+ * parity slice, a model-in/model-out seam whose boundary models are all in the
+ * emitter's `@serializable` closure (carried in `snapshot.serializedTypes`, since
+ * that loader is what the typed entrypoint decodes with). Such operations are
+ * reported in their own `typed` bucket. Classification is additive and strictly
+ * expanding: an adapter registered today keeps its `covered` classification
+ * (adapters stay authoritative), and the typed rail only ever rescues operations
+ * that would otherwise be `missing` (or made a waiver redundant). Each operation
+ * lands in exactly one bucket.
  */
 export interface VectorAdapterCoverageInput {
   snapshot: CallableVectorSnapshot;
@@ -38,8 +42,10 @@ export interface VectorAdapterCoverageResult {
   /** Operations covered by a registered hand adapter (authoritative). */
   covered: string[];
   /**
-   * Scalar seams covered by the emitted typed conformance entrypoint with no
-   * hand adapter required. These are as good as `covered` for gate purposes.
+   * Seams covered by the emitted typed conformance entrypoint with no hand
+   * adapter required (scalar seams, plus model-in/model-out seams whose boundary
+   * models are in the `@serializable` closure). These are as good as `covered`
+   * for gate purposes.
    */
   typed: string[];
   waived: string[];
@@ -58,15 +64,20 @@ function operationKeys(snapshot: CallableVectorSnapshot): string[] {
 
 /**
  * Operations the emitted typed conformance entrypoint covers: those whose every
- * vector entry is a fully-scalar seam. Vectors of one operation share the seam
+ * vector entry is a typed-eligible seam (`isTypedSeamEntry`) — fully scalar, or
+ * model-in/model-out with every boundary model in the `@serializable` closure
+ * carried by `snapshot.serializedTypes`. Vectors of one operation share the seam
  * signature, so `every` here is equivalent to `some`; using `every` states the
- * intent that the whole operation is typed-emittable.
+ * intent that the whole operation is typed-emittable. Snapshots emitted before
+ * `serializedTypes` existed lack the field; treating it as empty degrades safely
+ * to scalar-only coverage.
  */
 function typedOperationKeys(snapshot: CallableVectorSnapshot): Set<string> {
+  const serializedTypeNames = new Set(snapshot.serializedTypes ?? []);
   const byOperation = new Map<string, boolean>();
   for (const entry of snapshot.vectors) {
     const key = `${entry.contract}.${entry.operation}`;
-    const eligible = isScalarSeamEntry(entry);
+    const eligible = isTypedSeamEntry(entry, serializedTypeNames);
     byOperation.set(key, (byOperation.get(key) ?? true) && eligible);
   }
   const typed = new Set<string>();

@@ -48,6 +48,8 @@ import {
 import type { CallableVectorSnapshot } from "./ir/vector.js";
 import { lowerTypeSpecTransportContracts } from "./ir/transport.js";
 import type { TransportContract } from "./ir/transport.js";
+import { TypeRegistry } from "./ir/expansion.js";
+import { computeSerializationClosure } from "./ir/lower.js";
 
 // Generator options passed to each generator
 export interface GeneratorOptions {
@@ -340,8 +342,23 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   }
 
   const targets = options["emit-targets"] || [];
+  // Serialization is opt-in via `@serializable`: compute the closure the drivers
+  // use for load/save emission (same nodes/registry, target-independent) so the
+  // vector snapshot can carry its members. A model-in/model-out seam is exercised
+  // by the emitted typed conformance entrypoint only when its boundary models are
+  // in this closure, so a downstream coverage check needs it in the artifact.
+  const closureTypes = Array.from(enumerateTypes(model));
+  const closureRegistry = TypeRegistry.fromTypeGraph(closureTypes);
+  const serializationClosure = computeSerializationClosure(
+    filterNodes(Array.from(enumerateTypes(model)), {
+      omitModels: options["omit-models"] || [],
+      additionalModels,
+    }),
+    closureRegistry,
+  );
   const callableVectorSnapshot = buildCallableVectorSnapshot(
     typeSpecCallableContracts,
+    serializationClosure,
   );
   const generatorOptions: GeneratorOptions = {
     rootNamespace,

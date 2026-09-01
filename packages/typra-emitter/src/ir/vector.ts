@@ -94,6 +94,17 @@ export interface CallableVectorSnapshot {
   emitter: "typra-emitter";
   version: 1;
   vectors: CallableVectorSnapshotEntry[];
+  /**
+   * Sorted simple names of every type in the emitter's `@serializable`
+   * serialization closure — the types for which the emitter emits a JSON loader
+   * (`load`/`from_json`). Carried in the snapshot so a downstream coverage check
+   * (which sees only this artifact, not the TypeSpec registry) can decide whether
+   * a model-in/model-out seam is exercised by the EMITTED typed conformance
+   * entrypoint (`isTypedSeamEntry`) and therefore needs no hand adapter. Optional
+   * so snapshots (and test fixtures) emitted before this field existed still
+   * type-check and read cleanly; readers treat its absence as an empty closure.
+   */
+  serializedTypes?: string[];
 }
 
 /**
@@ -315,6 +326,7 @@ export function lowerOperationVectors(
 
 export function buildCallableVectorSnapshot(
   contracts: CallableContract[],
+  serializedTypes: ReadonlySet<string> = new Set(),
 ): CallableVectorSnapshot {
   return {
     emitter: "typra-emitter",
@@ -340,6 +352,7 @@ export function buildCallableVectorSnapshot(
         ),
       )
       .sort((left, right) => vectorSnapshotKey(left).localeCompare(vectorSnapshotKey(right))),
+    serializedTypes: [...serializedTypes].sort(),
   };
 }
 
