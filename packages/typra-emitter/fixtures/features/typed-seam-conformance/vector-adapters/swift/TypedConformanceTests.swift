@@ -1,0 +1,33 @@
+// Committed consumer double for the Swift typed @vector conformance entrypoint
+// (issue #511 Cat 1, typra#306 Track A). This is the WHOLE authored surface a
+// consumer needs to migrate a plain seam off the stringly VectorAdapters
+// registry: a real `Transformer` protocol impl and one typed call to the
+// emitted `runTransformerConformance`. No registry, no string keys, no per-op
+// marshalling double.
+//
+// `runTransformerConformance` is emitted only when the entrypoint lands; on
+// `main` the symbol does not exist, so this file fails to compile (the red-first
+// signal). Conforming `TransformerImpl` to the emitted `Transformer` protocol
+// obliges every op, so a forgotten method fails to COMPILE — completeness is not
+// a runtime lookup.
+import XCTest
+
+@testable import TypraFixturesFeaturesTypedSeamConformance
+
+private enum TransformerError: Error, CustomStringConvertible {
+  case boom
+  var description: String { "boom not allowed" }
+}
+
+private struct TransformerImpl: Transformer {
+  func transform(text: String) async throws -> String {
+    if text == "boom" { throw TransformerError.boom }
+    return text.trimmingCharacters(in: .whitespaces)
+  }
+}
+
+final class TypedConformanceTests: XCTestCase {
+  func testTransformerTypedConformance() async throws {
+    try await runTransformerConformance(TransformerImpl())
+  }
+}

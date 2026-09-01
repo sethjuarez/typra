@@ -6,7 +6,9 @@ import {
   existsSync,
   fail,
   generatedRoot,
+  mkdirp,
   mkdtempSync,
+  packageRoot,
   path,
   readFileSync,
   rmSync,
@@ -645,4 +647,115 @@ final class ConformanceValidateTests: XCTestCase {
 
 export function runSwiftCodableExecutableConformance() {
   runSwiftExecutableConformance("swift-codable", true);
+}
+
+export function runSwiftVectorConformanceCompile(context) {
+  // Red-first gate for the typed conformance ENTRYPOINT (issue #511 Cat 1,
+  // typra#306 Track A). The emitter emits `run<Seam>Conformance<S: <Seam>>` in the
+  // library module; a consumer migrates a plain seam off the stringly
+  // VectorAdapters registry by authoring only a real seam impl and one typed call.
+  // This gate proves that path stands ALONE: generate the typed-seam-conformance
+  // fixture, DROP the stringly-rail test files (VectorConformanceTests +
+  // VectorRunner need a hand-authored VectorAdapters registry), attach the
+  // committed typed double as the sole test file, and `swift test`.
+  //
+  // Red-first: if the entrypoint is not emitted, `runTransformerConformance` does
+  // not exist and the double fails to compile — so this gate fails on `main`.
+  if (!commandExists("swift")) {
+    context.skip("swift is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "typed-seam-conformance",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-swift-typedseam-"));
+  const buildDir = mkdtempSync(
+    path.join(tmpdir(), "typra-swift-typedseam-build-"),
+  );
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "swift",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.TypedSeamConformance.Root",
+        "--deterministic",
+        "--no-format",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "swift");
+    const moduleDir = path.join(
+      sourceDir,
+      "Sources",
+      "TypraFixturesFeaturesTypedSeamConformance",
+    );
+    if (!existsSync(path.join(moduleDir, "vector_conformance.swift"))) {
+      fail(
+        "Swift typed-seam-conformance gate: emitter did not emit " +
+          "Sources/.../vector_conformance.swift (the typed conformance " +
+          "entrypoint). The committed double cannot resolve " +
+          "runTransformerConformance — this is the red-first signal.",
+      );
+      return;
+    }
+    // The typed entrypoint stands alone: replace the whole generated `tests`
+    // directory (VectorConformanceTests + VectorRunner would otherwise need a
+    // hand-authored VectorAdapters registry to compile) with only the committed
+    // typed double.
+    const testsDir = path.join(sourceDir, "tests");
+    if (existsSync(testsDir)) rmSync(testsDir, { recursive: true, force: true });
+    mkdirp(testsDir);
+    writeFileSync(
+      path.join(testsDir, "TypedConformanceTests.swift"),
+      readFileSync(
+        path.join(
+          fixtureDir,
+          "vector-adapters",
+          "swift",
+          "TypedConformanceTests.swift",
+        ),
+        "utf8",
+      ),
+    );
+    const env = swiftToolchainEnv();
+    try {
+      execFileSync(
+        "swift",
+        [
+          "test",
+          "--package-path",
+          sourceDir,
+          "--scratch-path",
+          buildDir,
+          "-Xswiftc",
+          "-warnings-as-errors",
+        ],
+        {
+          cwd: sourceDir,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          env,
+        },
+      );
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Swift typed-seam-conformance compile/run gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    if (existsSync(outRoot)) rmSync(outRoot, { recursive: true, force: true });
+    if (existsSync(buildDir)) rmSync(buildDir, { recursive: true, force: true });
+  }
 }

@@ -79,6 +79,7 @@ import {
   runSwiftCodableTests,
   runSwiftExecutableConformance,
   runSwiftTests,
+  runSwiftVectorConformanceCompile,
 } from "./fixtures/targets/swift.mjs";
 import { runIdempotencyGuard } from "./fixtures/idempotency-runner.mjs";
 import {
@@ -129,6 +130,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "rust.vector-conformance-compile",
   "rust-serde.generated-tests",
   "swift.generated-tests",
+  "swift.vector-conformance-compile",
   "swift-codable.generated-tests",
   "csharp.build",
   "csharp.consumer-nullability-build",
@@ -2288,6 +2290,10 @@ function runDeclaredValidationStages() {
         () => runRustTests("rust-serde", "fixtures_serde"),
       ],
       ["swift.generated-tests", () => runSwiftTests()],
+      [
+        "swift.vector-conformance-compile",
+        (context) => runSwiftVectorConformanceCompile(context),
+      ],
       ["swift-codable.generated-tests", () => runSwiftCodableTests()],
       ["csharp.build", runCSharpBuild],
       ["csharp.consumer-nullability-build", runCSharpConsumerNullabilityBuild],
@@ -2311,6 +2317,7 @@ function runDeclaredValidationStages() {
       "go.vector-bridge-compile": "go is not available",
       "go.vector-conformance-compile": "go is not available",
       "python.vector-conformance-compile": "uv is not available",
+      "swift.vector-conformance-compile": "swift is not available",
     },
   });
 }

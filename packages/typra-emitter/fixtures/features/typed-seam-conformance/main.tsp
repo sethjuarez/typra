@@ -59,6 +59,7 @@ interface Transformer {
 }
 
 @doc("Fixture root aggregating the plain-seam graph.")
+@serializable
 model Root {
   @doc("A sample input the seam transforms; present only to give the root a field.")
   seed: string = "";
