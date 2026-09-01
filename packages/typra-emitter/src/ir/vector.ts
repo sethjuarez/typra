@@ -407,3 +407,33 @@ export function isScalarSeamEntry(entry: CallableVectorSnapshotEntry): boolean {
     scalarRuntimeKind(classifyCallableParam(typeRef).base) !== null;
   return Object.values(entry.params).every(isScalar) && isScalar(entry.returns);
 }
+
+/**
+ * Model-parity eligibility for the TYPED conformance entrypoint (issue #511 Cat 1,
+ * Phase 2). Widens {@link isScalarSeamEntry} so a param or the return may ALSO be
+ * a bare model — but only when that model is a member of the target's
+ * `@serializable` serialization closure, i.e. the emitter already emits its JSON
+ * loader (`from_json` / `load_from_value`). The typed entrypoint decodes a model
+ * vector input and compares an expected model return through THAT loader plus the
+ * plain-derive `PartialEq`, so a model outside the closure has no decode primitive
+ * and MUST stay adapter/registry-covered. This is the honest reuse invariant: the
+ * loader emitted for persistence is the loader conformance decodes with — a type
+ * is never pressured into `@serializable` solely to unlock conformance.
+ *
+ * Superset of {@link isScalarSeamEntry}: a fully-scalar seam is eligible regardless
+ * of the closure (scalars carry native JSON codecs). Optional and array-of-model
+ * shapes stay deferred to later parity slices, so a bare `Model?` or `Model[]`
+ * param/return is still excluded here.
+ */
+export function isTypedSeamEntry(
+  entry: CallableVectorSnapshotEntry,
+  serializedTypeNames: ReadonlySet<string>,
+): boolean {
+  if (!isBridgeEligible(entry)) return false;
+  const isTyped = (typeRef: string): boolean => {
+    const shape = classifyCallableParam(typeRef);
+    if (scalarRuntimeKind(shape.base) !== null) return true;
+    return shape.bareModel && serializedTypeNames.has(shape.base);
+  };
+  return Object.values(entry.params).every(isTyped) && isTyped(entry.returns);
+}

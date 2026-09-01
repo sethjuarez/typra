@@ -30,7 +30,7 @@ import {
   DispatchedContract,
   isTypedDispatchEntry,
   classifyCallableParam,
-  isScalarSeamEntry,
+  isTypedSeamEntry,
 } from "../../ir/vector.js";
 import {
   lowerFile,
@@ -375,8 +375,13 @@ export const generateRust = async (
     // model crate exposing `run_<seam>_conformance<S: <Seam>>(seam: &S)` for every
     // eligible undispatched seam. Additive — the stringly runner above is
     // untouched; a consumer migrates a seam by calling this with their typed impl
-    // and deleting that seam's `vector_adapters` registration.
-    const entrypointEligible = allVectors.filter(isScalarSeamEntry);
+    // and deleting that seam's `vector_adapters` registration. Phase 2 widens
+    // eligibility from scalar-only to model-in/model-out seams whose boundary
+    // models are in the `@serializable` closure (their `from_json` loader exists);
+    // scalar seams remain eligible unconditionally (superset).
+    const entrypointEligible = allVectors.filter((entry) =>
+      isTypedSeamEntry(entry, serializationClosure),
+    );
     if (entrypointEligible.length > 0) {
       await emitRustFile(
         context,
@@ -2165,7 +2170,11 @@ function emitRustVectorConformanceEntrypoint(
   vectors: NonNullable<GeneratorOptions["callableVectors"]>,
   importPath: string,
 ): string {
-  const eligible = vectors.vectors.filter(isScalarSeamEntry);
+  // The driver owns eligibility (scalar OR model-in-`@serializable`-closure via
+  // `isTypedSeamEntry`) and passes the already-filtered set; trust it here so the
+  // model-parity entries survive (a local `isScalarSeamEntry` re-filter would drop
+  // them, since it has no view of the serialization closure).
+  const eligible = vectors.vectors;
   // Group eligible vectors by seam contract; a seam's entrypoint carries all of
   // its eligible vectors so `S: <Seam>` enforces the WHOLE seam is implemented.
   const bySeam = new Map<string, CallableVectorSnapshotEntry[]>();
@@ -2201,10 +2210,16 @@ function emitRustVectorConformanceEntrypoint(
     );
     const fn = `run_${toSnakeCase(seam)}_conformance`;
     const seamIsAsync = entries.some((entry) => !entry.sync);
-    const needsCtx = entries.some((entry) =>
-      Object.values(entry.params).some(
-        (paramType) => classifyCallableParam(paramType).bareModel,
-      ),
+    // A `LoadContext` is needed whenever a vector must decode a model through its
+    // `from_json` loader — either a bare-model PARAM or an expected bare-model
+    // RETURN (the serde-free `ReturnType::from_json(expected)` compare).
+    const needsCtx = entries.some(
+      (entry) =>
+        Object.values(entry.params).some(
+          (paramType) => classifyCallableParam(paramType).bareModel,
+        ) ||
+        (entry.vector.expected !== undefined &&
+          classifyCallableParam(entry.returns).bareModel),
     );
 
     lines.push(
@@ -2294,25 +2309,53 @@ function emitRustVectorConformanceEntrypoint(
           : invocation;
         lines.push(`        let actual = ${bind};`);
         if (entry.vector.expected !== undefined) {
-          lines.push(
-            `        let actual_value = serde_json::to_value(actual).expect(${JSON.stringify(
-              `${label}: serialize`,
-            )});`,
-          );
+          const returnShape = classifyCallableParam(entry.returns);
           const expectedJson = JSON.stringify(entry.vector.expected, null, 2);
-          lines.push("        let expected: Value = serde_json::from_str(");
-          lines.push(`            r####"`);
-          lines.push(expectedJson);
-          lines.push(`"####,`);
-          lines.push("        )");
-          lines.push(`        .expect(${JSON.stringify(`${label}: expected parses`)});`);
-          lines.push(
-            `        assert_eq!(actual_value, expected, ${JSON.stringify(
-              `${label} misrouted`,
-            )});`,
-          );
+          if (returnShape.bareModel) {
+            // Model return: compare serde-free through the model's own loader plus
+            // the plain-derive `PartialEq` — the plain (non-serde) target has no
+            // `Serialize` on `actual`, so `serde_json::to_value(actual)` would not
+            // compile. Symmetric with the bare-model PARAM decode above.
+            lines.push(
+              `        let expected = ${importPath}::${returnShape.base}::from_json(`,
+            );
+            lines.push(`            r####"`);
+            lines.push(expectedJson);
+            lines.push(`"####,`);
+            lines.push("            &ctx,");
+            lines.push("        )");
+            lines.push(
+              `        .expect(${JSON.stringify(`${label}: expected parses`)});`,
+            );
+            lines.push(
+              `        assert_eq!(actual, expected, ${JSON.stringify(
+                `${label} misrouted`,
+              )});`,
+            );
+          } else {
+            // Scalar return: `actual` is a JSON-native primitive, so the canonical
+            // `serde_json::to_value` round-trip compares structurally.
+            lines.push(
+              `        let actual_value = serde_json::to_value(actual).expect(${JSON.stringify(
+                `${label}: serialize`,
+              )});`,
+            );
+            lines.push("        let expected: Value = serde_json::from_str(");
+            lines.push(`            r####"`);
+            lines.push(expectedJson);
+            lines.push(`"####,`);
+            lines.push("        )");
+            lines.push(
+              `        .expect(${JSON.stringify(`${label}: expected parses`)});`,
+            );
+            lines.push(
+              `        assert_eq!(actual_value, expected, ${JSON.stringify(
+                `${label} misrouted`,
+              )});`,
+            );
+          }
         } else {
-          // No scalar expected: reaching here without error IS the assertion.
+          // No expected: reaching here without error IS the assertion.
           lines.push("        let _ = actual;");
         }
       }

@@ -12,7 +12,7 @@
 //
 // The gate attaches this file as a test module of the generated crate.
 
-use crate::model::Transformer;
+use crate::model::{Note, Reviser, Transformer};
 
 /// A minimal real seam implementation: trims, and rejects the literal "boom".
 struct TransformerImpl;
@@ -33,4 +33,27 @@ impl Transformer for TransformerImpl {
 #[tokio::test]
 async fn transformer_typed_vectors_pass() {
     crate::model::vector_conformance::run_transformer_conformance(&TransformerImpl).await;
+}
+
+/// A minimal real MODEL-in / MODEL-out seam: upper-cases the note title, passes
+/// the body through. The typed entrypoint decodes the `note` param and the
+/// expected `Note` via `Note::from_json` and asserts structural equality with
+/// the plain-derive `PartialEq` — no `Serialize` on the target model.
+struct ReviserImpl;
+
+#[async_trait::async_trait]
+impl Reviser for ReviserImpl {
+    async fn revise(
+        &self,
+        note: &Note,
+    ) -> Result<Note, Box<dyn std::error::Error + Send + Sync>> {
+        let mut revised = note.clone();
+        revised.title = note.title.to_uppercase();
+        Ok(revised)
+    }
+}
+
+#[tokio::test]
+async fn reviser_typed_vectors_pass() {
+    crate::model::vector_conformance::run_reviser_conformance(&ReviserImpl).await;
 }

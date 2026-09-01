@@ -58,9 +58,48 @@ interface Transformer {
   transform(text: string): string;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 2 (model parity): a plain seam that takes a MODEL and returns a MODEL.
+// The typed entrypoint decodes the `note` param and the expected return through
+// `Note`'s emitted `from_json` loader and compares the returned `Note` with the
+// plain-derive `PartialEq` — no native `Serialize` on the target. `Note` earns a
+// loader because it is a genuine member of the `@serializable` `Root` graph
+// (persisted as `Root.note`), NOT minted `@serializable` solely for conformance.
+// ---------------------------------------------------------------------------
+
+@doc("A note that crosses the seam boundary; persisted as part of Root.")
+model Note {
+  @doc("Short heading.")
+  title: string;
+
+  @doc("Free-form content.")
+  body: string;
+}
+
+@doc("Model-in / model-out plain seam: single implementation, no discriminator.")
+interface Reviser {
+  @vector(#{
+    name: "lower-title-uppercased",
+    stage: "callable",
+    input: #{ note: #{ title: "greeting", body: "hello" } },
+    expected: #{ title: "GREETING", body: "hello" },
+  })
+  @vector(#{
+    name: "already-uppercase-passthrough",
+    stage: "callable",
+    input: #{ note: #{ title: "WORLD", body: "peace" } },
+    expected: #{ title: "WORLD", body: "peace" },
+  })
+  @doc("Revise a note by upper-casing its title; the body passes through.")
+  revise(note: Note): Note;
+}
+
 @doc("Fixture root aggregating the plain-seam graph.")
 @serializable
 model Root {
   @doc("A sample input the seam transforms; present only to give the root a field.")
   seed: string = "";
+
+  @doc("A note the Reviser seam revises; puts `Note` in the serialization closure.")
+  note: Note;
 }
