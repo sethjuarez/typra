@@ -54,7 +54,7 @@ import {
   isTypedDispatchEntry,
   assertTypedDispatchSupported,
   classifyCallableParam,
-  isScalarSeamEntry,
+  isTypedSeamEntry,
 } from "../../ir/vector.js";
 
 /**
@@ -353,16 +353,19 @@ export const generateCsharp = async (
   }
 
   // Category 1 (issue #511): emit a typed @vector conformance entrypoint for
-  // plain (undispatched) scalar seams into the LIBRARY beside the seam
-  // interface. It takes the consumer's REAL typed seam impl (typed as the
-  // emitted `I<Seam>` interface, so a forgotten op fails to compile) and runs
-  // the seam's baked-in vectors by calling methods directly — the idiomatic
-  // replacement for the stringly VectorRunner registry + per-op marshalling
-  // double. Scalar-only for this slice, so the real (model-shaped) surface is
-  // untouched: emitted additively beside the stringly runner.
+  // plain (undispatched) seams into the LIBRARY beside the seam interface. It
+  // takes the consumer's REAL typed seam impl (typed as the emitted `I<Seam>`
+  // interface, so a forgotten op fails to compile) and runs the seam's baked-in
+  // vectors by calling methods directly — the idiomatic replacement for the
+  // stringly VectorRunner registry + per-op marshalling double. Phase 2 widens
+  // eligibility from scalar-only to model-in/model-out seams whose boundary
+  // models live in the `@serializable` closure (see `isTypedSeamEntry`): a model
+  // param decodes via `<Model>.FromJson(...)` and a model return compares through
+  // `actual.ToJson()`, keeping it zero-diff on real surfaces. Emitted additively
+  // beside the stringly runner.
   if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
     const conformanceEntries = options!.callableVectors!.vectors.filter(
-      isScalarSeamEntry,
+      (entry) => isTypedSeamEntry(entry, serializationClosure),
     );
     if (conformanceEntries.length > 0) {
       await emitCsharpFile(
@@ -1454,17 +1457,29 @@ function emitCSharpVectorConformanceEntrypoint(
       lines.push(`            // vector: ${label}`);
       for (const paramName of paramNames) {
         const shape = classifyCallableParam(entry.params[paramName]);
-        // A required scalar param decodes into the seam's non-null type; the
-        // deserializer's return is nullable, so null-forgive it (optional params
-        // keep the nullable local the seam signature already expects).
-        const forgive = shape.optional ? "" : "!";
-        lines.push(
-          `            var ${paramName} = JsonSerializer.Deserialize<${protocolCSharpType(
-            entry.params[paramName],
-          )}>(${jsonLiteral(input[paramName] ?? null)})${forgive};`,
-        );
+        if (shape.bareModel) {
+          // A model param in the `@serializable` closure decodes via the emitted
+          // wire-correct `<Model>.FromJson(...)`; System.Text.Json would mismatch
+          // the model's PascalCase properties against the lowercase wire shape.
+          lines.push(
+            `            var ${paramName} = ${shape.base}.FromJson(${jsonLiteral(
+              input[paramName] ?? null,
+            )});`,
+          );
+        } else {
+          // A required scalar param decodes into the seam's non-null type; the
+          // deserializer's return is nullable, so null-forgive it (optional params
+          // keep the nullable local the seam signature already expects).
+          const forgive = shape.optional ? "" : "!";
+          lines.push(
+            `            var ${paramName} = JsonSerializer.Deserialize<${protocolCSharpType(
+              entry.params[paramName],
+            )}>(${jsonLiteral(input[paramName] ?? null)})${forgive};`,
+          );
+        }
       }
       const call = `${awaitPrefix}seam.${method}(${paramNames.join(", ")})`;
+      const returnsModel = classifyCallableParam(entry.returns).bareModel;
 
       if (hasExpectedError) {
         lines.push("            Exception? caught = null;");
@@ -1493,8 +1508,13 @@ function emitCSharpVectorConformanceEntrypoint(
       } else {
         lines.push(`            var actual = ${call};`);
         if (entry.vector.expected !== undefined) {
+          // A model return serializes through the emitted wire-correct
+          // `actual.ToJson()`; a scalar return goes through System.Text.Json.
+          const serialized = returnsModel
+            ? "actual.ToJson()"
+            : "JsonSerializer.Serialize(actual)";
           lines.push(
-            `            if (Canonical(JsonSerializer.Serialize(actual)) != Canonical(${jsonLiteral(
+            `            if (Canonical(${serialized}) != Canonical(${jsonLiteral(
               entry.vector.expected,
             )}))`,
             `                throw new SeamConformanceException(${JSON.stringify(
