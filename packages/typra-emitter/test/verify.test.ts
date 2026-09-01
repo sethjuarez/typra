@@ -44,7 +44,7 @@ describe("typra verifier", () => {
         "hydration zone touches: 0",
         "stale cleanup dry-run candidates: 0",
         "schema: types +0 / -0, required fields +0, optional fields +0, requiredness changed 0, property types changed 0, wire names changed 0, discriminators changed 0, enum values changed 0",
-        "vector coverage: 0/0 covered, 0 waived, 0 missing",
+        "vector coverage: 0/0 covered, 0 typed, 0 waived, 0 missing",
         "breaking change classification: patch",
         "next action: no baseline update needed.",
         "",
