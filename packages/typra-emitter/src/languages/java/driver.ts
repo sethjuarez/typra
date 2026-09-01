@@ -29,7 +29,7 @@ import {
   isTypedDispatchEntry,
   assertTypedDispatchSupported,
   classifyCallableParam,
-  isScalarSeamEntry,
+  isTypedSeamEntry,
 } from "../../ir/vector.js";
 import {
   buildBaseTestContext,
@@ -371,16 +371,19 @@ export const generateJava = async (
   }
 
   // Category 1 (issue #511): emit a typed @vector conformance entrypoint for
-  // plain (undispatched) scalar seams into the LIBRARY beside the seam
-  // interface. It takes the consumer's REAL typed seam impl (typed as the
-  // emitted `<Seam>` interface, so a forgotten op fails to compile) and runs the
-  // seam's baked-in vectors by calling methods directly — the idiomatic
-  // replacement for the stringly VectorRunner registry + per-op marshalling
-  // double. Scalar-only for this slice, so the real (model-shaped) surface is
-  // untouched: emitted additively beside the stringly runner.
+  // plain (undispatched) seams into the LIBRARY beside the seam interface. It
+  // takes the consumer's REAL typed seam impl (typed as the emitted `<Seam>`
+  // interface, so a forgotten op fails to compile) and runs the seam's baked-in
+  // vectors by calling methods directly — the idiomatic replacement for the
+  // stringly VectorRunner registry + per-op marshalling double. Phase 2 widens
+  // eligibility from scalar-only to model-in/model-out seams whose boundary
+  // models live in the `@serializable` closure (see `isTypedSeamEntry`): a model
+  // param decodes via `<Model>.load(...)` and a model return compares through
+  // `actual.toJson()`, keeping it zero-diff on real surfaces. Emitted additively
+  // beside the stringly runner.
   if (emitTarget["output-dir"] && (options?.callableVectors?.vectors.length ?? 0) > 0) {
     const conformanceEntries = options!.callableVectors!.vectors.filter(
-      isScalarSeamEntry,
+      (entry) => isTypedSeamEntry(entry, serializationClosure),
     );
     if (conformanceEntries.length > 0) {
       await emitJavaFile(
@@ -1427,14 +1430,16 @@ function emitJavaInterfaceConformanceTest(
 
 /**
  * Emit the Category 1 (issue #511) typed `@vector` conformance entrypoint for
- * plain (undispatched) scalar seams. Unlike the stringly `VectorRunner` +
+ * plain (undispatched) seams. Unlike the stringly `VectorRunner` +
  * per-op marshalling double, this class lives in the LIBRARY and each
  * `run<Seam>Conformance` method takes the consumer's REAL typed seam impl
  * (typed as the emitted `<Seam>` interface), so a forgotten op cannot compile.
- * It decodes each vector's scalar inputs from the vector JSON (via the emitted
- * `TypraJson` helper, a library sibling), calls the seam method directly, and
- * asserts the result reproduces `expected` (or that an `expectedError` was
- * thrown). Emitted additively; scalar-only so the real surface is untouched.
+ * It decodes each vector's inputs from the vector JSON (scalars via the emitted
+ * `TypraJson` helper, models via the emitted `<Model>.load(...)`), calls the
+ * seam method directly, and asserts the result reproduces `expected` (models
+ * serialize back through `actual.toJson()`) or that an `expectedError` was
+ * thrown. Eligibility covers scalar and `@serializable`-closure model seams
+ * (see `isTypedSeamEntry`). Emitted additively so the real surface is untouched.
  */
 function emitJavaVectorConformanceEntrypoint(
   entries: CallableVectorSnapshotEntry[],
@@ -1515,12 +1520,23 @@ function emitJavaVectorConformanceEntrypoint(
       for (const paramName of paramNames) {
         const local = locals.get(paramName);
         const key = JSON.stringify(paramName);
-        const javaType = javaFqnCollectionType(
-          javaScalarType(entry.params[paramName]),
-        );
-        lines.push(`      ${javaType} ${local} = (${javaType}) input.get(${key});`);
+        const shape = classifyCallableParam(entry.params[paramName]);
+        if (shape.bareModel) {
+          // A model param in the `@serializable` closure decodes into its emitted
+          // class via `<Model>.load(...)` (the already-parsed map value); scalars
+          // and collections keep the direct cast off the parsed input map.
+          lines.push(
+            `      ${shape.base} ${local} = ${shape.base}.load(input.get(${key}), new LoadContext());`,
+          );
+        } else {
+          const javaType = javaFqnCollectionType(
+            javaScalarType(entry.params[paramName]),
+          );
+          lines.push(`      ${javaType} ${local} = (${javaType}) input.get(${key});`);
+        }
       }
       const callArgs = paramNames.map((paramName) => locals.get(paramName)).join(", ");
+      const returnsModel = classifyCallableParam(entry.returns).bareModel;
 
       if (hasExpectedError) {
         lines.push("      Throwable caught = null;");
@@ -1544,7 +1560,14 @@ function emitJavaVectorConformanceEntrypoint(
           );
         }
       } else {
-        lines.push(`      Object actual = seam.${method}(${callArgs});`);
+        // A model return is held in its typed local so it serializes through the
+        // emitted wire-correct `actual.toJson()`; a scalar return stays `Object`
+        // and round-trips through `TypraJson.stringify`.
+        lines.push(
+          returnsModel
+            ? `      ${classifyCallableParam(entry.returns).base} actual = seam.${method}(${callArgs});`
+            : `      Object actual = seam.${method}(${callArgs});`,
+        );
         if (entry.vector.expected !== undefined) {
           const expectedChunks = javaPayloadLiteralChunks(
             JSON.stringify(entry.vector.expected),
@@ -1556,8 +1579,11 @@ function emitJavaVectorConformanceEntrypoint(
           lines.push(
             "      Object expected = TypraJson.parse(expectedJson.toString());",
           );
+          const actualJson = returnsModel
+            ? "actual.toJson()"
+            : "TypraJson.stringify(actual)";
           lines.push(
-            `      if (!TypraJson.stringify(actual).equals(TypraJson.stringify(expected)))`,
+            `      if (!${actualJson}.equals(TypraJson.stringify(expected)))`,
             `        throw new AssertionError(${JSON.stringify(`${label} misrouted`)});`,
           );
         } else {

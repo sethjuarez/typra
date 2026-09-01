@@ -26,8 +26,21 @@ public final class TypedConformanceRun {
     }
   }
 
+  // A model-in/model-out seam impl: proves the typed entrypoint decodes the Note
+  // param via the emitted `Note.load(...)` and serializes the Note result back
+  // through `actual.toJson()`. Uppercases the title in place and returns it.
+  static final class ReviserImpl implements Reviser {
+    @Override
+    public Note revise(Note note) {
+      note.title = note.title == null ? null : note.title.toUpperCase();
+      return note;
+    }
+  }
+
   public static void main(String[] args) throws Exception {
     VectorConformance.runTransformerConformance(new TransformerImpl());
     System.out.println("PASS TransformerTypedConformance");
+    VectorConformance.runReviserConformance(new ReviserImpl());
+    System.out.println("PASS ReviserTypedConformance");
   }
 }
