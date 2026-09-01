@@ -49,6 +49,7 @@ import {
   runGoExecutableConformance,
   runGoTests,
   runGoVectorBridgeCompile,
+  runGoVectorConformanceCompile,
 } from "./fixtures/targets/go.mjs";
 import {
   runRustDispatchRegressionCompile,
@@ -118,6 +119,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "python_pydantic.generated-tests",
   "go.generated-tests",
   "go.vector-bridge-compile",
+  "go.vector-conformance-compile",
   "rust.generated-tests",
   "rust.dispatch-regression-compile",
   "rust.vector-conformance-compile",
@@ -2256,6 +2258,10 @@ function runDeclaredValidationStages() {
         "go.vector-bridge-compile",
         (context) => runGoVectorBridgeCompile(context),
       ],
+      [
+        "go.vector-conformance-compile",
+        (context) => runGoVectorConformanceCompile(context),
+      ],
       ["rust.generated-tests", () => runRustTests()],
       [
         "rust.dispatch-regression-compile",
@@ -2291,6 +2297,7 @@ function runDeclaredValidationStages() {
       "rust.dispatch-regression-compile": "cargo is not available",
       "rust.vector-conformance-compile": "cargo is not available",
       "go.vector-bridge-compile": "go is not available",
+      "go.vector-conformance-compile": "go is not available",
     },
   });
 }

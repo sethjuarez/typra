@@ -18,7 +18,6 @@ import {
   rustTestOptions,
 } from "../../testing/test-context.js";
 import { toSnakeCase } from "../../ir/utilities.js";
-import { scalarRuntimeKind } from "../../ir/scalar-kinds.js";
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
@@ -31,7 +30,7 @@ import {
   DispatchedContract,
   isTypedDispatchEntry,
   classifyCallableParam,
-  isBridgeEligible,
+  isScalarSeamEntry,
 } from "../../ir/vector.js";
 import {
   lowerFile,
@@ -2134,30 +2133,6 @@ function emitRustVectorConformanceTest(
     lines.push("");
   });
   return lines.join("\n");
-}
-
-/**
- * First-slice eligibility for the typed conformance entrypoint (issue #511 Cat 1).
- *
- * The entrypoint decodes vector input with `serde_json::from_str` and re-encodes
- * the seam's result with `serde_json::to_value` for structural comparison. On the
- * PLAIN (non-serde) Rust target, models derive only `Debug, Clone, PartialEq` — NOT
- * `Serialize`/`Deserialize` — so those calls only compile when every param and the
- * return are serde-native SCALARS (`String`, integers, floats, bool, and their
- * `Option`/`Vec` wrappers). Model params/returns, `Record<…>`, and `unknown` need
- * the model's own `from_json`/`to_value` seam and structural normalization that is
- * a deferred follow-up, so this slice restricts to fully-scalar seams. This keeps
- * the slice additive and zero-diff on the integration surface (whose one eligible
- * plain seam takes a model array) while the dedicated `typed-seam-conformance`
- * fixture exercises the typed path red-first.
- */
-function isScalarSeamEntry(entry: CallableVectorSnapshotEntry): boolean {
-  if (!isBridgeEligible(entry)) return false;
-  const isScalar = (typeRef: string): boolean =>
-    scalarRuntimeKind(classifyCallableParam(typeRef).base) !== null;
-  return (
-    Object.values(entry.params).every(isScalar) && isScalar(entry.returns)
-  );
 }
 
 /**

@@ -384,3 +384,26 @@ function vectorSnapshotKey(entry: CallableVectorSnapshotEntry): string {
 export function isBridgeEligible(entry: CallableVectorSnapshotEntry): boolean {
   return !entry.dispatch && !entry.runtimeCancellable && !entry.optional;
 }
+
+/**
+ * First-slice eligibility for the TYPED conformance entrypoint (issue #511 Cat 1).
+ *
+ * The typed entrypoint decodes vector input with the target's JSON codec and
+ * re-encodes the seam's result for a structural comparison. That round-trip only
+ * compiles on targets whose models do NOT carry a native serializer (e.g. the
+ * plain non-serde Rust target derives only `Debug, Clone, PartialEq`) when every
+ * param and the return are JSON-native SCALARS (strings, integer widths, floats,
+ * bool, and their optional/array wrappers). Model params/returns, `Record<…>`,
+ * and `unknown` need the model's own loader seam plus structural normalization
+ * that is a deferred follow-up, so this slice restricts to fully-scalar seams.
+ * Keeping the slice scalar-only also makes it ADDITIVE / zero-diff on real
+ * surfaces whose eligible plain seams take model shapes (they are excluded),
+ * while a dedicated fixture exercises the typed path red-first. Shared by every
+ * language driver so the eligibility rule cannot drift between targets.
+ */
+export function isScalarSeamEntry(entry: CallableVectorSnapshotEntry): boolean {
+  if (!isBridgeEligible(entry)) return false;
+  const isScalar = (typeRef: string): boolean =>
+    scalarRuntimeKind(classifyCallableParam(typeRef).base) !== null;
+  return Object.values(entry.params).every(isScalar) && isScalar(entry.returns);
+}
