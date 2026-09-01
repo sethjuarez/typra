@@ -40,6 +40,7 @@ behavior is genuinely runtime-specific.
 | Transport | `features/transport/main.tsp` | Path, query, header, cookie, body, status, success/error body envelopes, and wildcard status bodies. |
 | Namespaces | `features/namespaces/main.tsp` | Nested namespaces and cross-namespace references. |
 | Documentation | `features/docs/main.tsp` | `@doc` metadata and multiline sample text. |
+| Typed seam conformance | `features/typed-seam-conformance/main.tsp` | Plain (undispatched) scalar seam whose `@vector`s ride the emitted typed conformance entrypoint (`run_<seam>_conformance<S: <Seam>>`), covering `expected` (structural compare) and `expectedError` (async error channel). Rust gate `rust.vector-conformance-compile` attaches the committed typed double under `vector-adapters/rust/`. |
 
 ## Dispatch-seam integration fixture
 

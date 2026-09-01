@@ -55,6 +55,7 @@ import {
   runRustExecutableConformance,
   runRustTests,
   runRustUnknownAbstractConformance,
+  runRustVectorConformanceCompile,
 } from "./fixtures/targets/rust.mjs";
 import {
   runCSharpBuild,
@@ -119,6 +120,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "go.vector-bridge-compile",
   "rust.generated-tests",
   "rust.dispatch-regression-compile",
+  "rust.vector-conformance-compile",
   "rust-serde.generated-tests",
   "swift.generated-tests",
   "swift-codable.generated-tests",
@@ -702,6 +704,7 @@ function assertFocusedFeatureFixtures() {
     "features/dispatch-vector-params/main.tsp",
     "features/dispatch-vector-coerce/main.tsp",
     "features/dispatch-target-regression/main.tsp",
+    "features/typed-seam-conformance/main.tsp",
   );
 
   for (const fixture of fixtures) {
@@ -2259,6 +2262,10 @@ function runDeclaredValidationStages() {
         (context) => runRustDispatchRegressionCompile(context),
       ],
       [
+        "rust.vector-conformance-compile",
+        (context) => runRustVectorConformanceCompile(context),
+      ],
+      [
         "rust-serde.generated-tests",
         () => runRustTests("rust-serde", "fixtures_serde"),
       ],
@@ -2282,6 +2289,7 @@ function runDeclaredValidationStages() {
       ...idempotencyAllowedSkips(),
       "typescript.runtime-neutrality": "no TypeScript targets generated",
       "rust.dispatch-regression-compile": "cargo is not available",
+      "rust.vector-conformance-compile": "cargo is not available",
       "go.vector-bridge-compile": "go is not available",
     },
   });
