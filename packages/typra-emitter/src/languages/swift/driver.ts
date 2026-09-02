@@ -299,9 +299,17 @@ export const generateSwift = async (
     // seams whose boundary models live in the `@serializable` closure (see
     // `isTypedSeamEntry`): a model param decodes via `<Model>.load(...)` and a
     // model return compares through `try actual.save()`, keeping it zero-diff on
-    // real surfaces.
-    const conformanceEntries = options!.callableVectors!.vectors.filter(
-      (entry) => isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
+    // real surfaces. Array parity (`{ arrays: true }`) admits `Model[]` seams
+    // (per-element `.load()` / `.save()`). Carrier parity (`{ carriers: true }`)
+    // admits an untyped `Record<unknown>` param (optional or not): a non-optional
+    // carrier decodes via `input[key] as! [String: Any]`, an optional one via
+    // `input[key] as? [String: Any]` (nil when absent). Param-only — the return
+    // keeps its own rule.
+    const conformanceEntries = options!.callableVectors!.vectors.filter((entry) =>
+      isTypedSeamEntry(entry, serializationClosure, {
+        arrays: true,
+        carriers: true,
+      }),
     );
     if (conformanceEntries.length > 0) {
       await emitSwiftGeneratedFile(
@@ -1266,6 +1274,15 @@ function emitSwiftVectorConformanceEntrypoint(
           lines.push(
             `    let ${local} = try (input[${key}]! as! [Any]).map { try ${shape.base}.load($0) }`,
           );
+        } else if (shape.optional) {
+          // An optional param (e.g. an optional `Record<unknown>` carrier —
+          // prompty's `Parser.parse` `context?`) may be ABSENT from the input
+          // JSON. The dictionary subscript already yields an Optional, so cast
+          // with `as?` to the base type: nil when the key is absent, the value
+          // otherwise — matching the seam's optional parameter without a
+          // force-cast crash. Non-optional params keep the force path below.
+          const baseType = swiftType(entry.params[paramName]).replace(/\?$/, "");
+          lines.push(`    let ${local} = input[${key}] as? ${baseType}`);
         } else {
           lines.push(
             `    let ${local} = input[${key}] as! ${swiftType(entry.params[paramName])}`,

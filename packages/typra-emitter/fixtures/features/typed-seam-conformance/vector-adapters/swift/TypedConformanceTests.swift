@@ -46,6 +46,22 @@ private struct CollatorImpl: Collator {
   }
 }
 
+// A carrier-param seam impl: the note flows through typed while `options` is an
+// untyped `[String: Any]` carrier (prompty's `Renderer.render` `inputs`).
+// `reassemble` takes the OPTIONAL carrier (`Parser.parse` `context?`), which
+// lowers to `[String: Any]?`; the absent-carrier vector proves an omitted
+// optional carrier decodes to `nil`. The impls ignore `options` — the point is
+// only that the untyped param decodes and the `[Note]` return still compares.
+private struct AssemblerImpl: Assembler {
+  func assemble(note: Note, options: [String: Any]) async throws -> [Note] {
+    return [note]
+  }
+
+  func reassemble(note: Note, options: [String: Any]?) async throws -> [Note] {
+    return [note]
+  }
+}
+
 final class TypedConformanceTests: XCTestCase {
   func testTransformerTypedConformance() async throws {
     try await runTransformerConformance(TransformerImpl())
@@ -57,5 +73,9 @@ final class TypedConformanceTests: XCTestCase {
 
   func testCollatorTypedConformance() async throws {
     try await runCollatorConformance(CollatorImpl())
+  }
+
+  func testAssemblerTypedConformance() async throws {
+    try await runAssemblerConformance(AssemblerImpl())
   }
 }
