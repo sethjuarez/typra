@@ -308,8 +308,15 @@ export const generatePython = async (
     // through `result.save()`, keeping it zero-diff on real surfaces. Phase 2
     // array parity (`{ arrays: true }`) further admits `Model[]` seams — the
     // decode/compare become per-element `.load()` / `.save()` comprehensions.
-    const conformanceEntries = options!.callableVectors!.vectors.filter(
-      (entry) => isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
+    // Carrier parity (`{ carriers: true }`) admits an untyped `Record<unknown>`
+    // param (optional or not); it decodes via the same `json.loads(...)` pass-
+    // through (dict / None) with no extra emission, and stays param-only so the
+    // return keeps its own rule.
+    const conformanceEntries = options!.callableVectors!.vectors.filter((entry) =>
+      isTypedSeamEntry(entry, serializationClosure, {
+        arrays: true,
+        carriers: true,
+      }),
     );
     if (conformanceEntries.length > 0) {
       await emitPythonFile(

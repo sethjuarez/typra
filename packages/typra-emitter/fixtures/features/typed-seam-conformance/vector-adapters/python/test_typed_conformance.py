@@ -12,8 +12,9 @@
 # collect (the red-first signal). The @runtime_checkable isinstance assertion
 # checks that every op is present at runtime; a static checker enforces it from
 # the Protocol annotation on run_<seam>_conformance.
-from fixtures import Collator, Note, Reviser, Transformer
+from fixtures import Assembler, Collator, Note, Reviser, Transformer
 from fixtures.vector_conformance import (
+    run_assembler_conformance,
     run_collator_conformance,
     run_reviser_conformance,
     run_transformer_conformance,
@@ -54,6 +55,32 @@ class CollatorImpl:
         return self.collate(notes)
 
 
+class AssemblerImpl:
+    # A carrier-param seam: the note flows through typed while `options` is an
+    # untyped dict[str, Any] carrier (prompty's Renderer.render `inputs`).
+    # `reassemble` takes the OPTIONAL carrier (Parser.parse `context?`), which
+    # lowers to `dict[str, Any] | None`; the absent-carrier vector proves an
+    # omitted optional carrier decodes to None. The impls ignore `options` — the
+    # point is only that the untyped param decodes and the Note[] return compares.
+    def assemble(self, note: Note, options: dict[str, object]) -> list[Note]:
+        return [note]
+
+    async def assemble_async(
+        self, note: Note, options: dict[str, object]
+    ) -> list[Note]:
+        return self.assemble(note, options)
+
+    def reassemble(
+        self, note: Note, options: "dict[str, object] | None"
+    ) -> list[Note]:
+        return [note]
+
+    async def reassemble_async(
+        self, note: Note, options: "dict[str, object] | None"
+    ) -> list[Note]:
+        return self.reassemble(note, options)
+
+
 def test_transformer_typed_conformance():
     impl = TransformerImpl()
     assert isinstance(impl, Transformer)
@@ -70,3 +97,9 @@ def test_collator_typed_conformance():
     impl = CollatorImpl()
     assert isinstance(impl, Collator)
     run_collator_conformance(impl)
+
+
+def test_assembler_typed_conformance():
+    impl = AssemblerImpl()
+    assert isinstance(impl, Assembler)
+    run_assembler_conformance(impl)
