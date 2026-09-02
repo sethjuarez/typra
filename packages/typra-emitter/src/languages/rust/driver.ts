@@ -268,11 +268,14 @@ export const generateRust = async (
       groupModuleNames.get(group)!.push(toSnakeCase(n.typeName.name));
     }
 
-    // Render test file — skip children of polymorphic hierarchies (they're enum variants now) and protocols
+    // Render test file — skip children of polymorphic hierarchies (they're enum variants now), protocols,
+    // and non-serialized types (their round-trip test would reference load/save that is no longer emitted;
+    // gate on the serialization closure, matching Go).
     if (
       emitTarget["test-dir"] &&
       !childToParent.has(n.typeName.name) &&
-      !n.isProtocol
+      !n.isProtocol &&
+      serializationClosure.has(n.typeName.name)
     ) {
       const importPath = namespaceProjection.importPath!;
       const testContext = buildTestContext(n, registry);

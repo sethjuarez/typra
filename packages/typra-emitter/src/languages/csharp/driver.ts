@@ -219,7 +219,11 @@ export const generateCsharp = async (
       outDir,
       emitTarget["output-dir"],
     );
-    if (emitTarget["test-dir"] && !n.isProtocol) {
+    if (
+      emitTarget["test-dir"] &&
+      !n.isProtocol &&
+      serializationClosure.has(n.typeName.name)
+    ) {
       const testDir = groupFolder
         ? `${emitTarget["test-dir"]}/${groupFolder}`
         : emitTarget["test-dir"];

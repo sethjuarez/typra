@@ -164,7 +164,12 @@ export const generateSwift = async (
       );
     }
 
-    if (testRoot && !n.base && !n.isProtocol) {
+    if (
+      testRoot &&
+      !n.base &&
+      !n.isProtocol &&
+      serializationClosure.has(n.typeName.name)
+    ) {
       const testContext = { ...buildTestContext(n, registry), moduleName };
       const group = n.group || "";
       const outDir = group ? `${testRoot}/${group}` : testRoot;
