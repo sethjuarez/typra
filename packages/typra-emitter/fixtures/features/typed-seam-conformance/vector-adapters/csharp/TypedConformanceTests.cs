@@ -55,6 +55,26 @@ file sealed class CollatorImpl : ICollator
     }
 }
 
+/// <summary>A real typed Assembler impl — the note flows through typed while
+/// `options` is an untyped Dictionary&lt;string, object?&gt; carrier (prompty's
+/// Renderer.render `inputs`). ReassembleAsync takes the OPTIONAL carrier
+/// (Parser.parse `context?`), which lowers to a nullable dictionary; the
+/// absent-carrier vector proves an omitted optional carrier decodes to null.
+/// The impls ignore `options` — the point is only that the untyped param
+/// decodes and the List&lt;Note&gt; return still compares.</summary>
+file sealed class AssemblerImpl : IAssembler
+{
+    public Task<List<Note>> AssembleAsync(Note note, Dictionary<string, object?> options)
+    {
+        return Task.FromResult(new List<Note> { note });
+    }
+
+    public Task<List<Note>> ReassembleAsync(Note note, Dictionary<string, object?>? options)
+    {
+        return Task.FromResult(new List<Note> { note });
+    }
+}
+
 public class TypedConformanceTests
 {
     [Fact]
@@ -73,5 +93,11 @@ public class TypedConformanceTests
     public async Task CollatorTypedConformance()
     {
         await VectorConformance.RunCollatorConformanceAsync(new CollatorImpl());
+    }
+
+    [Fact]
+    public async Task AssemblerTypedConformance()
+    {
+        await VectorConformance.RunAssemblerConformanceAsync(new AssemblerImpl());
     }
 }
