@@ -65,12 +65,14 @@ function operationKeys(snapshot: CallableVectorSnapshot): string[] {
 /**
  * Operations the emitted typed conformance entrypoint covers: those whose every
  * vector entry is a typed-eligible seam (`isTypedSeamEntry`) — fully scalar,
- * model-in/model-out, or array-of-model-in/out, with every boundary model in the
- * `@serializable` closure carried by `snapshot.serializedTypes`. Vectors of one
- * operation share the seam signature, so `every` here is equivalent to `some`;
- * using `every` states the intent that the whole operation is typed-emittable.
- * Snapshots emitted before `serializedTypes` existed lack the field; treating it
- * as empty degrades safely to scalar-only coverage.
+ * model-in/model-out, array-of-model-in/out, or carrying an untyped
+ * `Record<unknown>` param (optional or not) alongside a typed return, with every
+ * boundary model in the `@serializable` closure carried by
+ * `snapshot.serializedTypes`. Vectors of one operation share the seam signature,
+ * so `every` here is equivalent to `some`; using `every` states the intent that
+ * the whole operation is typed-emittable. Snapshots emitted before
+ * `serializedTypes` existed lack the field; treating it as empty degrades safely
+ * to scalar-only coverage.
  */
 function typedOperationKeys(snapshot: CallableVectorSnapshot): Set<string> {
   const serializedTypeNames = new Set(snapshot.serializedTypes ?? []);
@@ -79,6 +81,7 @@ function typedOperationKeys(snapshot: CallableVectorSnapshot): Set<string> {
     const key = `${entry.contract}.${entry.operation}`;
     const eligible = isTypedSeamEntry(entry, serializedTypeNames, {
       arrays: true,
+      carriers: true,
     });
     byOperation.set(key, (byOperation.get(key) ?? true) && eligible);
   }

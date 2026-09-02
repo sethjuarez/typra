@@ -415,6 +415,91 @@ describe("vector adapter coverage gate", () => {
     assert.deepEqual(complete.missing, []);
     assertPartition(complete);
   });
+
+  it("type-covers a carrier-param seam (optional or not) when the return is typed", () => {
+    // The Record<unknown>-carrier slice landed across all 7 runtimes: an untyped
+    // carrier param (Record<unknown>, optional or not) decodes via the target's
+    // native untyped-JSON codec and threads straight through to the seam call.
+    // This is the exact shape of prompty's three vector seams — Renderer.render /
+    // renderSegments (`inputs: Record<unknown>`, non-optional) and Parser.parse
+    // (`context?: Record<unknown>`, optional) — all with a typed return. Both ops
+    // sit on ONE seam, so the every-op guard must see BOTH eligible for the seam
+    // to be retirable. (This assertion flipped red-first when the drivers gained
+    // carrier support, exactly as the scalar->model->array flips did.)
+    const snap: CallableVectorSnapshot = {
+      emitter: "typra-emitter",
+      version: 1,
+      serializedTypes: ["Note"],
+      vectors: [
+        {
+          contract: "Assembler",
+          namespace: "Typra.Sample",
+          group: "",
+          operation: "assemble",
+          params: { note: "Note", options: "Record<unknown>" },
+          returns: "Note[]",
+          sync: false,
+          vector: { operation: "assemble", stage: "callable", input: {}, expected: [] },
+        },
+        {
+          contract: "Assembler",
+          namespace: "Typra.Sample",
+          group: "",
+          operation: "reassemble",
+          params: { note: "Note", options: "Record<unknown>?" },
+          returns: "Note[]",
+          sync: false,
+          vector: { operation: "reassemble", stage: "callable", input: {}, expected: [] },
+        },
+      ],
+    };
+    const covered = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    assert.ok(covered.ok);
+    assert.deepEqual(covered.typed, ["Assembler.assemble", "Assembler.reassemble"]);
+    assert.deepEqual(covered.covered, []);
+    assert.deepEqual(covered.missing, []);
+    assertPartition(covered);
+  });
+
+  it("does NOT type-cover an op whose RETURN is an untyped carrier (param-only invariant)", () => {
+    // The carrier admission is deliberately PARAM-ONLY: an untyped carrier must
+    // never loosen RETURN checking. An op that RETURNS a Record<unknown> has no
+    // schema to decode/compare its result against, so it stays OFF the typed rail
+    // (adapter/waiver/missing) even though its params are all typed. Flipping a
+    // carrier-return op to typed would let a consumer delete a double whose result
+    // the runtime cannot structurally verify.
+    const snap: CallableVectorSnapshot = {
+      emitter: "typra-emitter",
+      version: 1,
+      serializedTypes: ["Note"],
+      vectors: [
+        {
+          contract: "Emit",
+          namespace: "Typra.Sample",
+          group: "",
+          operation: "raw",
+          params: { payload: "string" },
+          returns: "Record<unknown>",
+          sync: false,
+          vector: { operation: "raw", stage: "callable", input: {}, expected: {} },
+        },
+      ],
+    };
+    const missing = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    assert.equal(missing.ok, false);
+    assert.deepEqual(missing.typed, []);
+    assert.deepEqual(missing.missing, ["Emit.raw"]);
+
+    // It CAN still be covered the honest way — a hand adapter or a waiver.
+    const adapted = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: ["Emit.raw"],
+    });
+    assert.ok(adapted.ok);
+    assert.deepEqual(adapted.covered, ["Emit.raw"]);
+    assert.deepEqual(adapted.typed, []);
+    assertPartition(adapted);
+  });
 });
 
 // Every operation lands in exactly one bucket (no double-count, no drop).
