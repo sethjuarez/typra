@@ -80,3 +80,27 @@ var _ fixtures.Collator = CollatorImpl{}
 func TestCollatorTypedVectors(t *testing.T) {
 	vectorconformance.RunCollatorConformance(t, CollatorImpl{})
 }
+
+// AssemblerImpl is a minimal real CARRIER-in / ARRAY-out seam: it wraps the note
+// in a one-element slice, ignoring the untyped `options` carrier. The emitted
+// entrypoint decodes the `options` param via `json.Unmarshal` into
+// `map[string]interface{}` (or `*map[string]interface{}` for the optional
+// carrier) — the same generic json codec as any other param — and threads the
+// parsed bag straight through to the call. The RETURN keeps its own
+// array-of-model rule, so the carrier param never loosens the result check.
+// `Reassemble`'s optional carrier proves an absent carrier decodes to a nil map.
+type AssemblerImpl struct{}
+
+func (AssemblerImpl) Assemble(note fixtures.Note, options map[string]interface{}) ([]fixtures.Note, error) {
+	return []fixtures.Note{note}, nil
+}
+
+func (AssemblerImpl) Reassemble(note fixtures.Note, options *map[string]interface{}) ([]fixtures.Note, error) {
+	return []fixtures.Note{note}, nil
+}
+
+var _ fixtures.Assembler = AssemblerImpl{}
+
+func TestAssemblerTypedVectors(t *testing.T) {
+	vectorconformance.RunAssemblerConformance(t, AssemblerImpl{})
+}

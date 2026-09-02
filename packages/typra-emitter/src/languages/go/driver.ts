@@ -306,11 +306,18 @@ export const generateGo = async (
     // carries `json:` struct tags, so the model path rides the SAME code as the
     // scalar path — no serde-free branch (unlike the plain Rust target). The same
     // generic json codec lifts over sequences, so `{ arrays: true }` (Phase 2
-    // array parity) admits `Model[]` seams with ZERO extra emission here. Emitted
-    // as a sibling PACKAGE `vectorconformance` (like the runner/bridge) because a
-    // Go directory holds only one non-test package.
+    // array parity) admits `Model[]` seams with ZERO extra emission here.
+    // `{ carriers: true }` (Phase 2 carrier parity) likewise admits an untyped
+    // `Record<…>` / `map[string]interface{}` PARAM — `json.Unmarshal` decodes it
+    // into the mapped map type (or a `*map[…]` pointer for an optional carrier)
+    // exactly like any other param, so carrier seams also cost ZERO extra
+    // emission here. Emitted as a sibling PACKAGE `vectorconformance` (like the
+    // runner/bridge) because a Go directory holds only one non-test package.
     const conformanceEntries = allVectors.filter((entry) =>
-      isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
+      isTypedSeamEntry(entry, serializationClosure, {
+        arrays: true,
+        carriers: true,
+      }),
     );
     if (conformanceEntries.length > 0) {
       await emitGoFile(

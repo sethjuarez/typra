@@ -124,6 +124,53 @@ interface Collator {
   collate(notes: Note[]): Note[];
 }
 
+// ---------------------------------------------------------------------------
+// Phase 2 (carrier parity): a plain seam whose op takes an UNTYPED CARRIER param
+// (`Record<unknown>`) alongside a typed model param, returning an array of a
+// model. A carrier has no schema, so the typed entrypoint decodes it with the
+// target's native untyped-JSON codec (Go `map[string]interface{}`, Rust
+// `serde_json::Value`, TS `Record<string, unknown>`, …) and threads the parsed
+// bag straight through to the seam call — WITHOUT loosening the RETURN check,
+// which still rides its own array-of-model rule. Carrier eligibility is
+// PARAM-ONLY: a carrier RETURN stays adapter/registry-covered.
+//
+// This is the exact shape of prompty's `Renderer.render`/`renderSegments`
+// (`inputs: Record<unknown>`, non-optional) and `Parser.parse`
+// (`context?: Record<unknown>`, OPTIONAL) — the last gate before those seams can
+// retire their hand-authored doubles. `assemble` covers the non-optional
+// carrier; `reassemble` covers the optional carrier (absent-carrier vector
+// proves the target's empty/none form decodes). Per the every-op-eligible seam
+// guard, `Assembler` only reports typed-covered once BOTH ops clear the carrier
+// gate together.
+// ---------------------------------------------------------------------------
+
+@doc("Carrier-in / array-out plain seam: single implementation, no discriminator.")
+interface Assembler {
+  @vector(#{
+    name: "assemble-single",
+    stage: "callable",
+    input: #{ note: #{ title: "hi", body: "there" }, options: #{ loud: true } },
+    expected: #[#{ title: "hi", body: "there" }],
+  })
+  @doc("Assemble the note into a one-element list; `options` is an untyped carrier the impl may consult but need not — proving the carrier param decodes and threads through.")
+  assemble(note: Note, options: Record<unknown>): Note[];
+
+  @vector(#{
+    name: "reassemble-carrier-present",
+    stage: "callable",
+    input: #{ note: #{ title: "x", body: "y" }, options: #{ n: 1 } },
+    expected: #[#{ title: "x", body: "y" }],
+  })
+  @vector(#{
+    name: "reassemble-carrier-absent",
+    stage: "callable",
+    input: #{ note: #{ title: "z", body: "w" } },
+    expected: #[#{ title: "z", body: "w" }],
+  })
+  @doc("Like assemble but the carrier is OPTIONAL (prompty's `Parser.parse` `context?`); the absent-carrier vector proves an omitted optional carrier decodes to the target's empty/none form.")
+  reassemble(note: Note, options?: Record<unknown>): Note[];
+}
+
 @doc("Fixture root aggregating the plain-seam graph.")
 @serializable
 model Root {

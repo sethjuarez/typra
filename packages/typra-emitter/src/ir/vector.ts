@@ -443,14 +443,35 @@ export function isScalarSeamEntry(entry: CallableVectorSnapshotEntry): boolean {
  * the element-wise array branch, and the coverage gate enables it only after all
  * targets do, so an array seam is never reported covered before every runtime can
  * decode it. Optional (`Model?`) shapes stay deferred regardless.
+ *
+ * `opts.carriers` (Phase 2 carrier parity) additionally admits an untyped-carrier
+ * PARAM — `Record<…>` / `unknown` / `any` / `dictionary`, optional or not. A
+ * carrier has no schema, so the entrypoint decodes it with the target's native
+ * untyped-JSON codec (`serde_json::Value`, `map[string]interface{}`, …) and
+ * threads the parsed bag straight through to the seam call. It is deliberately
+ * PARAM-ONLY: an untyped carrier must NEVER loosen RETURN checking, so the return
+ * still rides its scalar / model / array rule (a carrier RETURN stays
+ * adapter/registry-covered). This is the shape of prompty's
+ * `Renderer.render`/`renderSegments` (non-optional carrier) and `Parser.parse`
+ * (optional carrier). Like `arrays`, OPT-IN per driver then per coverage gate.
  */
 export function isTypedSeamEntry(
   entry: CallableVectorSnapshotEntry,
   serializedTypeNames: ReadonlySet<string>,
-  opts: { arrays?: boolean } = {},
+  opts: { arrays?: boolean; carriers?: boolean } = {},
 ): boolean {
   if (!isBridgeEligible(entry)) return false;
-  const isTyped = (typeRef: string): boolean => {
+  // An untyped carrier: a plain (native-decode) bag with no schema. Matches the
+  // exact plain-but-not-scalar set from `classifyCallableParam` — `unknown` /
+  // `any` / `dictionary` or any generic (`Record<…>`, `<`-bearing) — optional or
+  // not, but never an array (array-of-carrier is a separate future widening).
+  const isCarrier = (shape: CallableParamShape): boolean =>
+    !shape.array &&
+    (shape.base === "unknown" ||
+      shape.base === "any" ||
+      shape.base === "dictionary" ||
+      shape.base.includes("<"));
+  const isTyped = (typeRef: string, allowCarrier: boolean): boolean => {
     const shape = classifyCallableParam(typeRef);
     if (scalarRuntimeKind(shape.base) !== null) return true;
     if (shape.bareModel && serializedTypeNames.has(shape.base)) return true;
@@ -463,7 +484,11 @@ export function isTypedSeamEntry(
     ) {
       return true;
     }
+    if (opts.carriers && allowCarrier && isCarrier(shape)) return true;
     return false;
   };
-  return Object.values(entry.params).every(isTyped) && isTyped(entry.returns);
+  return (
+    Object.values(entry.params).every((typeRef) => isTyped(typeRef, true)) &&
+    isTyped(entry.returns, false)
+  );
 }
