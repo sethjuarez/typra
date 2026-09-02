@@ -50,6 +50,28 @@ public final class TypedConformanceRun {
     }
   }
 
+  // A carrier-param seam impl: the note flows through typed while `options` is
+  // an untyped Map<String, Object> carrier (prompty's Renderer.render `inputs`).
+  // `reassemble` is the OPTIONAL-carrier op (Parser.parse `context?`); Java
+  // erases the optionality to the same Map type, so an absent carrier decodes to
+  // null. The impls ignore `options` — the point is only that the untyped param
+  // decodes and the List<Note> return still compares.
+  static final class AssemblerImpl implements Assembler {
+    @Override
+    public java.util.List<Note> assemble(Note note, java.util.Map<String, Object> options) {
+      java.util.List<Note> out = new java.util.ArrayList<>();
+      out.add(note);
+      return out;
+    }
+
+    @Override
+    public java.util.List<Note> reassemble(Note note, java.util.Map<String, Object> options) {
+      java.util.List<Note> out = new java.util.ArrayList<>();
+      out.add(note);
+      return out;
+    }
+  }
+
   public static void main(String[] args) throws Exception {
     VectorConformance.runTransformerConformance(new TransformerImpl());
     System.out.println("PASS TransformerTypedConformance");
@@ -57,5 +79,7 @@ public final class TypedConformanceRun {
     System.out.println("PASS ReviserTypedConformance");
     VectorConformance.runCollatorConformance(new CollatorImpl());
     System.out.println("PASS CollatorTypedConformance");
+    VectorConformance.runAssemblerConformance(new AssemblerImpl());
+    System.out.println("PASS AssemblerTypedConformance");
   }
 }

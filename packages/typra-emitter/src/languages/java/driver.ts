@@ -381,10 +381,17 @@ export const generateJava = async (
   // param decodes via `<Model>.load(...)` and a model return compares through
   // `actual.toJson()`, keeping it zero-diff on real surfaces. Phase 2 array
   // parity (`{ arrays: true }`) further admits `Model[]` seams — decoded/compared
-  // element-wise into `List<Model>`. Emitted additively beside the stringly runner.
+  // element-wise into `List<Model>`. Carrier parity (`{ carriers: true }`)
+  // admits an untyped `Record<unknown>` param (optional or not); it decodes via
+  // the same `(Map<String, Object>) input.get(...)` cast branch with no extra
+  // emission, and stays param-only so the return keeps its own rule. Emitted
+  // additively beside the stringly runner.
   if (emitTarget["output-dir"] && (options?.callableVectors?.vectors.length ?? 0) > 0) {
-    const conformanceEntries = options!.callableVectors!.vectors.filter(
-      (entry) => isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
+    const conformanceEntries = options!.callableVectors!.vectors.filter((entry) =>
+      isTypedSeamEntry(entry, serializationClosure, {
+        arrays: true,
+        carriers: true,
+      }),
     );
     if (conformanceEntries.length > 0) {
       await emitJavaFile(
