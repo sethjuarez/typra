@@ -52,13 +52,18 @@ import {
   isTypedDispatchEntry,
   assertTypedDispatchSupported,
   classifyCallableParam,
+  isTypedSeamEntry,
 } from "../../ir/vector.js";
 import { scalarRuntimeKind } from "../../ir/scalar-kinds.js";
 import {
   buildBaseTestContext,
   pythonTestOptions,
 } from "../../testing/test-context.js";
-import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
+import {
+  lowerFile,
+  collectPolymorphicTypeNames,
+  computeSerializationClosure,
+} from "../../ir/lower.js";
 import { emitPythonFile as emitPythonFileDecl } from "./emitter.js";
 import { formatPythonSource } from "./python-format.js";
 import {
@@ -195,6 +200,10 @@ export const generatePython = async (
     }
   }
 
+  // Serialization is opt-in via `@serializable`: compute the closure once and
+  // thread it so only its members emit load/save.
+  const serializationClosure = computeSerializationClosure(nodes, registry);
+
   // Group nodes by their semantic group folder
   const groupMap = new Map<string, TypeNode[]>();
   for (const n of nodes) {
@@ -221,7 +230,12 @@ export const generatePython = async (
     // Skip child types - they're rendered with their parent
     if (!n.base) {
       const group = n.group || "";
-      const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
+      const fileDecl = lowerFile(
+        n,
+        registry,
+        polymorphicTypeNames,
+        serializationClosure,
+      );
       const fileContent = emitPythonFileDecl(fileDecl, visitor, group, {
         cancellationTokenPath: emitTarget["cancellation-token-path"],
         nativeSerialization,
@@ -277,6 +291,39 @@ export const generatePython = async (
         `_${toSnakeCase(dispatched.contract)}_resolver.py`,
         emitPythonDispatchResolver(dispatched),
         resolverDir,
+        emitTarget["output-dir"],
+      );
+    }
+
+    // Typed conformance ENTRYPOINT (issue #511 Cat 1 / typra#306, Track A): for
+    // every eligible plain seam, emit `run_<seam>_conformance(seam)` that
+    // runs the seam's vectors by calling the impl DIRECTLY — no registry, no
+    // string keys, no per-op marshalling double. Typing the parameter as the
+    // emitted `<Seam>` Protocol lets a static checker prove op completeness.
+    // Emitted into the package root as a reusable module (imports only stdlib +
+    // the barrel), additively beside the stringly runner. Phase 2 widens
+    // eligibility from scalar-only to model-in/model-out seams whose boundary
+    // models live in the `@serializable` closure (see `isTypedSeamEntry`): a
+    // model param decodes via `<Model>.load(...)` and a model return compares
+    // through `result.save()`, keeping it zero-diff on real surfaces. Phase 2
+    // array parity (`{ arrays: true }`) further admits `Model[]` seams — the
+    // decode/compare become per-element `.load()` / `.save()` comprehensions.
+    // Carrier parity (`{ carriers: true }`) admits an untyped `Record<unknown>`
+    // param (optional or not); it decodes via the same `json.loads(...)` pass-
+    // through (dict / None) with no extra emission, and stays param-only so the
+    // return keeps its own rule.
+    const conformanceEntries = options!.callableVectors!.vectors.filter((entry) =>
+      isTypedSeamEntry(entry, serializationClosure, {
+        arrays: true,
+        carriers: true,
+      }),
+    );
+    if (conformanceEntries.length > 0) {
+      await emitPythonFile(
+        context,
+        "vector_conformance.py",
+        emitPythonVectorConformanceEntrypoint(conformanceEntries),
+        emitTarget["output-dir"],
         emitTarget["output-dir"],
       );
     }
@@ -946,6 +993,191 @@ function emitPythonInterfaceConformanceTest(
       lines.push("    assert result is not None");
     }
   });
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * Emit the TYPED `@vector` conformance ENTRYPOINT (issue #511 Cat 1 / typra#306,
+ * Track A) — the Python twin of Rust's `emitRustVectorConformanceEntrypoint`.
+ *
+ * For every scalar-eligible plain seam it emits ONE function
+ * `run_<seam>_conformance(seam: <Seam>)` with the seam's vectors baked in: decode
+ * each vector's params, call the seam method DIRECTLY (running the result if it
+ * is awaitable, mirroring the dispatched conformance test), and assert `expected`
+ * (canonical `json.dumps(..., sort_keys=True)` compare) or `expectedError` (the
+ * call raises, and — for a string — its message contains the expected substring).
+ * The consumer's authored surface collapses to their real `<Seam>` Protocol impl
+ * plus a one-line call — no `vector_adapters` registry, no `Contract.operation`
+ * string keys, no per-op marshalling double.
+ *
+ * Typing the parameter as the emitted `<Seam>` Protocol lets a static checker
+ * (and `@runtime_checkable` isinstance) enforce that every op is present, so the
+ * consumer proves completeness by construction rather than by populating a map.
+ * The module imports only stdlib (`asyncio`/`inspect`/`json`) plus the seam type
+ * (and any boundary model types) from the package barrel, so it carries no pytest
+ * or vector-adapters dependency and is emitted ADDITIVELY beside the stringly
+ * runner. Phase 2 widens eligibility from scalar-only to model-in/model-out seams
+ * whose boundary models live in the `@serializable` closure (shared
+ * `isTypedSeamEntry`): a model param decodes via `<Model>.load(...)` and a model
+ * return compares through `result.save()`, keeping it zero-diff on real surfaces.
+ */
+function emitPythonVectorConformanceEntrypoint(
+  entries: CallableVectorSnapshotEntry[],
+): string {
+  const bySeam = new Map<string, CallableVectorSnapshotEntry[]>();
+  for (const entry of entries) {
+    if (!bySeam.has(entry.contract)) bySeam.set(entry.contract, []);
+    bySeam.get(entry.contract)!.push(entry);
+  }
+
+  // A Python string literal carrying the value's JSON, safe to hand to json.loads
+  // (JSON string escaping is a subset of Python's).
+  const jsonLiteral = (value: unknown): string =>
+    JSON.stringify(JSON.stringify(value ?? null));
+
+  const seamNames = [...bySeam.keys()].sort();
+  // Model param/return types (in the `@serializable` closure) are imported from
+  // the barrel too: a model param decodes via `<Model>.load(...)` and a model
+  // return serializes via `result.save()` for the canonical compare. Scalars and
+  // `Record<unknown>` arrive already decoded from json.loads and need no import.
+  // Array-of-model param/return import the ELEMENT model — the decode/compare is
+  // a per-element `<Model>.load(...)` / `item.save()` comprehension.
+  const modelTypeNames = new Set<string>();
+  for (const entry of entries) {
+    for (const type of Object.values(entry.params)) {
+      const shape = classifyCallableParam(type);
+      if (shape.bareModel) modelTypeNames.add(type);
+      else if (shape.array && shape.isModel && !shape.optional) {
+        modelTypeNames.add(shape.base);
+      }
+    }
+    const returnShape = classifyCallableParam(entry.returns);
+    if (returnShape.bareModel) {
+      modelTypeNames.add(entry.returns);
+    } else if (returnShape.array && returnShape.isModel && !returnShape.optional) {
+      modelTypeNames.add(returnShape.base);
+    }
+  }
+  const importNames = [
+    ...new Set([...seamNames, ...modelTypeNames]),
+  ].sort();
+  const lines: string[] = [
+    "# <auto-generated by typra-emitter>",
+    "# Copyright (c) Microsoft. All rights reserved.",
+    "# WARNING: This is an auto-generated file. DO NOT EDIT THIS FILE DIRECTLY.",
+    "#",
+    "# Typed @vector conformance entrypoints (issue #511 Cat 1). Each function",
+    "# takes a consumer's REAL typed seam impl and runs the seam's baked-in vectors",
+    "# by calling seam methods directly -- the idiomatic replacement for the",
+    "# stringly vector_adapters registry + per-op marshalling double. Typing the",
+    "# parameter as the emitted <Seam> Protocol lets a static checker (and",
+    "# @runtime_checkable isinstance) enforce op completeness, rather than a runtime",
+    "# map lookup. Imports only stdlib + the package barrel (no vector_adapters, so",
+    "# no cycle); emitted additively beside the stringly runner.",
+    "# See docs: reference/vector-conformance.",
+    "",
+    "import asyncio",
+    "import inspect",
+    "import json",
+    "",
+    `from . import ${importNames.join(", ")}`,
+    "",
+  ];
+
+  seamNames.forEach((seam) => {
+    const seamEntries = [...bySeam.get(seam)!].sort((left, right) =>
+      (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+    );
+    const fn = `run_${toSnakeCase(seam)}_conformance`;
+
+    lines.push("", "");
+    lines.push(`def ${fn}(seam: ${seam}) -> None:`);
+    lines.push(
+      `    """Typed @vector conformance for ${seam}. Pass your real ${seam} impl;`,
+    );
+    lines.push(
+      `    the ${seam} annotation lets a type checker prove every op is implemented."""`,
+    );
+
+    seamEntries.forEach((entry) => {
+      const method = toSnakeCase(entry.operation);
+      const paramNames = Object.keys(entry.params);
+      const label = entry.vector.name ?? entry.operation;
+      const input = (entry.vector.input ?? {}) as Record<string, unknown>;
+      const hasExpectedError = entry.vector.expectedError !== undefined;
+
+      lines.push(`    # vector: ${label}`);
+      for (const paramName of paramNames) {
+        const decoded = `json.loads(${jsonLiteral(input[paramName] ?? null)})`;
+        // A model param in the `@serializable` closure decodes into its emitted
+        // class via `<Model>.load(...)`; an array-of-model param decodes
+        // element-wise via a comprehension; scalars / `Record<unknown>` pass
+        // through as the native json.loads value.
+        const paramShape = classifyCallableParam(entry.params[paramName]);
+        if (paramShape.bareModel) {
+          lines.push(`    ${paramName} = ${entry.params[paramName]}.load(${decoded})`);
+        } else if (paramShape.array && paramShape.isModel && !paramShape.optional) {
+          lines.push(
+            `    ${paramName} = [${paramShape.base}.load(item) for item in ${decoded}]`,
+          );
+        } else {
+          lines.push(`    ${paramName} = ${decoded}`);
+        }
+      }
+      const call = `seam.${method}(${paramNames.join(", ")})`;
+      // A model return serializes back to a plain dict via `result.save()` for the
+      // canonical json.dumps compare; an array-of-model return serializes
+      // element-wise; a scalar return compares directly.
+      const returnShape = classifyCallableParam(entry.returns);
+      const returnsModel = returnShape.bareModel;
+      const returnsModelArray =
+        returnShape.array && returnShape.isModel && !returnShape.optional;
+
+      if (hasExpectedError) {
+        lines.push("    caught = None");
+        lines.push("    try:");
+        lines.push(`        result = ${call}`);
+        lines.push("        if inspect.isawaitable(result):");
+        lines.push("            asyncio.run(result)");
+        lines.push("    except Exception as error:  # noqa: BLE001");
+        lines.push("        caught = error");
+        lines.push(
+          `    assert caught is not None, ${JSON.stringify(
+            `${label}: expected an error`,
+          )}`,
+        );
+        if (typeof entry.vector.expectedError === "string") {
+          lines.push(
+            `    assert ${JSON.stringify(
+              entry.vector.expectedError,
+            )} in str(caught), ${JSON.stringify(
+              `${label}: error message mismatch`,
+            )}`,
+          );
+        }
+      } else {
+        lines.push(`    result = ${call}`);
+        lines.push("    if inspect.isawaitable(result):");
+        lines.push("        result = asyncio.run(result)");
+        if (entry.vector.expected !== undefined) {
+          const actual = returnsModel
+            ? "result.save()"
+            : returnsModelArray
+              ? "[item.save() for item in result]"
+              : "result";
+          lines.push(`    expected = json.loads(${jsonLiteral(entry.vector.expected)})`);
+          lines.push(
+            `    assert json.dumps(${actual}, sort_keys=True) == json.dumps(` +
+              `expected, sort_keys=True), ${JSON.stringify(`${label} misrouted`)}`,
+          );
+        } else {
+          lines.push("    assert result is not None");
+        }
+      }
+    });
+  });
+
   lines.push("");
   return lines.join("\n");
 }

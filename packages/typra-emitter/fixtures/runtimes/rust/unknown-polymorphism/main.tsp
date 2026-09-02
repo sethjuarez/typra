@@ -2,6 +2,7 @@ import "@typra/emitter";
 
 namespace Typra.Fixtures.RustUnknown;
 
+@serializable
 model Root {
   connection: Connection;
 }

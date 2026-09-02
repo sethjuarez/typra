@@ -137,6 +137,14 @@ export interface TypeDecl {
   load: LoadDecl;
   /** Save method specification */
   save: SaveDecl;
+  /**
+   * Whether this type participates in serialization (load/save). True when the
+   * type is in the serialization closure of some `@serializable` root. Emitters
+   * gate the load/save/ToJSON/ToYAML/FromJSON/FromYAML surface on this flag,
+   * mirroring the `wire` opt-in. Defaults to true when the lowering is invoked
+   * without a closure (direct API/test callers), preserving legacy behavior.
+   */
+  serialized: boolean;
   /** Factory methods (reuse Expr IR for bodies) */
   factories: FactoryDecl[];
   /** Collection helper methods (load_items/save_items for complex collections) */

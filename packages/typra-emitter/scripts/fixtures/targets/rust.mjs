@@ -719,3 +719,131 @@ export function runRustDispatchRegressionCompile(context) {
     }
   }
 }
+
+export function runRustVectorConformanceCompile(context) {
+  // Typed @vector conformance ENTRYPOINT gate (prompty#511 Cat 1 / typra#306,
+  // Track A). The emitter emits `run_<seam>_conformance<S: <Seam>>(seam: &S)` as
+  // a library module (`vector_conformance.rs`) of the model crate; a consumer
+  // migrates a plain seam off the stringly adapter registry by authoring only a
+  // real `impl <Seam>` and one typed call. This gate proves that path stays
+  // compilable end-to-end: generate the typed-seam-conformance fixture, attach
+  // the committed typed double as a test module, and `cargo build --tests`.
+  //
+  // Red-first: if the entrypoint is not emitted, `crate::model::vector_conformance`
+  // is unresolved and the double fails to compile — so this gate fails on `main`.
+  if (!commandExists("cargo")) {
+    context.skip("cargo is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "typed-seam-conformance",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-rust-typedseam-"));
+  const targetDir = mkdtempSync(
+    path.join(tmpdir(), "typra-rust-typedseam-target-"),
+  );
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "rust",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.TypedSeamConformance.Root",
+        "--deterministic",
+        "--no-format",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "rust");
+    if (!existsSync(sourceDir)) {
+      fail("Rust typed-seam-conformance gate: no rust output generated.");
+      return;
+    }
+    if (!existsSync(path.join(sourceDir, "vector_conformance.rs"))) {
+      fail(
+        "Rust typed-seam-conformance gate: emitter did not emit vector_conformance.rs " +
+          "(the typed conformance entrypoint). The committed double cannot resolve " +
+          "crate::model::vector_conformance — this is the red-first signal.",
+      );
+      return;
+    }
+    // Attach the committed typed double as a test module of the generated crate.
+    writeFileSync(
+      path.join(sourceDir, "typed_conformance.rs"),
+      readFileSync(
+        path.join(fixtureDir, "vector-adapters", "rust", "typed_conformance.rs"),
+        "utf8",
+      ),
+    );
+    writeFileSync(
+      path.join(sourceDir, "Cargo.toml"),
+      [
+        "[package]",
+        'name = "typed_seam_conformance"',
+        'version = "0.0.0"',
+        'edition = "2021"',
+        "autotests = false",
+        "",
+        "[dependencies]",
+        'async-trait = "0.1"',
+        'serde = { version = "1", features = ["derive"] }',
+        'serde_json = "1"',
+        'serde_yaml = "0.9"',
+        "",
+        "[dev-dependencies]",
+        'tokio = { version = "1", features = ["macros", "rt"] }',
+        "",
+        "[features]",
+        "serde = []",
+        "",
+        "[lib]",
+        'path = "lib.rs"',
+        "",
+      ].join("\n"),
+    );
+    // Re-export the model at the crate root and pull the committed typed double
+    // in under cfg(test); it calls the emitted entrypoint with its real impl.
+    writeFileSync(
+      path.join(sourceDir, "lib.rs"),
+      [
+        '#[path = "mod.rs"]',
+        "pub mod model;",
+        "pub use model::*;",
+        "",
+        "#[cfg(test)]",
+        '#[path = "typed_conformance.rs"]',
+        "mod typed_conformance;",
+        "",
+      ].join("\n"),
+    );
+    try {
+      execFileSync("cargo", ["build", "--tests"], {
+        cwd: sourceDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+      });
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Rust typed-seam-conformance compile gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    for (const dir of [outRoot, targetDir]) {
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }
+}

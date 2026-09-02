@@ -51,6 +51,7 @@ const SPEC = [
   "",
   "namespace Prompty.Sdk;",
   "",
+  "@serializable",
   "model Agent {",
   '  @sample(#{ name: "assistant" })',
   "  name: string;",

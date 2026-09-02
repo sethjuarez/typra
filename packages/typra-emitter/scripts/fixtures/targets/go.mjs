@@ -1,16 +1,21 @@
 import {
   KNOWN_TEST_FAILURES,
   assertKnownTestFailures,
+  commandExists,
   execFileSync,
   existsSync,
   fail,
   failures,
   generatedRoot,
   mkdirp,
+  mkdtempSync,
+  packageRoot,
   path,
+  readFileSync,
   rmSync,
   runCommand,
   runGoFormatCheck,
+  tmpdir,
   unlinkSync,
   walkFiles,
   writeFileSync,
@@ -540,5 +545,229 @@ export function runGoExecutableConformance() {
       }
     }
     rmSync(path.join(sourceDir, "cmd"), { recursive: true, force: true });
+  }
+}
+
+export function runGoVectorBridgeCompile(context) {
+  // Red-first gate for the typed adapter bridge (issue #511 Cat 1, typra#306
+  // Track A). A plain (undispatched) `@vector` seam has no discriminator, so its
+  // emitted conformance test looks the impl up in the consumer-authored
+  // `vectoradapters` registry — historically forcing every consumer to
+  // hand-author a per-op marshalling closure (the ~7×-duplicated bulk). The
+  // emitter now emits a `vectorbridge` package whose constructors turn a typed
+  // seam impl into that decoded-invoke func, so the consumer registers one line
+  // instead. This gate generates the plain-seam-bridge fixture WITH tests,
+  // attaches the committed consumer double (which registers via
+  // `bridged(vectorbridge.TransformerTransform(impl))`), and RUNS the emitted
+  // suite — proving both that the bridge compiles (on `main`, the double's
+  // `vectorbridge` reference would not resolve) and that it decodes/invokes
+  // correctly end-to-end without an import cycle (vectoradapters → vectorbridge
+  // → model, never back).
+  if (!commandExists("go")) {
+    context.skip("go is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "plain-seam-bridge",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-go-bridge-"));
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "go",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.PlainSeamBridge.Root",
+        "--deterministic",
+        "--no-format",
+        // Module-prefixed import paths so the multi-package tree (model +
+        // vectoradapters + vectorbridge + vectorrunner) co-resolves in one Go
+        // module, mirroring the integration tspconfig.
+        "--import-path",
+        "fixtures",
+        "--package-name",
+        "fixtures",
+        "--vector-adapter-path",
+        "fixtures/vectoradapters",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "go");
+    if (!existsSync(sourceDir)) {
+      fail("Go vector-bridge gate: no go output generated.");
+      return;
+    }
+    if (!existsSync(path.join(sourceDir, "vectorbridge", "bridge.go"))) {
+      fail(
+        "Go vector-bridge gate: emitter did not emit vectorbridge/bridge.go for the plain seam.",
+      );
+      return;
+    }
+    // Attach the committed consumer double as the vectoradapters package.
+    const adaptersDir = path.join(sourceDir, "vectoradapters");
+    mkdirp(adaptersDir);
+    writeFileSync(
+      path.join(adaptersDir, "adapters.go"),
+      readFileSync(
+        path.join(fixtureDir, "vector-adapters", "go", "adapters.go"),
+        "utf8",
+      ),
+    );
+    writeFileSync(
+      path.join(sourceDir, "go.mod"),
+      [
+        "module fixtures",
+        "",
+        "go 1.22",
+        "",
+        "require gopkg.in/yaml.v3 v3.0.1",
+        "",
+      ].join("\n"),
+    );
+    try {
+      runCommand(
+        "Go vector-bridge module dependency resolution",
+        "go",
+        ["mod", "tidy"],
+        { cwd: sourceDir },
+      );
+      execFileSync("go", ["test", "./..."], {
+        cwd: sourceDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Go vector-bridge compile/run gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    if (existsSync(outRoot)) {
+      rmSync(outRoot, { recursive: true, force: true });
+    }
+  }
+}
+
+export function runGoVectorConformanceCompile(context) {
+  // Red-first gate for the typed conformance ENTRYPOINT (issue #511 Cat 1,
+  // typra#306 Track A). The emitter emits `Run<Seam>Conformance(t, seam)` as a
+  // sibling `vectorconformance` package; a consumer migrates a plain seam off the
+  // stringly `vectoradapters` registry by authoring only a real seam impl and one
+  // typed call. This gate proves that path stands ALONE: generate the
+  // typed-seam-conformance fixture, DROP the stringly-rail artifacts (the
+  // vectorrunner/vectorbridge/tests packages that need a hand-authored
+  // vectoradapters registry), attach the committed typed double as its own
+  // package, and `go test ./...`.
+  //
+  // Red-first: if the entrypoint is not emitted, `fixtures/vectorconformance` does
+  // not exist and the double fails to compile — so this gate fails on `main`.
+  if (!commandExists("go")) {
+    context.skip("go is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "typed-seam-conformance",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-go-typedseam-"));
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "go",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.TypedSeamConformance.Root",
+        "--deterministic",
+        "--no-format",
+        // Module-prefixed import paths so the model + vectorconformance packages
+        // co-resolve as `fixtures` / `fixtures/vectorconformance` in one module.
+        "--import-path",
+        "fixtures",
+        "--package-name",
+        "fixtures",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "go");
+    if (!existsSync(sourceDir)) {
+      fail("Go typed-seam-conformance gate: no go output generated.");
+      return;
+    }
+    if (
+      !existsSync(
+        path.join(sourceDir, "vectorconformance", "vector_conformance.go"),
+      )
+    ) {
+      fail(
+        "Go typed-seam-conformance gate: emitter did not emit " +
+          "vectorconformance/vector_conformance.go (the typed conformance " +
+          "entrypoint). The committed double cannot resolve " +
+          "fixtures/vectorconformance — this is the red-first signal.",
+      );
+      return;
+    }
+    // The typed entrypoint stands alone: drop the stringly rail (vectorrunner +
+    // vectorbridge + the monolithic tests package) that would otherwise need a
+    // hand-authored vectoradapters registry to compile.
+    for (const relic of ["tests", "vectorrunner", "vectorbridge"]) {
+      const dir = path.join(sourceDir, relic);
+      if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+    }
+    // Attach the committed typed double as its own package.
+    const doubleDir = path.join(sourceDir, "conformancetest");
+    mkdirp(doubleDir);
+    writeFileSync(
+      path.join(doubleDir, "conformance_test.go"),
+      readFileSync(
+        path.join(fixtureDir, "vector-adapters", "go", "conformance_test.go"),
+        "utf8",
+      ),
+    );
+    writeFileSync(
+      path.join(sourceDir, "go.mod"),
+      ["module fixtures", "", "go 1.22", ""].join("\n"),
+    );
+    try {
+      runCommand(
+        "Go typed-seam-conformance module dependency resolution",
+        "go",
+        ["mod", "tidy"],
+        { cwd: sourceDir },
+      );
+      execFileSync("go", ["test", "./..."], {
+        cwd: sourceDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Go typed-seam-conformance compile/run gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    if (existsSync(outRoot)) {
+      rmSync(outRoot, { recursive: true, force: true });
+    }
   }
 }

@@ -29,6 +29,7 @@ import { JavaExprVisitor } from "../src/languages/java/visitor.js";
 function typeDecl(fields: TypeDecl["fields"]): TypeDecl {
   return {
     typeName: { namespace: "Test", name: "KeywordModel" },
+    serialized: true,
     base: null,
     isAbstract: false,
     isProtocol: false,

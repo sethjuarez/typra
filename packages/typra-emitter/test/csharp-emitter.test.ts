@@ -13,6 +13,7 @@ describe("C# emitter guarded scalar loads", () => {
     const category = { kind: "scalar" as const, scalarType: "string" };
     const model: TypeDecl = {
       typeName: { namespace: "Test", name: "FailureChunk" },
+      serialized: true,
       base: null,
       isAbstract: false,
       isProtocol: false,
@@ -115,6 +116,7 @@ describe("C# emitter guarded scalar loads", () => {
     };
     const model: TypeDecl = {
       typeName: { namespace: "Test", name: "Envelope" },
+      serialized: true,
       base: null,
       isAbstract: false,
       isProtocol: false,
@@ -184,6 +186,7 @@ describe("C# emitter guarded scalar loads", () => {
   it("emits nullable Record<unknown> values in protocol parameters", () => {
     const protocol: TypeDecl = {
       typeName: { namespace: "Test", name: "CheckpointStore" },
+      serialized: true,
       base: null,
       isAbstract: false,
       isProtocol: true,
@@ -244,6 +247,7 @@ function abstractOpenConnection(): TypeDecl {
   const names = ["kind", "label"];
   return {
     typeName: { namespace: "Test", name: "Connection" },
+    serialized: true,
     base: null,
     isAbstract: true,
     isProtocol: false,

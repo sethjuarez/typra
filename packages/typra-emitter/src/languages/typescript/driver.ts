@@ -15,7 +15,11 @@ import {
   emitEslintConfig,
 } from "./scaffolding.js";
 import { emitTypeScriptTest } from "./test-emitter.js";
-import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
+import {
+  lowerFile,
+  collectPolymorphicTypeNames,
+  computeSerializationClosure,
+} from "../../ir/lower.js";
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
@@ -27,6 +31,7 @@ import {
   isTypedDispatchEntry,
   assertTypedDispatchSupported,
   classifyCallableParam,
+  isTypedSeamEntry,
 } from "../../ir/vector.js";
 import {
   buildBaseTestContext,
@@ -136,6 +141,10 @@ export const generateTypeScript = async (
     }
   }
 
+  // Serialization is opt-in via `@serializable`: compute the closure once and
+  // thread it so only its members emit load/save.
+  const serializationClosure = computeSerializationClosure(nodes, registry);
+
   // Group root nodes by their semantic group folder
   const groupMap = new Map<string, TypeNode[]>();
   for (const n of nodes) {
@@ -154,7 +163,12 @@ export const generateTypeScript = async (
     }
 
     const group = n.group || "";
-    const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
+    const fileDecl = lowerFile(
+      n,
+      registry,
+      polymorphicTypeNames,
+      serializationClosure,
+    );
     const code = emitTypeScriptFileDecl(fileDecl, visitor, tsNamespace, group, {
       nativeSerialization,
     });
@@ -173,7 +187,12 @@ export const generateTypeScript = async (
   // Emit group index.ts files
   for (const [group, groupNodes] of groupMap) {
     if (!group) continue;
-    const groupIndexCode = emitTypeScriptGroupIndex(group, groupNodes, emitZod);
+    const groupIndexCode = emitTypeScriptGroupIndex(
+      group,
+      groupNodes,
+      emitZod,
+      serializationClosure,
+    );
     await emitTypeScriptFile(
       context,
       "index.ts",
@@ -284,6 +303,41 @@ export const generateTypeScript = async (
         );
       }
 
+      // Typed conformance ENTRYPOINT (issue #511 Cat 1 / typra#306, Track A): for
+      // every eligible plain seam, emit `run<Seam>Conformance(seam)` that
+      // runs the seam's vectors by calling the impl DIRECTLY — no registry, no
+      // string keys, no per-op marshalling double. Typing the parameter as the
+      // emitted `<Seam>` interface makes tsc prove every op is implemented
+      // (completeness at compile time). Emitted into the model output-dir as a
+      // reusable module (imports only the model barrel + an inlined assert, no
+      // Node builtins), additively
+      // beside the stringly runner. Phase 2 widens eligibility from scalar-only to
+      // model-in/model-out seams whose boundary models live in the `@serializable`
+      // closure (see `isTypedSeamEntry`); a model param decodes via a structural
+      // `JSON.parse(input) as <Model>` cast and the return compares through the
+      // same `JSON.parse(JSON.stringify(actual))` round-trip as a scalar. Phase 2
+      // array parity (`{ arrays: true }`) further admits `Model[]` seams — the
+      // structural `as <Model>[]` cast and round-trip compare lift over arrays
+      // unchanged. Carrier parity (`{ carriers: true }`) admits an untyped
+      // `Record<unknown>` param (optional or not); it decodes via the same
+      // generic `JSON.parse(input) as Record<string, unknown>` cast with no
+      // extra emission, and stays param-only so the return keeps its own rule.
+      const conformanceEntries = allVectors.filter((entry) =>
+        isTypedSeamEntry(entry, serializationClosure, {
+          arrays: true,
+          carriers: true,
+        }),
+      );
+      if (conformanceEntries.length > 0) {
+        await emitTypeScriptFile(
+          context,
+          "vector-conformance.ts",
+          emitTypeScriptVectorConformanceEntrypoint(conformanceEntries),
+          emitTarget["output-dir"],
+          emitTarget["output-dir"],
+        );
+      }
+
       for (const dispatched of collectDispatchedContracts(allVectors)) {
         const ifaceVectors = allVectors.filter(
           (entry) =>
@@ -379,6 +433,7 @@ export const generateTypeScript = async (
     indexContext.baseTypes,
     indexContext.types,
     emitZod,
+    serializationClosure,
   );
   await emitTypeScriptFile(
     context,
@@ -847,6 +902,197 @@ function emitTypeScriptVectorConformanceTest(
     "});",
     "",
   ].join("\n");
+}
+
+/**
+ * Emit the TYPED `@vector` conformance ENTRYPOINT (issue #511 Cat 1 / typra#306,
+ * Track A) — the TypeScript twin of Rust's `emitRustVectorConformanceEntrypoint`.
+ *
+ * For every eligible plain seam it emits ONE exported async function
+ * `run<Seam>Conformance(seam: <Seam>): Promise<void>` with the seam's vectors
+ * baked in: decode each vector's params, call the seam method DIRECTLY, and
+ * assert `expected` (structural `deepStrictEqual` over a JSON round-trip) or
+ * `expectedError` (the awaited call throws, and — for a string — its message
+ * contains the expected substring). The consumer's authored surface collapses to
+ * their real `implements <Seam>` plus a one-line call — no `vector-adapters`
+ * registry, no string keys, no per-op marshalling double. Typing the parameter as
+ * the emitted `<Seam>` interface makes `tsc` prove every op is implemented, so
+ * completeness is a COMPILE-TIME guarantee rather than a runtime map lookup.
+ *
+ * Runtime-neutral: it depends only on the model barrel (a type-only import) plus
+ * a tiny inlined assert — no `node:assert`, no Node builtins — so the shipped
+ * library stays importable from web/edge/Deno. It carries no test-runner or
+ * vector-adapter dependency and is emitted ADDITIVELY beside the stringly runner
+ * — an unmigrated seam keeps its `vector-adapters.ts`; this entrypoint is simply
+ * an available helper until a typed test calls it. Phase 2 widens eligibility
+ * from scalar-only to model-in/model-out seams whose boundary models live in the
+ * `@serializable` closure (shared `isTypedSeamEntry`); TS interfaces are
+ * structural, so a model param/return rides the SAME `JSON.parse` /
+ * canonical-compare code as a scalar.
+ */
+function emitTypeScriptVectorConformanceEntrypoint(
+  entries: CallableVectorSnapshotEntry[],
+): string {
+  // Group eligible vectors by seam; the seam's function carries all of its
+  // eligible vectors so the `<Seam>` parameter enforces the WHOLE seam.
+  const bySeam = new Map<string, CallableVectorSnapshotEntry[]>();
+  for (const entry of entries) {
+    if (!bySeam.has(entry.contract)) bySeam.set(entry.contract, []);
+    bySeam.get(entry.contract)!.push(entry);
+  }
+
+  // A TS string literal carrying the value's JSON, safe to hand to JSON.parse.
+  const jsonLiteral = (value: unknown): string =>
+    JSON.stringify(JSON.stringify(value ?? null));
+
+  const seamNames = [...bySeam.keys()].sort();
+  // Collect bare-model PARAM types (e.g. `Note`) referenced by `JSON.parse(...)
+  // as <Model>` casts; they must be imported from the barrel alongside the seam
+  // interfaces or tsc cannot resolve the cast. Scalar params need no import.
+  // Array-of-model params (`Note[]`) import the ELEMENT model — the cast is
+  // `as Note[]`, so `Note` (not `Note[]`) is the barrel symbol.
+  const modelTypeNames = new Set<string>();
+  for (const entry of entries) {
+    for (const paramType of Object.values(entry.params)) {
+      const shape = classifyCallableParam(paramType);
+      if (shape.bareModel) {
+        modelTypeNames.add(tsProtocolType(paramType));
+      } else if (shape.array && shape.isModel && !shape.optional) {
+        modelTypeNames.add(tsProtocolType(shape.base));
+      }
+    }
+  }
+  const importNames = [
+    ...new Set([...seamNames, ...modelTypeNames]),
+  ].sort();
+  const lines: string[] = [
+    "// Copyright (c) Microsoft. All rights reserved.",
+    "// WARNING: This is an auto-generated file. DO NOT EDIT THIS FILE DIRECTLY.",
+    "//",
+    "// Typed @vector conformance entrypoints (issue #511 Cat 1). Each exported",
+    "// function takes a consumer's REAL typed seam impl and runs the seam's",
+    "// baked-in vectors by calling seam methods directly — the idiomatic",
+    "// replacement for the stringly vector-adapters registry + per-op marshalling",
+    "// double. Typing the parameter as the emitted <Seam> interface makes tsc prove",
+    "// every op is implemented, so completeness is checked at COMPILE time, not by a",
+    "// runtime map lookup. Depends only on the model barrel + a tiny inlined",
+    "// assert (no Node builtins), so the shipped library stays runtime-neutral for",
+    "// web/edge/Deno consumers; emitted additively beside the stringly runner.",
+    "// See docs: reference/vector-conformance.",
+    "",
+    `import type { ${importNames.join(", ")} } from "./index";`,
+    "",
+    "// Runtime-neutral assert shims (no `node:assert`): the entrypoint ships inside",
+    "// the library, so it must not import Node builtins. `seamConformanceCanonical`",
+    "// gives order-insensitive deep equality by sorting object keys — matching",
+    "// `assert.deepStrictEqual` semantics for the plain-JSON vector payloads.",
+    "function seamConformanceAssert(condition: boolean, message: string): void {",
+    "  if (!condition) throw new Error(message);",
+    "}",
+    "function seamConformanceCanonical(value: unknown): string {",
+    "  if (value === null || typeof value !== \"object\") {",
+    "    return JSON.stringify(value ?? null);",
+    "  }",
+    "  if (Array.isArray(value)) {",
+    "    return `[${value.map(seamConformanceCanonical).join(\",\")}]`;",
+    "  }",
+    "  const record = value as Record<string, unknown>;",
+    "  const parts: string[] = [];",
+    "  for (const key of Object.keys(record).sort()) {",
+    "    const encoded = seamConformanceCanonical(record[key]);",
+    "    parts.push(`${JSON.stringify(key)}:${encoded}`);",
+    "  }",
+    "  return `{${parts.join(\",\")}}`;",
+    "}",
+    "",
+  ];
+
+  seamNames.forEach((seam, seamIndex) => {
+    const seamEntries = [...bySeam.get(seam)!].sort((left, right) =>
+      (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+    );
+    const fn = `run${seam}Conformance`;
+
+    lines.push(
+      `/** Typed @vector conformance for ${seam}. Pass your real \`implements ${seam}\`;`,
+    );
+    lines.push(
+      `    the \`${seam}\` parameter makes tsc prove every op is implemented. Call from a`,
+    );
+    lines.push(`    test, e.g. \`await ${fn}(new ${seam}Impl());\`. */`);
+    lines.push(
+      `export async function ${fn}(seam: ${seam}): Promise<void> {`,
+    );
+
+    seamEntries.forEach((entry) => {
+      const method = entry.operation;
+      const paramNames = Object.keys(entry.params);
+      const label = entry.vector.name ?? entry.operation;
+      const input = (entry.vector.input ?? {}) as Record<string, unknown>;
+      const hasExpectedError = entry.vector.expectedError !== undefined;
+
+      lines.push(`  // vector: ${label}`);
+      lines.push("  {");
+      for (const paramName of paramNames) {
+        const tsType = tsProtocolType(entry.params[paramName]);
+        // Two lines so neither the internal formatter nor prettier wraps the
+        // decode: the (unbreakable) JSON string literal sits alone, and the
+        // short `JSON.parse(...) as T` cast stays well under the print width.
+        lines.push(
+          `    const ${paramName}Json = ${jsonLiteral(input[paramName] ?? null)};`,
+        );
+        lines.push(
+          `    const ${paramName} = JSON.parse(${paramName}Json) as ${tsType};`,
+        );
+      }
+      const call = `seam.${method}(${paramNames.join(", ")})`;
+
+      if (hasExpectedError) {
+        lines.push("    let caught: unknown;");
+        lines.push("    try {");
+        lines.push(`      await ${call};`);
+        lines.push("    } catch (error) {");
+        lines.push("      caught = error;");
+        lines.push("    }");
+        lines.push(
+          `    seamConformanceAssert(caught !== undefined, ${JSON.stringify(
+            `${label}: expected an error`,
+          )});`,
+        );
+        if (typeof entry.vector.expectedError === "string") {
+          lines.push(
+            "    const message = String((caught as { message?: unknown })?.message ?? caught);",
+          );
+          lines.push(
+            `    seamConformanceAssert(message.includes(${JSON.stringify(
+              entry.vector.expectedError,
+            )}), ${JSON.stringify(`${label}: error message mismatch`)});`,
+          );
+        }
+      } else {
+        lines.push(`    const actual = await ${call};`);
+        if (entry.vector.expected !== undefined) {
+          lines.push(
+            `    const expected = JSON.parse(${jsonLiteral(entry.vector.expected)});`,
+          );
+          lines.push(
+            `    seamConformanceAssert(seamConformanceCanonical(JSON.parse(JSON.stringify(actual))) === seamConformanceCanonical(expected), ${JSON.stringify(
+              `${label} misrouted`,
+            )});`,
+          );
+        } else {
+          lines.push("    void actual;");
+        }
+      }
+      lines.push("  }");
+    });
+
+    lines.push("}");
+    if (seamIndex < seamNames.length - 1) lines.push("");
+  });
+
+  lines.push("");
+  return lines.join("\n");
 }
 
 /**

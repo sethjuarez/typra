@@ -259,6 +259,7 @@ interface Embedder {
 }
 
 @doc("Fixture root aggregating the dispatched-seam graph.")
+@serializable
 model Root {
   @doc("The agent whose template, model, and parser each carry a dispatch discriminator behind a coerced union.")
   agent: Agent;

@@ -221,3 +221,55 @@ extern dec dispatch(target: Interface, discriminator: ModelProperty);
  * `{ name: "city", kind: "string", default: "Seattle" }`, leaving `example` unset.
  */
 extern dec entryShorthand(target: Model, field: valueof string);
+
+/**
+ * Marks a model as a serialization root. Load and save are emitted over the
+ * model's transitive + discriminated closure (every model reachable through its
+ * properties, and — for an `@abstract @discriminator` base — all of its
+ * variants). Models that are never reached from a serialization root receive no
+ * load/save. This is the opt-in that replaces the historical behavior where any
+ * `@sample`-tagged model was unconditionally made loadable/savable.
+ *
+ * Serialization format is a target capability, not a model concern, so this
+ * decorator takes no format argument: a serializable model is emitted for every
+ * format the target supports (JSON + YAML today).
+ *
+ * @example
+ * ```typespec
+ * @serializable
+ * model Agent {
+ *   @sample(NameSample) name: string;
+ *   messages?: Message[];
+ * }
+ * ```
+ */
+extern dec serializable(target: Model);
+
+/**
+ * Withholds a sensitive field from the named serialization direction(s). The
+ * argument names the direction(s) the field is excluded from — it reads off the
+ * decorator: `@sensitive("save")` must not appear in saved output.
+ *
+ * The default is least-privilege / fail-closed: a bare `@sensitive` withholds
+ * the field from **both** directions (never loaded, never saved). Naming a
+ * direction relaxes that — `@sensitive("save")` keeps the field loadable (the
+ * write-only-secret case: injected from env/file, never persisted), and
+ * `@sensitive("load")` keeps it savable but never reloaded.
+ *
+ * This is a field-level omission, not a type-level exclusion: the enclosing
+ * model stays serializable and polymorphic load stays total. A model reached
+ * only through withheld fields naturally falls out of the relevant closure.
+ *
+ * @param directions Serialization direction(s) to withhold from; omit for both.
+ *
+ * @example
+ * ```typespec
+ * @serializable
+ * model Agent {
+ *   @sample(NameSample) name: string;
+ *   @sensitive("save") apiKey?: string;   // loaded, never saved
+ *   @sensitive scratch?: string;          // neither loaded nor saved
+ * }
+ * ```
+ */
+extern dec sensitive(target: ModelProperty, ...directions: valueof ("load" | "save")[]);

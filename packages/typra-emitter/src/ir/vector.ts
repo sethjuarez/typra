@@ -67,6 +67,18 @@ export interface CallableVectorSnapshotEntry {
    */
   sync: boolean;
   /**
+   * Operation classification carried from the seam op's `optional`/cancellation
+   * decorators. `runtimeCancellable` marks an op whose runtime-native signature
+   * takes a leading cancellation argument (e.g. Go `ctx context.Context`), and
+   * `optional` marks an op the seam may omit. Both are threaded so a downstream
+   * emitter (e.g. the typed adapter bridge) can EXCLUDE ops whose native call
+   * shape it cannot yet reproduce, instead of emitting a call that fails to
+   * compile. Undispatched, non-cancellable, non-optional ops keep the simplest
+   * `Method(params...) (T, error)` shape the bridge relies on.
+   */
+  runtimeCancellable?: boolean;
+  optional?: boolean;
+  /**
    * Present when the vector's owning seam interface is decorated with
    * `@dispatch`. Carries the discriminator identity plus the deterministic
    * field-access path (e.g. `agent.template.format.kind`) the conformance
@@ -82,6 +94,17 @@ export interface CallableVectorSnapshot {
   emitter: "typra-emitter";
   version: 1;
   vectors: CallableVectorSnapshotEntry[];
+  /**
+   * Sorted simple names of every type in the emitter's `@serializable`
+   * serialization closure — the types for which the emitter emits a JSON loader
+   * (`load`/`from_json`). Carried in the snapshot so a downstream coverage check
+   * (which sees only this artifact, not the TypeSpec registry) can decide whether
+   * a model-in/model-out seam is exercised by the EMITTED typed conformance
+   * entrypoint (`isTypedSeamEntry`) and therefore needs no hand adapter. Optional
+   * so snapshots (and test fixtures) emitted before this field existed still
+   * type-check and read cleanly; readers treat its absence as an empty closure.
+   */
+  serializedTypes?: string[];
 }
 
 /**
@@ -303,6 +326,7 @@ export function lowerOperationVectors(
 
 export function buildCallableVectorSnapshot(
   contracts: CallableContract[],
+  serializedTypes: ReadonlySet<string> = new Set(),
 ): CallableVectorSnapshot {
   return {
     emitter: "typra-emitter",
@@ -318,12 +342,17 @@ export function buildCallableVectorSnapshot(
             params: operation.params,
             returns: operation.returns,
             sync: operation.sync,
+            ...(operation.runtimeCancellable
+              ? { runtimeCancellable: operation.runtimeCancellable }
+              : {}),
+            ...(operation.optional ? { optional: operation.optional } : {}),
             ...(contract.dispatch ? { dispatch: contract.dispatch } : {}),
             vector,
           })),
         ),
       )
       .sort((left, right) => vectorSnapshotKey(left).localeCompare(vectorSnapshotKey(right))),
+    serializedTypes: [...serializedTypes].sort(),
   };
 }
 
@@ -343,4 +372,123 @@ export async function emitCallableVectorSnapshot(
 
 function vectorSnapshotKey(entry: CallableVectorSnapshotEntry): string {
   return `${entry.contract}:${entry.operation}:${entry.vector.name ?? ""}`;
+}
+
+/**
+ * Language-agnostic eligibility gate for the typed adapter bridge. A bridge
+ * constructor turns a consumer's typed seam impl into the `vectoradapters.Adapter`
+ * the conformance runner already consumes, replacing the hand-authored per-op
+ * marshalling `Invoke` closure. It is emittable only when the op's native call
+ * shape is the plain `Method(params...) (T, error)` the bridge reproduces:
+ *
+ *  - `dispatch` seams already ride the typed `@dispatch` resolver rail — the
+ *    bridge is for the 17 UNdispatched plain seams, so dispatched ops are out.
+ *  - `runtimeCancellable` ops carry a leading native cancellation arg (Go
+ *    `ctx context.Context`); the bridge does not thread one yet, so calling the
+ *    impl would drop an argument and fail to compile. Excluded until the bridge
+ *    learns to pass a cancellation token.
+ *  - `optional` ops the seam may omit can carry a different native return/error
+ *    shape; excluded conservatively for the first slice.
+ *
+ * The comparator, normalization, `expectedError`, `requires` gating and waivers
+ * ALL stay in the runner (the bridge only decodes → calls → returns), so this
+ * predicate governs solely whether the CALL shape is reproducible.
+ */
+export function isBridgeEligible(entry: CallableVectorSnapshotEntry): boolean {
+  return !entry.dispatch && !entry.runtimeCancellable && !entry.optional;
+}
+
+/**
+ * First-slice eligibility for the TYPED conformance entrypoint (issue #511 Cat 1).
+ *
+ * The typed entrypoint decodes vector input with the target's JSON codec and
+ * re-encodes the seam's result for a structural comparison. That round-trip only
+ * compiles on targets whose models do NOT carry a native serializer (e.g. the
+ * plain non-serde Rust target derives only `Debug, Clone, PartialEq`) when every
+ * param and the return are JSON-native SCALARS (strings, integer widths, floats,
+ * bool, and their optional/array wrappers). Model params/returns, `Record<…>`,
+ * and `unknown` need the model's own loader seam plus structural normalization
+ * that is a deferred follow-up, so this slice restricts to fully-scalar seams.
+ * Keeping the slice scalar-only also makes it ADDITIVE / zero-diff on real
+ * surfaces whose eligible plain seams take model shapes (they are excluded),
+ * while a dedicated fixture exercises the typed path red-first. Shared by every
+ * language driver so the eligibility rule cannot drift between targets.
+ */
+export function isScalarSeamEntry(entry: CallableVectorSnapshotEntry): boolean {
+  if (!isBridgeEligible(entry)) return false;
+  const isScalar = (typeRef: string): boolean =>
+    scalarRuntimeKind(classifyCallableParam(typeRef).base) !== null;
+  return Object.values(entry.params).every(isScalar) && isScalar(entry.returns);
+}
+
+/**
+ * Model-parity eligibility for the TYPED conformance entrypoint (issue #511 Cat 1,
+ * Phase 2). Widens {@link isScalarSeamEntry} so a param or the return may ALSO be
+ * a bare model — but only when that model is a member of the target's
+ * `@serializable` serialization closure, i.e. the emitter already emits its JSON
+ * loader (`from_json` / `load_from_value`). The typed entrypoint decodes a model
+ * vector input and compares an expected model return through THAT loader plus the
+ * plain-derive `PartialEq`, so a model outside the closure has no decode primitive
+ * and MUST stay adapter/registry-covered. This is the honest reuse invariant: the
+ * loader emitted for persistence is the loader conformance decodes with — a type
+ * is never pressured into `@serializable` solely to unlock conformance.
+ *
+ * Superset of {@link isScalarSeamEntry}: a fully-scalar seam is eligible regardless
+ * of the closure (scalars carry native JSON codecs).
+ *
+ * `opts.arrays` (Phase 2 array parity) additionally admits an `Model[]` param or
+ * return whose ELEMENT model is in the closure — the entrypoint decodes/compares
+ * each element through the same per-model loader lifted over the sequence. It is
+ * OPT-IN per driver: a target enables it only once its entrypoint emission grows
+ * the element-wise array branch, and the coverage gate enables it only after all
+ * targets do, so an array seam is never reported covered before every runtime can
+ * decode it. Optional (`Model?`) shapes stay deferred regardless.
+ *
+ * `opts.carriers` (Phase 2 carrier parity) additionally admits an untyped-carrier
+ * PARAM — `Record<…>` / `unknown` / `any` / `dictionary`, optional or not. A
+ * carrier has no schema, so the entrypoint decodes it with the target's native
+ * untyped-JSON codec (`serde_json::Value`, `map[string]interface{}`, …) and
+ * threads the parsed bag straight through to the seam call. It is deliberately
+ * PARAM-ONLY: an untyped carrier must NEVER loosen RETURN checking, so the return
+ * still rides its scalar / model / array rule (a carrier RETURN stays
+ * adapter/registry-covered). This is the shape of prompty's
+ * `Renderer.render`/`renderSegments` (non-optional carrier) and `Parser.parse`
+ * (optional carrier). Like `arrays`, OPT-IN per driver then per coverage gate.
+ */
+export function isTypedSeamEntry(
+  entry: CallableVectorSnapshotEntry,
+  serializedTypeNames: ReadonlySet<string>,
+  opts: { arrays?: boolean; carriers?: boolean } = {},
+): boolean {
+  if (!isBridgeEligible(entry)) return false;
+  // An untyped carrier: a plain (native-decode) bag with no schema. Matches the
+  // exact plain-but-not-scalar set from `classifyCallableParam` — `unknown` /
+  // `any` / `dictionary` or any generic (`Record<…>`, `<`-bearing) — optional or
+  // not, but never an array (array-of-carrier is a separate future widening).
+  const isCarrier = (shape: CallableParamShape): boolean =>
+    !shape.array &&
+    (shape.base === "unknown" ||
+      shape.base === "any" ||
+      shape.base === "dictionary" ||
+      shape.base.includes("<"));
+  const isTyped = (typeRef: string, allowCarrier: boolean): boolean => {
+    const shape = classifyCallableParam(typeRef);
+    if (scalarRuntimeKind(shape.base) !== null) return true;
+    if (shape.bareModel && serializedTypeNames.has(shape.base)) return true;
+    if (
+      opts.arrays &&
+      shape.array &&
+      !shape.optional &&
+      shape.isModel &&
+      serializedTypeNames.has(shape.base)
+    ) {
+      return true;
+    }
+    if (opts.carriers && allowCarrier && isCarrier(shape)) return true;
+    return false;
+  };
+  return (
+    Object.values(entry.params).every((typeRef) => isTyped(typeRef, true)) &&
+    isTyped(entry.returns, false)
+  );
 }

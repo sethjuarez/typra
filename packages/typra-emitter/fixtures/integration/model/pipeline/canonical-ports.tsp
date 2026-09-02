@@ -3,22 +3,27 @@ import "../events/session.tsp";
 
 namespace Typra.Fixtures;
 
+@serializable
 model Request {
   id: string;
 }
 
+@serializable
 model Decision {
   approved: boolean;
 }
 
+@serializable
 model Event {
   kind: string;
 }
 
+@serializable
 model Commit {
   id: string;
 }
 
+@serializable
 model Message {
   text: string;
 }

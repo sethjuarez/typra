@@ -372,6 +372,14 @@ export const $lib = createTypeSpecLibrary({
       description:
         "Behavioral polymorphic dispatch discriminator for a seam interface",
     },
+    serializable: {
+      description:
+        "Marks a model as a serialization root: load/save is emitted over its closure",
+    },
+    sensitive: {
+      description:
+        "Serialization direction(s) a field is withheld from (least-privilege default: both)",
+    },
     vectors: { description: "Operation-level callable behavior vectors" },
     parseAliases: { description: "Parse-only aliases for named string unions" },
     entryShorthands: {

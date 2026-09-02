@@ -36,6 +36,7 @@ function field(
 function typeDecl(fields: FieldDecl[]): TypeDecl {
   return {
     typeName: { namespace: "Test", name: "ModelInfo" },
+    serialized: true,
     base: null,
     isAbstract: false,
     isProtocol: false,

@@ -13,7 +13,11 @@ import { execFileSync } from "child_process";
 import { existsSync, readdirSync } from "fs";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { CSharpExprVisitor } from "./visitor.js";
-import { lowerType, collectPolymorphicTypeNames } from "../../ir/lower.js";
+import {
+  lowerType,
+  collectPolymorphicTypeNames,
+  computeSerializationClosure,
+} from "../../ir/lower.js";
 import {
   emitCSharpClass,
   emitCSharpEnum,
@@ -50,6 +54,7 @@ import {
   isTypedDispatchEntry,
   assertTypedDispatchSupported,
   classifyCallableParam,
+  isTypedSeamEntry,
 } from "../../ir/vector.js";
 
 /**
@@ -133,7 +138,12 @@ export const generateCsharp = async (
 
   // Build Declaration IR once (loop-invariant)
   const polyNames = collectPolymorphicTypeNames(allTypes[0], registry);
-  const allTypeDecls = nodes.map((nd) => lowerType(nd, registry, polyNames));
+  // Serialization is opt-in via `@serializable`: compute the closure once and
+  // thread it so only its members emit load/save.
+  const serializationClosure = computeSerializationClosure(nodes, registry);
+  const allTypeDecls = nodes.map((nd) =>
+    lowerType(nd, registry, polyNames, serializationClosure),
+  );
   const findTypeDecl = (name: string) =>
     allTypeDecls.find((t) => t.typeName.name === name);
 
@@ -188,7 +198,7 @@ export const generateCsharp = async (
   }
 
   for (const n of nodes) {
-    const typeDecl = lowerType(n, registry, polyNames);
+    const typeDecl = lowerType(n, registry, polyNames, serializationClosure);
     const classCode = emitCSharpClass(
       typeDecl,
       csharpNamespace,
@@ -342,6 +352,40 @@ export const generateCsharp = async (
     }
   }
 
+  // Category 1 (issue #511): emit a typed @vector conformance entrypoint for
+  // plain (undispatched) seams into the LIBRARY beside the seam interface. It
+  // takes the consumer's REAL typed seam impl (typed as the emitted `I<Seam>`
+  // interface, so a forgotten op fails to compile) and runs the seam's baked-in
+  // vectors by calling methods directly — the idiomatic replacement for the
+  // stringly VectorRunner registry + per-op marshalling double. Phase 2 widens
+  // eligibility from scalar-only to model-in/model-out seams whose boundary
+  // models live in the `@serializable` closure (see `isTypedSeamEntry`): a model
+  // param decodes via `<Model>.FromJson(...)` and a model return compares through
+  // `actual.ToJson()`, keeping it zero-diff on real surfaces. Phase 2 array
+  // parity (`{ arrays: true }`) further admits `Model[]` seams — decoded/compared
+  // element-wise into `List<Model>`. Carrier parity (`{ carriers: true }`)
+  // admits an untyped `Record<unknown>` param (optional or not); it decodes via
+  // the same generic `JsonSerializer.Deserialize<Dictionary<string, object?>>`
+  // param branch with no extra emission, and stays param-only so the return
+  // keeps its own rule. Emitted additively beside the stringly runner.
+  if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
+    const conformanceEntries = options!.callableVectors!.vectors.filter((entry) =>
+      isTypedSeamEntry(entry, serializationClosure, {
+        arrays: true,
+        carriers: true,
+      }),
+    );
+    if (conformanceEntries.length > 0) {
+      await emitCsharpFile(
+        context,
+        node,
+        emitCSharpVectorConformanceEntrypoint(conformanceEntries, csharpNamespace),
+        "VectorConformance.cs",
+        emitTarget["output-dir"],
+        emitTarget["output-dir"],
+      );
+    }
+  }
   // Format emitted files if format option is enabled (default: true)
   if (emitTarget.format !== false) {
     const outputDir = emitTarget["output-dir"]
@@ -1331,11 +1375,233 @@ function emitCSharpInterfaceConformanceTest(
 }
 
 /**
- * A dispatched seam interface that needs a Part III resolver emitted: its
- * interface name plus the SAME `PolymorphicDispatchDecl` that drives the shape
- * `Load` switch, and the namespace/group the resolver file is placed under.
- * Shared with the other language emitters (see `../../ir/vector.js`).
+ * Emit the Category 1 (issue #511) typed `@vector` conformance entrypoint for
+ * plain (undispatched) scalar seams. Unlike the stringly `VectorRunner` +
+ * per-op marshalling double, this file lives in the LIBRARY and takes the
+ * consumer's REAL typed seam impl (typed as the emitted `I<Seam>` interface),
+ * so a forgotten op cannot compile. Each seam gets one
+ * `Run<Seam>Conformance[Async]` method that inlines its vectors, decodes the
+ * scalar inputs from the vector JSON, calls the seam method directly, and
+ * asserts the result reproduces `expected` (or that an `expectedError` was
+ * thrown). Emitted additively; scalar-only so the real surface is untouched.
  */
+function emitCSharpVectorConformanceEntrypoint(
+  entries: CallableVectorSnapshotEntry[],
+  namespace: string,
+): string {
+  const bySeam = new Map<string, CallableVectorSnapshotEntry[]>();
+  for (const entry of entries) {
+    if (!bySeam.has(entry.contract)) bySeam.set(entry.contract, []);
+    bySeam.get(entry.contract)!.push(entry);
+  }
+
+  // Render a value's JSON as a C# string literal. JSON string escaping is a
+  // subset of C#'s (`\"`, `\\`, `\n`, `\uXXXX` all valid), so double-stringify.
+  const jsonLiteral = (value: unknown): string =>
+    JSON.stringify(JSON.stringify(value ?? null));
+
+  const seamNames = [...bySeam.keys()].sort();
+  // Array-of-model params/returns build `List<Model>` locals and enumerate
+  // `JsonElement` arrays, so pull in the collections + LINQ-free helpers only
+  // when such a seam is present (keeps unused-using-free on scalar/model-only
+  // surfaces).
+  const hasModelArray = entries.some((entry) =>
+    [...Object.values(entry.params), entry.returns].some((type) => {
+      const shape = classifyCallableParam(type);
+      return shape.array && shape.isModel && !shape.optional;
+    }),
+  );
+  const usings = [
+    "using System;",
+    ...(hasModelArray ? ["using System.Collections.Generic;"] : []),
+    "using System.Text.Json;",
+    "using System.Text.Json.Nodes;",
+    "using System.Threading.Tasks;",
+  ];
+  const lines: string[] = [
+    "// <auto-generated by typra-emitter>",
+    "// Copyright (c) Microsoft. All rights reserved.",
+    "// WARNING: This is an auto-generated file. DO NOT EDIT THIS FILE DIRECTLY.",
+    "//",
+    "// Typed @vector conformance entrypoints (issue #511 Cat 1). Each method",
+    "// takes a consumer's REAL typed seam impl and runs the seam's baked-in",
+    "// vectors by calling methods directly -- the idiomatic replacement for the",
+    "// stringly VectorRunner registry + per-op marshalling double. Typing the",
+    "// parameter as the emitted I<Seam> interface lets the compiler enforce op",
+    "// completeness, rather than a runtime map lookup. Emitted additively beside",
+    "// the stringly runner.",
+    "// See docs: reference/vector-conformance.",
+    "#nullable enable",
+    ...usings,
+    "",
+    `namespace ${namespace};`,
+    "",
+    "public static class VectorConformance",
+    "{",
+    "    // Canonicalize JSON text so structural compares ignore incidental",
+    "    // formatting (whitespace, member order is irrelevant for scalars).",
+    "    private static string Canonical(string json) =>",
+    "        JsonNode.Parse(json)?.ToJsonString() ?? \"null\";",
+    "",
+  ];
+
+  seamNames.forEach((seam) => {
+    const seamEntries = [...bySeam.get(seam)!].sort((left, right) =>
+      (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+    );
+    const isAsync = seamEntries.some((entry) => !entry.sync);
+    const fn = isAsync
+      ? `Run${toPascalCase(seam)}ConformanceAsync`
+      : `Run${toPascalCase(seam)}Conformance`;
+    const signature = isAsync
+      ? `    public static async Task ${fn}(I${seam} seam)`
+      : `    public static void ${fn}(I${seam} seam)`;
+
+    lines.push(
+      `    /// <summary>Typed @vector conformance for ${seam}. Pass your real`,
+      `    /// ${seam} impl; the I${seam} parameter proves every op is`,
+      `    /// implemented at compile time.</summary>`,
+      signature,
+      "    {",
+    );
+
+    seamEntries.forEach((entry) => {
+      const method = entry.sync
+        ? toPascalCase(entry.operation)
+        : `${toPascalCase(entry.operation)}Async`;
+      const paramNames = Object.keys(entry.params);
+      const label = entry.vector.name ?? entry.operation;
+      const input = (entry.vector.input ?? {}) as Record<string, unknown>;
+      const awaitPrefix = entry.sync ? "" : "await ";
+      const hasExpectedError = entry.vector.expectedError !== undefined;
+
+      lines.push("        {");
+      lines.push(`            // vector: ${label}`);
+      for (const paramName of paramNames) {
+        const shape = classifyCallableParam(entry.params[paramName]);
+        if (shape.bareModel) {
+          // A model param in the `@serializable` closure decodes via the emitted
+          // wire-correct `<Model>.FromJson(...)`; System.Text.Json would mismatch
+          // the model's PascalCase properties against the lowercase wire shape.
+          lines.push(
+            `            var ${paramName} = ${shape.base}.FromJson(${jsonLiteral(
+              input[paramName] ?? null,
+            )});`,
+          );
+        } else if (shape.array && shape.isModel && !shape.optional) {
+          // An array-of-model param decodes element-wise through the same
+          // wire-correct `<Model>.FromJson(...)` into a `List<Model>` (the seam
+          // signature's collection type) — enumerate the JSON array, no LINQ.
+          lines.push(
+            `            var ${paramName} = new List<${shape.base}>();`,
+            `            foreach (var __item in JsonSerializer.Deserialize<JsonElement>(${jsonLiteral(
+              input[paramName] ?? null,
+            )}).EnumerateArray())`,
+            "            {",
+            `                ${paramName}.Add(${shape.base}.FromJson(__item.GetRawText()));`,
+            "            }",
+          );
+        } else {
+          // A required scalar param decodes into the seam's non-null type; the
+          // deserializer's return is nullable, so null-forgive it (optional params
+          // keep the nullable local the seam signature already expects).
+          const forgive = shape.optional ? "" : "!";
+          lines.push(
+            `            var ${paramName} = JsonSerializer.Deserialize<${protocolCSharpType(
+              entry.params[paramName],
+            )}>(${jsonLiteral(input[paramName] ?? null)})${forgive};`,
+          );
+        }
+      }
+      const call = `${awaitPrefix}seam.${method}(${paramNames.join(", ")})`;
+      const returnShape = classifyCallableParam(entry.returns);
+      const returnsModel = returnShape.bareModel;
+      const returnsModelArray =
+        returnShape.array && returnShape.isModel && !returnShape.optional;
+
+      if (hasExpectedError) {
+        lines.push("            Exception? caught = null;");
+        lines.push("            try");
+        lines.push("            {");
+        lines.push(`                ${call};`);
+        lines.push("            }");
+        lines.push("            catch (Exception error)");
+        lines.push("            {");
+        lines.push("                caught = error;");
+        lines.push("            }");
+        lines.push(
+          `            if (caught is null) throw new SeamConformanceException(${JSON.stringify(
+            `${label}: expected an error`,
+          )});`,
+        );
+        if (typeof entry.vector.expectedError === "string") {
+          lines.push(
+            `            if (!caught.Message.Contains(${JSON.stringify(
+              entry.vector.expectedError,
+            )})) throw new SeamConformanceException(${JSON.stringify(
+              `${label}: error message mismatch`,
+            )});`,
+          );
+        }
+      } else {
+        lines.push(`            var actual = ${call};`);
+        if (entry.vector.expected !== undefined) {
+          // A model return serializes through the emitted wire-correct
+          // `actual.ToJson()`; an array-of-model return serializes each element
+          // the same way into a JSON array; a scalar return goes through
+          // System.Text.Json.
+          let serialized: string;
+          if (returnsModelArray) {
+            lines.push(
+              "            var __parts = new List<string>();",
+              "            foreach (var __item in actual)",
+              "            {",
+              "                __parts.Add(__item.ToJson());",
+              "            }",
+              '            var __serialized = "[" + string.Join(",", __parts) + "]";',
+            );
+            serialized = "__serialized";
+          } else {
+            serialized = returnsModel
+              ? "actual.ToJson()"
+              : "JsonSerializer.Serialize(actual)";
+          }
+          lines.push(
+            `            if (Canonical(${serialized}) != Canonical(${jsonLiteral(
+              entry.vector.expected,
+            )}))`,
+            `                throw new SeamConformanceException(${JSON.stringify(
+              `${label} misrouted`,
+            )});`,
+          );
+        } else {
+          lines.push(
+            `            if (actual is null) throw new SeamConformanceException(${JSON.stringify(
+              `${label}: expected a result`,
+            )});`,
+          );
+        }
+      }
+      lines.push("        }");
+    });
+
+    lines.push("    }");
+    lines.push("");
+  });
+
+  lines.push("}");
+  lines.push("");
+  lines.push(
+    "/// <summary>Thrown by an emitted conformance entrypoint when a vector's",
+    "/// expectation is not met.</summary>",
+    "public sealed class SeamConformanceException : Exception",
+    "{",
+    "    public SeamConformanceException(string message) : base(message) { }",
+    "}",
+  );
+  return lines.join("\n");
+}
+
 
 /**
  * Emit the Part III C# dispatch resolver for one seam interface — the behavioral

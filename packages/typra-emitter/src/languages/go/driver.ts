@@ -20,6 +20,7 @@ import {
   lowerFile,
   lowerType,
   collectPolymorphicTypeNames,
+  computeSerializationClosure,
 } from "../../ir/lower.js";
 import { emitGoFileContent, protocolGoType } from "./emitter.js";
 import { formatGoSource } from "./go-format.js";
@@ -40,6 +41,8 @@ import {
   collectDispatchedContracts,
   DispatchedContract,
   isTypedDispatchEntry,
+  isBridgeEligible,
+  isTypedSeamEntry,
   classifyCallableParam,
 } from "../../ir/vector.js";
 import {
@@ -104,8 +107,12 @@ export const generateGo = async (
       scalarCoercibleTypeNames.add(n.typeName.name);
     }
   }
+  // Compute the serialization closure once for the whole compilation. Types
+  // outside it emit no load/save (serialization is opt-in via `@serializable`).
+  const serializationClosure = computeSerializationClosure(nodes, registry);
+
   const declarationUniverse = nodes.map((n) =>
-    lowerType(n, registry, polymorphicTypeNames),
+    lowerType(n, registry, polymorphicTypeNames, serializationClosure),
   );
 
   // Emit context file (LoadContext/SaveContext utilities)
@@ -124,7 +131,12 @@ export const generateGo = async (
   for (const n of nodes) {
     // Skip child types - they're rendered with their parent
     if (!n.base) {
-      const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
+      const fileDecl = lowerFile(
+        n,
+        registry,
+        polymorphicTypeNames,
+        serializationClosure,
+      );
       // Go stays flat: pass group as a header comment only, no subfolder emission
       const fileContent = emitGoFileContent(
         fileDecl.types,
@@ -146,8 +158,14 @@ export const generateGo = async (
       );
     }
 
-    // Emit test file for each type (skip protocols — they have no data to test)
-    if (emitTarget["test-dir"] && !n.isProtocol) {
+    // Emit test file for each type (skip protocols — they have no data to
+    // test — and non-serialized types, whose tests would reference load/save
+    // functions that are no longer emitted).
+    if (
+      emitTarget["test-dir"] &&
+      !n.isProtocol &&
+      serializationClosure.has(n.typeName.name)
+    ) {
       const importPath = emitTarget["import-path"] || packageName;
       const fieldNames = buildGoFieldNames(
         collectInheritedPropertyNames(n, registry),
@@ -254,6 +272,63 @@ export const generateGo = async (
         ),
         emitTarget["test-dir"],
         emitTarget["test-dir"],
+      );
+    }
+
+    // Typed adapter bridge (issue #511 Cat 1): for every bridge-eligible plain
+    // seam op, emit a `vectorbridge` constructor that turns a consumer's typed
+    // seam impl into the `vectoradapters.Adapter` the runner already consumes,
+    // so the consumer registers one line instead of hand-authoring the per-op
+    // marshalling closure. Additive and non-breaking — the hand-authored
+    // registry keeps working; the bridge is an available helper, not a
+    // replacement. Emitted as a sibling PACKAGE of `vectoradapters` (like the
+    // runner) because a Go directory holds only one non-test package.
+    const bridgeEntries = allVectors.filter(isBridgeEligible);
+    if (bridgeEntries.length > 0) {
+      await emitGoFile(
+        context,
+        "bridge.go",
+        emitGoVectorBridge(bridgeEntries, importPath),
+        resolvePath(emitTarget["output-dir"] ?? "vectorbridge", "vectorbridge"),
+        emitTarget["output-dir"],
+      );
+    }
+
+    // Typed conformance ENTRYPOINT (issue #511 Cat 1 / typra#306, Track A): for
+    // every eligible plain seam, emit `Run<Seam>Conformance(t, seam)` that
+    // runs the seam's vectors by calling the impl DIRECTLY — no registry, no
+    // string keys, no per-op marshalling double. Requiring `fixtures.<Seam>` makes
+    // the compiler prove every op is implemented (completeness at compile time).
+    // Scalar seams are eligible unconditionally; Phase 2 widens eligibility to
+    // model-in/model-out seams whose boundary models live in the `@serializable`
+    // closure (see `isTypedSeamEntry`). Go decodes params with `json.Unmarshal`
+    // and compares via `json.Marshal` + `reflect.DeepEqual`, and every model
+    // carries `json:` struct tags, so the model path rides the SAME code as the
+    // scalar path — no serde-free branch (unlike the plain Rust target). The same
+    // generic json codec lifts over sequences, so `{ arrays: true }` (Phase 2
+    // array parity) admits `Model[]` seams with ZERO extra emission here.
+    // `{ carriers: true }` (Phase 2 carrier parity) likewise admits an untyped
+    // `Record<…>` / `map[string]interface{}` PARAM — `json.Unmarshal` decodes it
+    // into the mapped map type (or a `*map[…]` pointer for an optional carrier)
+    // exactly like any other param, so carrier seams also cost ZERO extra
+    // emission here. Emitted as a sibling PACKAGE `vectorconformance` (like the
+    // runner/bridge) because a Go directory holds only one non-test package.
+    const conformanceEntries = allVectors.filter((entry) =>
+      isTypedSeamEntry(entry, serializationClosure, {
+        arrays: true,
+        carriers: true,
+      }),
+    );
+    if (conformanceEntries.length > 0) {
+      await emitGoFile(
+        context,
+        "vector_conformance.go",
+        emitGoVectorConformanceEntrypoint(conformanceEntries, importPath),
+        resolvePath(
+          emitTarget["output-dir"] ?? "vectorconformance",
+          "vectorconformance",
+        ),
+        emitTarget["output-dir"],
       );
     }
 
@@ -650,6 +725,358 @@ function goVectorRunnerImportPath(adapterImportPath: string): string {
   return slash >= 0
     ? `${adapterImportPath.slice(0, slash)}/vectorrunner`
     : "vectorrunner";
+}
+
+/**
+ * Emit the typed adapter bridge (package `vectorbridge`) — issue #511 Cat 1.
+ *
+ * For each bridge-eligible plain-seam op the emitter produces one constructor,
+ * `<Seam><Method>(impl fixtures.<Seam>) func(rawInput any) (any, error)`, that
+ * decodes the runner's resolved `map[string]any` input into the op's typed
+ * parameters, calls the consumer's typed impl, and returns the raw `(value,
+ * error)` the runner canonicalizes. That single decoded-invoke func replaces the
+ * hand-authored per-op marshalling closure — the actual authored-surface win.
+ *
+ * IMPORT-CYCLE SAFETY: the seam registry `VectorAdapters` lives in the
+ * consumer-authored `vectoradapters` package, so a consumer that registers a
+ * bridge adapter must import `vectorbridge` FROM `vectoradapters`. If the bridge
+ * imported `vectoradapters` (for its `Adapter`/`Context` types) that would be an
+ * import cycle. The bridge therefore imports NEITHER — it returns a plain
+ * context-free `func(any) (any, error)`, and the consumer adapts it into their
+ * `Adapter` with a one-time helper:
+ *
+ *   func bridged(fn func(any) (any, error)) Adapter {
+ *       return Adapter{Invoke: func(in any, _ Context) (any, error) { return fn(in) }}
+ *   }
+ *   VectorAdapters["Transformer.transform"] = bridged(vectorbridge.TransformerTransform(impl))
+ *
+ * Everything behavioral — normalization, canonical comparison, `expectedError`,
+ * `requires` capability gating and waivers — stays in the runner; the bridge only
+ * decodes → calls → returns, so it never re-implements the comparator. Emitted as
+ * a sibling PACKAGE of `vectoradapters` (a Go directory holds one non-test
+ * package), importing only the model package for the seam interfaces + `Load*`
+ * hydrators (plus `encoding/json` when a scalar/array param needs a round-trip).
+ */
+function emitGoVectorBridge(
+  entries: CallableVectorSnapshotEntry[],
+  importPath: string,
+): string {
+  // One constructor per (contract, operation): multiple vectors share an op.
+  const seen = new Set<string>();
+  const ops: CallableVectorSnapshotEntry[] = [];
+  for (const entry of [...entries].sort((left, right) =>
+    `${left.contract}:${left.operation}`.localeCompare(
+      `${right.contract}:${right.operation}`,
+    ),
+  )) {
+    const key = `${entry.contract}:${entry.operation}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ops.push(entry);
+  }
+
+  const needsJSON = ops.some((entry) =>
+    Object.values(entry.params).some(
+      (paramType) => !classifyCallableParam(paramType).bareModel,
+    ),
+  );
+
+  const lines: string[] = [
+    "// <auto-generated by typra-emitter>",
+    "// Code generated by Typra emitter; DO NOT EDIT.",
+    "//",
+    "// Typed @vector adapter bridge (issue #511 Cat 1). Each constructor turns a",
+    "// consumer's typed seam impl into the decoded-invoke func the conformance",
+    "// harness needs, so the consumer drops the hand-authored per-op marshalling",
+    "// closure. The bridge only decodes the runner's resolved input into typed",
+    "// params, calls the impl, and returns the raw (value, error) the runner",
+    "// canonicalizes — normalization, comparison, expectedError, requires gating",
+    "// and waivers all stay in the runner. It imports NEITHER vectoradapters nor",
+    "// vectorrunner (the seam registry lives in the consumer's vectoradapters",
+    "// package, which imports THIS package — so importing it back would cycle);",
+    "// the consumer adapts the returned func into their Adapter with a one-time",
+    "// helper. See docs: reference/vector-conformance.",
+    "",
+    "package vectorbridge",
+    "",
+    "import (",
+  ];
+  if (needsJSON) lines.push('\t"encoding/json"');
+  lines.push(`\tfixtures ${JSON.stringify(importPath)}`);
+  lines.push(")");
+  lines.push("");
+
+  for (const entry of ops) {
+    const seam = goFieldName(entry.contract);
+    const method = goFieldName(entry.operation);
+    const ctor = `${seam}${method}`;
+    const paramNames = Object.keys(entry.params);
+    const hasReturn = (entry.returns ?? "").length > 0;
+
+    lines.push(
+      `// ${ctor} decodes ${entry.contract}.${entry.operation} vector input and invokes a`,
+    );
+    lines.push(
+      `// typed fixtures.${seam}. Adapt the returned func into your Adapter, e.g.:`,
+    );
+    lines.push("//");
+    lines.push(
+      `//\tVectorAdapters[${JSON.stringify(
+        `${entry.contract}.${entry.operation}`,
+      )}] = bridged(vectorbridge.${ctor}(impl))`,
+    );
+    lines.push(
+      `func ${ctor}(impl fixtures.${seam}) func(rawInput any) (any, error) {`,
+    );
+    lines.push("\treturn func(rawInput any) (any, error) {");
+    lines.push("\t\tpayload, _ := rawInput.(map[string]any)");
+    if (paramNames.length === 0) lines.push("\t\t_ = payload");
+    for (const paramName of paramNames) {
+      const shape = classifyCallableParam(entry.params[paramName]);
+      const key = JSON.stringify(paramName);
+      if (shape.bareModel) {
+        const paramType = goFieldName(entry.params[paramName]);
+        lines.push(
+          `\t\t${paramName}, err := fixtures.Load${paramType}(payload[${key}], fixtures.NewLoadContext())`,
+        );
+        lines.push("\t\tif err != nil {");
+        lines.push("\t\t\treturn nil, err");
+        lines.push("\t\t}");
+      } else {
+        lines.push(
+          `\t\tvar ${paramName} ${protocolGoType(entry.params[paramName], "fixtures")}`,
+        );
+        lines.push("\t\t{");
+        lines.push(
+          `\t\t\t${paramName}Bytes, marshalErr := json.Marshal(payload[${key}])`,
+        );
+        lines.push("\t\t\tif marshalErr != nil {");
+        lines.push("\t\t\t\treturn nil, marshalErr");
+        lines.push("\t\t\t}");
+        lines.push(
+          `\t\t\tif unmarshalErr := json.Unmarshal(${paramName}Bytes, &${paramName}); unmarshalErr != nil {`,
+        );
+        lines.push("\t\t\t\treturn nil, unmarshalErr");
+        lines.push("\t\t\t}");
+        lines.push("\t\t}");
+      }
+    }
+    const call = `impl.${method}(${paramNames.join(", ")})`;
+    if (hasReturn) {
+      // Method returns (T, error); T is assignable to any, so the multi-value
+      // return passes straight through to (any, error).
+      lines.push(`\t\treturn ${call}`);
+    } else {
+      // Void op returns just error — widen to the (any, error) func shape.
+      lines.push(`\t\tif err := ${call}; err != nil {`);
+      lines.push("\t\t\treturn nil, err");
+      lines.push("\t\t}");
+      lines.push("\t\treturn nil, nil");
+    }
+    lines.push("\t}");
+    lines.push("}");
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Emit the TYPED `@vector` conformance ENTRYPOINT (issue #511 Cat 1 / typra#306,
+ * Track A) — the Go twin of Rust's `emitRustVectorConformanceEntrypoint`.
+ *
+ * For every scalar-eligible plain seam it emits ONE exported helper
+ * `Run<Seam>Conformance(t *testing.T, seam fixtures.<Seam>)` with the seam's
+ * vectors baked in: decode the typed params from the vector JSON, call the seam
+ * method DIRECTLY, and assert `expected` (structural `reflect.DeepEqual` over a
+ * JSON round-trip) or `expectedError` (non-nil error whose message contains the
+ * expected substring). The consumer's authored surface collapses to their real
+ * seam impl plus a one-line call — no `vectoradapters` registry, no string keys,
+ * no per-op marshalling double. Passing a concrete impl where `fixtures.<Seam>`
+ * is required makes the Go compiler prove every op is implemented, so
+ * completeness is a COMPILE-TIME guarantee rather than a runtime map lookup.
+ *
+ * Emitted as a sibling PACKAGE `vectorconformance` (like `vectorrunner`/
+ * `vectorbridge`) because a Go directory holds only one non-test package. It
+ * imports ONLY the model package + std (`testing`, `encoding/json`, `reflect`,
+ * `strings`), so it carries no dependency on the consumer's test package (no
+ * cycle) and is emitted ADDITIVELY beside the stringly runner: an unmigrated
+ * seam keeps its registry; this entrypoint is simply an available helper until a
+ * typed test calls it.
+ */
+function emitGoVectorConformanceEntrypoint(
+  entries: CallableVectorSnapshotEntry[],
+  importPath: string,
+): string {
+  // Group eligible vectors by seam contract; a seam's helper carries all of its
+  // eligible vectors so the `fixtures.<Seam>` parameter enforces the WHOLE seam.
+  const bySeam = new Map<string, CallableVectorSnapshotEntry[]>();
+  for (const entry of entries) {
+    if (!bySeam.has(entry.contract)) bySeam.set(entry.contract, []);
+    bySeam.get(entry.contract)!.push(entry);
+  }
+
+  // A Go interpreted string literal carrying the value's JSON encoding: JSON
+  // string escaping is a superset-compatible subset of Go's, so double-stringify
+  // (value → JSON text → Go-quoted literal) yields a valid `"..."` for `[]byte`.
+  const goJSONLiteral = (value: unknown): string =>
+    JSON.stringify(JSON.stringify(value ?? null));
+
+  const needsStrings = entries.some(
+    (entry) => typeof entry.vector.expectedError === "string",
+  );
+  const needsReflect = entries.some(
+    (entry) =>
+      entry.vector.expectedError === undefined &&
+      entry.vector.expected !== undefined,
+  );
+
+  const lines: string[] = [
+    "// <auto-generated by typra-emitter>",
+    "// Code generated by Typra emitter; DO NOT EDIT.",
+    "//",
+    "// Typed @vector conformance entrypoints (issue #511 Cat 1). Each exported",
+    "// helper takes a consumer's REAL typed seam impl and runs the seam's baked-in",
+    "// vectors by calling seam methods directly — the idiomatic replacement for the",
+    "// stringly vectoradapters registry + per-op marshalling double. Passing a",
+    "// concrete impl where fixtures.<Seam> is required makes the compiler prove",
+    "// every op is implemented, so completeness is checked at COMPILE time, not by a",
+    "// runtime map lookup. Imports only the model package + std (no vectoradapters,",
+    "// so no cycle); emitted additively beside the stringly runner.",
+    "// See docs: reference/vector-conformance.",
+    "",
+    "package vectorconformance",
+    "",
+    "import (",
+    '\t"encoding/json"',
+  ];
+  if (needsReflect) lines.push('\t"reflect"');
+  if (needsStrings) lines.push('\t"strings"');
+  lines.push('\t"testing"');
+  lines.push("");
+  lines.push(`\tfixtures ${JSON.stringify(importPath)}`);
+  lines.push(")");
+  lines.push("");
+
+  const seamNames = [...bySeam.keys()].sort();
+  seamNames.forEach((seam, seamIndex) => {
+    const seamEntries = [...bySeam.get(seam)!].sort((left, right) =>
+      (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+    );
+    const seamType = goFieldName(seam);
+    const fn = `Run${seamType}Conformance`;
+
+    lines.push(
+      `// ${fn} runs the typed @vector conformance for ${seam}. Pass your real`,
+    );
+    lines.push(
+      `// seam impl; requiring fixtures.${seamType} makes the compiler prove every op`,
+    );
+    lines.push(
+      `// is implemented. Call from a test, e.g. ${fn}(t, ${seamType}Impl{}).`,
+    );
+    lines.push(
+      `func ${fn}(t *testing.T, seam fixtures.${seamType}) {`,
+    );
+    lines.push("\tt.Helper()");
+
+    seamEntries.forEach((entry) => {
+      const method = goFieldName(entry.operation);
+      const paramNames = Object.keys(entry.params);
+      const label = entry.vector.name ?? entry.operation;
+      const input = (entry.vector.input ?? {}) as Record<string, unknown>;
+      const hasExpectedError = entry.vector.expectedError !== undefined;
+
+      lines.push(`\t// vector: ${label}`);
+      lines.push("\t{");
+      for (const paramName of paramNames) {
+        const goType = protocolGoType(entry.params[paramName], "fixtures");
+        lines.push(`\t\tvar ${paramName} ${goType}`);
+        lines.push(
+          `\t\tif err := json.Unmarshal([]byte(${goJSONLiteral(
+            input[paramName] ?? null,
+          )}), &${paramName}); err != nil {`,
+        );
+        lines.push(
+          `\t\t\tt.Fatalf(${JSON.stringify(
+            `${label}: decode ${paramName}: %v`,
+          )}, err)`,
+        );
+        lines.push("\t\t}");
+      }
+      const call = `seam.${method}(${paramNames.join(", ")})`;
+
+      if (hasExpectedError) {
+        lines.push(`\t\t_, err := ${call}`);
+        lines.push("\t\tif err == nil {");
+        lines.push(
+          `\t\t\tt.Fatalf(${JSON.stringify(`${label}: expected an error, got nil`)})`,
+        );
+        lines.push("\t\t}");
+        if (typeof entry.vector.expectedError === "string") {
+          lines.push(
+            `\t\tif !strings.Contains(err.Error(), ${JSON.stringify(
+              entry.vector.expectedError,
+            )}) {`,
+          );
+          lines.push(
+            `\t\t\tt.Fatalf(${JSON.stringify(
+              `${label}: error %q does not contain %q`,
+            )}, err.Error(), ${JSON.stringify(entry.vector.expectedError)})`,
+          );
+          lines.push("\t\t}");
+        }
+      } else {
+        lines.push(`\t\tactual, err := ${call}`);
+        lines.push("\t\tif err != nil {");
+        lines.push(
+          `\t\t\tt.Fatalf(${JSON.stringify(`${label}: unexpected error: %v`)}, err)`,
+        );
+        lines.push("\t\t}");
+        if (entry.vector.expected !== undefined) {
+          lines.push("\t\tactualBytes, marshalErr := json.Marshal(actual)");
+          lines.push("\t\tif marshalErr != nil {");
+          lines.push(
+            `\t\t\tt.Fatalf(${JSON.stringify(`${label}: marshal actual: %v`)}, marshalErr)`,
+          );
+          lines.push("\t\t}");
+          lines.push("\t\tvar actualValue any");
+          lines.push(
+            "\t\tif err := json.Unmarshal(actualBytes, &actualValue); err != nil {",
+          );
+          lines.push(
+            `\t\t\tt.Fatalf(${JSON.stringify(`${label}: decode actual: %v`)}, err)`,
+          );
+          lines.push("\t\t}");
+          lines.push("\t\tvar expectedValue any");
+          lines.push(
+            `\t\tif err := json.Unmarshal([]byte(${goJSONLiteral(
+              entry.vector.expected,
+            )}), &expectedValue); err != nil {`,
+          );
+          lines.push(
+            `\t\t\tt.Fatalf(${JSON.stringify(`${label}: decode expected: %v`)}, err)`,
+          );
+          lines.push("\t\t}");
+          lines.push("\t\tif !reflect.DeepEqual(actualValue, expectedValue) {");
+          lines.push(
+            `\t\t\tt.Fatalf(${JSON.stringify(
+              `${label} misrouted: got %#v, want %#v`,
+            )}, actualValue, expectedValue)`,
+          );
+          lines.push("\t\t}");
+        } else {
+          lines.push("\t\t_ = actual");
+        }
+      }
+      lines.push("\t}");
+    });
+
+    lines.push("}");
+    if (seamIndex < seamNames.length - 1) lines.push("");
+  });
+
+  return lines.join("\n") + "\n";
 }
 
 /**

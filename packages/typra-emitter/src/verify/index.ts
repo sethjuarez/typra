@@ -90,6 +90,7 @@ export interface TypraVerifySummary {
   vectorCoverage: {
     operations: number;
     covered: number;
+    typed: number;
     waived: number;
     missing: number;
     wildcardWaivers: number;
@@ -219,6 +220,7 @@ const EMPTY_SUMMARY: TypraVerifySummary = {
   vectorCoverage: {
     operations: 0,
     covered: 0,
+    typed: 0,
     waived: 0,
     missing: 0,
     wildcardWaivers: 0,
@@ -408,7 +410,7 @@ export function formatVerifySummary(result: TypraVerifyResult): string {
     `hydration zone touches: ${result.summary.hydrationZoneTouches}`,
     `stale cleanup dry-run candidates: ${result.summary.staleCleanupCandidates}`,
     `schema: types +${result.summary.schema.addedTypes} / -${result.summary.schema.removedTypes}, required fields +${result.summary.schema.addedRequiredProperties}, optional fields +${result.summary.schema.addedOptionalProperties}, requiredness changed ${result.summary.schema.requirednessChanged}, property types changed ${result.summary.schema.propertyTypesChanged}, wire names changed ${result.summary.schema.wireNamesChanged}, discriminators changed ${result.summary.schema.discriminatorsChanged}, enum values changed ${result.summary.schema.enumValuesChanged}`,
-    `vector coverage: ${result.summary.vectorCoverage.covered}/${result.summary.vectorCoverage.operations} covered, ${result.summary.vectorCoverage.waived} waived, ${result.summary.vectorCoverage.missing} missing`,
+    `vector coverage: ${result.summary.vectorCoverage.covered}/${result.summary.vectorCoverage.operations} covered, ${result.summary.vectorCoverage.typed} typed, ${result.summary.vectorCoverage.waived} waived, ${result.summary.vectorCoverage.missing} missing`,
     `breaking change classification: ${result.breakingChange}`,
     `next action: ${formatNextAction(result)}`,
   ];
@@ -502,6 +504,7 @@ function compareVectorCoverage(
   summary.vectorCoverage = {
     operations: result.operations.length,
     covered: result.covered.length,
+    typed: result.typed.length,
     waived: result.waived.length,
     missing: result.missing.length,
     wildcardWaivers: result.wildcardWaivers.length,

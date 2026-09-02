@@ -30,8 +30,13 @@ import {
   DispatchedContract,
   isTypedDispatchEntry,
   classifyCallableParam,
+  isTypedSeamEntry,
 } from "../../ir/vector.js";
-import { lowerFile, collectPolymorphicTypeNames } from "../../ir/lower.js";
+import {
+  lowerFile,
+  collectPolymorphicTypeNames,
+  computeSerializationClosure,
+} from "../../ir/lower.js";
 import {
   emitRustFile as emitRustFileDecl,
   RUST_ALLOW_ATTR,
@@ -189,10 +194,18 @@ export const generateRust = async (
   //     referenced type's string `@coerce` template — otherwise the value-backed
   //     lowering stores the raw string and Rust alone diverges from every runtime
   //     that hydrates a typed child on load.
+  // Serialization is opt-in via `@serializable`: compute the closure once and
+  // thread it so only its members emit load/save.
+  const serializationClosure = computeSerializationClosure(nodes, registry);
+
   const rustDeclsByName = new Map<string, TypeDecl>(
     nodes
       .filter((n) => !n.base)
-      .flatMap((n) => lowerFile(n, registry, polymorphicTypeNames).types)
+      .flatMap(
+        (n) =>
+          lowerFile(n, registry, polymorphicTypeNames, serializationClosure)
+            .types,
+      )
       .map((decl) => [decl.typeName.name, decl]),
   );
 
@@ -221,7 +234,12 @@ export const generateRust = async (
   for (const n of nodes) {
     if (!n.base) {
       const group = n.group || "";
-      const fileDecl = lowerFile(n, registry, polymorphicTypeNames);
+      const fileDecl = lowerFile(
+        n,
+        registry,
+        polymorphicTypeNames,
+        serializationClosure,
+      );
       const fileContent = emitRustFileDecl(
         fileDecl,
         visitor,
@@ -306,6 +324,11 @@ export const generateRust = async (
     testGroupModuleNames.get("")!.push("protocol_scaffolds_test");
   }
 
+  // Typed @vector conformance entrypoints (issue #511 Cat 1) are emitted as a
+  // library module of the model crate; collect their module name(s) so the root
+  // mod.rs declares them (declare-only, not glob-re-exported).
+  const conformanceEntrypointModules: string[] = [];
+
   if (
     emitTarget["test-dir"] &&
     (options?.callableVectors?.vectors.length ?? 0) > 0
@@ -346,6 +369,40 @@ export const generateRust = async (
       );
       if (!testGroupModuleNames.has("")) testGroupModuleNames.set("", []);
       testGroupModuleNames.get("")!.push("vector_conformance_test");
+    }
+
+    // Typed conformance entrypoint (issue #511 Cat 1): a library module of the
+    // model crate exposing `run_<seam>_conformance<S: <Seam>>(seam: &S)` for every
+    // eligible undispatched seam. Additive — the stringly runner above is
+    // untouched; a consumer migrates a seam by calling this with their typed impl
+    // and deleting that seam's `vector_adapters` registration. Phase 2 widens
+    // eligibility from scalar-only to model-in/model-out seams whose boundary
+    // models are in the `@serializable` closure (their `from_json` loader exists);
+    // scalar seams remain eligible unconditionally (superset). Phase 2 array
+    // parity (`{ arrays: true }`) further admits `Model[]` seams — decoded/compared
+    // element-wise through the same serde-free `from_json` loader. Carrier parity
+    // (`{ carriers: true }`) admits an untyped `Record<…>` PARAM: it maps to
+    // `serde_json::Value` (or `Option<serde_json::Value>` when optional), so the
+    // entrypoint's serde-native `serde_json::from_str` param branch decodes it
+    // with ZERO extra emission — the carrier is param-only, so the RETURN keeps
+    // its own serde-free loader rule.
+    const entrypointEligible = allVectors.filter((entry) =>
+      isTypedSeamEntry(entry, serializationClosure, {
+        arrays: true,
+        carriers: true,
+      }),
+    );
+    if (entrypointEligible.length > 0) {
+      await emitRustFile(
+        context,
+        "vector_conformance.rs",
+        emitRustVectorConformanceEntrypoint(
+          { ...options!.callableVectors!, vectors: entrypointEligible },
+          emitTarget["import-path"] ?? "crate::model",
+        ),
+        emitTarget["output-dir"],
+      );
+      conformanceEntrypointModules.push("vector_conformance");
     }
 
     for (const dispatched of collectDispatchedContracts(allVectors)) {
@@ -495,7 +552,7 @@ export const generateRust = async (
     ["context", ...rootModules],
     groups,
     disambiguateGlobReexports(rootChildren),
-    resolverModuleNames.get("") ?? [],
+    [...(resolverModuleNames.get("") ?? []), ...conformanceEntrypointModules],
   );
   await emitRustFile(context, "mod.rs", libContent, emitTarget["output-dir"]);
 
@@ -2094,7 +2151,302 @@ function emitRustVectorConformanceTest(
 }
 
 /**
- * Emit the TYPED per-interface Rust `@vector` conformance harness
+ * Emit the TYPED `@vector` conformance ENTRYPOINT (issue #511 Cat 1) — the
+ * idiomatic replacement for the stringly `HashMap<&str, Adapter>` runner + the
+ * consumer-authored `vector_adapters.rs` registry. For each undispatched,
+ * non-cancellable, non-optional seam it emits ONE generic fn
+ * `run_<seam>_conformance<S: <Seam> + ?Sized>(seam: &S)` with the seam's vectors
+ * baked in: decode typed params, invoke the trait method DIRECTLY, and assert the
+ * result. The consumer's authored surface collapses to their real `impl <Seam>`
+ * plus a one-line typed call — no registry, no string keys, no boxed `Adapter`
+ * closures, no marshalling bridge. `S: <Seam>` makes the compiler prove every op
+ * is implemented (E0046), so conformance completeness is a COMPILE-TIME guarantee
+ * rather than a runtime map lookup. Structural `serde_json::Value` comparison
+ * absorbs field-order normalization for free.
+ *
+ * The module references ONLY the model crate + serde_json + std, so it carries no
+ * dependency on the consumer's test module (no cycle). It is emitted ADDITIVELY
+ * beside the existing stringly runner: a seam a consumer has not yet migrated
+ * keeps its `vector_adapters.rs`; the emitted entrypoint is simply an available
+ * `pub async fn` until a typed test calls it.
+ *
+ * Scope of this slice: `expected` (structural compare) and `expectedError` on
+ * ASYNC ops. A `@sync` op has no error channel (its trait method returns a bare
+ * value), so an `expectedError` vector on a sync op is skipped with a note;
+ * `requires`/capability gating, `normalization`, and provider/targetApi routing
+ * are deferred follow-ups (not exercised by the typed-seam fixture).
+ */
+function emitRustVectorConformanceEntrypoint(
+  vectors: NonNullable<GeneratorOptions["callableVectors"]>,
+  importPath: string,
+): string {
+  // The driver owns eligibility (scalar OR model-in-`@serializable`-closure via
+  // `isTypedSeamEntry`) and passes the already-filtered set; trust it here so the
+  // model-parity entries survive (a local `isScalarSeamEntry` re-filter would drop
+  // them, since it has no view of the serialization closure).
+  const eligible = vectors.vectors;
+  // This file is emitted as a library MODULE of the model crate (`output-dir`),
+  // so it must reference sibling types CRATE-RELATIVE. `importPath` is the
+  // EXTERNAL path (e.g. `fixtures_serde::model`) used by out-of-crate test
+  // crates; rebase its leading crate-name segment onto `crate` for in-crate use
+  // (`crate::model`). A path already rooted at `crate` passes through unchanged.
+  const inCrate = (() => {
+    const segments = importPath.replace(/^::/, "").split("::");
+    if (segments[0] !== "crate") segments[0] = "crate";
+    return segments.join("::");
+  })();
+  // Group eligible vectors by seam contract; a seam's entrypoint carries all of
+  // its eligible vectors so `S: <Seam>` enforces the WHOLE seam is implemented.
+  const bySeam = new Map<string, CallableVectorSnapshotEntry[]>();
+  for (const entry of eligible) {
+    if (!bySeam.has(entry.contract)) bySeam.set(entry.contract, []);
+    bySeam.get(entry.contract)!.push(entry);
+  }
+
+  const lines: string[] = [
+    "// <auto-generated by typra-emitter>",
+    "// Code generated by Typra emitter; DO NOT EDIT.",
+    "//",
+    "// Typed @vector conformance entrypoints (issue #511 Cat 1). Each generic fn",
+    "// takes a consumer's REAL typed seam impl and runs the seam's baked-in vectors",
+    "// by calling trait methods directly — the idiomatic replacement for the",
+    "// stringly HashMap<&str, Adapter> runner + vector_adapters.rs registry. The",
+    "// `S: <Seam>` bound makes the compiler prove every op is implemented (E0046),",
+    "// so completeness is checked at COMPILE time, not by a runtime map lookup.",
+    "// References only the model crate + serde_json + std (no vector_adapters, so",
+    "// no cycle); emitted additively beside the stringly runner.",
+    "// See docs: reference/vector-conformance.",
+    "",
+    "#![allow(unused_imports, dead_code, non_camel_case_types, unused_variables, unexpected_cfgs, clippy::all)]",
+    "",
+    "use serde_json::Value;",
+    "",
+  ];
+
+  const seamNames = [...bySeam.keys()].sort();
+  seamNames.forEach((seam, seamIndex) => {
+    const entries = [...bySeam.get(seam)!].sort((left, right) =>
+      (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
+    );
+    const fn = `run_${toSnakeCase(seam)}_conformance`;
+    const seamIsAsync = entries.some((entry) => !entry.sync);
+    // A model-decode type is a bare model OR an array-of-model; both round-trip
+    // each element through the model's serde-free `from_json` loader (no native
+    // `Deserialize` on the plain target), so both need a `LoadContext`.
+    const needsModelDecode = (typeRef: string): boolean => {
+      const shape = classifyCallableParam(typeRef);
+      return shape.bareModel || (shape.array && shape.isModel && !shape.optional);
+    };
+    // A `LoadContext` is needed whenever a vector must decode a model through its
+    // `from_json` loader — a bare-model or array-of-model PARAM, or an expected
+    // bare-model / array-of-model RETURN (the serde-free compare).
+    const needsCtx = entries.some(
+      (entry) =>
+        Object.values(entry.params).some(needsModelDecode) ||
+        (entry.vector.expected !== undefined && needsModelDecode(entry.returns)),
+    );
+
+    lines.push(
+      `/// Typed @vector conformance for ${seam}. Pass your real \`impl ${seam}\`; the`,
+    );
+    lines.push(
+      `/// \`S: ${seam}\` bound makes the compiler prove every op is implemented. Call`,
+    );
+    lines.push(
+      `/// from a test, e.g. \`${fn}(&${seam}Impl).await;\` (or without \`.await\` when sync).`,
+    );
+    lines.push(
+      `pub ${seamIsAsync ? "async " : ""}fn ${fn}<S: ${inCrate}::${seam} + ?Sized>(seam: &S) {`,
+    );
+    if (needsCtx) {
+      lines.push(`    let ctx = ${inCrate}::context::LoadContext::default();`);
+    }
+
+    entries.forEach((entry) => {
+      const method = toSnakeCase(entry.operation);
+      const paramNames = Object.keys(entry.params);
+      const label = entry.vector.name ?? entry.operation;
+      const input = (entry.vector.input ?? {}) as Record<string, unknown>;
+      const hasExpectedError = entry.vector.expectedError !== undefined;
+      const isAsyncOp = !entry.sync;
+
+      // A sync op has no error channel (bare-value return), so it cannot express
+      // expectedError in the typed path — skip that vector with a breadcrumb.
+      if (hasExpectedError && !isAsyncOp) {
+        lines.push(
+          `    // skipped: ${label} — expectedError on a @sync op has no typed error channel`,
+        );
+        return;
+      }
+
+      lines.push(`    // vector: ${label}`);
+      lines.push("    {");
+      for (const paramName of paramNames) {
+        const paramType = entry.params[paramName];
+        const shape = classifyCallableParam(paramType);
+        const local = rustFieldName(paramName);
+        const paramJson = JSON.stringify(input[paramName] ?? {}, null, 2);
+        if (shape.bareModel) {
+          lines.push(`        let ${local} = ${inCrate}::${paramType}::from_json(`);
+          lines.push(`            r####"`);
+          lines.push(paramJson);
+          lines.push(`"####,`);
+          lines.push("            &ctx,");
+          lines.push("        )");
+          lines.push(`        .expect(${JSON.stringify(`${paramName} parses`)});`);
+        } else if (shape.array && shape.isModel && !shape.optional) {
+          // Array-of-model param: parse the outer JSON array to values, then decode
+          // each element through the model's serde-free `from_json` loader (the
+          // plain target has no `Deserialize` for `Vec<Model>`), collecting a
+          // `Vec<Model>`. Symmetric with the array-of-model RETURN compare below.
+          const elem = `${inCrate}::${shape.base}`;
+          lines.push(`        let ${local}: Vec<${elem}> = {`);
+          lines.push("            let items: Vec<Value> = serde_json::from_str(");
+          lines.push(`                r####"`);
+          lines.push(paramJson);
+          lines.push(`"####,`);
+          lines.push("            )");
+          lines.push(`            .expect(${JSON.stringify(`${paramName} parses`)});`);
+          lines.push("            items");
+          lines.push("                .iter()");
+          lines.push(
+            `                .map(|item| ${elem}::from_json(&item.to_string(), &ctx)`,
+          );
+          lines.push(
+            `                    .expect(${JSON.stringify(`${paramName} element parses`)}))`,
+          );
+          lines.push("                .collect()");
+          lines.push("        };");
+        } else {
+          lines.push(
+            `        let ${local}: ${protocolRustType(paramType)} = serde_json::from_str(`,
+          );
+          lines.push(`            r####"`);
+          lines.push(paramJson);
+          lines.push(`"####,`);
+          lines.push("        )");
+          lines.push(`        .expect(${JSON.stringify(`${paramName} parses`)});`);
+        }
+      }
+      const callArgs = paramNames
+        .map((name) => `&${rustFieldName(name)}`)
+        .join(", ");
+      const invocation = `seam.${method}(${callArgs})${isAsyncOp ? ".await" : ""}`;
+
+      if (hasExpectedError) {
+        // Async op only reaches here. Assert the awaited Result erred; when
+        // expectedError is a string, also require the message to contain it.
+        lines.push(`        let result = ${invocation};`);
+        lines.push(
+          `        assert!(result.is_err(), ${JSON.stringify(`${label}: expected an error`)});`,
+        );
+        if (typeof entry.vector.expectedError === "string") {
+          lines.push("        let message = result.unwrap_err().to_string();");
+          lines.push(
+            `        assert!(message.contains(${JSON.stringify(
+              entry.vector.expectedError,
+            )}), ${JSON.stringify(`${label}: error message mismatch`)});`,
+          );
+        }
+      } else {
+        // `expected` present (or absent). Async op unwraps the awaited Result; a
+        // sync op returns the value directly.
+        const bind = isAsyncOp
+          ? `${invocation}.expect(${JSON.stringify(`${label}: seam ok`)})`
+          : invocation;
+        lines.push(`        let actual = ${bind};`);
+        if (entry.vector.expected !== undefined) {
+          const returnShape = classifyCallableParam(entry.returns);
+          const expectedJson = JSON.stringify(entry.vector.expected, null, 2);
+          if (returnShape.bareModel) {
+            // Model return: compare serde-free through the model's own loader plus
+            // the plain-derive `PartialEq` — the plain (non-serde) target has no
+            // `Serialize` on `actual`, so `serde_json::to_value(actual)` would not
+            // compile. Symmetric with the bare-model PARAM decode above.
+            lines.push(
+              `        let expected = ${inCrate}::${returnShape.base}::from_json(`,
+            );
+            lines.push(`            r####"`);
+            lines.push(expectedJson);
+            lines.push(`"####,`);
+            lines.push("            &ctx,");
+            lines.push("        )");
+            lines.push(
+              `        .expect(${JSON.stringify(`${label}: expected parses`)});`,
+            );
+            lines.push(
+              `        assert_eq!(actual, expected, ${JSON.stringify(
+                `${label} misrouted`,
+              )});`,
+            );
+          } else if (returnShape.array && returnShape.isModel && !returnShape.optional) {
+            // Array-of-model return: build the expected `Vec<Model>` element-wise
+            // through the model's serde-free loader and compare with the plain
+            // `PartialEq` lifted over `Vec` — `actual` has no `Serialize`, so the
+            // scalar `serde_json::to_value(actual)` path would not compile.
+            const elem = `${inCrate}::${returnShape.base}`;
+            lines.push(`        let expected: Vec<${elem}> = {`);
+            lines.push("            let items: Vec<Value> = serde_json::from_str(");
+            lines.push(`                r####"`);
+            lines.push(expectedJson);
+            lines.push(`"####,`);
+            lines.push("            )");
+            lines.push(
+              `            .expect(${JSON.stringify(`${label}: expected parses`)});`,
+            );
+            lines.push("            items");
+            lines.push("                .iter()");
+            lines.push(
+              `                .map(|item| ${elem}::from_json(&item.to_string(), &ctx)`,
+            );
+            lines.push(
+              `                    .expect(${JSON.stringify(
+                `${label}: expected element parses`,
+              )}))`,
+            );
+            lines.push("                .collect()");
+            lines.push("        };");
+            lines.push(
+              `        assert_eq!(actual, expected, ${JSON.stringify(
+                `${label} misrouted`,
+              )});`,
+            );
+          } else {
+            lines.push(
+              `        let actual_value = serde_json::to_value(actual).expect(${JSON.stringify(
+                `${label}: serialize`,
+              )});`,
+            );
+            lines.push("        let expected: Value = serde_json::from_str(");
+            lines.push(`            r####"`);
+            lines.push(expectedJson);
+            lines.push(`"####,`);
+            lines.push("        )");
+            lines.push(
+              `        .expect(${JSON.stringify(`${label}: expected parses`)});`,
+            );
+            lines.push(
+              `        assert_eq!(actual_value, expected, ${JSON.stringify(
+                `${label} misrouted`,
+              )});`,
+            );
+          }
+        } else {
+          // No expected: reaching here without error IS the assertion.
+          lines.push("        let _ = actual;");
+        }
+      }
+      lines.push("    }");
+    });
+
+    lines.push("}");
+    if (seamIndex < seamNames.length - 1) lines.push("");
+  });
+
+  return lines.join("\n") + "\n";
+}
+
+/**
  * (tests/${iface}_conformance_test.rs) — the per-interface twin of the per-model
  * ${model}_test.rs file (issue #282 §8). Each test loads the operation params
  * from the vector JSON, reads the shape discriminator off the TYPED graph, routes

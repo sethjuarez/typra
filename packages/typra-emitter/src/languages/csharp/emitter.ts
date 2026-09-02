@@ -160,11 +160,15 @@ export function emitCSharpClass(
   // Properties
   emitProperties(type, allTypes, findType, lines);
 
-  // Load region
-  emitLoadRegion(loadType, allTypes, findType, lines);
+  // Serialization surface (load/save regions) is opt-in: emitted only when the
+  // type is in the serialization closure of a `@serializable` root.
+  if (type.serialized) {
+    // Load region
+    emitLoadRegion(loadType, allTypes, findType, lines);
 
-  // Save region
-  emitSaveRegion(type, allTypes, findType, lines);
+    // Save region
+    emitSaveRegion(type, allTypes, findType, lines);
+  }
 
   // Factory methods
   if (type.factories.length > 0) {
@@ -179,7 +183,7 @@ export function emitCSharpClass(
   // Close class
   lines.push("}");
 
-  if (needsUnknownCarrier(type)) {
+  if (type.serialized && needsUnknownCarrier(type)) {
     emitUnknownCarrier(type, lines);
   }
 

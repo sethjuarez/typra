@@ -22,6 +22,7 @@ import {
   KnownAsEntry,
   DefaultForEntry,
   ParseAliasEntry,
+  SerializationDirection,
 } from "../decorators.js";
 import { StateKeys } from "../lib.js";
 import { scalarRuntimeKind } from "./scalar-kinds.js";
@@ -179,6 +180,12 @@ export class TypeNode {
   public properties: PropertyNode[] = [];
   public isAbstract: boolean = false;
   public isProtocol: boolean = false;
+  /**
+   * True when this model is a `@serializable` root: the emitter emits load/save
+   * over its serialization closure (transitive property reach + discriminated
+   * variant expansion). Populated from `StateKeys.serializable`.
+   */
+  public serializable: boolean = false;
   public entryShorthand: string | null = null;
   public isError: boolean = false;
   public discriminator: string | undefined = undefined;
@@ -263,6 +270,13 @@ export class PropertyNode {
   public samples: SampleEntry[] = [];
   public knownAs: KnownAsEntry[] = [];
   public defaultFor: DefaultForEntry[] = [];
+  /**
+   * Serialization directions this field is withheld from (`@sensitive`). Empty
+   * when the field is not sensitive; otherwise the set of directions in which
+   * the field is omitted. A field withheld from BOTH directions carries no
+   * reachability for the serialization closure.
+   */
+  public sensitive: SerializationDirection[] = [];
 
   public isScalar: boolean = false;
   public isOptional: boolean = false;
@@ -403,6 +417,9 @@ export const resolveModel = (
     node.isAbstract =
       getStateScalar<boolean>(program, StateKeys.abstracts, innerModel) ||
       false;
+    node.serializable =
+      getStateScalar<boolean>(program, StateKeys.serializable, innerModel) ||
+      false;
     node.entryShorthand =
       getStateScalar<string>(program, StateKeys.entryShorthands, innerModel) ||
       null;
@@ -435,6 +452,8 @@ export const resolveModel = (
     );
     node.isAbstract =
       getStateScalar<boolean>(program, StateKeys.abstracts, model) || false;
+    node.serializable =
+      getStateScalar<boolean>(program, StateKeys.serializable, model) || false;
     node.entryShorthand =
       getStateScalar<string>(program, StateKeys.entryShorthands, model) || null;
     node.isError = isErrorModel(program, model);
@@ -479,6 +498,13 @@ export const resolveModel = (
         StateKeys.samples,
         value,
       );
+      // sensitive-field withholding
+      prop.sensitive =
+        getStateScalar<SerializationDirection[]>(
+          program,
+          StateKeys.sensitive,
+          value,
+        ) ?? [];
       // wire mappings
       prop.knownAs = getStateValue<KnownAsEntry>(
         program,

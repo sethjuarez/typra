@@ -35,6 +35,7 @@ import {
   runGeneratedTypeScriptZodWebCompile,
   runTypeScriptExecutableConformance,
   runTypeScriptGeneratedTests,
+  runTypeScriptVectorConformanceCompile,
   runTypeScriptWebRuntimeSmoke,
   runTypeScriptZodExecutableConformance,
   runTypeScriptZodWebRuntimeSmoke,
@@ -44,16 +45,20 @@ import {
   runPythonExecutableConformance,
   runPythonGeneratedTests,
   runPythonRuffCheck,
+  runPythonVectorConformanceCompile,
 } from "./fixtures/targets/python.mjs";
 import {
   runGoExecutableConformance,
   runGoTests,
+  runGoVectorBridgeCompile,
+  runGoVectorConformanceCompile,
 } from "./fixtures/targets/go.mjs";
 import {
   runRustDispatchRegressionCompile,
   runRustExecutableConformance,
   runRustTests,
   runRustUnknownAbstractConformance,
+  runRustVectorConformanceCompile,
 } from "./fixtures/targets/rust.mjs";
 import {
   runCSharpBuild,
@@ -61,6 +66,7 @@ import {
   runCSharpExecutableConformance,
   runCSharpGeneratedTests,
   runCSharpProtocolScaffoldBuild,
+  runCSharpVectorConformanceCompile,
 } from "./fixtures/targets/csharp.mjs";
 import {
   runJavaBuild,
@@ -68,12 +74,14 @@ import {
   runJavaGeneratedTests,
   runJavaJacksonBuild,
   runJavaJacksonGeneratedTests,
+  runJavaVectorConformanceCompile,
 } from "./fixtures/targets/java.mjs";
 import {
   runSwiftCodableExecutableConformance,
   runSwiftCodableTests,
   runSwiftExecutableConformance,
   runSwiftTests,
+  runSwiftVectorConformanceCompile,
 } from "./fixtures/targets/swift.mjs";
 import { runIdempotencyGuard } from "./fixtures/idempotency-runner.mjs";
 import {
@@ -108,24 +116,32 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "typescript-zod.web-runtime",
   "typescript.runtime-neutrality",
   "typescript.generated-tests",
+  "typescript.vector-conformance-compile",
   "python.compile",
   "python_pydantic.compile",
   "python.lint",
   "python_pydantic.lint",
   "python.generated-tests",
   "python_pydantic.generated-tests",
+  "python.vector-conformance-compile",
   "go.generated-tests",
+  "go.vector-bridge-compile",
+  "go.vector-conformance-compile",
   "rust.generated-tests",
   "rust.dispatch-regression-compile",
+  "rust.vector-conformance-compile",
   "rust-serde.generated-tests",
   "swift.generated-tests",
+  "swift.vector-conformance-compile",
   "swift-codable.generated-tests",
   "csharp.build",
   "csharp.consumer-nullability-build",
   "csharp.generated-tests",
   "csharp.protocol-scaffold-build",
+  "csharp.vector-conformance-compile",
   "java.build",
   "java.generated-tests",
+  "java.vector-conformance-compile",
   "java-jackson.build",
   "java-jackson.generated-tests",
   ...IDEMPOTENCY_TARGETS.map((target) => target.stageId),
@@ -681,6 +697,7 @@ function assertFocusedFeatureFixtures() {
         .join("/"),
     ),
     "features/samples/main.tsp",
+    "features/serialization/main.tsp",
     "features/vectors/main.tsp",
     "features/model-shapes/main.tsp",
     "features/scalars/main.tsp",
@@ -699,6 +716,7 @@ function assertFocusedFeatureFixtures() {
     "features/dispatch-vector-params/main.tsp",
     "features/dispatch-vector-coerce/main.tsp",
     "features/dispatch-target-regression/main.tsp",
+    "features/typed-seam-conformance/main.tsp",
   );
 
   for (const fixture of fixtures) {
@@ -799,6 +817,106 @@ function assertFocusedFeatureFixtures() {
             `Focused vectors fixture did not preserve expected vector payload: ${expected}`,
           );
         }
+      }
+    }
+
+    if (featureName === "serialization") {
+      // The generic loop renders markdown to prove the fixture compiles; opt-in
+      // serialization is a target-specific behavior, so assert on rendered Go
+      // (the golden-reference runtime). Red-first gate for issue #306.
+      const goRoot = path.join(outputRoot, "go-render");
+      try {
+        execFileSync(
+          process.execPath,
+          [
+            path.join(packageRoot, "dist", "src", "cli.js"),
+            "--output",
+            goRoot,
+            "--targets",
+            "go",
+            "--spec",
+            fixture,
+            "--root-object",
+            "Typra.Fixtures.Features.Serialization.Root",
+            "--no-tests",
+            "--no-format",
+            "--deterministic",
+          ],
+          { cwd: packageRoot, stdio: "pipe" },
+        );
+      } catch (error) {
+        const output =
+          `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+        fail(
+          `Serialization fixture failed to render Go:\n${output || error.message}`,
+        );
+      }
+
+      const readGo = (name) => {
+        const file = path.join(goRoot, "go", name);
+        return existsSync(file) ? readFileSync(file, "utf8") : "";
+      };
+      const root = readGo("root.go");
+      const detached = readGo("detached.go");
+      const bodyOf = (source, header) => {
+        // Function bodies close with a column-0 `}`; inner blocks are indented,
+        // so `\n}` matches only the terminal brace.
+        const start = source.indexOf(header);
+        if (start < 0) return "";
+        const end = source.indexOf("\n}", start);
+        return end < 0 ? source.slice(start) : source.slice(start, end + 2);
+      };
+
+      // Opt-in: a `@serializable` root emits load + save over its closure.
+      if (
+        !root.includes("func LoadRoot(") ||
+        !root.includes("func (obj Root) Save(")
+      ) {
+        fail("@serializable Root must emit load/save.");
+      }
+      // Negative: a `@sample`-only, unreachable model emits NO load/save —
+      // `@sample` alone never implies serialization intent.
+      if (
+        detached.includes("func LoadDetached(") ||
+        detached.includes("func (obj Detached) Save(")
+      ) {
+        fail("@sample-only Detached must NOT emit load/save.");
+      }
+      // A non-serialized Go file must not request unused serialization imports.
+      if (
+        detached.includes("encoding/json") ||
+        detached.includes("gopkg.in/yaml.v3")
+      ) {
+        fail(
+          "Non-serialized Go file must not import encoding/json or gopkg.in/yaml.v3.",
+        );
+      }
+      // No test file for a non-serialized type.
+      if (existsSync(path.join(goRoot, "go", "detached_test.go"))) {
+        fail("@sample-only Detached must NOT emit a test file.");
+      }
+
+      // @sensitive field withholding is a per-direction omission on the
+      // participating type (the closure stays total).
+      const saveBody = bodyOf(root, "func (obj Root) Save(");
+      const loadBody = bodyOf(root, "func LoadRoot(");
+      // `@sensitive("save")` — write-only secret: loaded, never saved.
+      if (saveBody.includes('"apiKey"')) {
+        fail('@sensitive("save") apiKey must be omitted from save.');
+      }
+      if (!loadBody.includes('"apiKey"')) {
+        fail('@sensitive("save") apiKey must remain loadable.');
+      }
+      // bare `@sensitive` — withheld from both directions.
+      if (saveBody.includes('"scratch"') || loadBody.includes('"scratch"')) {
+        fail("bare @sensitive scratch must be omitted from load and save.");
+      }
+      // `@sensitive("load")` — save-only: persisted but never reloaded.
+      if (!saveBody.includes('"computedAt"')) {
+        fail('@sensitive("load") computedAt must remain savable.');
+      }
+      if (loadBody.includes('"computedAt"')) {
+        fail('@sensitive("load") computedAt must be omitted from load.');
       }
     }
 
@@ -2140,29 +2258,61 @@ function runDeclaredValidationStages() {
       ["python.lint", () => runPythonRuffCheck()],
       ["python_pydantic.lint", () => runPythonRuffCheck("python_pydantic")],
       ["typescript.generated-tests", runTypeScriptGeneratedTests],
+      [
+        "typescript.vector-conformance-compile",
+        runTypeScriptVectorConformanceCompile,
+      ],
       ["python.generated-tests", () => runPythonGeneratedTests()],
       [
         "python_pydantic.generated-tests",
         () => runPythonGeneratedTests("python_pydantic", "fixtures_pydantic"),
       ],
+      [
+        "python.vector-conformance-compile",
+        (context) => runPythonVectorConformanceCompile(context),
+      ],
       ["go.generated-tests", runGoTests],
+      [
+        "go.vector-bridge-compile",
+        (context) => runGoVectorBridgeCompile(context),
+      ],
+      [
+        "go.vector-conformance-compile",
+        (context) => runGoVectorConformanceCompile(context),
+      ],
       ["rust.generated-tests", () => runRustTests()],
       [
         "rust.dispatch-regression-compile",
         (context) => runRustDispatchRegressionCompile(context),
       ],
       [
+        "rust.vector-conformance-compile",
+        (context) => runRustVectorConformanceCompile(context),
+      ],
+      [
         "rust-serde.generated-tests",
         () => runRustTests("rust-serde", "fixtures_serde"),
       ],
       ["swift.generated-tests", () => runSwiftTests()],
+      [
+        "swift.vector-conformance-compile",
+        (context) => runSwiftVectorConformanceCompile(context),
+      ],
       ["swift-codable.generated-tests", () => runSwiftCodableTests()],
       ["csharp.build", runCSharpBuild],
       ["csharp.consumer-nullability-build", runCSharpConsumerNullabilityBuild],
       ["csharp.generated-tests", runCSharpGeneratedTests],
       ["csharp.protocol-scaffold-build", runCSharpProtocolScaffoldBuild],
+      [
+        "csharp.vector-conformance-compile",
+        (context) => runCSharpVectorConformanceCompile(context),
+      ],
       ["java.build", runJavaBuild],
       ["java.generated-tests", runJavaGeneratedTests],
+      [
+        "java.vector-conformance-compile",
+        (context) => runJavaVectorConformanceCompile(context),
+      ],
       ["java-jackson.build", runJavaJacksonBuild],
       ["java-jackson.generated-tests", runJavaJacksonGeneratedTests],
       ...IDEMPOTENCY_TARGETS.map((target) => [
@@ -2175,6 +2325,13 @@ function runDeclaredValidationStages() {
       ...idempotencyAllowedSkips(),
       "typescript.runtime-neutrality": "no TypeScript targets generated",
       "rust.dispatch-regression-compile": "cargo is not available",
+      "rust.vector-conformance-compile": "cargo is not available",
+      "go.vector-bridge-compile": "go is not available",
+      "go.vector-conformance-compile": "go is not available",
+      "python.vector-conformance-compile": "uv is not available",
+      "swift.vector-conformance-compile": "swift is not available",
+      "csharp.vector-conformance-compile": "dotnet is not available",
+      "java.vector-conformance-compile": "javac is not available",
     },
   });
 }

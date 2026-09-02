@@ -482,27 +482,32 @@ function emitStruct(
   }
   lines.push("  }");
   lines.push("");
-  emitLoad(type, lines, polymorphicTypeNames);
-  for (const helper of type.collectionHelpers) {
-    if (supportsNamedCollectionHelper(helper, polymorphicTypeNames)) {
-      lines.push("");
-      emitNamedCollectionLoadHelper(helper, lines, polymorphicTypeNames);
-      lines.push("");
-      emitNamedCollectionSaveHelper(helper, lines, polymorphicTypeNames);
+  // Serialization surface (load/save + collection helpers + wire + json/yaml)
+  // is opt-in: emitted only when the type is in the serialization closure of a
+  // `@serializable` root.
+  if (type.serialized) {
+    emitLoad(type, lines, polymorphicTypeNames);
+    for (const helper of type.collectionHelpers) {
+      if (supportsNamedCollectionHelper(helper, polymorphicTypeNames)) {
+        lines.push("");
+        emitNamedCollectionLoadHelper(helper, lines, polymorphicTypeNames);
+        lines.push("");
+        emitNamedCollectionSaveHelper(helper, lines, polymorphicTypeNames);
+      }
     }
-  }
-  lines.push("");
-  emitSave(type, lines, polymorphicTypeNames);
-  if (nativeSerialization === "codable") {
-    emitCodableDelegation(typeName, lines);
-  }
-  if (type.wire) {
     lines.push("");
-    emitToWire(type, lines, polymorphicTypeNames);
-    lines.push("");
-    emitFromWire(type, lines);
+    emitSave(type, lines, polymorphicTypeNames);
+    if (nativeSerialization === "codable") {
+      emitCodableDelegation(typeName, lines);
+    }
+    if (type.wire) {
+      lines.push("");
+      emitToWire(type, lines, polymorphicTypeNames);
+      lines.push("");
+      emitFromWire(type, lines);
+    }
+    emitJsonYamlMethods(typeName, lines);
   }
-  emitJsonYamlMethods(typeName, lines);
   for (const factory of type.factories) {
     lines.push("");
     const params = Object.entries(factory.params)

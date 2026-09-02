@@ -7,9 +7,11 @@ import {
   existsSync,
   fail,
   generatedRoot,
+  mkdirp,
   mkdtempSync,
   packageRoot,
   path,
+  readFileSync,
   requirePythonRunner,
   rmSync,
   runCommand,
@@ -320,6 +322,136 @@ export function runPythonExecutableConformance(
   } finally {
     if (existsSync(runnerPath)) {
       unlinkSync(runnerPath);
+    }
+  }
+}
+
+export function runPythonVectorConformanceCompile(context) {
+  // Red-first gate for the typed conformance ENTRYPOINT (issue #511 Cat 1,
+  // typra#306 Track A). The emitter emits `run_<seam>_conformance(seam)` in a
+  // `vector_conformance.py` module; a consumer migrates a plain seam off the
+  // stringly `vector_adapters` registry by authoring only a real seam impl and
+  // one typed call. This gate proves that path stands ALONE: generate the
+  // typed-seam-conformance fixture, stage the model package, attach the committed
+  // typed double as a pytest test, and run just that test.
+  //
+  // Red-first: if the entrypoint is not emitted, `fixtures/vector_conformance.py`
+  // does not exist and the double fails to import — so this gate fails on `main`.
+  if (!commandExists("uv")) {
+    context.skip("uv is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "typed-seam-conformance",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-python-typedseam-"));
+  const stageRoot = mkdtempSync(
+    path.join(tmpdir(), "typra-python-typedseam-stage-"),
+  );
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "python",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.TypedSeamConformance.Root",
+        "--deterministic",
+        "--no-format",
+        "--package-name",
+        "fixtures",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "python");
+    if (!existsSync(sourceDir)) {
+      fail("Python typed-seam-conformance gate: no python output generated.");
+      return;
+    }
+    if (!existsSync(path.join(sourceDir, "vector_conformance.py"))) {
+      fail(
+        "Python typed-seam-conformance gate: emitter did not emit " +
+          "vector_conformance.py (the typed conformance entrypoint). The " +
+          "committed double cannot import fixtures.vector_conformance — this is " +
+          "the red-first signal.",
+      );
+      return;
+    }
+    // Stage the generated model as the `fixtures` package. The typed entrypoint
+    // stands alone: the stringly rail (tests/vector_runner.py + the monolithic
+    // tests/test_vector_conformance.py needing a hand-authored vector_adapters
+    // module) is left uncopied by running pytest against only the double.
+    const packageDir = path.join(stageRoot, "fixtures");
+    cpSync(sourceDir, packageDir, {
+      recursive: true,
+      filter: (source) =>
+        !path.basename(source).startsWith("__pycache__") &&
+        path.basename(source) !== ".pytest_cache",
+    });
+    // Attach the committed typed double as its own pytest file.
+    const doubleTestsDir = path.join(packageDir, "typed_conformance_tests");
+    mkdirp(doubleTestsDir);
+    const doubleTest = path.join(doubleTestsDir, "test_typed_conformance.py");
+    writeFileSync(
+      doubleTest,
+      readFileSync(
+        path.join(
+          fixtureDir,
+          "vector-adapters",
+          "python",
+          "test_typed_conformance.py",
+        ),
+        "utf8",
+      ),
+    );
+    const runner = requirePythonRunner(
+      "Python typed-seam-conformance conformance",
+    );
+    if (!runner) return;
+    try {
+      execFileSync(
+        runner.command,
+        [
+          ...runner.argsPrefix,
+          "-m",
+          "pytest",
+          doubleTest,
+          "-q",
+          "-p",
+          "no:cacheprovider",
+        ],
+        {
+          cwd: stageRoot,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          env: {
+            ...process.env,
+            PYTHONPATH: stageRoot,
+            PYTHONDONTWRITEBYTECODE: "1",
+          },
+        },
+      );
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Python typed-seam-conformance compile/run gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    if (existsSync(outRoot)) {
+      rmSync(outRoot, { recursive: true, force: true });
+    }
+    if (existsSync(stageRoot)) {
+      rmSync(stageRoot, { recursive: true, force: true });
     }
   }
 }

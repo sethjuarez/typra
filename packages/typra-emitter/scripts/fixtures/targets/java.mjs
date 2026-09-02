@@ -1,6 +1,7 @@
 import {
   KNOWN_TEST_FAILURES,
   assertKnownTestFailures,
+  commandExists,
   execFileSync,
   existsSync,
   fail,
@@ -10,9 +11,13 @@ import {
   javaClasspathArgs,
   javaRuntimeClasspath,
   mkdirSync,
+  mkdtempSync,
+  packageRoot,
   path,
+  readFileSync,
   rmSync,
   runCommand,
+  tmpdir,
   unlinkSync,
   walkFiles,
   writeFileSync,
@@ -450,5 +455,124 @@ export function runJavaExecutableConformance() {
       unlinkSync(runnerPath);
     }
     rmSync(classesDir, { recursive: true, force: true });
+  }
+}
+
+export function runJavaVectorConformanceCompile(context) {
+  // Red-first gate for the typed conformance ENTRYPOINT (issue #511 Cat 1,
+  // typra#306 Track A). The emitter emits
+  // `VectorConformance.runTransformerConformance(seam)` into the LIBRARY beside
+  // the seam interface; a consumer migrates a plain seam off the stringly
+  // VectorRunner registry by authoring ONLY a real Transformer impl and one
+  // typed call. This gate proves that path stands ALONE: generate the
+  // typed-seam-conformance fixture, DROP the stringly-rail `tests/` package
+  // (VectorRunner + the monolithic VectorConformanceTests that need a
+  // hand-authored VectorAdapters class), attach the committed typed double, and
+  // compile + run it with javac/java.
+  //
+  // Red-first: if the entrypoint is not emitted, VectorConformance.java does not
+  // exist and the double cannot resolve the entrypoint — so this fails on `main`.
+  if (!commandExists("javac") || !commandExists("java")) {
+    context.skip("javac is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "typed-seam-conformance",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-java-typedseam-"));
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "java",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.TypedSeamConformance.Root",
+        "--deterministic",
+        "--no-format",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "java");
+    if (!existsSync(sourceDir)) {
+      fail("Java typed-seam-conformance gate: no java output generated.");
+      return;
+    }
+    if (!existsSync(path.join(sourceDir, "VectorConformance.java"))) {
+      fail(
+        "Java typed-seam-conformance gate: emitter did not emit " +
+          "VectorConformance.java (the typed conformance entrypoint). The " +
+          "committed double cannot resolve VectorConformance — this is the " +
+          "red-first signal.",
+      );
+      return;
+    }
+    // The typed entrypoint stands alone: drop the stringly rail (VectorRunner +
+    // the monolithic VectorConformanceTests) that would otherwise need a
+    // hand-authored VectorAdapters class to compile.
+    const stringlyTests = path.join(sourceDir, "tests");
+    if (existsSync(stringlyTests)) {
+      rmSync(stringlyTests, { recursive: true, force: true });
+    }
+    // Attach the committed typed double (a plain `main` runner implementing the
+    // real Transformer seam), then compile the emitted library + entrypoint +
+    // double and run the double.
+    writeFileSync(
+      path.join(sourceDir, "TypedConformanceRun.java"),
+      readFileSync(
+        path.join(
+          fixtureDir,
+          "vector-adapters",
+          "java",
+          "TypedConformanceRun.java",
+        ),
+        "utf8",
+      ),
+    );
+    const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".java"));
+    const classesDir = path.join(sourceDir, ".classes");
+    rmSync(classesDir, { recursive: true, force: true });
+    mkdirSync(classesDir, { recursive: true });
+    try {
+      const initialFailureCount = failures.length;
+      runCommand(
+        "Java typed-seam-conformance build",
+        "javac",
+        ["-Xlint:all", "-Werror", "-d", classesDir, ...sourceFiles],
+        { cwd: sourceDir },
+      );
+      if (failures.length > initialFailureCount) return;
+      try {
+        execFileSync(
+          "java",
+          [
+            "-cp",
+            javaRuntimeClasspath(classesDir, ""),
+            "typra.fixtures.features.typedseamconformance.TypedConformanceRun",
+          ],
+          { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+        );
+      } catch (error) {
+        const output =
+          `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+        fail(
+          `Java typed-seam-conformance compile/run gate failed:\n${output || error.message}`,
+        );
+      }
+    } finally {
+      rmSync(classesDir, { recursive: true, force: true });
+    }
+  } finally {
+    if (existsSync(outRoot)) {
+      rmSync(outRoot, { recursive: true, force: true });
+    }
   }
 }
