@@ -223,7 +223,11 @@ export const generateJava = async (
       );
     }
 
-    if (emitTarget["test-dir"] && !n.isProtocol) {
+    if (
+      emitTarget["test-dir"] &&
+      !n.isProtocol &&
+      serializationClosure.has(n.typeName.name)
+    ) {
       const testClass = javaTestClassName(n.typeName.name);
       testClassNames.push(testClass);
       const testContext = buildBaseTestContext(

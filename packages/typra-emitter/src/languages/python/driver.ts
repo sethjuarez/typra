@@ -252,8 +252,15 @@ export const generatePython = async (
       );
     }
 
-    // Render test file for each type (skip protocols — they have no data to test)
-    if (emitTarget["test-dir"] && !n.isProtocol) {
+    // Render test file for each type (skip protocols — they have no data to
+    // test — and non-serialized types, whose round-trip tests would reference
+    // load/save that is no longer emitted; gate on the serialization closure,
+    // matching Go).
+    if (
+      emitTarget["test-dir"] &&
+      !n.isProtocol &&
+      serializationClosure.has(n.typeName.name)
+    ) {
       const testDir = n.group
         ? `${emitTarget["test-dir"]}/${n.group}`
         : emitTarget["test-dir"];

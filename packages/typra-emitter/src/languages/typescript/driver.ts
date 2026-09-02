@@ -230,6 +230,10 @@ export const generateTypeScript = async (
     const importPath = namespaceProjection.importPath!;
     for (const n of nodes) {
       if (n.isProtocol) continue;
+      // Skip non-serialized types: their round-trip test would reference
+      // load/save that is no longer emitted (gate on the serialization
+      // closure, matching Go).
+      if (!serializationClosure.has(n.typeName.name)) continue;
       const group = n.group || "";
       const testDir = group
         ? `${emitTarget["test-dir"]}/${group}`

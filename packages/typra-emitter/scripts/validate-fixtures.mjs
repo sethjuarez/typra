@@ -918,6 +918,95 @@ function assertFocusedFeatureFixtures() {
       if (loadBody.includes('"computedAt"')) {
         fail('@sensitive("load") computedAt must be omitted from load.');
       }
+
+      // Round-trip TEST emission must gate on serializability across EVERY
+      // target, not just Go. `@sample` no longer implies `@serializable`, so a
+      // `@sample`-only, non-serializable type (Detached) gets a model with NO
+      // load/save — and any generated round-trip test that calls the missing
+      // load/save fails to compile. Go already prunes the per-type test file
+      // (the reference behavior); this locks the same contract for the other
+      // six drivers. Red-first for the 2.1.1 emitter-drift fix: render WITH
+      // tests and assert no target emits a Detached round-trip test file.
+      const allTestsRoot = path.join(outputRoot, "all-tests-render");
+      try {
+        execFileSync(
+          process.execPath,
+          [
+            path.join(packageRoot, "dist", "src", "cli.js"),
+            "--output",
+            allTestsRoot,
+            "--targets",
+            "go,python,typescript,csharp,java,swift,rust",
+            "--spec",
+            fixture,
+            "--root-object",
+            "Typra.Fixtures.Features.Serialization.Root",
+            "--no-format",
+            "--deterministic",
+          ],
+          { cwd: packageRoot, stdio: "pipe" },
+        );
+      } catch (error) {
+        const output =
+          `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+        fail(
+          `Serialization fixture failed to render all targets with tests:\n${output || error.message}`,
+        );
+      }
+
+      // Per-target path where each driver writes a type's round-trip test. Go is
+      // the golden reference (already gated); the other six must match.
+      const detachedTestFiles = {
+        go: ["go", "detached_test.go"],
+        python: [
+          "python",
+          "tests",
+          "fixtures",
+          "features",
+          "serialization",
+          "test_detached.py",
+        ],
+        typescript: [
+          "typescript",
+          "tests",
+          "fixtures",
+          "features",
+          "serialization",
+          "detached.test.ts",
+        ],
+        csharp: [
+          "csharp",
+          "tests",
+          "Fixtures",
+          "Features",
+          "Serialization",
+          "DetachedConversionTests.cs",
+        ],
+        java: ["java", "tests", "DetachedGeneratedTest.java"],
+        swift: [
+          "swift",
+          "tests",
+          "Fixtures",
+          "Features",
+          "Serialization",
+          "DetachedTests.swift",
+        ],
+        rust: [
+          "rust",
+          "tests",
+          "fixtures",
+          "features",
+          "serialization",
+          "detached_test.rs",
+        ],
+      };
+      for (const [target, segments] of Object.entries(detachedTestFiles)) {
+        if (existsSync(path.join(allTestsRoot, ...segments))) {
+          fail(
+            `${target}: @sample-only Detached must NOT emit a round-trip test file (its model has no load/save). Gate per-type test emission on the serialization closure, matching Go.`,
+          );
+        }
+      }
     }
 
     if (featureName === "protocols") {
