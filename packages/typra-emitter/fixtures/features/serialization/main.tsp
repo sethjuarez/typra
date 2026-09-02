@@ -6,7 +6,7 @@ namespace Typra.Fixtures.Features.Serialization;
 // over its transitive + discriminated closure (Profile, ContentPart + variants).
 @serializable
 model Root {
-  @sample(#{ name: "assistant" })
+  @sample(#{ name: "assistant", apiKey: "sk-secret-value" })
   name: string;
 
   // Write-only secret: injected on load, never written on save.

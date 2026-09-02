@@ -1007,6 +1007,103 @@ function assertFocusedFeatureFixtures() {
           );
         }
       }
+
+      // A generated load → save → load round-trip test must NOT assert that a
+      // `@sensitive("save")` field survives: `save()` omits it, so the reloaded
+      // instance carries the default, not the original value. Root.apiKey is
+      // `@sensitive("save")` and carries a `@sample` value, so a naive driver
+      // emits `reloaded.apiKey == "sk-secret-value"` — an assertion that is
+      // false by construction (the security property the annotation guarantees).
+      // Rust is exempt: its round-trip test asserts load-ok + to_json-ok only,
+      // never field survival, so it can't emit the inverted assertion. Red-first
+      // for the 2.1.2 emitter-drift fix.
+      const sensitiveRoundtripChecks = {
+        go: { file: ["go", "tests", "root_test.go"], sensitive: "ApiKey", normal: "Name" },
+        python: {
+          file: [
+            "python",
+            "tests",
+            "fixtures",
+            "features",
+            "serialization",
+            "test_root.py",
+          ],
+          sensitive: "api_key",
+          normal: "name",
+        },
+        typescript: {
+          file: [
+            "typescript",
+            "tests",
+            "fixtures",
+            "features",
+            "serialization",
+            "root.test.ts",
+          ],
+          sensitive: "apiKey",
+          normal: "name",
+        },
+        csharp: {
+          file: [
+            "csharp",
+            "tests",
+            "Fixtures",
+            "Features",
+            "Serialization",
+            "RootConversionTests.cs",
+          ],
+          sensitive: "ApiKey",
+          normal: "Name",
+        },
+        java: {
+          file: ["java", "tests", "RootGeneratedTest.java"],
+          sensitive: "apiKey",
+          normal: "name",
+        },
+        swift: {
+          file: [
+            "swift",
+            "tests",
+            "Fixtures",
+            "Features",
+            "Serialization",
+            "RootTests.swift",
+          ],
+          sensitive: "apiKey",
+          normal: "name",
+        },
+      };
+      for (const [target, spec] of Object.entries(sensitiveRoundtripChecks)) {
+        const filePath = path.join(allTestsRoot, ...spec.file);
+        if (!existsSync(filePath)) {
+          fail(
+            `${target}: @serializable Root must emit a round-trip test file (expected ${spec.file.join("/")}).`,
+          );
+          continue;
+        }
+        const testLines = readFileSync(filePath, "utf8").split("\n");
+        // The reloaded (post-save) instance is the only place `reloaded` and a
+        // field accessor co-occur — load-side assertions use `instance`. Java's
+        // `reloaded0` still contains the `reloaded` substring.
+        const assertsSensitiveSurvives = testLines.some(
+          (line) => line.includes("reloaded") && line.includes(spec.sensitive),
+        );
+        if (assertsSensitiveSurvives) {
+          fail(
+            `${target}: round-trip test must NOT assert @sensitive("save") apiKey survives load→save→load — save() omits it, so the reloaded value is default. Exclude @sensitive("save") fields from post-save reload assertions.`,
+          );
+        }
+        // Positive control: the non-sensitive field must still be asserted, so
+        // the fix drops only the withheld field, not the whole reload check.
+        const assertsNormalSurvives = testLines.some(
+          (line) => line.includes("reloaded") && line.includes(spec.normal),
+        );
+        if (!assertsNormalSurvives) {
+          fail(
+            `${target}: round-trip test must still assert the non-sensitive field survives load→save→load.`,
+          );
+        }
+      }
     }
 
     if (featureName === "protocols") {

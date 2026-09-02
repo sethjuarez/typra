@@ -11,6 +11,7 @@ import {
   javaPropertyName,
   javaTypeName,
 } from "./identifiers.js";
+import { postSaveExample } from "../../testing/test-context.js";
 
 function javaString(value: string): string {
   return JSON.stringify(value);
@@ -132,11 +133,21 @@ function emitExampleTest(
   lines.push(
     `    ${typeName} fromYaml${index} = ${typeName}.fromYaml(yamlRoundtrip${index});`,
   );
-  emitExampleValidations(lines, `fromYaml${index}`, node, example);
+  emitExampleValidations(
+    lines,
+    `fromYaml${index}`,
+    node,
+    postSaveExample(example, node),
+  );
   lines.push(
     `    ${typeName} reloaded${index} = ${typeName}.load(instance${index}.save(new SaveContext()), new LoadContext());`,
   );
-  emitExampleValidations(lines, `reloaded${index}`, node, example);
+  emitExampleValidations(
+    lines,
+    `reloaded${index}`,
+    node,
+    postSaveExample(example, node),
+  );
   if (nativeSerialization === "jackson") {
     lines.push(
       `    assertJacksonMatches(instance${index}, ${jsonData}, ${typeName}.class, "Expected Jackson to match Typra load/save for ${typeName} example ${index}");`,

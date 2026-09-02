@@ -18,6 +18,7 @@ import {
   PropertyNode,
 } from "../../ir/ast.js";
 import { buildGoFieldNames, goFieldName } from "./identifiers.js";
+import { postSaveExample } from "../../testing/test-context.js";
 
 // ============================================================================
 // Helpers
@@ -1163,7 +1164,14 @@ function emitRoundtripTest(
     lines.push(`if err != nil {`);
     lines.push(`t.Fatalf("Failed to reload ${typeName}: %v", err)`);
     lines.push(`}`);
-    emitExampleValidations(lines, "reloaded", sample, node, pkg, fieldNames);
+    emitExampleValidations(
+      lines,
+      "reloaded",
+      postSaveExample(sample, node),
+      node,
+      pkg,
+      fieldNames,
+    );
   }
   lines.push("}");
 }
@@ -1213,7 +1221,14 @@ function emitToJSONTest(
     lines.push(`if err != nil {`);
     lines.push(`t.Fatalf("Failed to reload generated JSON: %v", err)`);
     lines.push(`}`);
-    emitExampleValidations(lines, "reloaded", sample, node, pkg, fieldNames);
+    emitExampleValidations(
+      lines,
+      "reloaded",
+      postSaveExample(sample, node),
+      node,
+      pkg,
+      fieldNames,
+    );
   }
 
   lines.push("}");
@@ -1264,7 +1279,14 @@ function emitToYAMLTest(
     lines.push(`if err != nil {`);
     lines.push(`t.Fatalf("Failed to reload generated YAML: %v", err)`);
     lines.push(`}`);
-    emitExampleValidations(lines, "reloaded", sample, node, pkg, fieldNames);
+    emitExampleValidations(
+      lines,
+      "reloaded",
+      postSaveExample(sample, node),
+      node,
+      pkg,
+      fieldNames,
+    );
   }
 
   lines.push("}");
