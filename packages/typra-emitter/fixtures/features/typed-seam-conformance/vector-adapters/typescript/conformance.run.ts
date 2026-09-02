@@ -10,8 +10,9 @@
 // `runTransformerConformance` import resolves only when the emitter emits
 // `vector-conformance.ts`; on `main` it does not exist, so this file fails to
 // compile (the red-first signal).
-import type { Collator, Note, Reviser, Transformer } from "./index";
+import type { Assembler, Collator, Note, Reviser, Transformer } from "./index";
 import {
+  runAssemblerConformance,
   runCollatorConformance,
   runReviserConformance,
   runTransformerConformance,
@@ -49,10 +50,34 @@ class CollatorImpl implements Collator {
   }
 }
 
+// A carrier-param seam: the note flows through typed while `options` is an
+// untyped `Record<string, unknown>` carrier (prompty's `Renderer.render`
+// `inputs`). `reassemble` takes the OPTIONAL carrier form (`Parser.parse`
+// `context?`), which lowers to `Record<string, unknown> | null`; the
+// absent-carrier vector proves an omitted optional carrier decodes to `null`
+// and still threads through. The impls ignore `options` — the point is only
+// that the untyped param decodes and the typed `Note[]` return still compares.
+class AssemblerImpl implements Assembler {
+  async assemble(
+    note: Note,
+    _options: Record<string, unknown>,
+  ): Promise<Note[]> {
+    return [note];
+  }
+
+  async reassemble(
+    note: Note,
+    _options: Record<string, unknown> | null,
+  ): Promise<Note[]> {
+    return [note];
+  }
+}
+
 async function main(): Promise<void> {
   await runTransformerConformance(new TransformerImpl());
   await runReviserConformance(new ReviserImpl());
   await runCollatorConformance(new CollatorImpl());
+  await runAssemblerConformance(new AssemblerImpl());
   console.log("TYPED_CONFORMANCE_OK");
 }
 

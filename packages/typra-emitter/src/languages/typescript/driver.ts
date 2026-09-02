@@ -318,9 +318,15 @@ export const generateTypeScript = async (
       // same `JSON.parse(JSON.stringify(actual))` round-trip as a scalar. Phase 2
       // array parity (`{ arrays: true }`) further admits `Model[]` seams — the
       // structural `as <Model>[]` cast and round-trip compare lift over arrays
-      // unchanged.
+      // unchanged. Carrier parity (`{ carriers: true }`) admits an untyped
+      // `Record<unknown>` param (optional or not); it decodes via the same
+      // generic `JSON.parse(input) as Record<string, unknown>` cast with no
+      // extra emission, and stays param-only so the return keeps its own rule.
       const conformanceEntries = allVectors.filter((entry) =>
-        isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
+        isTypedSeamEntry(entry, serializationClosure, {
+          arrays: true,
+          carriers: true,
+        }),
       );
       if (conformanceEntries.length > 0) {
         await emitTypeScriptFile(
