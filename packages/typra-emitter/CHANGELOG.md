@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [2.1.0](https://github.com/sethjuarez/typra/compare/v2.0.2...v2.1.0) (2026-09-02)
+
+
+### Features
+
+* **emitter:** emit typed [@vector](https://github.com/vector) conformance rail with opt-in [@serializable](https://github.com/serializable) across 7 runtimes ([#309](https://github.com/sethjuarez/typra/issues/309)) ([3adadea](https://github.com/sethjuarez/typra/commit/3adadeac332a72aa19ad53c7dbcacb8f353ec31a))
+
 ## [2.0.2](https://github.com/sethjuarez/typra/compare/v2.0.1...v2.0.2) (2026-08-27)
 
 
