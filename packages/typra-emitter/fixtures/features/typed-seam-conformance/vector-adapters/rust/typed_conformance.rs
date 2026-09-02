@@ -12,7 +12,7 @@
 //
 // The gate attaches this file as a test module of the generated crate.
 
-use crate::model::{Collator, Note, Reviser, Transformer};
+use crate::model::{Assembler, Collator, Note, Reviser, Transformer};
 
 /// A minimal real seam implementation: trims, and rejects the literal "boom".
 struct TransformerImpl;
@@ -80,4 +80,37 @@ impl Collator for CollatorImpl {
 #[tokio::test]
 async fn collator_typed_vectors_pass() {
     crate::model::vector_conformance::run_collator_conformance(&CollatorImpl).await;
+}
+
+/// A minimal real CARRIER-in / ARRAY-out seam: wraps the note in a one-element
+/// `Vec`, ignoring the untyped `options` carrier. The typed entrypoint decodes
+/// `options` via `serde_json::from_str::<serde_json::Value>` (or
+/// `Option<serde_json::Value>` for the OPTIONAL carrier) — the same serde-native
+/// path as any scalar — and threads the parsed bag straight through to the call.
+/// The RETURN keeps its own array-of-model rule (`Note::from_json` element-wise),
+/// so the untyped carrier param never loosens the result check.
+struct AssemblerImpl;
+
+#[async_trait::async_trait]
+impl Assembler for AssemblerImpl {
+    async fn assemble(
+        &self,
+        note: &Note,
+        _options: &serde_json::Value,
+    ) -> Result<Vec<Note>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(vec![note.clone()])
+    }
+
+    async fn reassemble(
+        &self,
+        note: &Note,
+        _options: &Option<serde_json::Value>,
+    ) -> Result<Vec<Note>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(vec![note.clone()])
+    }
+}
+
+#[tokio::test]
+async fn assembler_typed_vectors_pass() {
+    crate::model::vector_conformance::run_assembler_conformance(&AssemblerImpl).await;
 }

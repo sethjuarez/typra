@@ -380,9 +380,17 @@ export const generateRust = async (
     // models are in the `@serializable` closure (their `from_json` loader exists);
     // scalar seams remain eligible unconditionally (superset). Phase 2 array
     // parity (`{ arrays: true }`) further admits `Model[]` seams — decoded/compared
-    // element-wise through the same serde-free `from_json` loader.
+    // element-wise through the same serde-free `from_json` loader. Carrier parity
+    // (`{ carriers: true }`) admits an untyped `Record<…>` PARAM: it maps to
+    // `serde_json::Value` (or `Option<serde_json::Value>` when optional), so the
+    // entrypoint's serde-native `serde_json::from_str` param branch decodes it
+    // with ZERO extra emission — the carrier is param-only, so the RETURN keeps
+    // its own serde-free loader rule.
     const entrypointEligible = allVectors.filter((entry) =>
-      isTypedSeamEntry(entry, serializationClosure, { arrays: true }),
+      isTypedSeamEntry(entry, serializationClosure, {
+        arrays: true,
+        carriers: true,
+      }),
     );
     if (entrypointEligible.length > 0) {
       await emitRustFile(
