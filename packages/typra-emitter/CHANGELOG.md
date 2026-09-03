@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [2.1.2](https://github.com/sethjuarez/typra/compare/v2.1.1...v2.1.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **emitter:** skip [@sensitive](https://github.com/sensitive)("save") fields in round-trip test assertions ([#313](https://github.com/sethjuarez/typra/issues/313)) ([92888de](https://github.com/sethjuarez/typra/commit/92888de764822bda9a4dbe612e0890f2928fdffe))
+
 ## [2.1.1](https://github.com/sethjuarez/typra/compare/v2.1.0...v2.1.1) (2026-09-02)
 
 
