@@ -445,10 +445,22 @@ function emitStruct(
   if (type.description) {
     lines.push(`/// ${type.description.replace(/\r?\n/g, " ")}`);
   }
-  const conformances = ["TypraModel"];
+  // `TypraModel` REQUIRES load/save; `Codable`'s emitted conformance is a
+  // delegation to load/save (`emitCodableDelegation`). Both are emitted only when
+  // the type is in a `@serializable` closure (see the `type.serialized` gate on
+  // the serialization surface below), so their CONFORMANCE must be gated on the
+  // same flag — otherwise a pruned (non-serializable) type declares a protocol it
+  // does not satisfy and the Swift package fails to compile. `Swift.Error` is a
+  // marker independent of serialization and stays unconditional.
+  const conformances: string[] = [];
+  if (type.serialized) conformances.push("TypraModel");
   if (type.isError) conformances.push("Swift.Error");
-  if (nativeSerialization === "codable") conformances.push("Codable");
-  lines.push(`public struct ${typeName}: ${conformances.join(", ")} {`);
+  if (type.serialized && nativeSerialization === "codable") {
+    conformances.push("Codable");
+  }
+  const conformanceClause =
+    conformances.length > 0 ? `: ${conformances.join(", ")}` : "";
+  lines.push(`public struct ${typeName}${conformanceClause} {`);
   lines.push(
     `  public static let shorthandProperty: String? = ${type.coercionProperty ? swiftStringLiteral(type.coercionProperty) : "nil"}`,
   );

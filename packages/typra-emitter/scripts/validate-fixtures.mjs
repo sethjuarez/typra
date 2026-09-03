@@ -909,6 +909,71 @@ function assertFocusedFeatureFixtures() {
         fail("@sample-only Detached must NOT emit a test file.");
       }
 
+      // Swift-specific gate (red-first for the 2.1.6 emitter-drift fix): Swift's
+      // `TypraModel` protocol REQUIRES load + save, so it is a serialization
+      // marker, not a bare base marker. A non-serializable type whose load/save
+      // are (correctly) pruned must therefore NOT declare `: TypraModel` — else
+      // it conforms to a protocol it cannot satisfy and `swift build` fails with
+      // "type 'Detached' does not conform to protocol 'TypraModel'". Render Swift
+      // and assert the pruned `Detached` emits a PLAIN struct (no conformance),
+      // with no load/save/wire — matching Go's plain struct.
+      const swiftRoot = path.join(outputRoot, "swift-render");
+      try {
+        execFileSync(
+          process.execPath,
+          [
+            path.join(packageRoot, "dist", "src", "cli.js"),
+            "--output",
+            swiftRoot,
+            "--targets",
+            "swift",
+            "--spec",
+            fixture,
+            "--root-object",
+            "Typra.Fixtures.Features.Serialization.Root",
+            "--no-tests",
+            "--no-format",
+            "--deterministic",
+          ],
+          { cwd: packageRoot, stdio: "pipe" },
+        );
+      } catch (error) {
+        const output =
+          `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+        fail(
+          `Serialization fixture failed to render Swift:\n${output || error.message}`,
+        );
+      }
+      const findSwift = (basename) => {
+        const found = walkFiles(
+          swiftRoot,
+          (file) => path.basename(file) === basename,
+        );
+        return found.length === 1 ? readFileSync(found[0], "utf8") : "";
+      };
+      const detachedSwift = findSwift("detached.swift");
+      const rootSwift = findSwift("root.swift");
+      // Positive: the `@serializable` Root keeps its serialization conformance.
+      if (!rootSwift.includes("struct Root: TypraModel")) {
+        fail("@serializable Root must declare `: TypraModel` in Swift.");
+      }
+      // Negative: the pruned, non-serializable Detached must be a plain struct.
+      if (/struct Detached\b[^{]*:\s*[^{]*TypraModel/.test(detachedSwift)) {
+        fail(
+          "@sample-only Detached must NOT declare `: TypraModel` in Swift — its load/save are pruned, so the conformance is unsatisfiable and breaks `swift build`.",
+        );
+      }
+      if (
+        detachedSwift.includes("func save(") ||
+        detachedSwift.includes("static func load(") ||
+        detachedSwift.includes("func toWire(") ||
+        detachedSwift.includes("static func fromWire(")
+      ) {
+        fail(
+          "@sample-only Detached must NOT emit load/save/wire methods in Swift.",
+        );
+      }
+
       // @sensitive field withholding is a per-direction omission on the
       // participating type (the closure stays total).
       const saveBody = bodyOf(root, "func (obj Root) Save(");
