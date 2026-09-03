@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [2.1.7](https://github.com/sethjuarez/typra/compare/v2.1.6...v2.1.7) (2026-09-03)
+
+
+### Bug Fixes
+
+* **emitter:** fill never-loaded fields via Default in Rust load initializer ([#326](https://github.com/sethjuarez/typra/issues/326)) ([bdca169](https://github.com/sethjuarez/typra/commit/bdca169c806b401c34bfebfe6cc0a7e39b4ed75d))
+
 ## [2.1.6](https://github.com/sethjuarez/typra/compare/v2.1.5...v2.1.6) (2026-09-03)
 
 
