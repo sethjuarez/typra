@@ -882,6 +882,19 @@ function assertFocusedFeatureFixtures() {
       ) {
         fail("@sample-only Detached must NOT emit load/save.");
       }
+      // Negative: a non-serialized model with `@knownAs` wire mappings must emit
+      // NO wire methods. Go's ToWire/FromWire route through Save()/Load, which
+      // are pruned for non-serialized types — emitting them dangles those
+      // symbols and breaks `go build` (the Go-only regression, matching the
+      // other 6 targets, which nest wire emission inside the serialized block).
+      if (
+        detached.includes("func (obj *Detached) ToWire(") ||
+        detached.includes("func DetachedFromWire(")
+      ) {
+        fail(
+          "@sample-only Detached with @knownAs must NOT emit ToWire/FromWire — they call the pruned Save()/Load and break the Go build.",
+        );
+      }
       // A non-serialized Go file must not request unused serialization imports.
       if (
         detached.includes("encoding/json") ||
