@@ -484,12 +484,14 @@ export const renderTests = (
               key: renderName(key),
               value: `${csEnumName}.${memberName}`,
               isExpression: true,
+              withheldOnSave: (prop?.sensitive ?? []).includes("save"),
             };
           }
           return {
             key: renderName(key),
             value: val,
             isExpression: false,
+            withheldOnSave: (prop?.sensitive ?? []).includes("save"),
           };
         }),
     };

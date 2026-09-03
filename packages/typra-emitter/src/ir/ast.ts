@@ -1273,6 +1273,13 @@ export interface PropertyValidation {
   delimiter: string;
   /** Whether property is optional/pointer (for Go, C# nullable) */
   isOptional: boolean;
+  /**
+   * True when the field is withheld from the `save` direction (`@sensitive("save")`
+   * or bare `@sensitive`). `save()` omits it, so it cannot survive a
+   * load → save → load round-trip; its value must NOT be asserted on the reloaded
+   * instance (the load/instance assertion still holds).
+   */
+  withheldOnSave?: boolean;
 }
 
 /**

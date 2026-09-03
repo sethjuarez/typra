@@ -21,6 +21,7 @@ import {
   BaseTestContext,
 } from "../../ir/ast.js";
 import { toSnakeCase } from "../../ir/utilities.js";
+import { postSaveExample } from "../../testing/test-context.js";
 
 // ============================================================================
 // Macro replacements
@@ -394,7 +395,7 @@ export function emitPythonTest(
     }
     lines.push(`    reloaded = ${typeName}.load(saved_data)`);
     lines.push(`    assert reloaded is not None`);
-    for (const v of sample.validations) {
+    for (const v of postSaveExample(sample, node).validations) {
       lines.push(renderValidation(v, "reloaded"));
     }
     lines.push("");

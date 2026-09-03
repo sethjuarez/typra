@@ -533,6 +533,7 @@ function buildValidations(
             value: enumResult.value,
             delimiter: enumResult.delimiter,
             isOptional: prop?.isOptional || false,
+            withheldOnSave: (prop?.sensitive ?? []).includes("save"),
           };
         }
       }
@@ -555,8 +556,53 @@ function buildValidations(
         value,
         delimiter,
         isOptional: prop?.isOptional || false,
+        withheldOnSave: (prop?.sensitive ?? []).includes("save"),
       };
     });
+}
+
+/**
+ * Source-key names of a node's fields that are withheld from the `save`
+ * direction (`@sensitive("save")` or bare `@sensitive`).
+ */
+function withheldOnSaveKeys(node: TypeNode): Set<string> {
+  return new Set(
+    node.properties
+      .filter((prop) => (prop.sensitive ?? []).includes("save"))
+      .map((prop) => prop.name),
+  );
+}
+
+/**
+ * Project a test example onto the shape a load → save → load round-trip can
+ * actually reproduce: `save()` omits `@sensitive("save")` fields, so a reloaded
+ * instance never carries them. Drops their validations and removes their keys
+ * from the raw sample (so structured-validation passes skip them too). The
+ * original example is returned untouched when the node has no save-withheld
+ * field. Use this at every reload/round-trip validation site; the load-side
+ * (`instance`) validations must keep asserting these fields.
+ */
+export function postSaveExample(
+  example: TestExample,
+  node: TypeNode,
+): TestExample {
+  const withheld = withheldOnSaveKeys(node);
+  if (withheld.size === 0) {
+    return example;
+  }
+  const sample: Record<string, any> = {};
+  for (const [key, value] of Object.entries(example.sample)) {
+    if (!withheld.has(key)) {
+      sample[key] = value;
+    }
+  }
+  return {
+    ...example,
+    sample,
+    validations: example.validations.filter(
+      (validation) => !validation.withheldOnSave,
+    ),
+  };
 }
 
 /**

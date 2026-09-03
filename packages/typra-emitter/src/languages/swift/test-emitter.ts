@@ -10,6 +10,7 @@ import {
   swiftStringLiteral,
   swiftTypeName,
 } from "./identifiers.js";
+import { postSaveExample } from "../../testing/test-context.js";
 
 type SwiftNativeSerialization = "none" | "codable";
 
@@ -161,7 +162,7 @@ function emitExampleTest(
     "    let reloaded = try " + typeName + ".fromJSON(try instance.toJSON())",
   );
   const jsonReloadValidationStart = lines.length;
-  emitValidations(lines, "reloaded", example, node);
+  emitValidations(lines, "reloaded", postSaveExample(example, node), node);
   if (lines.length === jsonReloadValidationStart) {
     lines.push("    _ = reloaded");
   }
@@ -180,7 +181,7 @@ function emitExampleTest(
     "    let reloaded = try " + typeName + ".fromYAML(try instance.toYAML())",
   );
   const yamlReloadValidationStart = lines.length;
-  emitValidations(lines, "reloaded", example, node);
+  emitValidations(lines, "reloaded", postSaveExample(example, node), node);
   if (lines.length === yamlReloadValidationStart) {
     lines.push("    _ = reloaded");
   }

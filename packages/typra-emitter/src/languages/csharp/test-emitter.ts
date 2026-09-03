@@ -22,7 +22,12 @@ export interface CSharpTestContext {
   examples: Array<{
     json: string[];
     yaml: string[];
-    validations: Array<{ key: string; value: any; isExpression: boolean }>;
+    validations: Array<{
+      key: string;
+      value: any;
+      isExpression: boolean;
+      withheldOnSave?: boolean;
+    }>;
   }>;
   coercions: Array<{
     title: string;
@@ -118,7 +123,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push(`        var reloaded = ${typeName}.FromJson(json);`);
     L.push("        Assert.NotNull(reloaded);");
     const rtJsonAssertions = emitExampleAssertions(
-      sample.validations,
+      sample.validations.filter((v) => !v.withheldOnSave),
       "reloaded",
       ctx.singlePrecisionKeys,
     );
@@ -144,7 +149,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push(`        var reloaded = ${typeName}.FromYaml(yaml);`);
     L.push("        Assert.NotNull(reloaded);");
     const rtYamlAssertions = emitExampleAssertions(
-      sample.validations,
+      sample.validations.filter((v) => !v.withheldOnSave),
       "reloaded",
       ctx.singlePrecisionKeys,
     );
@@ -315,7 +320,12 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
 
 /** Render Assert.Equal / Assert.True / Assert.False lines for example validations. */
 function emitExampleAssertions(
-  validations: Array<{ key: string; value: any; isExpression: boolean }>,
+  validations: Array<{
+    key: string;
+    value: any;
+    isExpression: boolean;
+    withheldOnSave?: boolean;
+  }>,
   varName: string,
   singlePrecisionKeys: ReadonlySet<string>,
 ): string {
