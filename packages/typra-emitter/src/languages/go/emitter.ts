@@ -399,8 +399,13 @@ function emitTypeBlock(
     emitSaveMethod(type, lines, polymorphicTypeNames, fieldNames);
   }
 
-  // ToWire method (only when wire mappings exist)
-  if (type.wire) {
+  // ToWire/FromWire route through Save()/Load, which are opt-in on the
+  // serialization closure. Emit them only for serialized types with wire
+  // mappings — matching the other 6 targets, where wire methods live inside the
+  // serialized block. A non-serialized type with `@knownAs` wire mappings has no
+  // Save()/Load, so emitting these would reference pruned symbols and break the
+  // Go build (issue: Go-only wire-vs-@serializable gate).
+  if (type.serialized && type.wire) {
     emitToWireMethod(type, lines);
     emitFromWireMethod(type, lines);
   }
