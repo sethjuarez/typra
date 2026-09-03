@@ -1023,21 +1023,31 @@ function emitImpl(
   }
 
   // Collection helpers — include both base type and child type helpers
-  // (in Rust, child types are enum variants, so their helpers live on the parent impl)
-  const emittedHelpers = new Set<string>();
-  const allHelpers = [...type.collectionHelpers];
-  for (const child of childTypes) {
-    for (const h of child.collectionHelpers) {
-      if (!emittedHelpers.has(h.propertyName)) {
-        allHelpers.push(h);
+  // (in Rust, child types are enum variants, so their helpers live on the parent impl).
+  // Opt-in like the serialization surface: these `save_<field>` / `load_<field>`
+  // helpers are consumed ONLY by `to_value` / `load_from_value` (both gated on
+  // `type.serialized` above) and they call the element type's own
+  // `to_value` / `load_from_value`. When THIS type is not in a `@serializable`
+  // closure those methods are pruned, so emitting the helpers would (a) be dead
+  // code and (b) reference the element type's now-pruned serializers — a compile
+  // error whenever the element type is itself non-serializable. Gate on the same
+  // flag as their only callers.
+  if (type.serialized) {
+    const emittedHelpers = new Set<string>();
+    const allHelpers = [...type.collectionHelpers];
+    for (const child of childTypes) {
+      for (const h of child.collectionHelpers) {
+        if (!emittedHelpers.has(h.propertyName)) {
+          allHelpers.push(h);
+        }
       }
     }
-  }
-  for (const helper of allHelpers) {
-    if (emittedHelpers.has(helper.propertyName)) continue;
-    emittedHelpers.add(helper.propertyName);
-    emitCollectionLoadHelper(helper, polymorphicTypeNames, lines);
-    emitCollectionSaveHelper(helper, lines);
+    for (const helper of allHelpers) {
+      if (emittedHelpers.has(helper.propertyName)) continue;
+      emittedHelpers.add(helper.propertyName);
+      emitCollectionLoadHelper(helper, polymorphicTypeNames, lines);
+      emitCollectionSaveHelper(helper, lines);
+    }
   }
 
   // Factories
