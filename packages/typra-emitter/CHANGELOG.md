@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [2.1.5](https://github.com/sethjuarez/typra/compare/v2.1.4...v2.1.5) (2026-09-03)
+
+
+### Bug Fixes
+
+* **emitter:** gate Rust collection-field save/load helpers on serializable closure ([#320](https://github.com/sethjuarez/typra/issues/320)) ([3cfef18](https://github.com/sethjuarez/typra/commit/3cfef1854756f0d9cc2059360686eef83a76b7c0))
+
 ## [2.1.4](https://github.com/sethjuarez/typra/compare/v2.1.3...v2.1.4) (2026-09-03)
 
 
