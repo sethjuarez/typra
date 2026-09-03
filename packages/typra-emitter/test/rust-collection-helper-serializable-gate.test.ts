@@ -62,6 +62,51 @@ model Root {
 }
 `;
 
+// The parent (prompty) reported the same defect on BOTH a plain contracts parent
+// and a `@knownAs` WIRE parent (e.g. `AnthropicMessagesRequest { messages:
+// AnthropicWireMessage[] }`), noting they "emit through different driver paths".
+// Wire types set `type.wire != null`, which adds `to_wire`/`from_wire` (gated on
+// `type.serialized && type.wire`) but does NOT change where collection helpers are
+// emitted. This spec exercises the wire path: a non-serializable `@knownAs` parent
+// with a collection of a non-serializable child. Pre-fix it emitted
+// `save_messages`/`load_messages` calling the pruned `WireMessage::load_from_value`.
+const WIRE_SPEC = `import "@typra/emitter";
+using Typra;
+
+namespace Typra.Fixtures.Test.WireCollectionGate;
+
+@doc("Non-serializable wire child element.")
+model WireMessage {
+  @doc("role")
+  role: string;
+
+  @doc("text")
+  text: string;
+}
+
+@doc("A @knownAs wire parent holding a collection of a non-serializable child; itself unreachable from any @serializable root.")
+model WireRequest {
+  @doc("model id")
+  modelId: string;
+
+  @doc("messages")
+  messages: WireMessage[];
+
+  @doc("max tokens")
+  maxTokens: int32;
+}
+
+@@knownAs(WireRequest.modelId, "anthropic", "model");
+@@knownAs(WireRequest.maxTokens, "anthropic", "max_tokens");
+
+@doc("Serializable root referencing ONLY a scalar; nothing here reaches WireRequest.")
+@serializable
+model Root {
+  @doc("name")
+  name: string;
+}
+`;
+
 describe("Rust gates collection-field helpers on serializability (prompty#511)", () => {
   let specDir: string;
   let output: string;
@@ -144,6 +189,87 @@ describe("Rust gates collection-field helpers on serializability (prompty#511)",
       src,
       /pub fn (to_value|load_from_value)\b/,
       `validation_error.rs should have serializers pruned (it is not in any @serializable closure):\n${src}`,
+    );
+  });
+});
+
+describe("Rust gates collection-field helpers for @knownAs WIRE parents too (prompty#511)", () => {
+  let specDir: string;
+  let output: string;
+  let result: Awaited<ReturnType<typeof generate>>;
+
+  before(async () => {
+    specDir = mkdtempSync(path.join(process.cwd(), ".tmp-wire-gate-"));
+    output = mkdtempSync(path.join(process.cwd(), ".tmp-wire-gate-out-"));
+    writeFileSync(path.join(specDir, "main.tsp"), WIRE_SPEC, "utf8");
+    result = await generate({
+      output,
+      source: path.join(specDir, "main.tsp"),
+      rootObject: "Typra.Fixtures.Test.WireCollectionGate.Root",
+      targets: ["rust"],
+      format: false,
+      generateTests: false,
+      deterministic: true,
+    });
+  });
+
+  after(() => {
+    for (const dir of [specDir, output]) {
+      if (dir && existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  const readRust = (basename: string): string => {
+    const rustRoot = path.join(output, "rust");
+    const found: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name === basename) found.push(full);
+      }
+    };
+    walk(rustRoot);
+    assert.equal(
+      found.length,
+      1,
+      `expected exactly one ${basename}, found ${found.length}`,
+    );
+    return readFileSync(found[0], "utf8");
+  };
+
+  it("emits Rust successfully for the wire parent", () => {
+    assert.equal(
+      result.success,
+      true,
+      `emit must succeed, got: ${result.errors?.join("\n")}`,
+    );
+  });
+
+  it("non-serializable @knownAs wire parent emits NO collection save/load helpers", () => {
+    const src = readRust("wire_request.rs");
+    assert.doesNotMatch(
+      src,
+      /fn (save|load)_messages\b/,
+      `wire_request.rs must not emit collection helpers when the wire type is not serialized:\n${src}`,
+    );
+  });
+
+  it("non-serializable wire parent has NO reference to the element's pruned serializers", () => {
+    const src = readRust("wire_request.rs");
+    assert.doesNotMatch(
+      src,
+      /WireMessage::(to_value|load_from_value)\b/,
+      `wire_request.rs must not call the pruned wire-element serializers:\n${src}`,
+    );
+  });
+
+  it("the non-serializable wire element itself has no to_value/load_from_value (sanity)", () => {
+    const src = readRust("wire_message.rs");
+    assert.doesNotMatch(
+      src,
+      /pub fn (to_value|load_from_value)\b/,
+      `wire_message.rs should have serializers pruned (it is not in any @serializable closure):\n${src}`,
     );
   });
 });
