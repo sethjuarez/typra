@@ -30,13 +30,24 @@ import "@typra/emitter";
 namespace Typra.Fixtures.Features.SerializableClosureCompile;
 
 // In-closure serialization root: load/save + conformance MUST be emitted, and
-// must compile. Holds only scalars so the closure is exactly {Root}.
+// must compile. Holds only scalars so the closure is exactly {Root}. One field
+// is named after a C# reserved word (`base`) so the C# compile gate proves a
+// keyword-named field survives the generated model codec — the driver
+// PascalCases it to a property (`Base`) and suffixes its local (`baseValue`),
+// so a keyword field must never leak an unescaped bare identifier into the
+// load/save body. (The stricter `var @base` conformance-local escaping of the
+// 2.1.4 family is exercised by the separate `csharp.vector-conformance-compile`
+// gate, which compiles conformance code; this closure gate renders `--no-tests`
+// and covers the model codec.) `base` is not a reserved word in
+// Java/Rust/Swift, so it stays a plain scalar field there.
 @serializable
 model Root {
   @sample(#{ id: "root-1", label: "primary" })
   id: string;
 
   label: string;
+
+  base: string;
 }
 
 // Non-serializable standalone scalar type, unreachable from any `@serializable`

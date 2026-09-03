@@ -741,3 +741,114 @@ export function runCSharpVectorConformanceCompile(context) {
     }
   }
 }
+
+export function runCSharpSerializableClosureCompile(context) {
+  // Whole-tree COMPILE gate for the "@serializable-closure conformance" defect
+  // family (prompty#511), C# arm. Two things get locked here at once:
+  //   1. The closure family: the `serializable-closure-compile` fixture couples a
+  //      @serializable root with genuinely non-serializable, closure-UNREACHABLE
+  //      types (a standalone scalar, a @knownAs wire type, and a collection PARENT
+  //      over a non-serializable ELEMENT). Their load/save are pruned, so any
+  //      codec emitted outside the closure gate references a pruned member and
+  //      fails `dotnet build`.
+  //   2. Keyword-named field survival (the 2.1.4 family, model-codec arm): the
+  //      root carries a scalar field named after a C# keyword (`base`). The
+  //      driver PascalCases it to a property (`Base`) and suffixes its codec
+  //      local (`baseValue`), so a keyword field must never leak an unescaped
+  //      bare identifier into the generated model load/save body. (The stricter
+  //      `var @base` conformance-local escaping of the 2.1.4 regression lives in
+  //      conformance code and is compile-asserted by the separate
+  //      `csharp.vector-conformance-compile` gate; this gate renders `--no-tests`
+  //      and covers the model codec.)
+  // Render WITHOUT tests, scaffold a library csproj (TreatWarningsAsErrors), and
+  // `dotnet build`.
+  if (!commandExists("dotnet")) {
+    context.skip("dotnet is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "serializable-closure-compile",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-csharp-closure-"));
+  const outputRoot = mkdtempSync(path.join(tmpdir(), "typra-csharp-closure-o-"));
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "csharp",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.SerializableClosureCompile.Root",
+        "--deterministic",
+        "--no-format",
+        "--no-tests",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "csharp");
+    if (!existsSync(sourceDir)) {
+      fail("C# serializable-closure gate: no csharp output generated.");
+      return;
+    }
+    const sourceFiles = walkFiles(
+      sourceDir,
+      (file) =>
+        file.endsWith(".cs") && !file.includes(`${path.sep}tests${path.sep}`),
+    );
+    if (sourceFiles.length === 0) {
+      fail("C# serializable-closure gate: no .cs files emitted.");
+      return;
+    }
+    const projectPath = path.join(sourceDir, "TypraClosureCompile.csproj");
+    const stubsPath = path.join(sourceDir, "TypraClosureCompile.Stubs.cs");
+    const binDir = path.join(outputRoot, "bin");
+    const objDir = path.join(outputRoot, "obj");
+    writeFileSync(
+      projectPath,
+      [
+        '<Project Sdk="Microsoft.NET.Sdk">',
+        "  <PropertyGroup>",
+        `    <TargetFramework>${CSHARP_TARGET_FRAMEWORK}</TargetFramework>`,
+        "    <Nullable>enable</Nullable>",
+        "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>",
+        "    <ImplicitUsings>enable</ImplicitUsings>",
+        "  </PropertyGroup>",
+        "  <ItemGroup>",
+        '    <Compile Remove="tests/**/*.cs" />',
+        '    <PackageReference Include="YamlDotNet" Version="16.3.0" />',
+        "  </ItemGroup>",
+        "</Project>",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(stubsPath, buildCSharpValidationStubs(sourceDir));
+    runCommand(
+      "C# serializable-closure compile gate",
+      "dotnet",
+      [
+        "build",
+        projectPath,
+        "--nologo",
+        "--verbosity",
+        "quiet",
+        "-p:BaseOutputPath=" + `${binDir}${path.sep}`,
+        "-p:BaseIntermediateOutputPath=" + `${objDir}${path.sep}`,
+      ],
+      { cwd: sourceDir },
+    );
+  } finally {
+    for (const dir of [outRoot, outputRoot]) {
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }
+}

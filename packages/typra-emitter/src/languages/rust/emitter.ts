@@ -1454,10 +1454,27 @@ function emitLoadFromValue(
   } else {
     // Simple struct construction
     lines.push("        Self {");
+    const assignedFieldNames = new Set(
+      type.load.assignments.map((a) => a.fieldName),
+    );
     for (const a of type.load.assignments) {
       lines.push(
         `            ${rustFieldName(a.fieldName)}: ${loadExpr(a, polymorphicTypeNames, declsByName)},`,
       );
+    }
+    // A field withheld from load (a bare `@sensitive` or `@sensitive("load")`
+    // field) has no load assignment yet is still a struct field, so an explicit
+    // `Self { .. }` literal that lists only loaded fields is incomplete and fails
+    // to compile with E0063. Fill any such never-loaded field from `Default`
+    // (every data struct derives `Default`, see the struct emission above), which
+    // matches the field's zero value — `None` for the optional secrets this
+    // applies to. Emitted only when a gap exists so a fully-loaded struct keeps
+    // its exhaustive literal (and avoids a redundant functional-update base).
+    const hasNeverLoadedField = type.fields.some(
+      (f) => !assignedFieldNames.has(f.name),
+    );
+    if (hasNeverLoadedField) {
+      lines.push("            ..Default::default()");
     }
     lines.push("        }");
   }
