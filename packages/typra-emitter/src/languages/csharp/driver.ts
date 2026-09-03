@@ -25,6 +25,7 @@ import {
   protocolCSharpType,
 } from "./emitter.js";
 import { emitCSharpContext, emitCSharpUtils } from "./scaffolding.js";
+import { csharpIdentifier } from "./identifiers.js";
 import { emitCSharpTest } from "./test-emitter.js";
 import { toPascalCase } from "../../ir/visitor.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
@@ -1328,23 +1329,28 @@ function emitCSharpInterfaceConformanceTest(
       const paramType = entry.params[paramName];
       const shape = classifyCallableParam(paramType);
       const key = JSON.stringify(paramName);
+      // `paramName` comes verbatim from the seam op's spec signature and may be a
+      // C# reserved word (e.g. a `base:` param -> `var base`, a compile error).
+      // Escape it as a verbatim identifier for every C# LOCAL use; the JSON `key`
+      // stays raw (it is the wire field name, not a C# identifier).
+      const local = csharpIdentifier(paramName);
       if (shape.bareModel) {
         lines.push(
-          `        var ${paramName} = ${paramType}.FromJson(root.GetProperty(${key}).GetRawText());`,
+          `        var ${local} = ${paramType}.FromJson(root.GetProperty(${key}).GetRawText());`,
         );
       } else if (shape.optional) {
         // Optional non-model param: tolerate an absent property, decoding into
         // the mapped (nullable) C# type when present.
         lines.push(
-          `        var ${paramName} = root.TryGetProperty(${key}, out var ${paramName}El)`,
-          `            ? JsonSerializer.Deserialize<${protocolCSharpType(paramType)}>(${paramName}El.GetRawText())`,
+          `        var ${local} = root.TryGetProperty(${key}, out var ${local}El)`,
+          `            ? JsonSerializer.Deserialize<${protocolCSharpType(paramType)}>(${local}El.GetRawText())`,
           `            : default;`,
         );
       } else {
         // Non-model param (scalar, `Record<unknown>`, array) decoded into the
         // mapped C# type the seam signature expects.
         lines.push(
-          `        var ${paramName} = JsonSerializer.Deserialize<${protocolCSharpType(
+          `        var ${local} = JsonSerializer.Deserialize<${protocolCSharpType(
             paramType,
           )}>(root.GetProperty(${key}).GetRawText());`,
         );
@@ -1357,7 +1363,7 @@ function emitCSharpInterfaceConformanceTest(
     lines.push(
       `        Assert.NotNull(impl);`,
     );
-    const call = `impl!.${method}(${paramNames.join(", ")})`;
+    const call = `impl!.${method}(${paramNames.map(csharpIdentifier).join(", ")})`;
     if (entry.sync) {
       lines.push(`        var actual = ${call};`);
     } else {
@@ -1485,12 +1491,15 @@ function emitCSharpVectorConformanceEntrypoint(
       lines.push(`            // vector: ${label}`);
       for (const paramName of paramNames) {
         const shape = classifyCallableParam(entry.params[paramName]);
+        // Escape reserved words for every C# LOCAL use; `input[...]` stays keyed
+        // on the raw wire param name.
+        const local = csharpIdentifier(paramName);
         if (shape.bareModel) {
           // A model param in the `@serializable` closure decodes via the emitted
           // wire-correct `<Model>.FromJson(...)`; System.Text.Json would mismatch
           // the model's PascalCase properties against the lowercase wire shape.
           lines.push(
-            `            var ${paramName} = ${shape.base}.FromJson(${jsonLiteral(
+            `            var ${local} = ${shape.base}.FromJson(${jsonLiteral(
               input[paramName] ?? null,
             )});`,
           );
@@ -1499,12 +1508,12 @@ function emitCSharpVectorConformanceEntrypoint(
           // wire-correct `<Model>.FromJson(...)` into a `List<Model>` (the seam
           // signature's collection type) — enumerate the JSON array, no LINQ.
           lines.push(
-            `            var ${paramName} = new List<${shape.base}>();`,
+            `            var ${local} = new List<${shape.base}>();`,
             `            foreach (var __item in JsonSerializer.Deserialize<JsonElement>(${jsonLiteral(
               input[paramName] ?? null,
             )}).EnumerateArray())`,
             "            {",
-            `                ${paramName}.Add(${shape.base}.FromJson(__item.GetRawText()));`,
+            `                ${local}.Add(${shape.base}.FromJson(__item.GetRawText()));`,
             "            }",
           );
         } else {
@@ -1513,13 +1522,15 @@ function emitCSharpVectorConformanceEntrypoint(
           // keep the nullable local the seam signature already expects).
           const forgive = shape.optional ? "" : "!";
           lines.push(
-            `            var ${paramName} = JsonSerializer.Deserialize<${protocolCSharpType(
+            `            var ${local} = JsonSerializer.Deserialize<${protocolCSharpType(
               entry.params[paramName],
             )}>(${jsonLiteral(input[paramName] ?? null)})${forgive};`,
           );
         }
       }
-      const call = `${awaitPrefix}seam.${method}(${paramNames.join(", ")})`;
+      const call = `${awaitPrefix}seam.${method}(${paramNames
+        .map(csharpIdentifier)
+        .join(", ")})`;
       const returnShape = classifyCallableParam(entry.returns);
       const returnsModel = returnShape.bareModel;
       const returnsModelArray =
