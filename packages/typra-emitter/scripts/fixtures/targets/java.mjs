@@ -576,3 +576,77 @@ export function runJavaVectorConformanceCompile(context) {
     }
   }
 }
+
+export function runJavaSerializableClosureCompile(context) {
+  // Whole-tree COMPILE gate for the "@serializable-closure conformance" defect
+  // family (prompty#511), Java arm. Java already gates the family correctly, so
+  // this stands as a REGRESSION guard: the `serializable-closure-compile`
+  // fixture couples a @serializable root with genuinely non-serializable,
+  // closure-UNREACHABLE types (a standalone scalar type, a @knownAs wire type,
+  // and a collection PARENT holding a `List` of a non-serializable ELEMENT).
+  // Their load/save are pruned to plain classes. A driver that emits a codec /
+  // per-field collection helper outside the serializable-closure gate would call
+  // the pruned member and fail `javac` — a failure per-file string assertions
+  // never see. Render WITHOUT tests and compile the emitted sources with
+  // `-Xlint:all -Werror`. The root carries a field named after a C# reserved
+  // word (`base`); it is not a Java keyword, so on this arm it is a plain scalar
+  // and simply proves the field compiles unremarkably in Java.
+  if (!commandExists("javac")) {
+    context.skip("javac is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "serializable-closure-compile",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-java-closure-"));
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "java",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.SerializableClosureCompile.Root",
+        "--deterministic",
+        "--no-format",
+        "--no-tests",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "java");
+    if (!existsSync(sourceDir)) {
+      fail("Java serializable-closure gate: no java output generated.");
+      return;
+    }
+    const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".java"));
+    if (sourceFiles.length === 0) {
+      fail("Java serializable-closure gate: no .java files emitted.");
+      return;
+    }
+    const classesDir = path.join(sourceDir, ".classes");
+    rmSync(classesDir, { recursive: true, force: true });
+    mkdirSync(classesDir, { recursive: true });
+    try {
+      runCommand(
+        "Java serializable-closure compile gate",
+        "javac",
+        ["-Xlint:all", "-Werror", "-d", classesDir, ...sourceFiles],
+        { cwd: sourceDir },
+      );
+    } finally {
+      rmSync(classesDir, { recursive: true, force: true });
+    }
+  } finally {
+    if (existsSync(outRoot)) {
+      rmSync(outRoot, { recursive: true, force: true });
+    }
+  }
+}

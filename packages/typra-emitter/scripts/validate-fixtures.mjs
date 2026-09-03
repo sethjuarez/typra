@@ -57,6 +57,7 @@ import {
   runRustDispatchRegressionCompile,
   runRustExecutableConformance,
   runRustSerializableClosureCompile,
+  runRustSensitiveNeverLoadedCompile,
   runRustTests,
   runRustUnknownAbstractConformance,
   runRustVectorConformanceCompile,
@@ -67,6 +68,7 @@ import {
   runCSharpExecutableConformance,
   runCSharpGeneratedTests,
   runCSharpProtocolScaffoldBuild,
+  runCSharpSerializableClosureCompile,
   runCSharpVectorConformanceCompile,
 } from "./fixtures/targets/csharp.mjs";
 import {
@@ -75,6 +77,7 @@ import {
   runJavaGeneratedTests,
   runJavaJacksonBuild,
   runJavaJacksonGeneratedTests,
+  runJavaSerializableClosureCompile,
   runJavaVectorConformanceCompile,
 } from "./fixtures/targets/java.mjs";
 import {
@@ -133,6 +136,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "rust.dispatch-regression-compile",
   "rust.vector-conformance-compile",
   "rust.serializable-closure-compile",
+  "rust.sensitive-never-loaded-compile",
   "rust-serde.generated-tests",
   "swift.generated-tests",
   "swift.vector-conformance-compile",
@@ -143,9 +147,11 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "csharp.generated-tests",
   "csharp.protocol-scaffold-build",
   "csharp.vector-conformance-compile",
+  "csharp.serializable-closure-compile",
   "java.build",
   "java.generated-tests",
   "java.vector-conformance-compile",
+  "java.serializable-closure-compile",
   "java-jackson.build",
   "java-jackson.generated-tests",
   ...IDEMPOTENCY_TARGETS.map((target) => target.stageId),
@@ -2562,6 +2568,10 @@ function runDeclaredValidationStages() {
         (context) => runRustSerializableClosureCompile(context),
       ],
       [
+        "rust.sensitive-never-loaded-compile",
+        (context) => runRustSensitiveNeverLoadedCompile(context),
+      ],
+      [
         "rust-serde.generated-tests",
         () => runRustTests("rust-serde", "fixtures_serde"),
       ],
@@ -2583,11 +2593,19 @@ function runDeclaredValidationStages() {
         "csharp.vector-conformance-compile",
         (context) => runCSharpVectorConformanceCompile(context),
       ],
+      [
+        "csharp.serializable-closure-compile",
+        (context) => runCSharpSerializableClosureCompile(context),
+      ],
       ["java.build", runJavaBuild],
       ["java.generated-tests", runJavaGeneratedTests],
       [
         "java.vector-conformance-compile",
         (context) => runJavaVectorConformanceCompile(context),
+      ],
+      [
+        "java.serializable-closure-compile",
+        (context) => runJavaSerializableClosureCompile(context),
       ],
       ["java-jackson.build", runJavaJacksonBuild],
       ["java-jackson.generated-tests", runJavaJacksonGeneratedTests],
@@ -2603,13 +2621,16 @@ function runDeclaredValidationStages() {
       "rust.dispatch-regression-compile": "cargo is not available",
       "rust.vector-conformance-compile": "cargo is not available",
       "rust.serializable-closure-compile": "cargo is not available",
+      "rust.sensitive-never-loaded-compile": "cargo is not available",
       "go.vector-bridge-compile": "go is not available",
       "go.vector-conformance-compile": "go is not available",
       "python.vector-conformance-compile": "uv is not available",
       "swift.vector-conformance-compile": "swift is not available",
       "swift.serializable-closure-compile": "swift is not available",
       "csharp.vector-conformance-compile": "dotnet is not available",
+      "csharp.serializable-closure-compile": "dotnet is not available",
       "java.vector-conformance-compile": "javac is not available",
+      "java.serializable-closure-compile": "javac is not available",
     },
   });
 }

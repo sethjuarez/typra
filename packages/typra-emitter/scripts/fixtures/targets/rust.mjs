@@ -848,6 +848,113 @@ export function runRustVectorConformanceCompile(context) {
   }
 }
 
+export function runRustSensitiveNeverLoadedCompile(context) {
+  // Whole-tree COMPILE gate for the Rust never-loaded-field family (E0063). The
+  // `serialization` feature fixture's `@serializable` Root carries two fields
+  // that are never LOADED — a bare `@sensitive scratch` (withheld from both
+  // directions) and a `@sensitive("load") computedAt` (save-only). Neither field
+  // gets a load assignment, yet both remain struct fields, so the Rust driver's
+  // explicit `Self { .. }` load literal is incomplete and the model crate fails
+  // to compile with E0063 ("missing fields ... in initializer"). Render WITHOUT
+  // tests and `cargo build` the model crate.
+  //
+  // Red-first: on the pre-fix emitter the `Self { .. }` literal lists only the
+  // loaded fields and omits `scratch`/`computed_at` → E0063. Green once the
+  // driver fills any never-loaded field from `..Default::default()` (every data
+  // struct derives `Default`). This is the compile witness for the latent bug the
+  // string-asserted `serialization` fixture never exercised because it was never
+  // compiled.
+  if (!commandExists("cargo")) {
+    context.skip("cargo is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "serialization",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-rust-sensitive-"));
+  const targetDir = mkdtempSync(
+    path.join(tmpdir(), "typra-rust-sensitive-target-"),
+  );
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "rust",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.Serialization.Root",
+        "--deterministic",
+        "--no-format",
+        "--no-tests",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "rust");
+    if (!existsSync(sourceDir)) {
+      fail("Rust sensitive-never-loaded gate: no rust output generated.");
+      return;
+    }
+    writeFileSync(
+      path.join(sourceDir, "Cargo.toml"),
+      [
+        "[package]",
+        'name = "sensitive_never_loaded_compile"',
+        'version = "0.0.0"',
+        'edition = "2021"',
+        "",
+        "[dependencies]",
+        'async-trait = "0.1"',
+        'serde = { version = "1", features = ["derive"] }',
+        'serde_json = "1"',
+        'serde_yaml = "0.9"',
+        "",
+        "[features]",
+        "serde = []",
+        "",
+        "[lib]",
+        'path = "lib.rs"',
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(sourceDir, "lib.rs"),
+      '#[path = "mod.rs"] pub mod model;\n',
+    );
+    try {
+      execFileSync("cargo", ["build"], {
+        cwd: sourceDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          CARGO_TARGET_DIR: targetDir,
+          RUSTFLAGS: "-D warnings",
+        },
+      });
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Rust sensitive-never-loaded compile gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    for (const dir of [outRoot, targetDir]) {
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }
+}
+
 export function runRustSerializableClosureCompile(context) {
   // Whole-tree COMPILE gate for the "@serializable-closure conformance" defect
   // family (prompty#511). The `serializable-closure-compile` fixture couples a
