@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [2.1.4](https://github.com/sethjuarez/typra/compare/v2.1.3...v2.1.4) (2026-09-03)
+
+
+### Bug Fixes
+
+* **emitter:** escape C# reserved-word seam params in vector conformance ([#318](https://github.com/sethjuarez/typra/issues/318)) ([1bad415](https://github.com/sethjuarez/typra/commit/1bad41521b30bf380fd6534f7a463d8e71d4a774))
+
 ## [2.1.3](https://github.com/sethjuarez/typra/compare/v2.1.2...v2.1.3) (2026-09-03)
 
 
