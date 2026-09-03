@@ -759,3 +759,83 @@ export function runSwiftVectorConformanceCompile(context) {
     if (existsSync(buildDir)) rmSync(buildDir, { recursive: true, force: true });
   }
 }
+
+export function runSwiftSerializableClosureCompile(context) {
+  // Whole-tree COMPILE gate for the "@serializable-closure conformance" defect
+  // family (prompty#511). The `serializable-closure-compile` fixture couples a
+  // @serializable root with genuinely non-serializable, closure-UNREACHABLE
+  // types. `TypraModel` is a serialization protocol (it REQUIRES load + save),
+  // so a driver that stamps `: TypraModel` on every struct UNCONDITIONALLY —
+  // while load/save are (correctly) pruned for non-closure types — produces a
+  // struct that names a protocol it cannot satisfy, and `swift build` fails with
+  // "type 'X' does not conform to protocol 'TypraModel'". Render WITHOUT tests
+  // (Package.swift emits only the library target) and `swift build` it.
+  //
+  // Red-first: on the pre-2.1.6 emitter `Standalone`/`WireDetached`/`Group`/
+  // `GroupItem` all declare `: TypraModel` without load/save — so the package
+  // fails to compile. Green once the conformance is gated on the serializable
+  // closure (shipped 2.1.6).
+  if (!commandExists("swift")) {
+    context.skip("swift is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "serializable-closure-compile",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-swift-closure-"));
+  const buildDir = mkdtempSync(
+    path.join(tmpdir(), "typra-swift-closure-build-"),
+  );
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "swift",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.SerializableClosureCompile.Root",
+        "--deterministic",
+        "--no-format",
+        "--no-tests",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "swift");
+    if (!existsSync(path.join(sourceDir, "Package.swift"))) {
+      fail(
+        "Swift serializable-closure gate: emitter did not emit Package.swift.",
+      );
+      return;
+    }
+    const env = swiftToolchainEnv();
+    try {
+      execFileSync(
+        "swift",
+        ["build", "--package-path", sourceDir, "--scratch-path", buildDir],
+        {
+          cwd: sourceDir,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          env,
+        },
+      );
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Swift serializable-closure compile gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    if (existsSync(outRoot)) rmSync(outRoot, { recursive: true, force: true });
+    if (existsSync(buildDir)) rmSync(buildDir, { recursive: true, force: true });
+  }
+}

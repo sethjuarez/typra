@@ -56,6 +56,7 @@ import {
 import {
   runRustDispatchRegressionCompile,
   runRustExecutableConformance,
+  runRustSerializableClosureCompile,
   runRustTests,
   runRustUnknownAbstractConformance,
   runRustVectorConformanceCompile,
@@ -80,6 +81,7 @@ import {
   runSwiftCodableExecutableConformance,
   runSwiftCodableTests,
   runSwiftExecutableConformance,
+  runSwiftSerializableClosureCompile,
   runSwiftTests,
   runSwiftVectorConformanceCompile,
 } from "./fixtures/targets/swift.mjs";
@@ -130,9 +132,11 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "rust.generated-tests",
   "rust.dispatch-regression-compile",
   "rust.vector-conformance-compile",
+  "rust.serializable-closure-compile",
   "rust-serde.generated-tests",
   "swift.generated-tests",
   "swift.vector-conformance-compile",
+  "swift.serializable-closure-compile",
   "swift-codable.generated-tests",
   "csharp.build",
   "csharp.consumer-nullability-build",
@@ -2554,6 +2558,10 @@ function runDeclaredValidationStages() {
         (context) => runRustVectorConformanceCompile(context),
       ],
       [
+        "rust.serializable-closure-compile",
+        (context) => runRustSerializableClosureCompile(context),
+      ],
+      [
         "rust-serde.generated-tests",
         () => runRustTests("rust-serde", "fixtures_serde"),
       ],
@@ -2561,6 +2569,10 @@ function runDeclaredValidationStages() {
       [
         "swift.vector-conformance-compile",
         (context) => runSwiftVectorConformanceCompile(context),
+      ],
+      [
+        "swift.serializable-closure-compile",
+        (context) => runSwiftSerializableClosureCompile(context),
       ],
       ["swift-codable.generated-tests", () => runSwiftCodableTests()],
       ["csharp.build", runCSharpBuild],
@@ -2590,10 +2602,12 @@ function runDeclaredValidationStages() {
       "typescript.runtime-neutrality": "no TypeScript targets generated",
       "rust.dispatch-regression-compile": "cargo is not available",
       "rust.vector-conformance-compile": "cargo is not available",
+      "rust.serializable-closure-compile": "cargo is not available",
       "go.vector-bridge-compile": "go is not available",
       "go.vector-conformance-compile": "go is not available",
       "python.vector-conformance-compile": "uv is not available",
       "swift.vector-conformance-compile": "swift is not available",
+      "swift.serializable-closure-compile": "swift is not available",
       "csharp.vector-conformance-compile": "dotnet is not available",
       "java.vector-conformance-compile": "javac is not available",
     },

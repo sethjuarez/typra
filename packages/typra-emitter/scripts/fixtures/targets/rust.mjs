@@ -847,3 +847,110 @@ export function runRustVectorConformanceCompile(context) {
     }
   }
 }
+
+export function runRustSerializableClosureCompile(context) {
+  // Whole-tree COMPILE gate for the "@serializable-closure conformance" defect
+  // family (prompty#511). The `serializable-closure-compile` fixture couples a
+  // @serializable root with genuinely non-serializable, closure-UNREACHABLE
+  // types — including a collection PARENT (`Group`) holding a `Vec` of a
+  // non-serializable ELEMENT (`GroupItem`). Their load/save are correctly pruned
+  // to plain structs. A driver that emits a per-field `save_<field>`/`load_<field>`
+  // helper gated only on "has a collection field" (NOT on closure membership)
+  // calls the pruned element codec and fails to compile with E0599 — a failure
+  // that per-file string assertions never see. Render WITHOUT tests and
+  // `cargo build` the model crate.
+  //
+  // Red-first: on the pre-2.1.5 emitter `Group` emits `save_items`/`load_items`
+  // calling `GroupItem::to_value`/`load_from_value`, which are (correctly) pruned
+  // — so the crate fails to compile. Green once the collection-helper emission is
+  // gated on the serializable closure (shipped 2.1.5).
+  if (!commandExists("cargo")) {
+    context.skip("cargo is not available");
+    return;
+  }
+  const fixtureDir = path.join(
+    packageRoot,
+    "fixtures",
+    "features",
+    "serializable-closure-compile",
+  );
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-rust-closure-"));
+  const targetDir = mkdtempSync(
+    path.join(tmpdir(), "typra-rust-closure-target-"),
+  );
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageRoot, "dist", "src", "cli.js"),
+        "--output",
+        outRoot,
+        "--targets",
+        "rust",
+        "--spec",
+        path.join(fixtureDir, "main.tsp"),
+        "--root-object",
+        "Typra.Fixtures.Features.SerializableClosureCompile.Root",
+        "--deterministic",
+        "--no-format",
+        "--no-tests",
+      ],
+      { cwd: packageRoot, stdio: "pipe" },
+    );
+    const sourceDir = path.join(outRoot, "rust");
+    if (!existsSync(sourceDir)) {
+      fail("Rust serializable-closure gate: no rust output generated.");
+      return;
+    }
+    writeFileSync(
+      path.join(sourceDir, "Cargo.toml"),
+      [
+        "[package]",
+        'name = "serializable_closure_compile"',
+        'version = "0.0.0"',
+        'edition = "2021"',
+        "",
+        "[dependencies]",
+        'async-trait = "0.1"',
+        'serde = { version = "1", features = ["derive"] }',
+        'serde_json = "1"',
+        'serde_yaml = "0.9"',
+        "",
+        "[features]",
+        "serde = []",
+        "",
+        "[lib]",
+        'path = "lib.rs"',
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(sourceDir, "lib.rs"),
+      '#[path = "mod.rs"] pub mod model;\n',
+    );
+    try {
+      execFileSync("cargo", ["build"], {
+        cwd: sourceDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          CARGO_TARGET_DIR: targetDir,
+          RUSTFLAGS: "-D warnings",
+        },
+      });
+    } catch (error) {
+      const output =
+        `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+      fail(
+        `Rust serializable-closure compile gate failed:\n${output || error.message}`,
+      );
+    }
+  } finally {
+    for (const dir of [outRoot, targetDir]) {
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }
+}
