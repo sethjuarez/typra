@@ -6,6 +6,13 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [2.1.6](https://github.com/sethjuarez/typra/compare/v2.1.5...v2.1.6) (2026-09-03)
+
+
+### Bug Fixes
+
+* **emitter:** gate Swift TypraModel/Codable conformance on serializable closure ([#323](https://github.com/sethjuarez/typra/issues/323)) ([6f65e34](https://github.com/sethjuarez/typra/commit/6f65e3472e811651f7c9e4e90e77e77e6b773fb1))
+
 ## [2.1.5](https://github.com/sethjuarez/typra/compare/v2.1.4...v2.1.5) (2026-09-03)
 
 
