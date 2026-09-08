@@ -606,6 +606,48 @@ export function postSaveExample(
 }
 
 /**
+ * A single provider wire-name assertion the generated conversion test should make:
+ * source field `fieldName` is renamed to `wireName` for `provider`.
+ */
+export interface WireTestMapping {
+  fieldName: string;
+  provider: string;
+  wireName: string;
+}
+
+/**
+ * Derive the provider wire-mapping assertions a generated conversion test should make for
+ * a `@sample` payload. Shared by every language backend so the emitted `toWire`/`fromWire`
+ * coverage is uniform (issue #328).
+ *
+ * The fixture generator synthesizes required-only payloads — optional fields are deliberately
+ * omitted (see `synthesizeCompleteComplexSample`). `toWire` only emits a wire key when its
+ * source field was populated, so the presence assertions are restricted to fields the fixture
+ * actually carries. Asserting a wire field whose optional source was never set would produce a
+ * test that fails against the very payload the generator built beside it.
+ */
+export function wireTestMappings(
+  node: TypeNode,
+  sample: Record<string, unknown> | undefined,
+): WireTestMapping[] {
+  const present = sample ?? {};
+  return node.properties
+    .filter((prop) => prop.name in present)
+    .flatMap((prop) =>
+      (prop.knownAs ?? []).map((mapping) => ({
+        fieldName: prop.name,
+        provider: mapping.provider,
+        wireName: mapping.name,
+      })),
+    );
+}
+
+/** The distinct providers referenced by a set of wire mappings, in first-seen order. */
+export function wireTestProviders(mappings: WireTestMapping[]): string[] {
+  return [...new Set(mappings.map((mapping) => mapping.provider))];
+}
+
+/**
  * Build coercion (scalar-to-object) test cases from node coercions.
  */
 function buildCoercions(
@@ -706,6 +748,19 @@ export const csharpTestOptions: TestContextOptions = {
   escapeString: (str: string) =>
     str.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),
   getDelimiter: (str: string) => (str.includes("\n") ? '@"' : '"'),
+  // Closed enums assert against `EnumName.MemberName`; open enums fall through to plain
+  // string rendering (return null) exactly as the C# driver's own enum branch did.
+  renderEnumValue: (enumName, rawValue, _fieldName, isOpenEnum) =>
+    isOpenEnum
+      ? null
+      : {
+          value: `${toPascalCase(enumName)}.${toPascalCase(rawValue)}`,
+          delimiter: "",
+        },
+  // yaml's default (40) folds a long double-quoted scalar across lines using `\`
+  // continuations, and a space adjacent to a fold is not recoverable on reload (#93).
+  // Opt out so C# multiline fixtures round-trip byte-for-byte.
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   scalarValues: {
     boolean: "false",
     float: "3.14f",

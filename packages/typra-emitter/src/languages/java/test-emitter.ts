@@ -11,7 +11,11 @@ import {
   javaPropertyName,
   javaTypeName,
 } from "./identifiers.js";
-import { postSaveExample } from "../../testing/test-context.js";
+import {
+  postSaveExample,
+  wireTestMappings,
+  wireTestProviders,
+} from "../../testing/test-context.js";
 
 function javaString(value: string): string {
   return JSON.stringify(value);
@@ -291,14 +295,13 @@ function emitWireTest(
   node: TypeNode,
   example: TestExample,
 ): void {
-  const mappings = node.properties.flatMap((prop) =>
-    prop.knownAs.map((mapping) => ({
-      sourceName: prop.name,
-      provider: mapping.provider,
-      wireName: mapping.name,
-    })),
-  );
-  const providers = [...new Set(mappings.map((mapping) => mapping.provider))];
+  const raw = wireTestMappings(node, example.sample);
+  const mappings = raw.map((mapping) => ({
+    sourceName: mapping.fieldName,
+    provider: mapping.provider,
+    wireName: mapping.wireName,
+  }));
+  const providers = wireTestProviders(raw);
   if (providers.length === 0) return;
 
   lines.push("");

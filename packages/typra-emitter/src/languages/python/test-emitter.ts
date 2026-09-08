@@ -19,9 +19,14 @@ import {
   PropertyValidation,
   PythonClassContext,
   BaseTestContext,
+  TypeNode,
 } from "../../ir/ast.js";
 import { toSnakeCase } from "../../ir/utilities.js";
-import { postSaveExample } from "../../testing/test-context.js";
+import {
+  postSaveExample,
+  wireTestMappings,
+  wireTestProviders,
+} from "../../testing/test-context.js";
 
 // ============================================================================
 // Macro replacements
@@ -291,6 +296,59 @@ class TestSaveContext:
 }
 
 /**
+ * Emit a pytest wire-conversion test for a type that carries provider wire mappings.
+ *
+ * Verifies `to_wire(provider)` renames each mapped field and that `from_wire(provider, …)`
+ * inverts it — the per-provider assertions Go and Java already emit (issue #328).
+ */
+function emitPythonWireTest(
+  lines: string[],
+  typeName: string,
+  typeNameLower: string,
+  node: TypeNode,
+  sample: BaseTestContext["examples"][number],
+): void {
+  const mappings = wireTestMappings(node, sample.sample);
+  const providers = wireTestProviders(mappings);
+  if (providers.length === 0) return;
+
+  const jsonBlock = sample.json
+    .map((line) => (line.length > 0 ? `    ${line}` : ""))
+    .join("\n");
+
+  lines.push(`def test_to_wire_${typeNameLower}():`);
+  lines.push(
+    `    """Test that to_wire()/from_wire() apply provider wire field names."""`,
+  );
+  lines.push(`    json_data = r'''`);
+  lines.push(jsonBlock);
+  lines.push(`    '''`);
+  lines.push(`    data = json.loads(json_data, strict=False)`);
+  lines.push(`    instance = ${typeName}.load(data)`);
+  for (const provider of providers) {
+    lines.push(`    ${provider}_wire = instance.to_wire("${provider}")`);
+    for (const mapping of mappings.filter(
+      (entry) => entry.provider === provider,
+    )) {
+      lines.push(`    assert "${mapping.wireName}" in ${provider}_wire`);
+      if (mapping.fieldName !== mapping.wireName) {
+        lines.push(`    assert "${mapping.fieldName}" not in ${provider}_wire`);
+      }
+    }
+    lines.push(
+      `    ${provider}_restored = ${typeName}.from_wire("${provider}", ${provider}_wire)`,
+    );
+    lines.push(
+      `    ${provider}_round = ${provider}_restored.to_wire("${provider}")`,
+    );
+    lines.push(
+      `    assert set(${provider}_round.keys()) == set(${provider}_wire.keys())`,
+    );
+  }
+  lines.push("");
+}
+
+/**
  * Emit a pytest test file for a type.
  * Replaces test.py.njk template.
  */
@@ -426,6 +484,26 @@ export function emitPythonTest(
     lines.push(`    assert yaml_output is not None`);
     lines.push(`    parsed = yaml.safe_load(yaml_output)`);
     lines.push(`    assert isinstance(parsed, dict)`);
+    lines.push("");
+  }
+
+  // Wire-conversion test (only when the type carries provider wire mappings)
+  if (examples.length > 0) {
+    emitPythonWireTest(lines, typeName, typeNameLower, node, examples[0]);
+  }
+
+  // Invalid-input test (load must reject non-object input instead of silently defaulting, issue #328 class)
+  if (examples.length > 0) {
+    lines.push(`def test_load_${typeNameLower}_invalid():`);
+    lines.push(
+      `    """load must reject invalid input instead of silently defaulting."""`,
+    );
+    lines.push(`    raised = False`);
+    lines.push(`    try:`);
+    lines.push(`        ${typeName}.load(object())`);
+    lines.push(`    except ValueError:`);
+    lines.push(`        raised = True`);
+    lines.push(`    assert raised, "Expected invalid input to be rejected"`);
     lines.push("");
   }
 

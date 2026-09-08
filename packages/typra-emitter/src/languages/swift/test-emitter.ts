@@ -10,7 +10,11 @@ import {
   swiftStringLiteral,
   swiftTypeName,
 } from "./identifiers.js";
-import { postSaveExample } from "../../testing/test-context.js";
+import {
+  postSaveExample,
+  wireTestMappings,
+  wireTestProviders,
+} from "../../testing/test-context.js";
 
 type SwiftNativeSerialization = "none" | "codable";
 
@@ -106,6 +110,20 @@ export function emitSwiftTests(
     emitCodableAssertions(lines);
   }
 
+  if (ctx.examples.length > 0) {
+    emitWireTest(lines, ctx.node, typeName, ctx.examples[0]);
+  }
+
+  if (ctx.examples.length > 0) {
+    lines.push(
+      "  // Invalid-input test (malformed JSON must be rejected, issue #328 class)",
+    );
+    lines.push("  func testFromJSONInvalid() throws {");
+    lines.push(`    XCTAssertThrowsError(try ${typeName}.fromJSON("{"))`);
+    lines.push("  }");
+    lines.push("");
+  }
+
   lines.push("}");
   lines.push("");
   return lines.join("\n");
@@ -144,6 +162,45 @@ export function emitSwiftConformanceTest(moduleName: string): string {
     "}",
     "",
   ].join("\n");
+}
+
+/**
+ * Emit a wire-conversion test asserting `toWire(provider)`/`fromWire(provider, …)` apply the
+ * provider-specific field names. Shared with every other backend via `wireTestMappings` so
+ * the coverage is uniform (issue #328). Skips types that carry no `@knownAs` wire mappings.
+ */
+function emitWireTest(
+  lines: string[],
+  node: TypeNode,
+  typeName: string,
+  example: TestExample,
+): void {
+  const mappings = wireTestMappings(node, example.sample);
+  const providers = wireTestProviders(mappings);
+  if (providers.length === 0) return;
+
+  lines.push("");
+  lines.push("  func testWireConversion() throws {");
+  lines.push(`    let json = ${swiftMultilineString(example.json.join("\n"))}`);
+  lines.push(`    let instance = try ${typeName}.fromJSON(json)`);
+  for (const provider of providers) {
+    lines.push(`    let ${provider}Wire = try instance.toWire("${provider}")`);
+    for (const mapping of mappings.filter((m) => m.provider === provider)) {
+      lines.push(
+        `    XCTAssertNotNil(${provider}Wire["${mapping.wireName}"])`,
+      );
+      if (mapping.fieldName !== mapping.wireName) {
+        lines.push(`    XCTAssertNil(${provider}Wire["${mapping.fieldName}"])`);
+      }
+    }
+    lines.push(
+      `    let ${provider}Restored = try ${typeName}.fromWire("${provider}", ${provider}Wire)`,
+    );
+    lines.push(
+      `    XCTAssertEqual(Set(try ${provider}Restored.toWire("${provider}").keys), Set(${provider}Wire.keys))`,
+    );
+  }
+  lines.push("  }");
 }
 
 function emitExampleTest(

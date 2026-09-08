@@ -97,6 +97,7 @@ import {
   REQUIRED_CONFORMANCE_MATRIX_TARGETS,
   validateConformanceMatrix,
 } from "./conformance-matrix-policy.mjs";
+import { checkTestCategoryParity } from "./test-category-parity-policy.mjs";
 
 const EXPECTED_VALIDATION_STAGE_IDS = [
   "generated-targets",
@@ -1106,7 +1107,11 @@ function assertFocusedFeatureFixtures() {
       // never field survival, so it can't emit the inverted assertion. Red-first
       // for the 2.1.2 emitter-drift fix.
       const sensitiveRoundtripChecks = {
-        go: { file: ["go", "tests", "root_test.go"], sensitive: "ApiKey", normal: "Name" },
+        go: {
+          file: ["go", "tests", "root_test.go"],
+          sensitive: "ApiKey",
+          normal: "Name",
+        },
         python: {
           file: [
             "python",
@@ -1807,9 +1812,211 @@ function assertStaticFixtureCoverage() {
       "tests",
       "WireOptionsGeneratedTest.java",
     ),
-    "WireOptions openaiRestored = WireOptions.fromWire(\"openai\", openaiWire);",
-    "openaiRestored.toWire(\"openai\").keySet()",
+    'WireOptions openaiRestored = WireOptions.fromWire("openai", openaiWire);',
+    'openaiRestored.toWire("openai").keySet()',
   );
+  // Every backend must emit toWire/fromWire assertions in its generated
+  // conversion tests — not just Go and Java (regression for issue #328).
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "python",
+      "tests",
+      "test_wire_options.py",
+    ),
+    'instance.to_wire("openai")',
+    "max_completion_tokens",
+    "max_tokens",
+    'WireOptions.from_wire("openai", openai_wire)',
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "typescript",
+      "tests",
+      "wire-options.test.ts",
+    ),
+    'instance.toWire("openai")',
+    "max_completion_tokens",
+    "max_tokens",
+    'WireOptions.fromWire("openai", openaiWire)',
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "csharp",
+      "tests",
+      "WireOptionsConversionTests.cs",
+    ),
+    'instance.ToWire("openai")',
+    "max_completion_tokens",
+    "max_tokens",
+    'WireOptions.FromWire("openai", openaiWire)',
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust", "tests", "wire_options_test.rs"),
+    'instance.to_wire("openai")',
+    "max_completion_tokens",
+    "max_tokens",
+    'WireOptions::from_wire("openai", &openai_wire, &ctx)',
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "swift",
+      "Tests",
+      "TypraFixturesTests",
+      "WireOptionsTests.swift",
+    ),
+    'instance.toWire("openai")',
+    "max_completion_tokens",
+    "max_tokens",
+    'WireOptions.fromWire("openai", openaiWire)',
+  );
+  // ---------------------------------------------------------------------------
+  // Test-category parity policy (issue #328 class).
+  //
+  // A complete, bidirectionally-exhaustive guard over the canonical WireOptions
+  // type: every supported backend must, for every tracked test category, either
+  // prove the category is emitted (marker substrings) or declare a waiver WITH A
+  // REASON. It fails loudly when:
+  //   - a backend is missing an entry for a category (silent per-backend gap);
+  //   - a category references an unknown/stale backend (drifted matrix);
+  //   - the guard's backend set diverges from the project's canonical backend
+  //     list (a newly added backend can't skip the guard, nor a removed one linger);
+  //   - a waiver has no reason, or a marker list is empty.
+  // Tracked categories are the demonstrated risk classes, not the full test
+  // inventory: `roundtripJson` (a core control that must exist everywhere),
+  // `wire` (the exact category that drifted in #328 — proven in BOTH directions,
+  // toWire and fromWire), and `negativeInput` (the same-class malformed-input gap
+  // closed alongside it). Adding a backend or category forces every cell to be
+  // filled or waived-with-reason.
+  // ---------------------------------------------------------------------------
+  const wireOptionsTestFiles = {
+    go: path.join("generated", "fixtures", "go", "tests", "wire_options_test.go"),
+    java: path.join(
+      "generated",
+      "fixtures",
+      "java",
+      "tests",
+      "WireOptionsGeneratedTest.java",
+    ),
+    python: path.join(
+      "generated",
+      "fixtures",
+      "python",
+      "tests",
+      "test_wire_options.py",
+    ),
+    typescript: path.join(
+      "generated",
+      "fixtures",
+      "typescript",
+      "tests",
+      "wire-options.test.ts",
+    ),
+    csharp: path.join(
+      "generated",
+      "fixtures",
+      "csharp",
+      "tests",
+      "WireOptionsConversionTests.cs",
+    ),
+    rust: path.join(
+      "generated",
+      "fixtures",
+      "rust",
+      "tests",
+      "wire_options_test.rs",
+    ),
+    swift: path.join(
+      "generated",
+      "fixtures",
+      "swift",
+      "Tests",
+      "TypraFixturesTests",
+      "WireOptionsTests.swift",
+    ),
+  };
+  // Per category, per backend: an array of marker substrings that prove the
+  // category is emitted, or `{ waived: "<reason>" }` to skip it deliberately.
+  // A composite category (e.g. `wire`) lists a marker for each obligation it
+  // carries — here both the toWire and the fromWire direction.
+  const testCategoryParity = {
+    roundtripJson: {
+      go: ["func TestWireOptionsRoundtrip"],
+      java: ["WireOptions.load(instance1.save("],
+      python: ["def test_roundtrip_json_wireoptions"],
+      typescript: ["should round-trip JSON"],
+      csharp: ["public void RoundtripJson"],
+      rust: ["fn test_wire_options_roundtrip"],
+      swift: ["func testJSONRoundTrip1"],
+    },
+    wire: {
+      go: ["func TestWireOptionsToWire", "WireOptionsFromWire("],
+      java: [
+        'wireInstance.toWire("openai")',
+        'WireOptions.fromWire("openai", openaiWire)',
+      ],
+      python: [
+        'instance.to_wire("openai")',
+        'WireOptions.from_wire("openai", openai_wire)',
+      ],
+      typescript: [
+        'instance.toWire("openai")',
+        'WireOptions.fromWire("openai", openaiWire)',
+      ],
+      csharp: [
+        'instance.ToWire("openai")',
+        'WireOptions.FromWire("openai", openaiWire)',
+      ],
+      rust: [
+        'instance.to_wire("openai")',
+        'WireOptions::from_wire("openai", &openai_wire, &ctx)',
+      ],
+      swift: [
+        'instance.toWire("openai")',
+        'WireOptions.fromWire("openai", openaiWire)',
+      ],
+    },
+    negativeInput: {
+      go: ["func TestWireOptionsFromJSONInvalid", 'WireOptionsFromJSON("{")'],
+      java: ['assertThrows(() -> WireOptions.fromJson("{")'],
+      python: ["def test_load_wireoptions_invalid", "WireOptions.load(object())"],
+      typescript: ["should reject malformed JSON", 'WireOptions.fromJson("{")'],
+      csharp: ["public void RejectsMalformedJson", 'WireOptions.FromJson("{")'],
+      rust: [
+        "fn test_wire_options_from_json_invalid",
+        'WireOptions::from_json("{", &ctx).is_err()',
+      ],
+      swift: [
+        "func testFromJSONInvalid",
+        'XCTAssertThrowsError(try WireOptions.fromJSON("{"))',
+      ],
+    },
+  };
+  // The guard's backend set is the project's canonical backend list — so a
+  // backend added to (or removed from) the emitter can't silently skip parity.
+  // The policy logic lives in test-category-parity-policy.mjs so it can be
+  // unit-tested in isolation; here we drive it against the real fixtures.
+  const parityReadFile = (relPath) => {
+    const absPath = path.join(packageRoot, relPath);
+    if (!existsSync(absPath)) return null;
+    return readFileSync(absPath, "utf8");
+  };
+  for (const parityFailure of checkTestCategoryParity({
+    wireOptionsTestFiles,
+    testCategoryParity,
+    canonicalBackends: REQUIRED_CONFORMANCE_MATRIX_TARGETS,
+    readFile: parityReadFile,
+  })) {
+    fail(parityFailure);
+  }
+
   assertIncludes(
     path.join("generated", "fixtures", "java", "FixtureRoot.java"),
     "return fromJson(json, new LoadContext());",

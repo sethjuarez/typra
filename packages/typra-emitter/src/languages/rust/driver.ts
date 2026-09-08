@@ -16,6 +16,8 @@ import { RustExprVisitor } from "./visitor.js";
 import {
   buildBaseTestContext,
   rustTestOptions,
+  wireTestMappings,
+  wireTestProviders,
 } from "../../testing/test-context.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 import {
@@ -1460,6 +1462,52 @@ export function emitRustTest(ctx: RustTestContext): string {
       out += "}\n";
       out += "\n";
     }
+  }
+  // Wire conversion test (provider-specific field names via to_wire/from_wire, issue #328)
+  if (!isAbstract && examples.length > 0) {
+    const wireMappings = wireTestMappings(node, examples[0].sample);
+    const wireProviders = wireTestProviders(wireMappings);
+    if (wireProviders.length > 0) {
+      out += "#[test]\n";
+      out += `fn test_${snakeName}_wire_conversion() {\n`;
+      out += '    let json = r####"\n';
+      for (const line of examples[0].json) {
+        out += `${line}\n`;
+      }
+      out += '"####;\n';
+      out += "    let ctx = LoadContext::default();\n";
+      out += `    let instance = ${typeName}::from_json(json, &ctx).expect("load should succeed");\n`;
+      for (const provider of wireProviders) {
+        out += `    let ${provider}_wire = instance.to_wire("${provider}");\n`;
+        out += `    let ${provider}_obj = ${provider}_wire.as_object().expect("to_wire returns an object");\n`;
+        for (const mapping of wireMappings.filter(
+          (m) => m.provider === provider,
+        )) {
+          out += `    assert!(${provider}_obj.contains_key("${mapping.wireName}"), "Expected ${provider} wire output to include ${mapping.wireName}");\n`;
+          if (mapping.fieldName !== mapping.wireName) {
+            out += `    assert!(!${provider}_obj.contains_key("${mapping.fieldName}"), "Expected ${provider} wire output to omit ${mapping.fieldName}");\n`;
+          }
+        }
+        out += `    let ${provider}_restored = ${typeName}::from_wire("${provider}", &${provider}_wire, &ctx);\n`;
+        out += `    let ${provider}_round = ${provider}_restored.to_wire("${provider}");\n`;
+        out += `    let mut ${provider}_expected: Vec<&String> = ${provider}_obj.keys().collect();\n`;
+        out += `    let mut ${provider}_actual: Vec<&String> = ${provider}_round.as_object().expect("to_wire returns an object").keys().collect();\n`;
+        out += `    ${provider}_expected.sort();\n`;
+        out += `    ${provider}_actual.sort();\n`;
+        out += `    assert_eq!(${provider}_expected, ${provider}_actual, "Expected ${provider} round-trip to preserve wire keys");\n`;
+      }
+      out += "}\n";
+      out += "\n";
+    }
+  }
+  // Invalid-input test (malformed JSON must be rejected, parity with Go/Java, issue #328 class)
+  if (examples.length > 0) {
+    out += "#[test]\n";
+    out += `fn test_${snakeName}_from_json_invalid() {\n`;
+    out += "    let ctx = LoadContext::default();\n";
+    out += `    assert!(${typeName}::from_json("{", &ctx).is_err(), "malformed JSON must be rejected instead of silently defaulting");\n`;
+    out += "}\n";
+    out += "\n";
   }
   // Coercion tests
   for (let i = 0; i < coercions.length; i++) {

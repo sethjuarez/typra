@@ -11,6 +11,10 @@
 import { FactoryEntry } from "../../decorators.js";
 import { TypeNode } from "../../ir/ast.js";
 import { toPascalCase } from "../../ir/visitor.js";
+import {
+  wireTestMappings,
+  wireTestProviders,
+} from "../../testing/test-context.js";
 
 // ============================================================================
 // Public types
@@ -22,6 +26,7 @@ export interface CSharpTestContext {
   examples: Array<{
     json: string[];
     yaml: string[];
+    sample?: Record<string, unknown>;
     validations: Array<{
       key: string;
       value: any;
@@ -190,6 +195,20 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push("    }");
   });
 
+  emitCSharpWireTest(L, typeName, ctx);
+
+  // --- Invalid-input test (malformed JSON must be rejected, issue #328 class) ---
+  if (ctx.examples.length > 0) {
+    L.push("");
+    L.push("    [Fact]");
+    L.push("    public void RejectsMalformedJson()");
+    L.push("    {");
+    L.push(
+      `        Assert.ThrowsAny<System.Exception>(() => ${typeName}.FromJson("{"));`,
+    );
+    L.push("    }");
+  }
+
   // --- Coercion tests (2 per coercion) ---
   if (ctx.coercions.length > 0) {
     for (const alt of ctx.coercions) {
@@ -312,6 +331,57 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
   L.push("");
 
   return L.join("\n");
+}
+
+/**
+ * Emit a wire-conversion test asserting `ToWire(provider)`/`FromWire(provider, …)` apply the
+ * provider-specific field names. Shared with every other backend via `wireTestMappings` so
+ * the coverage is uniform (issue #328). Skips types that carry no `@knownAs` wire mappings.
+ */
+function emitCSharpWireTest(
+  L: string[],
+  typeName: string,
+  ctx: CSharpTestContext,
+): void {
+  const example = ctx.examples[0];
+  if (!example) return;
+  const mappings = wireTestMappings(ctx.node, example.sample);
+  const providers = wireTestProviders(mappings);
+  if (providers.length === 0) return;
+
+  L.push("");
+  L.push("    [Fact]");
+  L.push("    public void WireConversion()");
+  L.push("    {");
+  L.push(...emitRawStringLiteral("jsonData", example.json).map((l) => `    ${l}`));
+  L.push("");
+  L.push(`        var instance = ${typeName}.FromJson(jsonData);`);
+  L.push("        Assert.NotNull(instance);");
+  for (const provider of providers) {
+    L.push("");
+    L.push(`        var ${provider}Wire = instance.ToWire("${provider}");`);
+    for (const mapping of mappings.filter((m) => m.provider === provider)) {
+      L.push(
+        `        Assert.Contains("${mapping.wireName}", ${provider}Wire.Keys);`,
+      );
+      if (mapping.fieldName !== mapping.wireName) {
+        L.push(
+          `        Assert.DoesNotContain("${mapping.fieldName}", ${provider}Wire.Keys);`,
+        );
+      }
+    }
+    L.push(
+      `        var ${provider}Restored = ${typeName}.FromWire("${provider}", ${provider}Wire);`,
+    );
+    L.push("        Assert.Equal(");
+    L.push(
+      `            new System.Collections.Generic.SortedSet<string>(${provider}Wire.Keys),`,
+    );
+    L.push(
+      `            new System.Collections.Generic.SortedSet<string>(${provider}Restored.ToWire("${provider}").Keys));`,
+    );
+  }
+  L.push("    }");
 }
 
 // ============================================================================
