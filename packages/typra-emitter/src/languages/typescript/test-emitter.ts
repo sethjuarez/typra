@@ -135,6 +135,16 @@ export function emitTypeScriptTest(
       }
       lines.push(`    });`);
     }
+    lines.push("");
+    lines.push(`    it("should reject malformed JSON", () => {`);
+    lines.push(`      let threw = false;`);
+    lines.push(`      try {`);
+    lines.push(`        ${typeName}.fromJson("{");`);
+    lines.push(`      } catch {`);
+    lines.push(`        threw = true;`);
+    lines.push(`      }`);
+    lines.push(`      expect(threw).toBe(true);`);
+    lines.push(`    });`);
     lines.push(`  });`);
 
     // YAML serialization

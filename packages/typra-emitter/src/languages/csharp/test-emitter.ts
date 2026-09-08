@@ -197,6 +197,18 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
 
   emitCSharpWireTest(L, typeName, ctx);
 
+  // --- Invalid-input test (malformed JSON must be rejected, issue #328 class) ---
+  if (ctx.examples.length > 0) {
+    L.push("");
+    L.push("    [Fact]");
+    L.push("    public void RejectsMalformedJson()");
+    L.push("    {");
+    L.push(
+      `        Assert.ThrowsAny<System.Exception>(() => ${typeName}.FromJson("{"));`,
+    );
+    L.push("    }");
+  }
+
   // --- Coercion tests (2 per coercion) ---
   if (ctx.coercions.length > 0) {
     for (const alt of ctx.coercions) {

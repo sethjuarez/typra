@@ -1500,6 +1500,15 @@ export function emitRustTest(ctx: RustTestContext): string {
       out += "\n";
     }
   }
+  // Invalid-input test (malformed JSON must be rejected, parity with Go/Java, issue #328 class)
+  if (examples.length > 0) {
+    out += "#[test]\n";
+    out += `fn test_${snakeName}_from_json_invalid() {\n`;
+    out += "    let ctx = LoadContext::default();\n";
+    out += `    assert!(${typeName}::from_json("{", &ctx).is_err(), "malformed JSON must be rejected instead of silently defaulting");\n`;
+    out += "}\n";
+    out += "\n";
+  }
   // Coercion tests
   for (let i = 0; i < coercions.length; i++) {
     const alt = coercions[i];

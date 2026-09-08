@@ -1876,6 +1876,73 @@ function assertStaticFixtureCoverage() {
     "max_tokens",
     'WireOptions.fromWire("openai", openaiWire)',
   );
+  // Every backend must emit a per-type negative/malformed-input rejection test
+  // (parity with Go/Java's long-standing FromJSONInvalid — same #328-class gap).
+  assertIncludes(
+    path.join("generated", "fixtures", "go", "tests", "wire_options_test.go"),
+    "func TestWireOptionsFromJSONInvalid",
+    'WireOptionsFromJSON("{")',
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "java",
+      "tests",
+      "WireOptionsGeneratedTest.java",
+    ),
+    'assertThrows(() -> WireOptions.fromJson("{")',
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "python",
+      "tests",
+      "test_wire_options.py",
+    ),
+    "def test_load_wireoptions_invalid",
+    "WireOptions.load(object())",
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "typescript",
+      "tests",
+      "wire-options.test.ts",
+    ),
+    "should reject malformed JSON",
+    'WireOptions.fromJson("{")',
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "csharp",
+      "tests",
+      "WireOptionsConversionTests.cs",
+    ),
+    "public void RejectsMalformedJson",
+    'WireOptions.FromJson("{")',
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust", "tests", "wire_options_test.rs"),
+    "fn test_wire_options_from_json_invalid",
+    'WireOptions::from_json("{", &ctx).is_err()',
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "swift",
+      "Tests",
+      "TypraFixturesTests",
+      "WireOptionsTests.swift",
+    ),
+    "func testFromJSONInvalid",
+    'XCTAssertThrowsError(try WireOptions.fromJSON("{"))',
+  );
   assertIncludes(
     path.join("generated", "fixtures", "java", "FixtureRoot.java"),
     "return fromJson(json, new LoadContext());",

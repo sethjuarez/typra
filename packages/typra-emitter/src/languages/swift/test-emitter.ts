@@ -114,6 +114,16 @@ export function emitSwiftTests(
     emitWireTest(lines, ctx.node, typeName, ctx.examples[0]);
   }
 
+  if (ctx.examples.length > 0) {
+    lines.push(
+      "  // Invalid-input test (malformed JSON must be rejected, issue #328 class)",
+    );
+    lines.push("  func testFromJSONInvalid() throws {");
+    lines.push(`    XCTAssertThrowsError(try ${typeName}.fromJSON("{"))`);
+    lines.push("  }");
+    lines.push("");
+  }
+
   lines.push("}");
   lines.push("");
   return lines.join("\n");

@@ -492,6 +492,21 @@ export function emitPythonTest(
     emitPythonWireTest(lines, typeName, typeNameLower, node, examples[0]);
   }
 
+  // Invalid-input test (load must reject non-object input instead of silently defaulting, issue #328 class)
+  if (examples.length > 0) {
+    lines.push(`def test_load_${typeNameLower}_invalid():`);
+    lines.push(
+      `    """load must reject invalid input instead of silently defaulting."""`,
+    );
+    lines.push(`    raised = False`);
+    lines.push(`    try:`);
+    lines.push(`        ${typeName}.load(object())`);
+    lines.push(`    except ValueError:`);
+    lines.push(`        raised = True`);
+    lines.push(`    assert raised, "Expected invalid input to be rejected"`);
+    lines.push("");
+  }
+
   // Coercion tests
   if (coercions.length > 0) {
     for (const alt of coercions) {
