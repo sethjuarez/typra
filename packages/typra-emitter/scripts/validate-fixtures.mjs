@@ -1876,63 +1876,57 @@ function assertStaticFixtureCoverage() {
     "max_tokens",
     'WireOptions.fromWire("openai", openaiWire)',
   );
-  // Every backend must emit a per-type negative/malformed-input rejection test
-  // (parity with Go/Java's long-standing FromJSONInvalid — same #328-class gap).
-  assertIncludes(
-    path.join("generated", "fixtures", "go", "tests", "wire_options_test.go"),
-    "func TestWireOptionsFromJSONInvalid",
-    'WireOptionsFromJSON("{")',
-  );
-  assertIncludes(
-    path.join(
+  // ---------------------------------------------------------------------------
+  // Test-category parity guard (issue #328 class).
+  //
+  // Every backend's generated test file for the canonical WireOptions type must
+  // cover each expected test category, or declare an explicit waiver ([]). A
+  // missing marker fails assertIncludes; a backend with no entry at all for a
+  // category throws. This is what makes wire / negative-input style gaps
+  // self-catching instead of silently landing in only a subset of backends:
+  //   - `wire` is the exact category that drifted in #328 (Go/Java only).
+  //   - `negativeInput` is the same-class gap (Go/Java only) closed alongside it.
+  //   - `roundtripJson` is a core control that must exist everywhere.
+  // When adding a backend or a category, every cell must be filled or waived.
+  // ---------------------------------------------------------------------------
+  const wireOptionsTestFiles = {
+    go: path.join("generated", "fixtures", "go", "tests", "wire_options_test.go"),
+    java: path.join(
       "generated",
       "fixtures",
       "java",
       "tests",
       "WireOptionsGeneratedTest.java",
     ),
-    'assertThrows(() -> WireOptions.fromJson("{")',
-  );
-  assertIncludes(
-    path.join(
+    python: path.join(
       "generated",
       "fixtures",
       "python",
       "tests",
       "test_wire_options.py",
     ),
-    "def test_load_wireoptions_invalid",
-    "WireOptions.load(object())",
-  );
-  assertIncludes(
-    path.join(
+    typescript: path.join(
       "generated",
       "fixtures",
       "typescript",
       "tests",
       "wire-options.test.ts",
     ),
-    "should reject malformed JSON",
-    'WireOptions.fromJson("{")',
-  );
-  assertIncludes(
-    path.join(
+    csharp: path.join(
       "generated",
       "fixtures",
       "csharp",
       "tests",
       "WireOptionsConversionTests.cs",
     ),
-    "public void RejectsMalformedJson",
-    'WireOptions.FromJson("{")',
-  );
-  assertIncludes(
-    path.join("generated", "fixtures", "rust", "tests", "wire_options_test.rs"),
-    "fn test_wire_options_from_json_invalid",
-    'WireOptions::from_json("{", &ctx).is_err()',
-  );
-  assertIncludes(
-    path.join(
+    rust: path.join(
+      "generated",
+      "fixtures",
+      "rust",
+      "tests",
+      "wire_options_test.rs",
+    ),
+    swift: path.join(
       "generated",
       "fixtures",
       "swift",
@@ -1940,9 +1934,60 @@ function assertStaticFixtureCoverage() {
       "TypraFixturesTests",
       "WireOptionsTests.swift",
     ),
-    "func testFromJSONInvalid",
-    'XCTAssertThrowsError(try WireOptions.fromJSON("{"))',
-  );
+  };
+  // Per category, the marker substring(s) that prove the category is emitted for
+  // each backend. `[]` is an explicit waiver; a missing key throws.
+  const testCategoryParity = {
+    roundtripJson: {
+      go: ["func TestWireOptionsRoundtrip"],
+      java: ["WireOptions.load(instance1.save("],
+      python: ["def test_roundtrip_json_wireoptions"],
+      typescript: ["should round-trip JSON"],
+      csharp: ["public void RoundtripJson"],
+      rust: ["fn test_wire_options_roundtrip"],
+      swift: ["func testJSONRoundTrip1"],
+    },
+    wire: {
+      go: ["func TestWireOptionsToWire"],
+      java: ['wireInstance.toWire("openai")'],
+      python: ['instance.to_wire("openai")'],
+      typescript: ['instance.toWire("openai")'],
+      csharp: ['instance.ToWire("openai")'],
+      rust: ['instance.to_wire("openai")'],
+      swift: ['instance.toWire("openai")'],
+    },
+    negativeInput: {
+      go: ["func TestWireOptionsFromJSONInvalid", 'WireOptionsFromJSON("{")'],
+      java: ['assertThrows(() -> WireOptions.fromJson("{")'],
+      python: ["def test_load_wireoptions_invalid", "WireOptions.load(object())"],
+      typescript: ["should reject malformed JSON", 'WireOptions.fromJson("{")'],
+      csharp: ["public void RejectsMalformedJson", 'WireOptions.FromJson("{")'],
+      rust: [
+        "fn test_wire_options_from_json_invalid",
+        'WireOptions::from_json("{", &ctx).is_err()',
+      ],
+      swift: [
+        "func testFromJSONInvalid",
+        'XCTAssertThrowsError(try WireOptions.fromJSON("{"))',
+      ],
+    },
+  };
+  const parityBackends = Object.keys(wireOptionsTestFiles);
+  for (const [category, byBackend] of Object.entries(testCategoryParity)) {
+    for (const backend of parityBackends) {
+      const markers = byBackend[backend];
+      if (markers === undefined) {
+        fail(
+          `Test-category parity: backend "${backend}" has no entry (markers or an explicit [] waiver) for category "${category}". ` +
+            `Every backend must declare each generated-test category so #328-class gaps cannot land silently.`,
+        );
+        continue;
+      }
+      if (markers.length === 0) continue; // explicit waiver
+      assertIncludes(wireOptionsTestFiles[backend], ...markers);
+    }
+  }
+
   assertIncludes(
     path.join("generated", "fixtures", "java", "FixtureRoot.java"),
     "return fromJson(json, new LoadContext());",
