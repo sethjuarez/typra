@@ -7,7 +7,6 @@ import {
 import { enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { scalarValue } from "../../ir/utilities.js";
-import * as YAML from "yaml";
 import { resolve, dirname } from "path";
 import { execFileSync } from "child_process";
 import { existsSync, readdirSync } from "fs";
@@ -40,7 +39,8 @@ import {
   shouldEmitCompileOnlyProtocolScaffolds,
 } from "../../protocol-scaffolds.js";
 import {
-  buildExampleSamples,
+  buildBaseTestContext,
+  csharpTestOptions,
   TypeResolver,
 } from "../../testing/test-context.js";
 import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
@@ -423,81 +423,49 @@ export const renderTests = (
   namespace: string,
   resolveType: TypeResolver,
 ): string => {
-  const examples = buildExampleSamples(node, resolveType).map((sample) => {
-    // Create YAML document and customize string scalar style for values with special chars
-    const doc = new YAML.Document(sample);
-    YAML.visit(doc, {
-      Scalar(key, node) {
-        // Only quote string values that contain special characters requiring escaping
-        if (typeof node.value === "string") {
-          const str = node.value as string;
-          if (
-            str.includes("\n") ||
-            str.includes("\t") ||
-            str.includes("#") ||
-            str.includes(":") ||
-            str.includes('"')
-          ) {
-            node.type = "QUOTE_DOUBLE";
-          }
-        }
-      },
-    });
-    return {
-      json: JSON.stringify(sample, null, 2).split("\n"),
-      sample: sample as Record<string, unknown>,
-      // `doubleQuotedMinMultiLineLength` (yaml's default is 40) folds a long double-quoted
-      // scalar across lines using `\` line continuations. A space adjacent to such a fold is
-      // not recoverable on reload, so the value silently loses one space per folded break.
-      // Every backend that goes through `buildBaseTestContext` opts out of this via
-      // `yamlDoubleQuotedMinMultiLineLength`; because this driver hand-rolls the document it
-      // never inherited that, and its generated multiline fixtures did not round-trip. See #93.
-      yaml: doc
-        .toString({
-          indent: 2,
-          lineWidth: 0,
-          doubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
-        })
-        .split("\n"),
-      // Mirror the shared `buildValidations` filter in src/testing/test-context.ts: a
-      // validation is only emitted for a key that is genuinely a scalar (or enum) property
-      // of this node. Filtering on the sample alone asserts properties that do not exist on
-      // the emitted class — a polymorphic base whose `@sample` shows a subtype payload, or a
-      // complex field populated through a scalar coercion — and the generated test then
-      // fails to compile against the generated loader.
-      validations: Object.keys(sample)
-        .filter((key) => isCSharpAssertableSampleKey(key, sample[key], node))
-        .map((key) => {
-          const val = sample[key];
-          // Check if this field is a closed enum — if so, use EnumName.MemberName syntax
-          // Skip discriminator fields — their enums are excluded from generation
-          const prop = node.properties.find((p) => p.name === key);
-          const isDiscriminator = node.discriminator === key;
-          if (
-            prop &&
-            prop.enumName &&
-            !prop.isOpenEnum &&
-            !isDiscriminator &&
-            typeof val === "string"
-          ) {
-            const csEnumName = toPascalCase(prop.enumName);
-            const memberName = toPascalCase(val);
-            return {
-              key: renderName(key),
-              value: `${csEnumName}.${memberName}`,
-              isExpression: true,
-              withheldOnSave: (prop?.sensitive ?? []).includes("save"),
-            };
-          }
-          return {
-            key: renderName(key),
-            value: val,
-            isExpression: false,
-            withheldOnSave: (prop?.sensitive ?? []).includes("save"),
-          };
-        }),
-    };
-  });
+  // C# sources its example samples, JSON, and YAML from the shared `buildBaseTestContext`
+  // like every other backend, so the sample-completion filter and YAML rendering that drove
+  // #92/#93/#328 can no longer diverge here. The bespoke assertion emitter in `emitCSharpTest`
+  // still consumes raw JS values (booleans, single-precision floats, JSON-style string
+  // literals), so a thin presentation adapter recovers each raw value via `sourceKey` and
+  // preserves the closed-enum `EnumName.Member` expression form. Coercions stay on the C#
+  // path below because the shared coercion shape drops the raw scalar this template needs.
+  const base = buildBaseTestContext(
+    node,
+    namespace,
+    csharpTestOptions,
+    resolveType,
+  );
+  const examples = base.examples.map((example) => ({
+    json: example.json,
+    yaml: example.yaml,
+    sample: example.sample as Record<string, unknown>,
+    validations: example.validations.map((v) => {
+      const sourceKey = v.sourceKey;
+      if (sourceKey === undefined) {
+        throw new Error(
+          `C# test adapter: shared validation for ${node.typeName.name}.${v.key} has no sourceKey`,
+        );
+      }
+      const raw = example.sample[sourceKey];
+      const prop = node.properties.find((p) => p.name === sourceKey);
+      // Closed enums render as `EnumName.Member` (a C# expression); open enums and every
+      // other field render from the raw value. Mirrors the shared enum branch and the C#
+      // driver's prior logic — this is a rendering choice, not a second membership filter.
+      const isClosedEnum =
+        !!prop &&
+        !!prop.enumName &&
+        !prop.isOpenEnum &&
+        node.discriminator !== sourceKey &&
+        typeof raw === "string";
+      return {
+        key: v.key,
+        value: isClosedEnum ? v.value : raw,
+        isExpression: isClosedEnum,
+        withheldOnSave: v.withheldOnSave,
+      };
+    }),
+  }));
 
   const coercions = node.coercions.map((alt) => {
     const example = alt.example
@@ -567,24 +535,6 @@ export const renderTests = (
       renderCsharpFactoryMethodName(factoryName, node),
     renderCsharpFactoryTestValue,
   });
-};
-
-/**
- * Whether a `@sample` key should become an assertion in the generated conversion test.
- *
- * Mirrors the shared `buildValidations` filter in src/testing/test-context.ts: only a key that
- * is genuinely a scalar (or enum) property of this node is assertable. Filtering on the sample
- * alone asserts members that do not exist on the emitted class — a polymorphic base whose
- * `@sample` carries a subtype payload, or a complex field populated through a scalar coercion —
- * and the generated test then fails to compile against the generated loader.
- */
-export const isCSharpAssertableSampleKey = (
-  key: string,
-  value: unknown,
-  node: TypeNode,
-): boolean => {
-  const prop = node.properties.find((p) => p.name === key);
-  return typeof value !== "object" && Boolean(prop?.isScalar || prop?.enumName);
 };
 
 const renderName = (name: string): string => {

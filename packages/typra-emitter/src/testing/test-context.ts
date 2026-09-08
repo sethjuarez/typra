@@ -748,6 +748,19 @@ export const csharpTestOptions: TestContextOptions = {
   escapeString: (str: string) =>
     str.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),
   getDelimiter: (str: string) => (str.includes("\n") ? '@"' : '"'),
+  // Closed enums assert against `EnumName.MemberName`; open enums fall through to plain
+  // string rendering (return null) exactly as the C# driver's own enum branch did.
+  renderEnumValue: (enumName, rawValue, _fieldName, isOpenEnum) =>
+    isOpenEnum
+      ? null
+      : {
+          value: `${toPascalCase(enumName)}.${toPascalCase(rawValue)}`,
+          delimiter: "",
+        },
+  // yaml's default (40) folds a long double-quoted scalar across lines using `\`
+  // continuations, and a space adjacent to a fold is not recoverable on reload (#93).
+  // Opt out so C# multiline fixtures round-trip byte-for-byte.
+  yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   scalarValues: {
     boolean: "false",
     float: "3.14f",

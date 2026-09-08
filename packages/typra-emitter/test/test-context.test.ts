@@ -429,12 +429,20 @@ describe("csharp driver — generated fixtures satisfy generated loaders", () =>
 
     // yaml folds a long double-quoted scalar using `\` line continuations, and a space
     // adjacent to a fold is not recoverable on reload — the value loses one space per
-    // folded break. Every other backend opts out via `yamlDoubleQuotedMinMultiLineLength`;
-    // this driver hand-rolls the document, so it has to opt out explicitly. See #93.
+    // folded break. C# now flows through the shared `buildBaseTestContext`, which opts out
+    // via `yamlDoubleQuotedMinMultiLineLength` (see `csharpTestOptions`). See #93.
     assert.doesNotMatch(
       rendered,
       /\\$/m,
       "YAML fixture must not fold a double-quoted scalar across lines",
+    );
+    // A trailing space before a newline must render as a literal space + escaped `\n`
+    // (JSON-style), never yaml's `\ ` escaped-space fold that the old hand-rolled C# YAML
+    // emitted — that fold is the same space-preservation hazard as the line fold above.
+    assert.doesNotMatch(
+      rendered,
+      /\\ /,
+      "YAML fixture must not emit an escaped-space (`\\ `) fold around trailing whitespace",
     );
     // The assertion and the payload must agree on the raw value, byte for byte.
     assert.match(
