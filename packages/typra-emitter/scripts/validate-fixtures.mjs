@@ -97,6 +97,7 @@ import {
   REQUIRED_CONFORMANCE_MATRIX_TARGETS,
   validateConformanceMatrix,
 } from "./conformance-matrix-policy.mjs";
+import { checkTestCategoryParity } from "./test-category-parity-policy.mjs";
 
 const EXPECTED_VALIDATION_STAGE_IDS = [
   "generated-targets",
@@ -2000,66 +2001,20 @@ function assertStaticFixtureCoverage() {
   };
   // The guard's backend set is the project's canonical backend list — so a
   // backend added to (or removed from) the emitter can't silently skip parity.
-  const parityBackends = Object.keys(wireOptionsTestFiles);
-  const canonicalBackends = new Set(REQUIRED_CONFORMANCE_MATRIX_TARGETS);
-  for (const backend of parityBackends) {
-    if (!canonicalBackends.has(backend)) {
-      fail(
-        `Test-category parity: backend "${backend}" is not in the canonical backend list ` +
-          `(REQUIRED_CONFORMANCE_MATRIX_TARGETS). Remove it here or add it to the canonical list.`,
-      );
-    }
-  }
-  for (const backend of REQUIRED_CONFORMANCE_MATRIX_TARGETS) {
-    if (!(backend in wireOptionsTestFiles)) {
-      fail(
-        `Test-category parity: canonical backend "${backend}" has no WireOptions test file entry. ` +
-          `Every supported backend must be covered so #328-class gaps cannot land silently.`,
-      );
-    }
-  }
-  for (const [category, byBackend] of Object.entries(testCategoryParity)) {
-    for (const backend of Object.keys(byBackend)) {
-      if (!(backend in wireOptionsTestFiles)) {
-        fail(
-          `Test-category parity: category "${category}" references unknown backend "${backend}". ` +
-            `Matrix has drifted from the backend set.`,
-        );
-      }
-    }
-    for (const backend of parityBackends) {
-      const entry = byBackend[backend];
-      if (entry === undefined) {
-        fail(
-          `Test-category parity: backend "${backend}" has no entry (markers or a waiver with a reason) ` +
-            `for category "${category}". Every backend must declare each tracked category so #328-class gaps cannot land silently.`,
-        );
-        continue;
-      }
-      if (Array.isArray(entry)) {
-        if (entry.length === 0) {
-          fail(
-            `Test-category parity: backend "${backend}" category "${category}" has an empty marker list. ` +
-              `Provide marker substrings, or a { waived: "<reason>" } to skip deliberately.`,
-          );
-          continue;
-        }
-        assertIncludes(wireOptionsTestFiles[backend], ...entry);
-        continue;
-      }
-      if (
-        entry &&
-        typeof entry === "object" &&
-        typeof entry.waived === "string" &&
-        entry.waived.trim().length > 0
-      ) {
-        continue; // deliberate waiver with a reason
-      }
-      fail(
-        `Test-category parity: backend "${backend}" category "${category}" must be an array of marker ` +
-          `substrings or { waived: "<non-empty reason>" }.`,
-      );
-    }
+  // The policy logic lives in test-category-parity-policy.mjs so it can be
+  // unit-tested in isolation; here we drive it against the real fixtures.
+  const parityReadFile = (relPath) => {
+    const absPath = path.join(packageRoot, relPath);
+    if (!existsSync(absPath)) return null;
+    return readFileSync(absPath, "utf8");
+  };
+  for (const parityFailure of checkTestCategoryParity({
+    wireOptionsTestFiles,
+    testCategoryParity,
+    canonicalBackends: REQUIRED_CONFORMANCE_MATRIX_TARGETS,
+    readFile: parityReadFile,
+  })) {
+    fail(parityFailure);
   }
 
   assertIncludes(
