@@ -1106,7 +1106,11 @@ function assertFocusedFeatureFixtures() {
       // never field survival, so it can't emit the inverted assertion. Red-first
       // for the 2.1.2 emitter-drift fix.
       const sensitiveRoundtripChecks = {
-        go: { file: ["go", "tests", "root_test.go"], sensitive: "ApiKey", normal: "Name" },
+        go: {
+          file: ["go", "tests", "root_test.go"],
+          sensitive: "ApiKey",
+          normal: "Name",
+        },
         python: {
           file: [
             "python",
@@ -1807,8 +1811,70 @@ function assertStaticFixtureCoverage() {
       "tests",
       "WireOptionsGeneratedTest.java",
     ),
-    "WireOptions openaiRestored = WireOptions.fromWire(\"openai\", openaiWire);",
-    "openaiRestored.toWire(\"openai\").keySet()",
+    'WireOptions openaiRestored = WireOptions.fromWire("openai", openaiWire);',
+    'openaiRestored.toWire("openai").keySet()',
+  );
+  // Every backend must emit toWire/fromWire assertions in its generated
+  // conversion tests — not just Go and Java (regression for issue #328).
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "python",
+      "tests",
+      "test_wire_options.py",
+    ),
+    'instance.to_wire("openai")',
+    "max_completion_tokens",
+    "max_tokens",
+    'WireOptions.from_wire("openai", openai_wire)',
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "typescript",
+      "tests",
+      "wire-options.test.ts",
+    ),
+    'instance.toWire("openai")',
+    "max_completion_tokens",
+    "max_tokens",
+    'WireOptions.fromWire("openai", openaiWire)',
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "csharp",
+      "tests",
+      "WireOptionsConversionTests.cs",
+    ),
+    'instance.ToWire("openai")',
+    "max_completion_tokens",
+    "max_tokens",
+    'WireOptions.FromWire("openai", openaiWire)',
+  );
+  assertIncludes(
+    path.join("generated", "fixtures", "rust", "tests", "wire_options_test.rs"),
+    'instance.to_wire("openai")',
+    "max_completion_tokens",
+    "max_tokens",
+    'WireOptions::from_wire("openai", &openai_wire, &ctx)',
+  );
+  assertIncludes(
+    path.join(
+      "generated",
+      "fixtures",
+      "swift",
+      "Tests",
+      "TypraFixturesTests",
+      "WireOptionsTests.swift",
+    ),
+    'instance.toWire("openai")',
+    "max_completion_tokens",
+    "max_tokens",
+    'WireOptions.fromWire("openai", openaiWire)',
   );
   assertIncludes(
     path.join("generated", "fixtures", "java", "FixtureRoot.java"),

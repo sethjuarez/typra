@@ -445,6 +445,7 @@ export const renderTests = (
     });
     return {
       json: JSON.stringify(sample, null, 2).split("\n"),
+      sample: sample as Record<string, unknown>,
       // `doubleQuotedMinMultiLineLength` (yaml's default is 40) folds a long double-quoted
       // scalar across lines using `\` line continuations. A space adjacent to such a fold is
       // not recoverable on reload, so the value silently loses one space per folded break.

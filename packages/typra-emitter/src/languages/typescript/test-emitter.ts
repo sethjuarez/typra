@@ -15,7 +15,11 @@
  */
 
 import { BaseTestContext } from "../../ir/ast.js";
-import { postSaveExample } from "../../testing/test-context.js";
+import {
+  postSaveExample,
+  wireTestMappings,
+  wireTestProviders,
+} from "../../testing/test-context.js";
 
 // ============================================================================
 // Macro replacements
@@ -171,6 +175,42 @@ export function emitTypeScriptTest(
       lines.push(`    });`);
     }
     lines.push(`  });`);
+
+    // Wire conversion (only when the type carries provider wire mappings)
+    const wireMappings = wireTestMappings(node, examples[0].sample);
+    const wireProviders = wireTestProviders(wireMappings);
+    if (wireProviders.length > 0) {
+      lines.push("");
+      lines.push(`  describe("wire conversion", () => {`);
+      lines.push(`    it("should apply provider wire field names", () => {`);
+      lines.push("      const json = `" + examples[0].json.join("\\n") + "`;");
+      lines.push(`      const instance = ${typeName}.fromJson(json);`);
+      for (const provider of wireProviders) {
+        lines.push(
+          `      const ${provider}Wire = instance.toWire("${provider}");`,
+        );
+        for (const mapping of wireMappings.filter(
+          (entry) => entry.provider === provider,
+        )) {
+          lines.push(
+            `      expect(Object.keys(${provider}Wire).includes("${mapping.wireName}")).toBe(true);`,
+          );
+          if (mapping.fieldName !== mapping.wireName) {
+            lines.push(
+              `      expect(Object.keys(${provider}Wire).includes("${mapping.fieldName}")).toBe(false);`,
+            );
+          }
+        }
+        lines.push(
+          `      const ${provider}Restored = ${typeName}.fromWire("${provider}", ${provider}Wire);`,
+        );
+        lines.push(
+          `      expect(Object.keys(${provider}Restored.toWire("${provider}")).sort()).toEqual(Object.keys(${provider}Wire).sort());`,
+        );
+      }
+      lines.push(`    });`);
+      lines.push(`  });`);
+    }
   }
 
   // Alternate representations (coercions)
