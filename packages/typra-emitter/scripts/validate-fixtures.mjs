@@ -1877,17 +1877,23 @@ function assertStaticFixtureCoverage() {
     'WireOptions.fromWire("openai", openaiWire)',
   );
   // ---------------------------------------------------------------------------
-  // Test-category parity guard (issue #328 class).
+  // Test-category parity policy (issue #328 class).
   //
-  // Every backend's generated test file for the canonical WireOptions type must
-  // cover each expected test category, or declare an explicit waiver ([]). A
-  // missing marker fails assertIncludes; a backend with no entry at all for a
-  // category throws. This is what makes wire / negative-input style gaps
-  // self-catching instead of silently landing in only a subset of backends:
-  //   - `wire` is the exact category that drifted in #328 (Go/Java only).
-  //   - `negativeInput` is the same-class gap (Go/Java only) closed alongside it.
-  //   - `roundtripJson` is a core control that must exist everywhere.
-  // When adding a backend or a category, every cell must be filled or waived.
+  // A complete, bidirectionally-exhaustive guard over the canonical WireOptions
+  // type: every supported backend must, for every tracked test category, either
+  // prove the category is emitted (marker substrings) or declare a waiver WITH A
+  // REASON. It fails loudly when:
+  //   - a backend is missing an entry for a category (silent per-backend gap);
+  //   - a category references an unknown/stale backend (drifted matrix);
+  //   - the guard's backend set diverges from the project's canonical backend
+  //     list (a newly added backend can't skip the guard, nor a removed one linger);
+  //   - a waiver has no reason, or a marker list is empty.
+  // Tracked categories are the demonstrated risk classes, not the full test
+  // inventory: `roundtripJson` (a core control that must exist everywhere),
+  // `wire` (the exact category that drifted in #328 — proven in BOTH directions,
+  // toWire and fromWire), and `negativeInput` (the same-class malformed-input gap
+  // closed alongside it). Adding a backend or category forces every cell to be
+  // filled or waived-with-reason.
   // ---------------------------------------------------------------------------
   const wireOptionsTestFiles = {
     go: path.join("generated", "fixtures", "go", "tests", "wire_options_test.go"),
@@ -1935,8 +1941,10 @@ function assertStaticFixtureCoverage() {
       "WireOptionsTests.swift",
     ),
   };
-  // Per category, the marker substring(s) that prove the category is emitted for
-  // each backend. `[]` is an explicit waiver; a missing key throws.
+  // Per category, per backend: an array of marker substrings that prove the
+  // category is emitted, or `{ waived: "<reason>" }` to skip it deliberately.
+  // A composite category (e.g. `wire`) lists a marker for each obligation it
+  // carries — here both the toWire and the fromWire direction.
   const testCategoryParity = {
     roundtripJson: {
       go: ["func TestWireOptionsRoundtrip"],
@@ -1948,13 +1956,31 @@ function assertStaticFixtureCoverage() {
       swift: ["func testJSONRoundTrip1"],
     },
     wire: {
-      go: ["func TestWireOptionsToWire"],
-      java: ['wireInstance.toWire("openai")'],
-      python: ['instance.to_wire("openai")'],
-      typescript: ['instance.toWire("openai")'],
-      csharp: ['instance.ToWire("openai")'],
-      rust: ['instance.to_wire("openai")'],
-      swift: ['instance.toWire("openai")'],
+      go: ["func TestWireOptionsToWire", "WireOptionsFromWire("],
+      java: [
+        'wireInstance.toWire("openai")',
+        'WireOptions.fromWire("openai", openaiWire)',
+      ],
+      python: [
+        'instance.to_wire("openai")',
+        'WireOptions.from_wire("openai", openai_wire)',
+      ],
+      typescript: [
+        'instance.toWire("openai")',
+        'WireOptions.fromWire("openai", openaiWire)',
+      ],
+      csharp: [
+        'instance.ToWire("openai")',
+        'WireOptions.FromWire("openai", openaiWire)',
+      ],
+      rust: [
+        'instance.to_wire("openai")',
+        'WireOptions::from_wire("openai", &openai_wire, &ctx)',
+      ],
+      swift: [
+        'instance.toWire("openai")',
+        'WireOptions.fromWire("openai", openaiWire)',
+      ],
     },
     negativeInput: {
       go: ["func TestWireOptionsFromJSONInvalid", 'WireOptionsFromJSON("{")'],
@@ -1972,19 +1998,67 @@ function assertStaticFixtureCoverage() {
       ],
     },
   };
+  // The guard's backend set is the project's canonical backend list — so a
+  // backend added to (or removed from) the emitter can't silently skip parity.
   const parityBackends = Object.keys(wireOptionsTestFiles);
+  const canonicalBackends = new Set(REQUIRED_CONFORMANCE_MATRIX_TARGETS);
+  for (const backend of parityBackends) {
+    if (!canonicalBackends.has(backend)) {
+      fail(
+        `Test-category parity: backend "${backend}" is not in the canonical backend list ` +
+          `(REQUIRED_CONFORMANCE_MATRIX_TARGETS). Remove it here or add it to the canonical list.`,
+      );
+    }
+  }
+  for (const backend of REQUIRED_CONFORMANCE_MATRIX_TARGETS) {
+    if (!(backend in wireOptionsTestFiles)) {
+      fail(
+        `Test-category parity: canonical backend "${backend}" has no WireOptions test file entry. ` +
+          `Every supported backend must be covered so #328-class gaps cannot land silently.`,
+      );
+    }
+  }
   for (const [category, byBackend] of Object.entries(testCategoryParity)) {
-    for (const backend of parityBackends) {
-      const markers = byBackend[backend];
-      if (markers === undefined) {
+    for (const backend of Object.keys(byBackend)) {
+      if (!(backend in wireOptionsTestFiles)) {
         fail(
-          `Test-category parity: backend "${backend}" has no entry (markers or an explicit [] waiver) for category "${category}". ` +
-            `Every backend must declare each generated-test category so #328-class gaps cannot land silently.`,
+          `Test-category parity: category "${category}" references unknown backend "${backend}". ` +
+            `Matrix has drifted from the backend set.`,
+        );
+      }
+    }
+    for (const backend of parityBackends) {
+      const entry = byBackend[backend];
+      if (entry === undefined) {
+        fail(
+          `Test-category parity: backend "${backend}" has no entry (markers or a waiver with a reason) ` +
+            `for category "${category}". Every backend must declare each tracked category so #328-class gaps cannot land silently.`,
         );
         continue;
       }
-      if (markers.length === 0) continue; // explicit waiver
-      assertIncludes(wireOptionsTestFiles[backend], ...markers);
+      if (Array.isArray(entry)) {
+        if (entry.length === 0) {
+          fail(
+            `Test-category parity: backend "${backend}" category "${category}" has an empty marker list. ` +
+              `Provide marker substrings, or a { waived: "<reason>" } to skip deliberately.`,
+          );
+          continue;
+        }
+        assertIncludes(wireOptionsTestFiles[backend], ...entry);
+        continue;
+      }
+      if (
+        entry &&
+        typeof entry === "object" &&
+        typeof entry.waived === "string" &&
+        entry.waived.trim().length > 0
+      ) {
+        continue; // deliberate waiver with a reason
+      }
+      fail(
+        `Test-category parity: backend "${backend}" category "${category}" must be an array of marker ` +
+          `substrings or { waived: "<non-empty reason>" }.`,
+      );
     }
   }
 
