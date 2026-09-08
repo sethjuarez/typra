@@ -6,6 +6,14 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [2.1.8](https://github.com/sethjuarez/typra/compare/v2.1.7...v2.1.8) (2026-09-08)
+
+
+### Bug Fixes
+
+* **emitter:** emit malformed-input rejection tests for all backends ([3611a38](https://github.com/sethjuarez/typra/commit/3611a38bcddb989bd5d6200ebc6531b52864f7e8))
+* **emitter:** emit toWire/fromWire conversion assertions for all backends ([#329](https://github.com/sethjuarez/typra/issues/329)) ([3611a38](https://github.com/sethjuarez/typra/commit/3611a38bcddb989bd5d6200ebc6531b52864f7e8))
+
 ## [2.1.7](https://github.com/sethjuarez/typra/compare/v2.1.6...v2.1.7) (2026-09-03)
 
 
