@@ -535,6 +535,15 @@ model AudioContent extends FixtureContent {
   // A non-string scalar array on a variant must load as typed elements (#341).
   @sample(#{ channelLevels: #[3, 7] })
   channelLevels: int32[];
+
+  // Multi-word enum values must yield one Rust variant name across model, defaults, and tests (#340).
+  @sample(#{ mix: "wide_hold_then_push" })
+  mix: FixtureAudioMix = FixtureAudioMix.subtlePush;
+}
+
+union FixtureAudioMix {
+  subtlePush: "subtle_push";
+  wideHoldThenPush: "wide_hold_then_push";
 }
 
 @abstract

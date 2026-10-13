@@ -14,6 +14,11 @@ import { lowerFile } from "../src/ir/lower.js";
 import { emitRustFile } from "../src/languages/rust/emitter.js";
 import { disambiguateGlobReexports } from "../src/languages/rust/driver.js";
 import { RustExprVisitor } from "../src/languages/rust/visitor.js";
+import {
+  rustEnumVariantName,
+  assertDistinctRustVariants,
+} from "../src/languages/rust/identifiers.js";
+import { rustTestOptions } from "../src/testing/test-context.js";
 
 interface PropOptions {
   isScalar?: boolean;
@@ -874,5 +879,63 @@ describe("rust emitter — typed scalar arrays (#341)", () => {
     const code = emitArrays(["unknown"]);
     assert.ok(code.includes("items_unknown: Vec<serde_json::Value>"));
     assert.ok(code.includes(".map(|arr| arr.to_vec()).unwrap_or_default()"));
+  });
+});
+
+describe("rust emitter — multi-word string enum variants (#340)", () => {
+  it("derives one PascalCase variant name shared by the enum, load defaults, and tests", () => {
+    const kind = makeProp("kind", "string", {
+      isScalar: true,
+      allowedValues: ["subtle_push", "wide_hold_then_push"],
+      defaultValue: "subtle_push",
+    });
+    kind.enumName = "MotionPlanKind";
+    const plan = makeType("MotionPlan", [kind]);
+    const registry = TypeRegistry.fromTypeGraph([plan]);
+    const code = emitRustFile(
+      lowerFile(plan, registry, new Set()),
+      new RustExprVisitor(registry),
+      new Set(),
+    );
+
+    assert.match(code, /\bSubtlePush\b/);
+    assert.match(code, /\bWideHoldThenPush\b/);
+    assert.doesNotMatch(code, /Subtle_push|Wide_hold_then_push/);
+    assert.equal(
+      rustTestOptions.renderEnumValue!(
+        "MotionPlanKind",
+        "wide_hold_then_push",
+        "kind",
+      )?.value,
+      "MotionPlanKind::WideHoldThenPush",
+    );
+  });
+
+  it("produces valid identifiers for punctuated and numeric values", () => {
+    assert.equal(rustEnumVariantName("system"), "System");
+    assert.equal(rustEnumVariantName("camelCase"), "CamelCase");
+    assert.equal(rustEnumVariantName("gpt-4o.mini"), "Gpt4oMini");
+    assert.equal(rustEnumVariantName("4k"), "V4k");
+    assert.equal(rustEnumVariantName("self"), "SelfValue");
+  });
+
+  it("rejects values that normalize to the same variant", () => {
+    assert.throws(
+      () =>
+        assertDistinctRustVariants({ name: "E", values: ["foo_bar", "fooBar"] }),
+      /"foo_bar" and "fooBar" both map to variant FooBar/,
+    );
+    assert.throws(
+      () =>
+        assertDistinctRustVariants({
+          name: "E",
+          values: ["other_"],
+          isOpen: true,
+        }),
+      /variant Other/,
+    );
+    assert.doesNotThrow(() =>
+      assertDistinctRustVariants({ name: "E", values: ["a_b", "a_c"] }),
+    );
   });
 });

@@ -15,6 +15,7 @@ import {
 } from "../ir/ast.js";
 import { getCombinations, scalarValue, toSnakeCase } from "../ir/utilities.js";
 import { toPascalCase } from "../ir/visitor.js";
+import { rustEnumVariantName } from "../languages/rust/identifiers.js";
 import {
   swiftPropertyName,
   swiftTypeName,
@@ -873,7 +874,7 @@ export const rustTestOptions: TestContextOptions = {
   getDelimiter: (str: string) => '"',
   yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   renderEnumValue: (enumName: string, rawValue: string) => ({
-    value: `${enumName}::${toPascalCase(rawValue)}`,
+    value: `${enumName}::${rustEnumVariantName(rawValue)}`,
     delimiter: "",
   }),
   escapeJsonForTemplate: undefined,

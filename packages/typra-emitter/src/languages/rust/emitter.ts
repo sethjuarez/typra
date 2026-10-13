@@ -33,6 +33,7 @@
  *         - Method stubs (as trait)
  */
 
+import { rustEnumVariantName, assertDistinctRustVariants } from "./identifiers.js";
 import {
   FileDecl,
   TypeDecl,
@@ -110,13 +111,6 @@ function renderLines(lines: string[]): string {
   return `${lines.join("\n")}\n`;
 }
 
-/**
- * Convert a string literal value to a PascalCase Rust variant name.
- * e.g., "system" → "System", "tool" → "Tool", "text" → "Text"
- */
-function toPascalCase(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
 
 const RUST_KEYWORDS = new Set([
   "as",
@@ -173,7 +167,8 @@ function emitStringEnum(
   lines: string[],
   options: RustEmitterOptions,
 ): void {
-  const firstVariant = toPascalCase(enumDef.values[0]);
+  const firstVariant = rustEnumVariantName(enumDef.values[0]);
+  assertDistinctRustVariants(enumDef);
   if (enumDef.isOpen) {
     // Open enums carry String data in Other variant — no Copy
     lines.push("#[derive(Debug, Clone, PartialEq, Eq, Hash)]");
@@ -182,7 +177,7 @@ function emitStringEnum(
   }
   lines.push(`pub enum ${enumDef.name} {`);
   for (const value of enumDef.values) {
-    const variant = toPascalCase(value);
+    const variant = rustEnumVariantName(value);
     lines.push(`    ${variant},`);
   }
   if (enumDef.isOpen) {
@@ -208,7 +203,7 @@ function emitStringEnum(
   lines.push("        match self {");
   for (const value of enumDef.values) {
     lines.push(
-      `            Self::${toPascalCase(value)} => write!(f, "${value}"),`,
+      `            Self::${rustEnumVariantName(value)} => write!(f, "${value}"),`,
     );
   }
   if (enumDef.isOpen) {
@@ -230,13 +225,13 @@ function emitStringEnum(
     lines.push("        match s {");
     for (const value of enumDef.values) {
       lines.push(
-        `            "${value}" => Some(Self::${toPascalCase(value)}),`,
+        `            "${value}" => Some(Self::${rustEnumVariantName(value)}),`,
       );
     }
     for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
       for (const alias of aliases) {
         lines.push(
-          `            "${alias}" => Some(Self::${toPascalCase(canonical)}),`,
+          `            "${alias}" => Some(Self::${rustEnumVariantName(canonical)}),`,
         );
       }
     }
@@ -252,13 +247,13 @@ function emitStringEnum(
   lines.push("    pub fn from_str_ignore_case_opt(s: &str) -> Option<Self> {");
   for (const value of enumDef.values) {
     lines.push(`        if s.eq_ignore_ascii_case("${value}") {`);
-    lines.push(`            return Some(Self::${toPascalCase(value)});`);
+    lines.push(`            return Some(Self::${rustEnumVariantName(value)});`);
     lines.push("        }");
   }
   for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
     for (const alias of aliases) {
       lines.push(`        if s.eq_ignore_ascii_case("${alias}") {`);
-      lines.push(`            return Some(Self::${toPascalCase(canonical)});`);
+      lines.push(`            return Some(Self::${rustEnumVariantName(canonical)});`);
       lines.push("        }");
     }
   }
@@ -272,7 +267,7 @@ function emitStringEnum(
   lines.push("    pub fn as_str(&self) -> &str {");
   lines.push("        match self {");
   for (const value of enumDef.values) {
-    lines.push(`            Self::${toPascalCase(value)} => "${value}",`);
+    lines.push(`            Self::${rustEnumVariantName(value)} => "${value}",`);
   }
   if (enumDef.isOpen) {
     lines.push("            Self::Other(s) => s.as_str(),");
@@ -1657,7 +1652,7 @@ function coercionReturnStatement(
         const defaultVal = String(
           targetField.defaultValue || targetField.allowedValues[0],
         );
-        const enumExpr = `${targetField.enumName}::from_str_opt(&value).unwrap_or(${targetField.enumName}::${toPascalCase(defaultVal)})`;
+        const enumExpr = `${targetField.enumName}::from_str_opt(&value).unwrap_or(${targetField.enumName}::${rustEnumVariantName(defaultVal)})`;
         return isOptional
           ? `${snake}: Some(${enumExpr})`
           : `${snake}: ${enumExpr}`;
@@ -2796,7 +2791,7 @@ function fieldDefault(
       typeof field.defaultValue === "string" ? field.defaultValue : null;
     const defaultVal =
       dv && field.allowedValues.includes(dv) ? dv : field.allowedValues[0];
-    return `${field.enumName}::${toPascalCase(defaultVal)}`;
+    return `${field.enumName}::${rustEnumVariantName(defaultVal)}`;
   }
   const cat = field.category;
   switch (cat.kind) {
@@ -2880,7 +2875,7 @@ function loadExpr(
     if (a.isOptional) {
       return `value.get("${key}").and_then(|v| v.as_str()).and_then(|s| ${a.enumName}::from_str_opt(s))`;
     }
-    return `value.get("${key}").and_then(|v| v.as_str()).and_then(|s| ${a.enumName}::from_str_opt(s)).unwrap_or(${a.enumName}::${toPascalCase(defaultVal)})`;
+    return `value.get("${key}").and_then(|v| v.as_str()).and_then(|s| ${a.enumName}::from_str_opt(s)).unwrap_or(${a.enumName}::${rustEnumVariantName(defaultVal)})`;
   }
 
   switch (cat.kind) {
@@ -3062,7 +3057,7 @@ function variantLoadExpr(
     if (field.isOptional) {
       return `value.get("${key}").and_then(|v| v.as_str()).and_then(|s| ${field.enumName}::from_str_opt(s))`;
     }
-    return `value.get("${key}").and_then(|v| v.as_str()).and_then(|s| ${field.enumName}::from_str_opt(s)).unwrap_or(${field.enumName}::${toPascalCase(defaultVal)})`;
+    return `value.get("${key}").and_then(|v| v.as_str()).and_then(|s| ${field.enumName}::from_str_opt(s)).unwrap_or(${field.enumName}::${rustEnumVariantName(defaultVal)})`;
   }
 
   switch (cat.kind) {

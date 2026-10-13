@@ -3,6 +3,7 @@ import "@typra/emitter";
 namespace Typra.Fixtures.Features.Enums;
 
 model Root {
+  plan: MotionPlan;
   status: Status;
   mode: Mode;
 }
@@ -19,3 +20,14 @@ union Mode {
   manual: "manual";
   string;
 }
+
+union MotionPlanKind {
+  subtlePush: "subtle_push";
+  wideHoldThenPush: "wide_hold_then_push";
+}
+
+@serializable
+model MotionPlan {
+  kind: MotionPlanKind = MotionPlanKind.subtlePush;
+}
+
