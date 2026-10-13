@@ -257,6 +257,27 @@ describe("typed @vector conformance over a coerce-union discriminator with a bar
     );
   });
 
+  // #304: Swift read the discriminator into a local named after the field. For
+  // `provider` that `String` shadowed the `provider()` registry accessor, so
+  // `registry: provider()` failed to compile ("cannot call value of non-function
+  // type 'String'").
+  it("swift: the discriminator local never shadows the provider() accessor", () => {
+    const swift = readFileSync(
+      path.join(output, "swift", "tests", "ProcessorConformanceTests.swift"),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      swift,
+      /let provider =/,
+      `swift processor conformance must not bind a local named \`provider\`\n--- emitted ---\n${swift}`,
+    );
+    assert.match(
+      swift,
+      /let dispatchKey = try \(agent\.model\.save\(\)\)\["provider"\] as! String\n\s*guard let impl = ProcessorResolver\.resolve\(provider: dispatchKey, registry: self\.provider\(\)\) else \{/,
+      `swift processor conformance must route the fixed dispatchKey local through provider()\n--- emitted ---\n${swift}`,
+    );
+  });
+
   // Issue #2 (open-union `*` defaultVariant lowering): Model is an OPEN union
   // (`openai`, `azure`, string) with a declared wildcard child
   // `CustomModel { provider: "*" }`. The resolver must lower that default into a

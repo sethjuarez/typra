@@ -1127,14 +1127,20 @@ function emitSwiftInterfaceConformanceTest(
         lines.push(`    let ${local} = input[${key}] as! ${swiftType(entry.params[paramName])}`);
       }
     }
+    // The discriminator local is a fixed name rather than the field name, and the
+    // registry accessor is `self.`-qualified: a field or seam param named
+    // `provider` would otherwise shadow the `provider()` accessor (#304).
+    const paramLocals = new Set(paramNames.map((name) => swiftPropertyName(name)));
+    let dispatchKey = "dispatchKey";
+    while (paramLocals.has(dispatchKey)) dispatchKey = `_${dispatchKey}`;
     lines.push(
-      `    let ${swiftPropertyName(rawField)} = ${accessor}`,
+      `    let ${dispatchKey} = ${accessor}`,
       `    guard let impl = ${resolveTry}${resolver}.resolve(${swiftPropertyName(
         rawField,
-      )}: ${swiftPropertyName(rawField)}, registry: provider()) else {`,
+      )}: ${dispatchKey}, registry: self.provider()) else {`,
       `      XCTFail(${swiftStringLiteral(
         `${vectorName}: no ${seam} attached for `,
-      )} + ${swiftPropertyName(rawField)})`,
+      )} + ${dispatchKey})`,
       "      return",
       "    }",
       `    let actual = try ${awaitPrefix}impl.${method}(${paramNames

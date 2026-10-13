@@ -165,10 +165,10 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
           ),
           mustInclude: [
             // consumes the emitted resolver, not a stringly composite key
-            /guard let impl = try RendererResolver\.resolve\(kind: kind, registry: provider\(\)\)/,
+            /guard let impl = try RendererResolver\.resolve\(kind: dispatchKey, registry: self\.provider\(\)\)/,
             // reads the SAME discriminator off the typed union's serialized form
             // (a Swift union is an enum with no stored discriminator property)
-            /let kind = try \(agent\.template\.format\.save\(\)\)\["kind"\] as! String/,
+            /let dispatchKey = try \(agent\.template\.format\.save\(\)\)\["kind"\] as! String/,
             // invokes the typed seam method on the resolved impl
             /let actual = try await impl\.render\(agent: agent, inputs: inputs\)/,
             // provider VALUE is consumer-authored outside the conformance tree
