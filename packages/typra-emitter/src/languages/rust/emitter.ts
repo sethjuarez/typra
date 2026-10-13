@@ -3011,21 +3011,35 @@ function collectionScalarLoadExpr(
   scalarType: string,
   isOptional: boolean,
 ): string {
-  if (isValueType(scalarType)) {
-    return isOptional
-      ? `value.get("${key}").and_then(|v| v.as_array()).map(|arr| arr.to_vec())`
-      : `value.get("${key}").and_then(|v| v.as_array()).map(|arr| arr.to_vec()).unwrap_or_default()`;
-  }
+  const element = rustArrayElementLoadExpr(scalarType);
+  const loaded = element
+    ? `value.get("${key}").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| ${element}).collect())`
+    : `value.get("${key}").and_then(|v| v.as_array()).map(|arr| arr.to_vec())`;
+  return isOptional ? loaded : `${loaded}.unwrap_or_default()`;
+}
 
-  switch (scalarType) {
-    case "string":
-      return isOptional
-        ? `value.get("${key}").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())`
-        : `value.get("${key}").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default()`;
+/**
+ * Typed per-element conversion for a scalar array, or null when the element stays a
+ * `serde_json::Value`. Must agree with the `Vec<T>` field type rendered from RUST_TYPE_MAP;
+ * elements of the wrong JSON type are skipped, as for `string[]`.
+ */
+function rustArrayElementLoadExpr(scalarType: string): string | null {
+  if (isValueType(scalarType)) return null;
+  switch (RUST_TYPE_MAP[scalarType]) {
+    case "String":
+      return "v.as_str().map(|s| s.to_string())";
+    case "bool":
+      return "v.as_bool()";
+    case "i32":
+      return "v.as_i64().map(|n| n as i32)";
+    case "i64":
+      return "v.as_i64()";
+    case "f32":
+      return "v.as_f64().map(|n| n as f32)";
+    case "f64":
+      return "v.as_f64()";
     default:
-      return isOptional
-        ? `value.get("${key}").and_then(|v| v.as_array()).map(|arr| arr.to_vec())`
-        : `value.get("${key}").and_then(|v| v.as_array()).map(|arr| arr.to_vec()).unwrap_or_default()`;
+      return null;
   }
 }
 

@@ -531,6 +531,10 @@ model FileContent extends FixtureContent {
 model AudioContent extends FixtureContent {
   kind: "audio";
   value: string;
+
+  // A non-string scalar array on a variant must load as typed elements (#341).
+  @sample(#{ channelLevels: #[3, 7] })
+  channelLevels: int32[];
 }
 
 @abstract

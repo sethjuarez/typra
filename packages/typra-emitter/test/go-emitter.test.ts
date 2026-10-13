@@ -445,3 +445,16 @@ describe("Go emitter build safety (#305)", () => {
     assert.notEqual(protocolGoType("Record<Pet | null>"), "interface{}");
   });
 });
+
+describe("Go emitter typed scalar arrays (#341)", () => {
+  it("converts decoder-native numbers instead of asserting the element type", () => {
+    const field = {
+      ...scalarField("levels", "int32"),
+      category: { kind: "collection_scalar", scalarType: "int32" },
+    } as unknown as FieldDecl;
+    const out = emitLoader(loaderType("Audio", [field]));
+    assert.ok(!out.includes("v.(int32)"), "a bare assertion panics on JSON float64");
+    assert.match(out, /switch n := v\.\(type\) \{\n\t+case int:\n\t+result\.Levels\[i\] = int32\(n\)/);
+    assert.match(out, /case float64:\n\t+result\.Levels\[i\] = int32\(n\)/);
+  });
+});

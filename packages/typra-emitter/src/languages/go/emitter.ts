@@ -1031,12 +1031,9 @@ function emitLoadScalar(
   }
 }
 
-function emitLoadNumeric(
-  assign: LoadAssignment,
-  fieldName: string,
+function goNumericCases(
   goType: string,
-  lines: string[],
-): void {
+): Array<{ caseType: string; expr: string }> {
   const isFloat = FLOAT_GO_TYPES.has(goType);
 
   // Build the coercion cases
@@ -1062,6 +1059,16 @@ function emitLoadNumeric(
     // int types don't include float32
     cases.push({ caseType: "float64", expr: `${goType}(n)` });
   }
+  return cases;
+}
+
+function emitLoadNumeric(
+  assign: LoadAssignment,
+  fieldName: string,
+  goType: string,
+  lines: string[],
+): void {
+  const cases = goNumericCases(goType);
 
   if (assign.isOptional) {
     lines.push(
@@ -1165,7 +1172,17 @@ function emitLoadCollectionScalar(
     lines.push("\t\t\tcase []interface{}:");
     lines.push(`\t\t\t\tresult.${fieldName} = make([]${goType}, len(arr))`);
     lines.push("\t\t\t\tfor i, v := range arr {");
-    lines.push(`\t\t\t\t\tresult.${fieldName}[i] = v.(${goType})`);
+    if (NUMERIC_GO_TYPES.has(goType)) {
+      // JSON decodes numbers as float64 and YAML as int, so a bare v.(int32) would panic.
+      lines.push("\t\t\t\t\tswitch n := v.(type) {");
+      for (const c of goNumericCases(goType)) {
+        lines.push(`\t\t\t\t\tcase ${c.caseType}:`);
+        lines.push(`\t\t\t\t\t\tresult.${fieldName}[i] = ${c.expr}`);
+      }
+      lines.push("\t\t\t\t\t}");
+    } else {
+      lines.push(`\t\t\t\t\tresult.${fieldName}[i] = v.(${goType})`);
+    }
     lines.push("\t\t\t\t}");
     lines.push(`\t\t\tcase []${goType}:`);
     lines.push(`\t\t\t\tresult.${fieldName} = arr`);

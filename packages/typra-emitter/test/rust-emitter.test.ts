@@ -786,3 +786,93 @@ describe("disambiguateGlobReexports", () => {
     );
   });
 });
+
+describe("rust emitter — typed scalar arrays (#341)", () => {
+  function emitArrays(scalarTypes: string[]): string {
+    const fields = scalarTypes.map((scalarType) => ({
+      ...scalarField(`items_${scalarType}`, scalarType, false),
+      category: { kind: "collection_scalar", scalarType },
+    })) as unknown as FieldDecl[];
+    const type = {
+      typeName: { namespace: "Test", name: "Arrays" },
+      base: null,
+      isAbstract: false,
+      isProtocol: false,
+      description: "",
+      fields,
+      coercionProperty: null,
+      load: {
+        coercions: [],
+        assignments: fields.map((field) => ({
+          sourceName: field.name,
+          fieldName: field.name,
+          category: field.category,
+          isOptional: false,
+          parentTypeName: "Arrays",
+          enumName: null,
+          allowedValues: [],
+          parseAliases: {},
+          defaultValue: null,
+          isOpenEnum: false,
+        })),
+        hasPolymorphicDispatch: false,
+        hasContextHooks: false,
+      },
+      save: { assignments: [], hasBase: false, hasContextHooks: false },
+      factories: [],
+      collectionHelpers: [],
+      polymorphicDispatch: null,
+      methods: [],
+      wire: null,
+      serialized: true,
+    } as unknown as TypeDecl;
+    const file = {
+      group: "",
+      imports: [],
+      enums: [],
+      types: [type],
+    } as unknown as FileDecl;
+    return emitRustFile(
+      file,
+      new RustExprVisitor(TypeRegistry.fromTypeGraph([])),
+      new Set<string>(),
+    );
+  }
+
+  it("converts each element to the declared Vec<T> element type", () => {
+    const code = emitArrays([
+      "int32",
+      "int64",
+      "float32",
+      "float64",
+      "boolean",
+      "string",
+    ]);
+    const expected: Record<string, [string, string]> = {
+      int32: ["Vec<i32>", "v.as_i64().map(|n| n as i32)"],
+      int64: ["Vec<i64>", "v.as_i64()"],
+      float32: ["Vec<f32>", "v.as_f64().map(|n| n as f32)"],
+      float64: ["Vec<f64>", "v.as_f64()"],
+      boolean: ["Vec<bool>", "v.as_bool()"],
+      string: ["Vec<String>", "v.as_str().map(|s| s.to_string())"],
+    };
+    for (const [scalar, [fieldType, element]] of Object.entries(expected)) {
+      assert.ok(
+        code.includes(`items_${scalar}: ${fieldType}`),
+        `${scalar} field type`,
+      );
+      assert.ok(
+        code.includes(
+          `items_${scalar}: value.get("items_${scalar}").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| ${element}).collect()).unwrap_or_default()`,
+        ),
+        `${scalar} must load typed elements, not Vec<Value>`,
+      );
+    }
+  });
+
+  it("keeps Value elements for untyped arrays", () => {
+    const code = emitArrays(["unknown"]);
+    assert.ok(code.includes("items_unknown: Vec<serde_json::Value>"));
+    assert.ok(code.includes(".map(|arr| arr.to_vec()).unwrap_or_default()"));
+  });
+});
