@@ -50,6 +50,7 @@ import {
 import {
   runGoExecutableConformance,
   runGoTests,
+  runGoFocusedFixturesBuild,
   runGoVectorBridgeCompile,
   runGoVectorConformanceCompile,
 } from "./fixtures/targets/go.mjs";
@@ -131,6 +132,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "python_pydantic.generated-tests",
   "python.vector-conformance-compile",
   "go.generated-tests",
+  "go.focused-fixtures-build",
   "go.vector-bridge-compile",
   "go.vector-conformance-compile",
   "rust.generated-tests",
@@ -2754,6 +2756,11 @@ function runDeclaredValidationStages() {
       ],
       ["go.generated-tests", runGoTests],
       [
+        "go.focused-fixtures-build",
+        (context) =>
+          runGoFocusedFixturesBuild(context, findFocusedFeatureFixtures()),
+      ],
+      [
         "go.vector-bridge-compile",
         (context) => runGoVectorBridgeCompile(context),
       ],
@@ -2829,6 +2836,7 @@ function runDeclaredValidationStages() {
       "rust.vector-conformance-compile": "cargo is not available",
       "rust.serializable-closure-compile": "cargo is not available",
       "rust.sensitive-never-loaded-compile": "cargo is not available",
+      "go.focused-fixtures-build": "go is not available",
       "go.vector-bridge-compile": "go is not available",
       "go.vector-conformance-compile": "go is not available",
       "python.vector-conformance-compile": "uv is not available",

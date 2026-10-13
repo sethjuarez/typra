@@ -146,7 +146,12 @@ export function emitGoFileContent(
   );
   const needsFmt =
     enums.some((enumDef) => hasParseAliases(enumDef) && !enumDef.isOpen) ||
-    types.some((type) => type.serialized && type.polymorphicDispatch) ||
+    types.some(
+      (type) =>
+        type.serialized &&
+        type.polymorphicDispatch &&
+        !hasDeclaredDispatchDefault(type.polymorphicDispatch),
+    ) ||
     needsNamedCollections ||
     needsRequiredComplexValidation;
   // math.Trunc is only referenced when a type coerces from both a whole-number and a
@@ -171,10 +176,12 @@ export function emitGoFileContent(
           (c) => (GO_TYPE_MAP[c.scalarType] || c.scalarType) === "float64",
         ),
     ) ||
-    types.some((type) =>
-      type.collectionHelpers.some(
-        (helper) => helper.hasNameProperty && entryShorthandNeedsMath(helper),
-      ),
+    types.some(
+      (type) =>
+        type.serialized &&
+        type.collectionHelpers.some(
+          (helper) => helper.hasNameProperty && entryShorthandNeedsMath(helper),
+        ),
     );
   if (hasNonProtocol) {
     emitHeader(
@@ -324,9 +331,9 @@ function emitGoEnum(enumDef: EnumDef, lines: string[]): void {
       );
     }
     for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
-      for (const alias of aliases) {
-        lines.push(`\tcase ${JSON.stringify(alias)}:`);
-      }
+      if (aliases.length === 0) continue;
+      // Go cases never fall through, so every alias shares one case clause.
+      lines.push(`\tcase ${aliases.map((alias) => JSON.stringify(alias)).join(", ")}:`);
       lines.push(
         `\t\treturn ${enumDef.name}${toPascalCase(canonical)}${enumDef.isOpen ? "" : ", nil"}`,
       );
@@ -692,6 +699,15 @@ function emitLoadFunction(
 // Polymorphic dispatch
 // ============================================================================
 
+/**
+ * A declared `*` wildcard carrier (a default variant that is not a base self-reference) absorbs
+ * absent, blank, unknown, and non-string discriminators, so the dispatch never emits `fmt.Errorf`.
+ * `needsFmt` keys on this too: requesting `fmt` for such a dispatch leaves an unused import (#305).
+ */
+function hasDeclaredDispatchDefault(dispatch: PolymorphicDispatchDecl): boolean {
+  return Boolean(dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference);
+}
+
 function emitPolymorphicDispatch(
   typeName: string,
   dispatch: PolymorphicDispatchDecl,
@@ -707,10 +723,9 @@ function emitPolymorphicDispatch(
   // by self-reference all reject absent/blank up front — a blank discriminator
   // names no variant. Unknown NON-blank values still fall through to the declared
   // carrier / self-reference base construction below.
-  const declaredDefault =
-    defaultVariant && !defaultVariant.isSelfReference
-      ? defaultVariant
-      : undefined;
+  const declaredDefault = hasDeclaredDispatchDefault(dispatch)
+    ? defaultVariant
+    : undefined;
   const hasFallback = Boolean(declaredDefault);
 
   lines.push("\t// Handle polymorphic types based on discriminator");
@@ -2136,8 +2151,36 @@ function goMethodReturnType(returns: string): string {
 // Protocol interface emission
 // ============================================================================
 
+/** Split `A | B` on top-level bars only, so `Record<A | null>` stays one arm. */
+function splitTopLevelUnion(typeStr: string): string[] {
+  const arms: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < typeStr.length; i++) {
+    const ch = typeStr[i];
+    if (ch === "<" || ch === "(") depth++;
+    else if (ch === ">" || ch === ")") depth--;
+    else if (ch === "|" && depth === 0) {
+      arms.push(typeStr.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  arms.push(typeStr.slice(start).trim());
+  return arms;
+}
+
 /** Map a protocol type string to a Go type. */
 export function protocolGoType(typeStr: string, modelQualifier?: string): string {
+  // Go has no union types. `X | null` is an optional X; any other union (e.g. an HTTP op's
+  // `Created | Error` response) widens to interface{}, as polymorphic results already do.
+  const arms = splitTopLevelUnion(typeStr);
+  if (arms.length > 1) {
+    const nonNull = arms.filter((arm) => arm !== "null");
+    if (nonNull.length === 1) {
+      return `*${protocolGoType(nonNull[0], modelQualifier)}`;
+    }
+    return "interface{}";
+  }
   // Handle nullable types
   if (typeStr.endsWith("?")) {
     const inner = typeStr.slice(0, -1);

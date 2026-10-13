@@ -6,9 +6,10 @@ import type {
   CollectionHelperDecl,
   FieldDecl,
   LoadAssignment,
+  PolymorphicDefault,
   TypeDecl,
 } from "../src/ir/declarations.js";
-import { emitGoFileContent } from "../src/languages/go/emitter.js";
+import { emitGoFileContent, protocolGoType } from "../src/languages/go/emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
 
 function coercion(scalarType: string, kindLiteral: string): CoercionDecl {
@@ -375,5 +376,72 @@ describe("Go emitter LoadContext guard dead-store elimination", () => {
       !body.includes("if ctx == nil {"),
       "a field literally named ctx must not resurrect the ctx == nil guard block",
     );
+  });
+});
+
+// ============================================================================
+// Go build-safety for shapes only focused fixtures exercise (#305)
+// ============================================================================
+
+function dispatchType(defaultVariant: PolymorphicDefault): TypeDecl {
+  return {
+    ...typeWith([]),
+    typeName: { namespace: "Test", name: "Model" },
+    polymorphicDispatch: {
+      discriminatorField: "provider",
+      variants: [{ value: "openai", typeName: { namespace: "Test", name: "OpenAIModel" } }],
+      defaultVariant,
+      isAbstract: false,
+      isClosed: false,
+    },
+  } as TypeDecl;
+}
+
+describe("Go emitter build safety (#305)", () => {
+  it("omits fmt for a dispatch whose declared `*` carrier absorbs every discriminator", () => {
+    const out = emitLoader(
+      dispatchType({ typeName: { namespace: "Test", name: "CustomModel" }, isSelfReference: false }),
+    );
+    assert.ok(out.includes("return LoadCustomModel(data, ctx)"), out);
+    assert.ok(!out.includes("fmt."), "a declared carrier never errors");
+    assert.ok(!out.includes('"fmt"'), "an unused fmt import does not compile");
+  });
+
+  it("keeps fmt when the dispatch rejects absent or blank discriminators", () => {
+    const out = emitLoader(
+      dispatchType({ typeName: { namespace: "Test", name: "Model" }, isSelfReference: true }),
+    );
+    assert.ok(out.includes("fmt.Errorf"), out);
+    assert.ok(out.includes('"fmt"'));
+  });
+
+  it("omits math for a shape-only type whose named-collection helper would need it", () => {
+    const type = { ...typeWith([]), serialized: false, collectionHelpers: [helperWith(true)] };
+    const out = emitLoader(type as TypeDecl);
+    assert.ok(!out.includes('"math"'), "shape-only types emit no shorthand arms");
+  });
+
+  it("routes every parse alias of a canonical value through one case clause", () => {
+    const out = emitGoFileContent([], "model", new GoExprVisitor(), new Set<string>(), [
+      {
+        name: "Status",
+        values: ["draft", "ready"],
+        parseAliases: { ready: ["complete", "done"] },
+        isOpen: false,
+      },
+    ]);
+    // Go cases never fall through: a bare `case "complete":` silently matched nothing.
+    assert.match(out, /\tcase "complete", "done":\n\t\treturn StatusReady, nil/);
+    assert.doesNotMatch(out, /case "complete":\n/);
+  });
+
+  it("widens union operation types Go cannot express", () => {
+    assert.equal(protocolGoType("CreatedPet | DefaultError"), "interface{}");
+    assert.equal(protocolGoType("Pet | null"), "*Pet");
+    assert.equal(protocolGoType("Pet | null", "fixtures"), "*fixtures.Pet");
+    assert.equal(protocolGoType("Pet"), "Pet");
+    assert.equal(protocolGoType("null | Pet"), "*Pet");
+    // A bar nested in a generic does not make the whole type a union.
+    assert.notEqual(protocolGoType("Record<Pet | null>"), "interface{}");
   });
 });
