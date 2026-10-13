@@ -616,7 +616,8 @@
               "String wireName = null;",
               "if (target.equals(\"openai\")) { wireName = \"max_completion_tokens\"; }",
               "if (target.equals(\"anthropic\")) { wireName = \"max_tokens\"; }",
-              "if (wireName != null && this.temperature != null)"
+              "Map<String, Object> data = save(new SaveContext());",
+              "if (wireName != null && data.get(\"temperature\") != null)"
             ]
           }
         ],

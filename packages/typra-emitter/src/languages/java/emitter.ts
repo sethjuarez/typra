@@ -1170,6 +1170,9 @@ function emitRawPayloadHelpers(lines: string[]): void {
  */
 function emitToWire(wire: WireDecl, lines: string[]): void {
   lines.push("  public Map<String, Object> toWire(String provider) {");
+  // Rename keys on the canonical save() output (as Go/Rust/C# do) so enums, models, and
+  // collections serialize exactly as save() writes them (#331).
+  lines.push("    Map<String, Object> data = save(new SaveContext());");
   lines.push("    Map<String, Object> result = new LinkedHashMap<>();");
   lines.push('    String target = provider == null ? "" : provider;');
   for (const field of wire.mappings) {
@@ -1181,7 +1184,7 @@ function emitToWire(wire: WireDecl, lines: string[]): void {
       );
     }
     lines.push(
-      `      if (wireName != null && this.${javaPropertyName(field.fieldName)} != null) result.put(wireName, serializeScalar(this.${javaPropertyName(field.fieldName)}));`,
+      `      if (wireName != null && data.get("${escapeJava(field.fieldName)}") != null) result.put(wireName, data.get("${escapeJava(field.fieldName)}"));`,
     );
     lines.push("    }");
   }

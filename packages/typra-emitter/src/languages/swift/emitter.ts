@@ -875,7 +875,10 @@ function emitToWire(
         helper.propertyName === mapping.fieldName &&
         supportsNamedCollectionHelper(helper, polymorphicTypeNames),
     );
-    emitWireField(mapping, lines, polymorphicTypeNames, collectionHelper);
+    // Named string unions render as enums/RawRepresentable; toWire must unwrap them like save() (#331).
+    const enumName =
+      type.fields.find((field) => field.name === mapping.fieldName)?.enumName ?? null;
+    emitWireField(mapping, enumName, lines, polymorphicTypeNames, collectionHelper);
   }
   lines.push("    return result");
   lines.push("  }");
@@ -917,6 +920,7 @@ function emitFromWire(type: TypeDecl, lines: string[]): void {
  */
 function emitWireField(
   mapping: WireFieldMapping,
+  enumName: string | null,
   lines: string[],
   polymorphicTypeNames: Set<string>,
   collectionHelper?: CollectionHelperDecl,
@@ -934,11 +938,11 @@ function emitWireField(
   lines.push("    }");
   if (mapping.isOptional) {
     lines.push(
-      `    if let wireKey = ${target}, let value = ${source} { result[wireKey] = ${swiftSaveExpression(mapping.category, null, "value", polymorphicTypeNames, collectionHelper)} }`,
+      `    if let wireKey = ${target}, let value = ${source} { result[wireKey] = ${swiftSaveExpression(mapping.category, enumName, "value", polymorphicTypeNames, collectionHelper)} }`,
     );
   } else {
     lines.push(
-      `    if let wireKey = ${target} { result[wireKey] = ${swiftSaveExpression(mapping.category, null, source, polymorphicTypeNames, collectionHelper)} }`,
+      `    if let wireKey = ${target} { result[wireKey] = ${swiftSaveExpression(mapping.category, enumName, source, polymorphicTypeNames, collectionHelper)} }`,
     );
   }
 }

@@ -1083,4 +1083,16 @@ model WireOptions {
 
   @sample(#{ repetitionPenalty: 1.5 })
   repetitionPenalty?: numeric;
+
+  // A named string-union field mapped to a provider wire name. Swift renders it as a
+  // RawRepresentable struct, so `toWire` must unwrap `.rawValue` exactly as `save()` does,
+  // or the `toWire` -> `fromWire` round trip fails to reload it (#331).
+  @knownAs("openai", "reasoning_effort")
+  @sample(#{ reasoningEffort: "high" })
+  reasoningEffort?: WireReasoningEffort;
+}
+
+union WireReasoningEffort {
+  low: "low",
+  high: "high",
 }

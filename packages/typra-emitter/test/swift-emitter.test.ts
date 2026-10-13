@@ -1493,6 +1493,23 @@ describe("Swift provider wire mapping", () => {
     );
     assert.match(source, /case "openai": wireNameTemperature = "temperature"/);
   });
+
+  it("writes a named string-union field as its rawValue (#331)", () => {
+    // toWire stored the enum itself, so fromWire -> load threw "Expected string". It must
+    // unwrap exactly as save() does.
+    const type = wireType();
+    type.fields.find((f) => f.name === "temperature")!.enumName = "WireReasoningEffort";
+    const source = emitSwiftFile(fileDecl(type), new SwiftExprVisitor(), new Set());
+
+    assert.match(
+      source,
+      /if let wireKey = wireNameTemperature, let value = self\.temperature \{ result\[wireKey\] = value\.rawValue \}/,
+    );
+    assert.match(
+      source,
+      /if let wireKey = wireNameMaxOutputTokens, let value = self\.maxOutputTokens \{ result\[wireKey\] = value \}/,
+    );
+  });
 });
 
 describe("emitSwiftPackage test resources (#260)", () => {

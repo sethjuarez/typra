@@ -1555,8 +1555,30 @@ describe("Java provider wire mapping", () => {
     assert.doesNotMatch(source, /boolean include/);
     assert.match(
       source,
-      /if \(wireName != null && this\.temperature != null\)/,
+      /if \(wireName != null && data\.get\("temperature"\) != null\)/,
     );
+  });
+
+  it("renames the canonical save() output so enums serialize by value (#331)", () => {
+    // Re-serializing fields via serializeScalar wrote enums as name().toLowerCase(), which
+    // mangles values like `wide_hold_then_push`, and passed models through unserialized.
+    const source = emitJavaFileContent(
+      [wireDecl()],
+      "test",
+      new JavaExprVisitor(),
+      new Set(),
+    );
+    const toWire = source.slice(
+      source.indexOf("public Map<String, Object> toWire("),
+      source.indexOf("fromWire("),
+    );
+
+    assert.match(toWire, /Map<String, Object> data = save\(new SaveContext\(\)\);/);
+    assert.match(
+      toWire,
+      /result\.put\(wireName, data\.get\("maxOutputTokens"\)\)/,
+    );
+    assert.doesNotMatch(toWire, /serializeScalar\(this\./);
   });
 
   it("still emits fields the requested provider does map", () => {
