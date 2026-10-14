@@ -994,7 +994,35 @@ function emitPythonInterfaceConformanceTest(
       `    assert impl is not None, f${JSON.stringify(
         `${entry.vector.name ?? fn}: no ${dispatched.contract} attached for {${field}}`,
       )}`,
-      `    result = impl.${method}(${paramNames.join(", ")})`,
+    );
+    const call = `impl.${method}(${paramNames.join(", ")})`;
+    if (entry.vector.expectedError !== undefined) {
+      // The resolver assert above stays OUTSIDE the try so a missing route fails
+      // the test instead of counting as the expected error.
+      const label = entry.vector.name ?? fn;
+      lines.push(
+        "    caught = None",
+        "    try:",
+        `        result = ${call}`,
+        "        if inspect.isawaitable(result):",
+        "            asyncio.run(result)",
+        "    except Exception as error:  # noqa: BLE001",
+        "        caught = error",
+        `    assert caught is not None, ${JSON.stringify(
+          `${label}: expected an error`,
+        )}`,
+      );
+      if (typeof entry.vector.expectedError === "string") {
+        lines.push(
+          `    assert ${JSON.stringify(
+            entry.vector.expectedError,
+          )} in str(caught), ${JSON.stringify(`${label}: error message mismatch`)}`,
+        );
+      }
+      return;
+    }
+    lines.push(
+      `    result = ${call}`,
       "    if inspect.isawaitable(result):",
       "        result = asyncio.run(result)",
     );

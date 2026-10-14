@@ -1563,6 +1563,9 @@ function emitGoInterfaceConformanceTest(
     "",
     "import (",
     '\t"encoding/json"',
+    ...(sorted.some((entry) => typeof entry.vector.expectedError === "string")
+      ? ['\t"strings"']
+      : []),
     '\t"testing"',
     "",
     `\tfixtures ${JSON.stringify(importPath)}`,
@@ -1638,6 +1641,45 @@ function emitGoInterfaceConformanceTest(
     );
     lines.push("\t}");
     const call = `impl.${method}(${paramNames.join(", ")})`;
+    // Mirrors goProtocolReturn: a void op returns only `error`.
+    const returnsValue = protocolGoType(entry.returns) !== "";
+    if (entry.vector.expectedError !== undefined) {
+      if (entry.sync && entry.optional) {
+        throw new Error(
+          `typed @dispatch conformance for ${dispatched.contract}.${method} vector "${
+            entry.vector.name ?? "(unnamed)"
+          }" is not supported: a Go @sync optional seam method returns no error, ` +
+            "so `expectedError` cannot be asserted.",
+        );
+      }
+      // The resolve/nil checks above fail the test on a missing route, so only
+      // an error RETURNED by the seam counts as the expected error.
+      lines.push(returnsValue ? `\t_, err = ${call}` : `\terr = ${call}`);
+      lines.push("\tif err == nil {");
+      lines.push(`\t\tt.Fatalf(${JSON.stringify(`${label}: expected an error, got nil`)})`);
+      lines.push("\t}");
+      if (typeof entry.vector.expectedError === "string") {
+        const want = JSON.stringify(entry.vector.expectedError);
+        lines.push(`\tif !strings.Contains(err.Error(), ${want}) {`);
+        lines.push(
+          `\t\tt.Fatalf(${JSON.stringify(
+            `${label}: error %q does not contain %q`,
+          )}, err.Error(), ${want})`,
+        );
+        lines.push("\t}");
+      }
+      lines.push("}");
+      lines.push("");
+      return;
+    }
+    if (!returnsValue) {
+      lines.push(`\tif err = ${call}; err != nil {`);
+      lines.push(`\t\tt.Fatalf("${label}: %v", err)`);
+      lines.push("\t}");
+      lines.push("}");
+      lines.push("");
+      return;
+    }
     lines.push(`\tactual, err := ${call}`);
     lines.push("\tif err != nil {");
     lines.push(`\t\tt.Fatalf("${label}: %v", err)`);

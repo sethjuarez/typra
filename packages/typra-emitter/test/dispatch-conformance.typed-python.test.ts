@@ -109,26 +109,31 @@ function conftest(includeMustache: boolean): string {
     "            'liquid': None,",
   ];
   return [
+    "import re",
+    "",
     "import pytest",
     "",
     `from ${PACKAGE}._renderer_resolver import new_renderer_provider`,
     "",
     "",
-    "def substitute(content, values, open_tok, close_tok):",
-    "    out = content",
-    "    for key, value in values.items():",
-    "        out = out.replace(f'{open_tok}{key}{close_tok}', str(value))",
-    "    return out",
+    "def substitute(content, values, pattern):",
+    "    def replace(match):",
+    "        key = match.group(1)",
+    "        if key not in values:",
+    "            raise ValueError(f'unbound variable: {key}')",
+    "        return str(values[key])",
+    "",
+    "    return re.sub(pattern, replace, content)",
     "",
     "",
     "class MustacheRenderer:",
     "    def render(self, agent, inputs):",
-    "        return substitute(agent.template.content, inputs.values, '{{', '}}')",
+    "        return substitute(agent.template.content, inputs.values, r'\\{\\{(\\w+)\\}\\}')",
     "",
     "",
     "class Jinja2Renderer:",
     "    def render(self, agent, inputs):",
-    "        return substitute(agent.template.content, inputs.values, '{{ ', ' }}')",
+    "        return substitute(agent.template.content, inputs.values, r'\\{\\{ (\\w+) \\}\\}')",
     "",
     "",
     "@pytest.fixture",
@@ -233,7 +238,7 @@ describe("typed per-interface @vector conformance runs green (Python, issue #282
         0,
         `emitted typed conformance should pass:\n${green.output}`,
       );
-      assert.match(green.output, /2 passed/);
+      assert.match(green.output, /3 passed/);
       assert.doesNotMatch(green.output, /failed/);
 
       // -- negative (control 2) -------------------------------------------------

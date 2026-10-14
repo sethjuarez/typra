@@ -1148,13 +1148,41 @@ function emitSwiftInterfaceConformanceTest(
       )} + ${dispatchKey})`,
       "      return",
       "    }",
-      `    let actual = try ${awaitPrefix}impl.${method}(${paramNames
-        .map((paramName) => {
-          const local = swiftPropertyName(paramName);
-          return `${local}: ${local}`;
-        })
-        .join(", ")})`,
     );
+    const swiftCall = `try ${awaitPrefix}impl.${method}(${paramNames
+      .map((paramName) => {
+        const local = swiftPropertyName(paramName);
+        return `${local}: ${local}`;
+      })
+      .join(", ")})`;
+    if (entry.vector.expectedError !== undefined) {
+      // The resolver guard above stays OUTSIDE the do/catch so a missing route
+      // fails the test instead of counting as the expected error.
+      lines.push(
+        "    var caught: Error? = nil",
+        "    do {",
+        `      _ = ${swiftCall}`,
+        "    } catch {",
+        "      caught = error",
+        "    }",
+        "    guard let caughtError = caught else {",
+        `      XCTFail(${swiftStringLiteral(`${vectorName}: expected an error`)})`,
+        "      return",
+        "    }",
+      );
+      if (typeof entry.vector.expectedError === "string") {
+        lines.push(
+          `    XCTAssertTrue(String(describing: caughtError).contains(${swiftStringLiteral(
+            entry.vector.expectedError,
+          )}), ${swiftStringLiteral(`${vectorName}: error message mismatch`)})`,
+        );
+      } else {
+        lines.push("    _ = caughtError");
+      }
+      lines.push("  }", "");
+      return;
+    }
+    lines.push(`    let actual = ${swiftCall}`);
     if (typeof expected === "string") {
       lines.push(`    XCTAssertEqual(actual, ${swiftStringLiteral(expected)})`);
     } else {

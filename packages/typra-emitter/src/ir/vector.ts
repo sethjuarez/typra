@@ -327,14 +327,16 @@ function containsVectorRef(value: unknown): boolean {
 /**
  * Guard the TYPED dispatch rail against `@vector` semantics it cannot yet
  * faithfully reproduce. The typed conformance suite builds inputs, routes
- * through the resolver, invokes the seam, and asserts `expected` — so a vector
- * that leans on the stringly runner's richer machinery (error expectations,
- * capability gating, normalization, delegated portability, an explicit adapter
- * pick, or `$env`/`$file`/`$json` input refs) would be SILENTLY weakened if
- * emitted on the typed rail. Rather than degrade conformance, we fail loud at
- * emit time with an actionable message. Shared by every language emitter so the
- * safety net is identical across the fan-out (issue #282 §8). Never fires for a
- * plain inline-input + `expected` dispatched vector.
+ * through the resolver, invokes the seam, and asserts `expected` (or, for an
+ * `expectedError` vector, that the invocation throws / returns an error whose
+ * message contains the string) — so a vector that leans on the stringly
+ * runner's richer machinery (capability gating, normalization, delegated
+ * portability, an explicit adapter pick, or `$env`/`$file`/`$json` input refs)
+ * would be SILENTLY weakened if emitted on the typed rail. Rather than degrade
+ * conformance, we fail loud at emit time with an actionable message. Shared by
+ * every language emitter so the safety net is identical across the fan-out
+ * (issue #282 §8). Never fires for a plain inline-input + `expected` /
+ * `expectedError` dispatched vector.
  */
 export function assertTypedDispatchSupported(
   entry: CallableVectorSnapshotEntry,
@@ -350,9 +352,6 @@ export function assertTypedDispatchSupported(
     );
   };
   const v = entry.vector;
-  if (v.expectedError !== undefined) {
-    reject("`expectedError` has no typed assertion arm (would assert success)");
-  }
   if (Array.isArray(v.requires) && v.requires.length > 0) {
     reject(
       "`requires` capability gating is only honored by the stringly runner",

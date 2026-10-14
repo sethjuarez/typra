@@ -1200,8 +1200,30 @@ function emitTypeScriptInterfaceConformanceTest(
       `    const ${field} = ${accessor};`,
       `    const impl = ${resolveFn}(${field}, ${providerVar});`,
       "    expect(impl).not.toBeNull();",
-      `    const result = await impl!.${method}(${paramNames.join(", ")});`,
     );
+    const call = `impl!.${method}(${paramNames.join(", ")})`;
+    if (entry.vector.expectedError !== undefined) {
+      // The resolver null-check above stays OUTSIDE the try so a missing route
+      // fails the test instead of counting as the expected error.
+      lines.push(
+        "    let caught: unknown;",
+        "    try {",
+        `      await ${call};`,
+        "    } catch (error) {",
+        "      caught = error;",
+        "    }",
+        "    expect(caught).toBeDefined();",
+      );
+      if (typeof entry.vector.expectedError === "string") {
+        lines.push(
+          "    const message = String((caught as { message?: unknown })?.message ?? caught);",
+          `    expect(message).toContain(${JSON.stringify(entry.vector.expectedError)});`,
+        );
+      }
+      lines.push("  });");
+      return;
+    }
+    lines.push(`    const result = await ${call};`);
     if (typeof expected === "string") {
       lines.push(`    expect(result).toEqual(${JSON.stringify(expected)});`);
     } else {

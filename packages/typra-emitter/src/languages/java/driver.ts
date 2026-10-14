@@ -1300,7 +1300,9 @@ function emitJavaInterfaceConformanceTest(
     (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
   );
   const needsNotNull = sorted.some(
-    (entry) => typeof entry.vector.expected !== "string",
+    (entry) =>
+      entry.vector.expectedError === undefined &&
+      typeof entry.vector.expected !== "string",
   );
 
   const lines: string[] = [
@@ -1381,10 +1383,37 @@ function emitJavaInterfaceConformanceTest(
       `    if (impl == null) throw new AssertionError(${JSON.stringify(
         `${vectorName}: no ${iface} attached for `,
       )} + ${fieldLocal});`,
-      `    Object actual = impl.${method}(${paramNames
-        .map((paramName) => locals.get(paramName))
-        .join(", ")});`,
     );
+    const javaCall = `impl.${method}(${paramNames
+      .map((paramName) => locals.get(paramName))
+      .join(", ")})`;
+    if (entry.vector.expectedError !== undefined) {
+      // The null-impl guard above stays OUTSIDE the try so a missing route fails
+      // the case instead of counting as the expected error.
+      lines.push(
+        "    Throwable caught = null;",
+        "    try {",
+        `      ${javaCall};`,
+        "    } catch (Throwable error) {",
+        "      caught = error;",
+        "    }",
+        `    if (caught == null) throw new AssertionError(${JSON.stringify(
+          `${vectorName}: expected an error`,
+        )});`,
+      );
+      if (typeof entry.vector.expectedError === "string") {
+        lines.push(
+          `    if (!String.valueOf(caught.getMessage()).contains(${JSON.stringify(
+            entry.vector.expectedError,
+          )})) throw new AssertionError(${JSON.stringify(
+            `${vectorName}: error message mismatch`,
+          )});`,
+        );
+      }
+      lines.push("  }", "");
+      return;
+    }
+    lines.push(`    Object actual = ${javaCall};`);
     if (typeof expected === "string") {
       lines.push(
         `    assertEquals(${JSON.stringify(expected)}, actual, ${JSON.stringify(

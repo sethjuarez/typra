@@ -413,6 +413,18 @@ return `Ok(value)`. An `@optionalOperation @sync` operation keeps its default bo
 and in-band return type (`Option<T>`, `()`, or `T`), matching Go. Optional
 operations are not part of the typed entrypoint.
 
+Typed per-interface `@dispatch` conformance uses the same error channel. Each
+dispatched test first resolves the implementation through the emitted resolver
+and fails if no implementation is attached for the discriminator value, so a
+missing route never passes as the expected error. For an `expectedError`
+vector, the test then invokes the resolved seam and asserts it fails through
+the native channel above. When `expectedError` is a string, the failure message
+must contain it; any other value only requires the operation to fail. Vectors
+that need the stringly runner's extra machinery (`requires`, `normalization`,
+delegated portability, an explicit `provider`, or `$file` / `$env` / `$json`
+input references) are still rejected at emit time on the typed `@dispatch`
+rail.
+
 ## Collaborator injection seams
 
 Some operations do not run in isolation — they select a strategy per

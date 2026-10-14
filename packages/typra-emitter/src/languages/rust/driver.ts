@@ -2651,6 +2651,32 @@ function emitRustInterfaceConformanceTest(
     const callArgs = paramNames
       .map((name) => `&${rustFieldName(name)}`)
       .join(", ");
+    if (entry.vector.expectedError !== undefined) {
+      // Every op (sync or async) returns `Result<T, Box<dyn Error + Send +
+      // Sync>>` (typra#338). The resolve panic above fires on a missing route,
+      // so only an `Err` RETURNED by the seam counts as the expected error.
+      lines.push(
+        `    let result = seam_impl.${method}(${callArgs})${entry.sync ? "" : ".await"};`,
+      );
+      lines.push(
+        `    assert!(result.is_err(), "{}: expected an error, got Ok", ${JSON.stringify(label)});`,
+      );
+      if (typeof entry.vector.expectedError === "string") {
+        lines.push(
+          "    let message = result.err().map(|error| error.to_string()).unwrap_or_default();",
+        );
+        lines.push(
+          `    assert!(message.contains(${JSON.stringify(
+            entry.vector.expectedError,
+          )}), "{}: error {:?} does not contain {:?}", ${JSON.stringify(
+            label,
+          )}, message, ${JSON.stringify(entry.vector.expectedError)});`,
+        );
+      }
+      lines.push("}");
+      lines.push("");
+      return;
+    }
     // Every seam method returns `Result<T, _>` (sync ops too, typra#338): unwrap
     // the (awaited, when async) Result.
     const invocationTail = `${entry.sync ? "" : ".await"}.expect(${JSON.stringify("seam invocation")})`;

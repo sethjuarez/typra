@@ -112,6 +112,7 @@ interface Renderer {
   // here so this file stays focused on the dispatched shape.
   @vector(mustacheBasic)
   @vector(jinja2Basic)
+  @vector(mustacheUnbound)
   @doc("Render the agent's template against the supplied inputs.")
   render(agent: Agent, inputs: Inputs): string;
 }

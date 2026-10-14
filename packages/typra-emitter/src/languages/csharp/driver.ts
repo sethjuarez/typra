@@ -1346,6 +1346,30 @@ function emitCSharpInterfaceConformanceTest(
       `        Assert.NotNull(impl);`,
     );
     const call = `impl!.${method}(${paramNames.map(csharpIdentifier).join(", ")})`;
+    if (entry.vector.expectedError !== undefined) {
+      // Assert.NotNull(impl) above stays OUTSIDE the try so a missing route
+      // fails the [Fact] instead of counting as the expected error.
+      lines.push("        Exception? caught = null;");
+      lines.push("        try");
+      lines.push("        {");
+      lines.push(`            ${entry.sync ? "" : "await "}${call};`);
+      lines.push("        }");
+      lines.push("        catch (Exception error)");
+      lines.push("        {");
+      lines.push("            caught = error;");
+      lines.push("        }");
+      lines.push("        Assert.NotNull(caught);");
+      if (typeof entry.vector.expectedError === "string") {
+        lines.push(
+          `        Assert.Contains(${JSON.stringify(
+            entry.vector.expectedError,
+          )}, caught!.Message);`,
+        );
+      }
+      lines.push("    }");
+      lines.push("");
+      return;
+    }
     if (entry.sync) {
       lines.push(`        var actual = ${call};`);
     } else {

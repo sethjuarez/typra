@@ -54,7 +54,9 @@ It stands up the full shape that motivated behavioral dispatch, end to end:
 - container models (`Template`, `Agent`, `Inputs`) carrying `@sample` payloads,
 - a `@dispatch(TemplateFormat.kind)` seam interface `Renderer` whose discriminator
   resolves to the deterministic access path `agent.template.format.kind`, and
-- `@vector`s exercising the seam.
+- `@vector`s exercising the seam — two success vectors plus an `expectedError`
+  vector (`mustache-unbound`) whose unbound template key must surface as an
+  error through the typed @dispatch conformance rail in every runtime.
 
 Regenerate it into `generated/dispatch-seam/<target>` (git-ignored, like all
 generated output) with:
@@ -89,7 +91,9 @@ spec is the durable artifact, the tests are the guard):
 - `test/dispatch-seam.conformance.test.ts` checks the emitted **behavior**: it
   walks the resolved `agent.template.format.kind` path over each committed
   `@vector` input, dispatches to a per-dialect renderer, and asserts the vector's
-  `expected` output — with a negative control proving a non-discriminator path
+  `expected` output (or, for an `expectedError` vector, that the renderer raises
+  an error containing the expected string) — with a negative control proving a
+  non-discriminator path
   misroutes. This is the in-process stand-in for the dispatch routing the emitted
   harness does not do yet, so the resolved path is proven correct now.
 
