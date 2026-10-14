@@ -1195,6 +1195,10 @@ export function emitRustTest(ctx: RustTestContext): string {
       out += "    let json_output = instance.to_json(&save_ctx);\n";
       out +=
         '    assert!(json_output.is_ok(), "Failed to serialize to JSON: {:?}", json_output.err());\n';
+      for (const key of sample.nullKeys ?? []) {
+        const literal = JSON.stringify(key);
+        out += `    assert!(instance.to_value(&save_ctx).get(${literal}).map_or(false, |value| value.is_null()), "Expected ${typeName} to save ${key} as null");\n`;
+      }
     }
     out += "}\n";
     out += "\n";
@@ -1280,7 +1284,7 @@ export function emitRustTest(ctx: RustTestContext): string {
             // whole-object byte-identity vs it is invalid (e.g. prompty's validation_result
             // `errors:[]`, turn_model_request `iteration:0`). Optional fields authored at zero
             // ARE emitted (`Some(0)`), so this only applies to required (non-`?`) fields.
-            if (!p.isOptional && propertyWireKey(p) in obj) {
+            if (!p.isOptional && !p.isNullable && propertyWireKey(p) in obj) {
               if (p.isCollection && Array.isArray(pv) && pv.length === 0)
                 return false;
               if (
@@ -1594,7 +1598,7 @@ export function emitRustTest(ctx: RustTestContext): string {
 
     for (const [pName] of paramEntries) {
       const prop = node.properties.find((p) => p.name === pName);
-      if (prop && prop.isOptional) {
+      if (prop && (prop.isOptional || prop.isNullable)) {
         out += `    assert!(instance.${toSnakeCase(pName)}.is_some());\n`;
       }
     }

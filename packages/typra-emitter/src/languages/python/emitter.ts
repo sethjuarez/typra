@@ -41,6 +41,7 @@ import {
   discriminatorWireKey,
 } from "../../ir/declarations.js";
 import {
+  isRequiredNullable,
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
@@ -1125,6 +1126,14 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
     const field = type.fields.find(
       (candidate) => candidate.name === a.fieldName,
     );
+    if (isRequiredNullable(a)) {
+      // Required nullable (#339): the key must be present; an explicit None is accepted.
+      lines.push(`        if ${pythonLiteral(a.sourceName)} not in data:`);
+      lines.push(
+        `            raise ValueError(context.at(${pythonLiteral(a.sourceName)}).path + ": missing required field")`,
+      );
+      continue;
+    }
     if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(
       `        if ${pythonLiteral(a.sourceName)} not in data or data[${pythonLiteral(a.sourceName)}] is None:`,
@@ -1155,7 +1164,9 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   // Per-property assignments
   for (const a of type.load.assignments) {
     lines.push(
-      `        if data is not None and ${pythonLiteral(a.sourceName)} in data:`,
+      isRequiredNullable(a)
+        ? `        if data is not None and data.get(${pythonLiteral(a.sourceName)}) is not None:`
+        : `        if data is not None and ${pythonLiteral(a.sourceName)} in data:`,
     );
     lines.push(`            ${emitLoadAssignment(a)}`);
   }
@@ -1639,6 +1650,10 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
     if (shouldOmitAbsentOnSave(a, "always-check")) {
       lines.push(`        if obj.${snake} is not None:`);
       lines.push(`            ${emitSaveAssignment(a)}`);
+      if (isRequiredNullable(a)) {
+        lines.push("        else:");
+        lines.push(`            result[${pythonLiteral(a.targetName)}] = None`);
+      }
     } else {
       lines.push(`        ${emitSaveAssignment(a)}`);
     }

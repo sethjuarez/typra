@@ -187,6 +187,14 @@ function resolveTargetType(prop, state) {
 function generatePropertyValue(prop, state, path) {
   const explicit = propertyDefault(prop);
   if (explicit !== undefined) return explicit;
+  // A required `T | null` key (#339) must be present but may carry an explicit null.
+  if (
+    prop.isNullable &&
+    !prop.isOptional &&
+    stableHash(`${state.seed}:${state.caseIndex}:${path}:null`) % 3 === 0
+  ) {
+    return null;
+  }
   if ((prop.allowedValues ?? []).length > 0) {
     if (prop.isOpenEnum && state.random() < 0.25) {
       return `custom-${state.caseIndex}-${stableHash(path) % 997}`;

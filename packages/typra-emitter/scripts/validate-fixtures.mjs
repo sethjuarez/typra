@@ -724,6 +724,7 @@ function assertFocusedFeatureFixtures() {
     "features/protocols/main.tsp",
     "features/wire/main.tsp",
     "features/encoded-name/main.tsp",
+    "features/nullable/main.tsp",
     "features/transport/main.tsp",
     "features/dispatch/main.tsp",
     "features/dispatch-union-coerce/main.tsp",
@@ -831,6 +832,38 @@ function assertFocusedFeatureFixtures() {
             `Focused vectors fixture did not preserve expected vector payload: ${expected}`,
           );
         }
+      }
+    }
+
+    if (featureName === "nullable") {
+      // Issue #339: `x: T | null` is a required key whose value may be null,
+      // distinct from `x?: T` (omitted when unset). The IR must record both
+      // flags so every runtime can require the key on load and always write it.
+      const row = (model.properties ?? []).find(
+        (field) => field.name === "row",
+      )?.type;
+      const flags = Object.fromEntries(
+        (row?.properties ?? []).map((field) => [
+          field.name,
+          `${field.isOptional ? "optional" : "required"}${field.isNullable ? "+nullable" : ""}`,
+        ]),
+      );
+      const expected = {
+        caption: "required+nullable",
+        count: "required+nullable",
+        mood: "required+nullable",
+        detail: "required+nullable",
+        tags: "required+nullable",
+        details: "required+nullable",
+        labels: "required+nullable",
+        note: "optional",
+        hint: "optional+nullable",
+      };
+      if (JSON.stringify(flags) !== JSON.stringify(expected)) {
+        fail(
+          `Nullable fixture must preserve required/optional + nullable flags in the IR.\n` +
+            `  expected: ${JSON.stringify(expected)}\n  actual:   ${JSON.stringify(flags)}`,
+        );
       }
     }
 

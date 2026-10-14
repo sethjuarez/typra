@@ -16,6 +16,7 @@ import {
   fieldWireKey,
 } from "../../ir/declarations.js";
 import {
+  isRequiredNullable,
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
@@ -252,7 +253,11 @@ function emitType(
   )) {
     if (nativeSerialization === "jackson") {
       lines.push(`  @JsonProperty("${escapeJava(fieldWireKey(field))}")`);
-      lines.push("  @JsonInclude(JsonInclude.Include.NON_NULL)");
+      lines.push(
+        isRequiredNullable(field)
+          ? "  @JsonInclude(JsonInclude.Include.ALWAYS)"
+          : "  @JsonInclude(JsonInclude.Include.NON_NULL)",
+      );
     }
     lines.push(
       `  public ${javaFieldType(field, polymorphicTypeNames)} ${javaPropertyName(field.name)}${javaDefault(field, polymorphicTypeNames)};`,
@@ -580,7 +585,15 @@ function emitLoadBaseInto(
       (helper) =>
         helper.propertyName === assignment.fieldName && helper.hasNameProperty,
     );
-    if (shouldGuardMissingRequiredField(field)) {
+    if (isRequiredNullable(assignment)) {
+      // Required nullable (#339): the key must be present; an explicit null is accepted.
+      const wireName = escapeJava(assignment.sourceName);
+      lines.push(`    if (!map.containsKey("${wireName}")) {`);
+      lines.push(
+        `      throw new IllegalArgumentException(ctx.at("${wireName}").path + ": missing required field");`,
+      );
+      lines.push("    }");
+    } else if (shouldGuardMissingRequiredField(field)) {
       const wireName = escapeJava(assignment.sourceName);
       lines.push(
         `    if (!map.containsKey("${wireName}") || map.get("${wireName}") == null) {`,
@@ -977,6 +990,12 @@ function emitSaveField(
   const enumName = field.isOpenEnum ? null : field.enumName;
   const wireName = escapeJava(field.targetName);
   const propertyName = javaPropertyName(name);
+  if (isRequiredNullable(field)) {
+    // Required nullable (#339): the key is always written, as null when unset.
+    lines.push(
+      `    if (obj.${propertyName} == null) result.put("${wireName}", null);`,
+    );
+  }
   switch (category.kind) {
     case "scalar":
       if (shouldOmitAbsentOnSave(field, "always-check")) {

@@ -13,6 +13,7 @@ import {
   discriminatorWireKey,
 } from "../../ir/declarations.js";
 import {
+  isRequiredNullable,
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
@@ -586,7 +587,16 @@ function emitLoad(
         helper.propertyName === assignment.fieldName &&
         supportsNamedCollectionHelper(helper, polymorphicTypeNames),
     );
-    if (shouldGuardMissingRequiredField(field)) {
+    if (isRequiredNullable(assignment)) {
+      // Required nullable (#339): the key must be present; an explicit null is accepted.
+      lines.push(
+        `    if object[${swiftStringLiteral(assignment.sourceName)}] == nil {`,
+      );
+      lines.push(
+        `      throw TypraRuntimeError.unsupported(context.at(${swiftStringLiteral(assignment.sourceName)}).path + ": missing required field")`,
+      );
+      lines.push("    }");
+    } else if (shouldGuardMissingRequiredField(field)) {
       lines.push(
         `    if object[${swiftStringLiteral(assignment.sourceName)}] == nil || object[${swiftStringLiteral(assignment.sourceName)}] is NSNull {`,
       );
@@ -596,7 +606,9 @@ function emitLoad(
       lines.push("    }");
     }
     lines.push(
-      `    if let value = object[${swiftStringLiteral(assignment.sourceName)}] {`,
+      isRequiredNullable(assignment) || assignment.isOptionalNullable
+        ? `    if let value = object[${swiftStringLiteral(assignment.sourceName)}], !(value is NSNull) {`
+        : `    if let value = object[${swiftStringLiteral(assignment.sourceName)}] {`,
     );
     lines.push(
       `      instance.${swiftPropertyName(assignment.fieldName)} = ${swiftLoadExpression(assignment.category, assignment.enumName, assignment.sourceName, "value", polymorphicTypeNames, collectionHelper)}`,
@@ -859,6 +871,14 @@ function emitSave(
         `      result[${swiftStringLiteral(assignment.targetName)}] = ${swiftSaveExpression(assignment.category, assignment.enumName, "value", polymorphicTypeNames, collectionHelper)}`,
       );
       lines.push("    }");
+      if (isRequiredNullable(assignment)) {
+        // Required nullable (#339): the key is always written, as null when unset.
+        lines.push("    else {");
+        lines.push(
+          `      result[${swiftStringLiteral(assignment.targetName)}] = NSNull()`,
+        );
+        lines.push("    }");
+      }
     } else {
       lines.push(
         `    result[${swiftStringLiteral(assignment.targetName)}] = ${serialized}`,

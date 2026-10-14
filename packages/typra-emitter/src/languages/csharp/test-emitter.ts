@@ -27,6 +27,7 @@ export interface CSharpTestContext {
     json: string[];
     yaml: string[];
     sample?: Record<string, unknown>;
+    nullKeys?: string[];
     validations: Array<{
       key: string;
       value: any;
@@ -131,6 +132,15 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
     L.push("");
     L.push(`        var reloaded = ${typeName}.FromJson(json);`);
     L.push("        Assert.NotNull(reloaded);");
+    const nullKeys = sample.nullKeys ?? [];
+    if (nullKeys.length > 0) {
+      L.push(`        var savedNull = original.Save();`);
+    }
+    for (const key of nullKeys) {
+      const literal = JSON.stringify(key);
+      L.push(`        Assert.True(savedNull.ContainsKey(${literal}));`);
+      L.push(`        Assert.Null(savedNull[${literal}]);`);
+    }
     const rtJsonAssertions = emitExampleAssertions(
       sample.validations.filter((v) => !v.withheldOnSave),
       "reloaded",

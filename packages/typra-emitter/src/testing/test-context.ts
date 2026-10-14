@@ -300,6 +300,11 @@ function synthesizeCompleteComplexSample(
   return payload;
 }
 
+/** A required `T | null` property (#339): its key must be present, but `null` is valid. */
+function isRequiredNullableProperty(prop: PropertyNode): boolean {
+  return prop.isNullable === true && !prop.isOptional;
+}
+
 /** Derive a wire value for a single required property that carries no `@sample`. */
 function synthesizeRequiredValue(
   prop: PropertyNode,
@@ -310,6 +315,7 @@ function synthesizeRequiredValue(
   // synthesized payload dispatches back to the type it was built from.
   if (prop.defaultValue !== null && prop.defaultValue !== undefined)
     return prop.defaultValue;
+  if (isRequiredNullableProperty(prop)) return null;
   if ((prop.allowedValues ?? []).length > 0) return prop.allowedValues[0];
   if (prop.isCollection) return [];
   if (prop.isDict || prop.isAny) return {};
@@ -328,6 +334,7 @@ function synthesizeCompleteRequiredValue(
 ): any {
   if (prop.defaultValue !== null && prop.defaultValue !== undefined)
     return prop.defaultValue;
+  if (isRequiredNullableProperty(prop)) return null;
   if ((prop.allowedValues ?? []).length > 0) return prop.allowedValues[0];
   if (prop.isCollection) return [];
   if (prop.isDict || prop.isAny) return {};
@@ -381,6 +388,11 @@ export function withRequiredComplexSamples(
   for (const prop of node.properties) {
     if (propertyWireKey(prop) in completed) continue;
     if (prop.isOptional || prop.hasExplicitDefault) continue;
+    if (isRequiredNullableProperty(prop)) {
+      // A required nullable key (#339) must be present; null is its cheapest valid value.
+      completed[propertyWireKey(prop)] = null;
+      continue;
+    }
     if (prop.isScalar || prop.isAny || prop.isDict || prop.enumName) continue;
 
     const target = prop.type ?? resolveType(prop.typeName.name);
@@ -507,11 +519,21 @@ function buildExamples(
       yamlStr = options.escapeYamlForTemplate(yamlStr);
     }
 
+    const nullKeys = node.properties
+      .filter(
+        (prop) =>
+          isRequiredNullableProperty(prop) &&
+          !(prop.sensitive ?? []).includes("save") &&
+          sample[propertyWireKey(prop)] === null,
+      )
+      .map((prop) => propertyWireKey(prop));
+
     return {
       sample,
       json: jsonStr.split("\n"),
       yaml: yamlStr.split("\n"),
       validations: buildValidations(sample, node, options),
+      ...(nullKeys.length > 0 ? { nullKeys } : {}),
     };
   });
 }
@@ -562,7 +584,7 @@ function buildValidations(
             key: options.renderKey(key),
             value: enumResult.value,
             delimiter: enumResult.delimiter,
-            isOptional: prop?.isOptional || false,
+            isOptional: prop?.isOptional || prop?.isNullable || false,
             withheldOnSave: (prop?.sensitive ?? []).includes("save"),
             ...wireKeyField,
           };
@@ -586,7 +608,7 @@ function buildValidations(
         key: options.renderKey(key),
         value,
         delimiter,
-        isOptional: prop?.isOptional || false,
+        isOptional: prop?.isOptional || prop?.isNullable || false,
         withheldOnSave: (prop?.sensitive ?? []).includes("save"),
         ...wireKeyField,
       };
@@ -733,7 +755,7 @@ function buildCoercions(
               key: options.renderKey(key),
               value: enumResult.value,
               delimiter: enumResult.delimiter,
-              isOptional: prop?.isOptional || false,
+              isOptional: prop?.isOptional || prop?.isNullable || false,
             };
           }
         }
@@ -749,7 +771,7 @@ function buildCoercions(
           key: options.renderKey(key),
           value: needsQuotes ? options.escapeString(value) : value,
           delimiter: needsQuotes ? '"' : "",
-          isOptional: prop?.isOptional || false,
+          isOptional: prop?.isOptional || prop?.isNullable || false,
         };
       });
 

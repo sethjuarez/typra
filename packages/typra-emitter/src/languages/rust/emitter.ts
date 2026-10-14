@@ -59,6 +59,7 @@ import {
   fieldWireKey,
 } from "../../ir/declarations.js";
 import {
+  isRequiredNullable,
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
@@ -1287,6 +1288,19 @@ function emitFieldInputValidation(
     const helper = type.collectionHelpers.find(
       (candidate) => candidate.propertyName === assignment.fieldName,
     );
+    if (isRequiredNullable(assignment)) {
+      // Required nullable (#339): the key must be present; an explicit null is accepted.
+      lines.push(
+        `${indent}if value.as_object().map_or(false, |object| !object.contains_key(${rustStringLiteral(field)})) {`,
+      );
+      lines.push(
+        `${indent}    let missing_path = if path.is_empty() { ${rustStringLiteral(field)}.to_string() } else { format!("{}.{}", path, ${rustStringLiteral(field)}) };`,
+      );
+      lines.push(
+        `${indent}    return Err(format!("{}: missing required field", missing_path));`,
+      );
+      lines.push(`${indent}}`);
+    }
     if (category.kind === "complex") {
       const fieldDecl = type.fields.find(
         (candidate) => candidate.name === assignment.fieldName,
@@ -1306,7 +1320,7 @@ function emitFieldInputValidation(
         );
       } else {
         lines.push(
-          `${indent}if let Some(child) = value.get(${rustStringLiteral(field)}) {`,
+          `${indent}if let Some(child) = value.get(${rustStringLiteral(field)})${isRequiredNullable(assignment) ? ".filter(|candidate| !candidate.is_null())" : ""} {`,
         );
         lines.push(
           `${indent}    ${category.typeName}::validate_input_at(child, &child_path)?;`,
@@ -2966,7 +2980,7 @@ function loadExpr(
       );
     }
     case "collection_complex": {
-      const loaded = `value.get(${rustStringLiteral(key)}).map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx))`;
+      const loaded = `value.get(${rustStringLiteral(key)})${isRequiredNullable(a) ? ".filter(|v| !v.is_null())" : ""}.map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx))`;
       return shouldPreserveOptionalAbsence(a)
         ? loaded
         : `${loaded}.unwrap_or_default()`;
@@ -3190,7 +3204,7 @@ function variantLoadExpr(
     }
     case "collection_complex": {
       // Collection in a variant — use the parent type's helper
-      const loaded = `value.get(${rustStringLiteral(key)}).map(|v| Self::load_${toSnakeCase(field.name)}(v, ctx))`;
+      const loaded = `value.get(${rustStringLiteral(key)})${isRequiredNullable(field) ? ".filter(|v| !v.is_null())" : ""}.map(|v| Self::load_${toSnakeCase(field.name)}(v, ctx))`;
       return shouldPreserveOptionalAbsence(field)
         ? loaded
         : `${loaded}.unwrap_or_default()`;
@@ -3214,6 +3228,13 @@ function emitSaveField(
   const key = a.targetName;
   const fieldRef = `${prefix}${rustFieldName(a.fieldName)}`;
   const cat = a.category;
+
+  if (isRequiredNullable(a)) {
+    // Required nullable (#339): the key is always written; a present value overwrites the null.
+    lines.push(
+      `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Null);`,
+    );
+  }
 
   // Named enum — serialize via .to_string()
   if (a.enumName) {
@@ -3467,6 +3488,12 @@ function emitVariantSaveField(
   const fieldRef = rustFieldName(field.name);
   const cat = field.category;
   const indent = "                ";
+
+  if (isRequiredNullable(field)) {
+    lines.push(
+      `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Null);`,
+    );
+  }
 
   // Named enum — serialize via .to_string()
   if (field.enumName && field.allowedValues.length > 0) {

@@ -174,6 +174,20 @@ export interface FieldDecl {
   category: PropertyCategory;
   /** Whether this field is optional (None/null/nil default) */
   isOptional: boolean;
+  /**
+   * Required-but-nullable field (`x: T | null`, issue #339). Present (always `true`)
+   * only for that shape: the value is typed like an optional field (`isOptional` is
+   * also `true`), but load REQUIRES the key (an explicit `null` is accepted and leaves
+   * the value unset) and save ALWAYS writes the key, as `null` when unset. Optional
+   * nullable fields (`x?: T | null`) lower exactly like `x?: T` and do not carry it.
+   */
+  isNullable?: boolean;
+  /**
+   * Optional nullable field (`x?: T | null`, issue #339). Present (always `true`) only
+   * for that shape. It behaves like `x?: T` (omitted on save when unset); the flag only
+   * lets runtimes that would otherwise reject an explicit `null` (Swift) treat it as unset.
+   */
+  isOptionalNullable?: boolean;
   /** Default value for the field (primitives only) */
   defaultValue: string | number | boolean | null;
   /** Whether TypeSpec explicitly declared a default, including collection defaults such as `#[]` */
@@ -280,6 +294,10 @@ export interface LoadAssignment {
   category: PropertyCategory;
   /** Whether the field is optional */
   isOptional: boolean;
+  /** Required nullable field (see {@link FieldDecl.isNullable}). */
+  isNullable?: boolean;
+  /** Optional nullable field (see {@link FieldDecl.isOptionalNullable}). */
+  isOptionalNullable?: boolean;
   /** Parent type name (needed for calling collection helpers like Parent.load_items) */
   parentTypeName: string;
   /** Enum type name (if this field references a named enum) */
@@ -324,6 +342,8 @@ export interface SaveAssignment {
   category: PropertyCategory;
   /** Whether the field is optional (skip if null/None/nil) */
   isOptional: boolean;
+  /** Required nullable field (see {@link FieldDecl.isNullable}). */
+  isNullable?: boolean;
   /** Whether TypeSpec explicitly declared a default */
   hasExplicitDefault?: boolean;
   /** Parent type name (for collection save helpers) */

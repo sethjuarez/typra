@@ -47,6 +47,7 @@ import {
   discriminatorWireKey,
 } from "../../ir/declarations.js";
 import {
+  isRequiredNullable,
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
@@ -336,7 +337,9 @@ function emitType(
   for (const field of type.fields) {
     const annotation = tsTypeAnnotation(field);
     const defaultVal = tsDefaultValue(field);
-    if (field.isOptional) {
+    if (isRequiredNullable(field)) {
+      lines.push(`  ${field.name}: ${tsNullableAnnotation(field)} = null;`);
+    } else if (field.isOptional) {
       lines.push(`  ${field.name}?: ${annotation}${defaultVal};`);
     } else if (defaultVal === "" && field.category.kind === "complex") {
       // Required complex types without defaults need definite assignment assertion
@@ -627,7 +630,7 @@ function zodObjectExpression(
     .filter((a) => a.fieldName !== omitField)
     .map(
       (a) =>
-        `    ${JSON.stringify(a.targetName)}: ${zodFieldSchema(type, a, allTypes)}${a.isOptional ? ".optional()" : ""},`,
+        `    ${JSON.stringify(a.targetName)}: ${zodFieldSchema(type, a, allTypes)}${isRequiredNullable(a) ? ".nullable()" : a.isOptional && type.fields.find((f) => f.name === a.fieldName)?.isOptionalNullable ? ".nullable().optional()" : a.isOptional ? ".optional()" : ""},`,
     );
   const objectBody =
     entries.length > 0 ? `{\n${entries.join("\n")}\n  }` : "{}";
@@ -844,6 +847,11 @@ function tsTypeAnnotation(f: FieldDecl): string {
   }
 }
 
+/** `T | null` for a required nullable field (#339): the key is always present. */
+function tsNullableAnnotation(f: FieldDecl): string {
+  return `${tsTypeAnnotation({ ...f, isOptional: false })} | null`;
+}
+
 function tsRecordValueType(valueType: string | undefined): string {
   if (!valueType || valueType === "unknown") return "unknown";
   return TYPE_MAP[valueType] || valueType;
@@ -1049,6 +1057,17 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
     const field = type.fields.find(
       (candidate) => candidate.name === a.fieldName,
     );
+    if (isRequiredNullable(a)) {
+      // Required nullable (#339): the key must be present; an explicit null is accepted.
+      lines.push(
+        `    if (data[${JSON.stringify(a.sourceName)}] === undefined) {`,
+      );
+      lines.push(
+        `      throw new Error(\`\${context.at(${JSON.stringify(a.sourceName)}).path}: missing required field\`);`,
+      );
+      lines.push("    }");
+      continue;
+    }
     if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(
       `    if (data[${JSON.stringify(a.sourceName)}] === undefined || data[${JSON.stringify(a.sourceName)}] === null) {`,
@@ -1635,6 +1654,10 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
         `    if (obj.${a.fieldName} !== undefined && obj.${a.fieldName} !== null) {`,
       );
       lines.push(`      ${emitSaveAssignment(a)}`);
+      if (isRequiredNullable(a)) {
+        lines.push("    } else {");
+        lines.push(`      result[${JSON.stringify(a.targetName)}] = null;`);
+      }
       lines.push("    }");
     } else {
       lines.push(`    ${emitSaveAssignment(a)}`);

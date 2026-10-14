@@ -572,6 +572,16 @@ model AudioContent extends FixtureContent {
   @encodedName("application/json", "fade-out {ms}")
   @sample(#{ `fade-out {ms}`: 120 })
   fadeOutMs?: int32;
+
+  // Required nullable: the key must be present on load (null allowed) and is always
+  // written on save, as null when unset — distinct from `?` optional (#339).
+  @sample(#{ transcript: null })
+  @sample(#{ transcript: "hello" })
+  transcript: string | null;
+
+  @sample(#{ loudness: null })
+  @sample(#{ loudness: 3 })
+  loudness: int32 | null;
 }
 
 union FixtureAudioMix {

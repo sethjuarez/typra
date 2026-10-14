@@ -40,6 +40,7 @@ import {
   fieldWireKey,
 } from "../../ir/declarations.js";
 import {
+  isRequiredNullable,
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
@@ -158,7 +159,10 @@ export function emitGoFileContent(
   const needsRequiredComplexValidation = types.some(
     (type) =>
       type.serialized &&
-      type.fields.some((field) => shouldGuardMissingRequiredField(field)),
+      type.fields.some(
+        (field) =>
+          shouldGuardMissingRequiredField(field) || isRequiredNullable(field),
+      ),
   );
   const needsFmt =
     enums.some((enumDef) => hasParseAliases(enumDef) && !enumDef.isOpen) ||
@@ -562,7 +566,7 @@ function emitStruct(
     const fieldName = fieldNames.get(field.name) ?? goFieldName(field.name);
     const tag = getStructTag(
       fieldWireKey(field),
-      shouldPreserveOptionalAbsence(field),
+      shouldPreserveOptionalAbsence(field) && !isRequiredNullable(field),
     );
     lines.push(`\t${fieldName} ${goType} ${tag}`);
   }
@@ -662,6 +666,17 @@ function emitLoadFunction(
       const field = type.fields.find(
         (candidate) => candidate.name === assign.fieldName,
       );
+      if (isRequiredNullable(assign)) {
+        // Required nullable (#339): the key must be present; an explicit nil is accepted.
+        body.push(
+          `\t\tif _, exists := m[${goLiteral(assign.sourceName)}]; !exists {`,
+        );
+        body.push(
+          `\t\t\treturn result, fmt.Errorf("%s: missing required field", ctx.At(${goLiteral(assign.sourceName)}).Path)`,
+        );
+        body.push("\t\t}");
+        continue;
+      }
       if (!shouldGuardMissingRequiredField(field)) continue;
       body.push(
         `\t\tif requiredValue, exists := m[${goLiteral(assign.sourceName)}]; !exists || requiredValue == nil {`,
@@ -1585,6 +1600,13 @@ function emitSaveAssignment(
   const fieldName =
     fieldNames.get(assign.fieldName) ?? goFieldName(assign.fieldName);
   const cat = assign.category;
+
+  if (isRequiredNullable(assign)) {
+    // Required nullable (#339): the key is always written, as nil when unset.
+    lines.push(`\tif obj.${fieldName} == nil {`);
+    lines.push(`\t\tresult[${goLiteral(assign.targetName)}] = nil`);
+    lines.push("\t}");
+  }
 
   switch (cat.kind) {
     case "scalar":

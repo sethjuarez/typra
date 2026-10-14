@@ -32,6 +32,11 @@ import { scalarRuntimeKind } from "./scalar-kinds.js";
 import { detectWireCollisions } from "./lower.js";
 import type { CallableDispatch } from "./callable.js";
 
+/** True for the `null` intrinsic variant of a `T | null` union. */
+function isNullType(type: Type): boolean {
+  return type.kind === "Intrinsic" && type.name === "null";
+}
+
 /**
  * Models whose `@knownAs` wire mappings have already been checked for
  * collisions, so the `typra-emitter-wire-collision` diagnostic is reported at
@@ -286,6 +291,11 @@ export class PropertyNode {
 
   public isScalar: boolean = false;
   public isOptional: boolean = false;
+  /**
+   * True when the property type is `T | null` (issue #339). The `null` variant is
+   * stripped and `T` resolved as usual; `isOptional` keeps the TypeSpec `?`.
+   */
+  public isNullable: boolean = false;
   public isCollection: boolean = false;
   public isAny: boolean = false;
   public isDict: boolean = false;
@@ -338,6 +348,7 @@ export class PropertyNode {
 
       isScalar: this.isScalar,
       isOptional: this.isOptional,
+      ...(this.isNullable ? { isNullable: true } : {}),
       isCollection: this.isCollection,
       isAny: this.isAny,
       isDict: this.isDict,
@@ -775,16 +786,29 @@ export const resolveProperty = (
   rootNamespace: string,
   rootAlias: string,
 ): PropertyNode => {
+  // `T | null` (issue #339): strip the `null` variant and resolve `T` as usual, then
+  // record nullability. A union of several non-null variants keeps flowing through
+  // resolveUnionProperty, which ignores the `null` variant itself.
+  let type: Type = property.type;
+  let isNullable = false;
+  if (type.kind === "Union") {
+    const variants = Array.from(type.variants.values()).map((v) => v.type);
+    const nonNull = variants.filter((v) => !isNullType(v));
+    if (nonNull.length > 0 && nonNull.length < variants.length) {
+      isNullable = true;
+      if (nonNull.length === 1) type = nonNull[0];
+    }
+  }
   let prop: PropertyNode;
-  switch (property.type.kind) {
+  switch (type.kind) {
     case "Scalar":
-      prop = resolveScalarProperty(program, property, property.type);
+      prop = resolveScalarProperty(program, property, type);
       break;
     case "Model":
       prop = resolveModelProperty(
         program,
         property,
-        property.type,
+        type,
         visited,
         rootNamespace,
         rootAlias,
@@ -794,25 +818,20 @@ export const resolveProperty = (
       prop = resolveUnionProperty(
         program,
         property,
-        property.type,
+        type,
         visited,
         rootNamespace,
         rootAlias,
       );
       break;
     case "Intrinsic":
-      prop = resolveIntrinsicProperty(
-        program,
-        property,
-        property.type,
-        visited,
-      );
+      prop = resolveIntrinsicProperty(program, property, type, visited);
       break;
     case "String":
       // this is for default values in discriminated types
       prop = new PropertyNode(property, getDoc(program, property) || "");
 
-      prop.defaultValue = property.type.value;
+      prop.defaultValue = type.value;
       prop.typeName = {
         namespace: "",
         name: "string",
@@ -828,12 +847,21 @@ export const resolveProperty = (
     default:
       program.reportDiagnostic({
         code: "typra-emitter-unsupported-property-type",
-        message: `Unsupported property type: ${property.type.kind}`,
+        message: `Unsupported property type: ${type.kind}`,
         severity: "error",
         target: property,
       });
       prop = new PropertyNode(property, getDoc(program, property) || "");
       break;
+  }
+  prop.isNullable = isNullable;
+  if (property.defaultValue?.valueKind === "NullValue") {
+    reportUnsupportedDefault(
+      program,
+      property,
+      prop,
+      "A `null` default is not supported; a nullable field is already null when unset, so remove the default.",
+    );
   }
   if (property.defaultValue?.valueKind === "ObjectValue") {
     reportUnsupportedDefault(
@@ -1068,7 +1096,9 @@ export const resolveUnionProperty = (
   prop.isOptional = property.optional;
   prop.isCollection = false;
 
-  const variants = Array.from(union.variants).map(([, v]) => v.type);
+  const variants = Array.from(union.variants)
+    .map(([, v]) => v.type)
+    .filter((v) => !isNullType(v));
   const models = variants.filter((v) => v.kind === "Model");
 
   if (models.length === 1) {
@@ -1451,6 +1481,11 @@ export interface TestExample {
   yaml: string[];
   /** Property assertions to validate after loading */
   validations: PropertyValidation[];
+  /**
+   * Wire keys of required nullable (`T | null`) properties the sample sets to an explicit
+   * `null` (#339). `save()` must still write each of these keys, as null.
+   */
+  nullKeys?: string[];
 }
 
 /**

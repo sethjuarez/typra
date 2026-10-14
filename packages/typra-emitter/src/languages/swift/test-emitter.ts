@@ -245,6 +245,16 @@ function emitExampleTest(
   if (lines.length === jsonReloadValidationStart) {
     lines.push("    _ = reloaded");
   }
+  const nullKeys = example.nullKeys ?? [];
+  if (nullKeys.length > 0) {
+    lines.push("    let savedNull = try instance.save()");
+  }
+  for (const key of nullKeys) {
+    const literal = JSON.stringify(key);
+    lines.push(
+      `    XCTAssertTrue(savedNull.keys.contains(${literal}) && savedNull[${literal}] is NSNull, "Expected ${typeName} to save ${key} as null")`,
+    );
+  }
   if (nativeSerialization === "codable") {
     lines.push(
       `    try assertCodableMatches(${typeName}.self, sourceJson: json, message: "example ${index + 1}")`,
@@ -336,7 +346,7 @@ function emitStructuredValidations(
           : undefined;
       if (count !== undefined) {
         lines.push(
-          `    XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional)}.count, ${count})`,
+          `    XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional || prop.isNullable === true)}.count, ${count})`,
         );
       }
       continue;
@@ -359,7 +369,7 @@ function emitStructuredValidations(
     ) {
       emitNestedValidation(
         lines,
-        requiredAccessor(accessor, prop.isOptional),
+        requiredAccessor(accessor, prop.isOptional || prop.isNullable === true),
         value,
         prop,
       );
@@ -540,7 +550,10 @@ function emitPropertyAssertion(
   unknownCast = "String",
 ): void {
   if (prop?.enumName) {
-    const valueAccessor = requiredAccessor(accessor, prop.isOptional);
+    const valueAccessor = requiredAccessor(
+      accessor,
+      prop.isOptional || prop.isNullable === true,
+    );
     if (expected.startsWith('"')) {
       lines.push(
         `${indent}XCTAssertEqual(${valueAccessor}.rawValue, ${expected})`,
@@ -562,7 +575,7 @@ function emitPropertyAssertion(
     lines.push(
       `${
         indent
-      }XCTAssertEqual(${prop.isOptional ? `try XCTUnwrap(${castAccessor})` : castAccessor}, ${expected})`,
+      }XCTAssertEqual(${prop.isOptional || prop.isNullable ? `try XCTUnwrap(${castAccessor})` : castAccessor}, ${expected})`,
     );
     return;
   }
@@ -572,7 +585,7 @@ function emitPropertyAssertion(
       ? `(try! ${swiftTypeName(prop.enumName)}.parse(${expected}))`
       : expected;
     lines.push(
-      `${indent}XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional)}, ${enumExpected})`,
+      `${indent}XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional || prop.isNullable === true)}, ${enumExpected})`,
     );
     return;
   }
@@ -580,7 +593,10 @@ function emitPropertyAssertion(
   if (prop && !prop.isScalar && prop.type) {
     const nestedKey = coercionProperty(prop.type) ?? prop.type.discriminator;
     if (nestedKey) {
-      const valueAccessor = requiredAccessor(accessor, prop.isOptional);
+      const valueAccessor = requiredAccessor(
+        accessor,
+        prop.isOptional || prop.isNullable === true,
+      );
       if (prop.type.childTypes.length > 0) {
         lines.push(
           `${indent}XCTAssertEqual(try ${valueAccessor}.save()[${swiftStringLiteral(swiftSampleKey(prop.type, nestedKey))}] as? String, ${expected})`,
@@ -591,7 +607,7 @@ function emitPropertyAssertion(
         );
         const nestedAccessor = `${valueAccessor}.${swiftPropertyName(nestedKey)}`;
         lines.push(
-          `${indent}XCTAssertEqual(${requiredAccessor(nestedAccessor, nestedProp?.isOptional ?? false)}, ${expected})`,
+          `${indent}XCTAssertEqual(${requiredAccessor(nestedAccessor, (nestedProp?.isOptional || nestedProp?.isNullable) === true)}, ${expected})`,
         );
       }
 
@@ -600,7 +616,7 @@ function emitPropertyAssertion(
   }
 
   lines.push(
-    `${indent}XCTAssertEqual(${requiredAccessor(accessor, prop?.isOptional ?? false)}, ${expected})`,
+    `${indent}XCTAssertEqual(${requiredAccessor(accessor, (prop?.isOptional || prop?.isNullable) === true)}, ${expected})`,
   );
 }
 

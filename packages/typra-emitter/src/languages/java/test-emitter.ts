@@ -156,6 +156,17 @@ function emitExampleTest(
     node,
     postSaveExample(example, node),
   );
+  const nullKeys = example.nullKeys ?? [];
+  if (nullKeys.length > 0) {
+    lines.push(
+      `    java.util.Map<String, Object> savedNull${index} = instance${index}.save(new SaveContext());`,
+    );
+  }
+  for (const key of nullKeys) {
+    lines.push(
+      `    assertTrue(savedNull${index}.containsKey(${javaString(key)}) && savedNull${index}.get(${javaString(key)}) == null, ${javaString(`Expected ${typeName} to save ${key} as null`)});`,
+    );
+  }
   if (nativeSerialization === "jackson") {
     lines.push(
       `    assertJacksonMatches(instance${index}, ${jsonData}, ${typeName}.class, "Expected Jackson to match Typra load/save for ${typeName} example ${index}");`,

@@ -39,6 +39,7 @@ import {
   discriminatorWireKey,
 } from "../../ir/declarations.js";
 import {
+  isRequiredNullable,
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
@@ -778,6 +779,19 @@ function emitLoadMethod(
     const field = type.fields.find(
       (candidate) => candidate.name === assign.fieldName,
     );
+    if (isRequiredNullable(assign)) {
+      // Required nullable (#339): the key must be present; an explicit null is accepted.
+      lines.push(
+        `        if (!data.ContainsKey(${csStringLiteral(assign.sourceName)}))`,
+      );
+      lines.push("        {");
+      lines.push(
+        `            throw new ArgumentException(context!.At(${csStringLiteral(assign.sourceName)}).Path + ": missing required field");`,
+      );
+      lines.push("        }");
+      lines.push("");
+      continue;
+    }
     if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(
       `        if (!data.TryGetValue(${csStringLiteral(assign.sourceName)}, out var required${toPascalCase(assign.fieldName)}Value) || required${toPascalCase(assign.fieldName)}Value is null)`,
@@ -1397,6 +1411,14 @@ function emitSaveAssignment(assign: SaveAssignment, lines: string[]): void {
     lines.push("        {");
     lines.push(`            ${getSaveExpression(assign, propName)}`);
     lines.push("        }");
+    if (isRequiredNullable(assign)) {
+      lines.push("        else");
+      lines.push("        {");
+      lines.push(
+        `            result[${csStringLiteral(assign.targetName)}] = null;`,
+      );
+      lines.push("        }");
+    }
   } else {
     lines.push(`        ${getSaveExpression(assign, propName)}`);
   }

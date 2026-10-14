@@ -441,6 +441,7 @@ export const renderTests = (
     json: example.json,
     yaml: example.yaml,
     sample: example.sample as Record<string, unknown>,
+    ...(example.nullKeys ? { nullKeys: example.nullKeys } : {}),
     validations: example.validations.map((v) => {
       const sourceKey = v.sourceKey;
       if (sourceKey === undefined) {

@@ -140,6 +140,16 @@ export function emitTypeScriptTest(
           `      expect(reloaded.${val.key}).toEqual(instance.${val.key});`,
         );
       }
+      if (example.nullKeys && example.nullKeys.length > 0) {
+        lines.push(`      const saved = instance.save();`);
+        for (const key of example.nullKeys) {
+          const literal = JSON.stringify(key);
+          lines.push(
+            `      expect(Object.prototype.hasOwnProperty.call(saved, ${literal})).toBe(true);`,
+          );
+          lines.push(`      expect(saved[${literal}]).toBe(null);`);
+        }
+      }
       lines.push(`    });`);
     }
     lines.push("");

@@ -464,6 +464,11 @@ export function emitPythonTest(
     }
     lines.push(`    reloaded = ${typeName}.load(saved_data)`);
     lines.push(`    assert reloaded is not None`);
+    for (const key of sample.nullKeys ?? []) {
+      const literal = JSON.stringify(key);
+      lines.push(`    assert ${literal} in saved_data`);
+      lines.push(`    assert saved_data[${literal}] is None`);
+    }
     for (const v of postSaveExample(sample, node).validations) {
       lines.push(renderValidation(v, "reloaded"));
     }

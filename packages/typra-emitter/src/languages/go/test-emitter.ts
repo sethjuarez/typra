@@ -179,7 +179,7 @@ function emitStructuredValidations(
         expr,
         fieldName,
         value,
-        prop.isOptional,
+        prop.isOptional || prop.isNullable === true,
       );
       continue;
     }
@@ -286,7 +286,7 @@ function emitShorthandObjectValidation(
     `${expr}.${targetField}`,
     `${fieldName}.${targetField}`,
     expected,
-    targetProp?.isOptional ?? false,
+    (targetProp?.isOptional || targetProp?.isNullable) === true,
   );
 }
 
@@ -529,13 +529,13 @@ function emitNestedObjectValidation(
             `${nestedExpr}.${targetField}`,
             `${fieldName}.${nestedField}.${targetField}`,
             expected,
-            targetProp?.isOptional ?? false,
+            (targetProp?.isOptional || targetProp?.isNullable) === true,
           );
         }
         continue;
       }
 
-      if (prop.isOptional) {
+      if (prop.isOptional || prop.isNullable) {
         lines.push(
           `if ${nestedExpr} == nil || *${nestedExpr} != ${goStringLiteral(expected)} {`,
         );
@@ -1174,6 +1174,15 @@ function emitRoundtripTest(
     lines.push(`if err != nil {`);
     lines.push(`t.Fatalf("Failed to reload ${typeName}: %v", err)`);
     lines.push(`}`);
+    for (const key of sample.nullKeys ?? []) {
+      lines.push(
+        `if value, exists := savedData[${goStringLiteral(key)}]; !exists || value != nil {`,
+      );
+      lines.push(
+        `t.Errorf("Expected saved key %q to be present as null, got %v (present=%v)", ${goStringLiteral(key)}, value, exists)`,
+      );
+      lines.push(`}`);
+    }
     emitExampleValidations(
       lines,
       "reloaded",
