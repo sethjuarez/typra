@@ -37,7 +37,7 @@ behavior is genuinely runtime-specific.
 | Protocols | `features/protocols/main.tsp` | TypeSpec-native interfaces/operations plus runtime cancellation, sync, optional, and effect metadata. |
 | Dispatch | `features/dispatch/main.tsp` | Behavioral polymorphic dispatch via `@dispatch`, resolving a discriminator field to a deterministic parameter access path. |
 | Provider wire | `features/wire/main.tsp` | Provider-specific names with `@@knownAs` and provider defaults with `@@defaultFor`. |
-| Encoded names | `features/encoded-name/main.tsp` | `@encodedName("application/json", ...)` as the canonical dict/JSON/YAML key on load and save (scalar, nested model, collection, discriminator, and `@@knownAs` interplay); non-JSON mimes are ignored. |
+| Encoded names | `features/encoded-name/main.tsp` | `@encodedName("application/json", ...)` as the canonical dict/JSON/YAML key on load and save (scalar, nested model, collection, discriminator, inherited `@coerce` target, and `@@knownAs` interplay); non-JSON mimes are ignored. |
 | Nullable fields | `features/nullable/main.tsp` | `x: T \| null` (required key, value may be null: load rejects an absent key and accepts `null`; save always writes the key, as `null` when unset) versus `x?: T` and `x?: T \| null` (both omitted when unset) across scalars, enums, models, arrays, and records. |
 | Transport | `features/transport/main.tsp` | Path, query, header, cookie, body, status, success/error body envelopes, and wildcard status bodies. |
 | Namespaces | `features/namespaces/main.tsp` | Nested namespaces and cross-namespace references. |

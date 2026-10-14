@@ -11,6 +11,7 @@ model Named<T> {
 model Root {
   narration: Narration;
   shapes?: Shape[];
+  cover?: Asset;
 }
 
 // `@encodedName("application/json", ...)` renames the canonical wire key while the
@@ -84,3 +85,24 @@ model Circle extends Shape {
   @encodedName("application/json", "radius_px")
   radiusPx: int32;
 }
+
+// A renamed base field inherited by a discriminated variant.
+@discriminator("assetKind")
+model Asset {
+  @encodedName("application/json", "asset_kind")
+  assetKind: string;
+
+  @encodedName("application/json", "asset_id")
+  assetId: string;
+}
+
+model ImageAsset extends Asset {
+  assetKind: "image";
+
+  @encodedName("application/json", "alt_text")
+  altText?: string;
+}
+
+// A coercion on a derived model that targets an inherited, renamed property must
+// read and write the base property's encoded key.
+@@coerce(ImageAsset, string, #{ assetId: "{value}" }, "image", "Load an image asset from its id.", "img-1");

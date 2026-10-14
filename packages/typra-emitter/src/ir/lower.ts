@@ -815,10 +815,18 @@ function findCoercionProperty(node: TypeNode): string | null {
   return null;
 }
 
-/** Canonical dict key of a named property on `node` (its `@encodedName`, else the name). */
+/**
+ * Canonical dict key of a named property on `node` (its `@encodedName`, else the name).
+ * Falls back to an inherited base property's encoded key when `node` does not
+ * redeclare the property.
+ */
 function propertyWireKey(node: TypeNode, propertyName: string): string {
   const property = node.properties.find((p) => p.name === propertyName);
-  return property?.serializedName ?? propertyName;
+  if (property) return property.serializedName ?? propertyName;
+  const inherited = node.inheritedSerializedNames;
+  return inherited && Object.hasOwn(inherited, propertyName)
+    ? inherited[propertyName]
+    : propertyName;
 }
 
 // ============================================================================

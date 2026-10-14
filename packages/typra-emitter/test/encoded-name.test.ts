@@ -276,6 +276,52 @@ describe("@encodedName drives the canonical wire key (#337)", () => {
     }
   });
 
+  it("a derived coercion keys an inherited property by the base encoded key", () => {
+    // ImageAsset's `@coerce` expands into Asset.assetId, encoded as `asset_id`:
+    // the shorthand key and the expansion dict must use the base's wire key.
+    const asset = (dir: string) =>
+      model(
+        dir,
+        /(^|\/)(_?asset\.(ts|py|go|rs|swift)|ImageAsset\.(java|cs))$/i,
+      );
+    for (const [, dir] of TARGETS) {
+      // Swift's scalar-coercion error label (`field: "assetId"`) names the property.
+      assert.doesNotMatch(
+        asset(dir),
+        /(?<!field: )"assetId"/,
+        `${dir} must not key the inherited coercion property by its name`,
+      );
+    }
+    for (const dir of ["typescript", "typescript-zod"]) {
+      assert.match(
+        asset(dir),
+        /static readonly shorthandProperty: string \| undefined = "asset_id"/,
+      );
+    }
+    for (const dir of ["python", "python-pydantic"]) {
+      assert.match(
+        asset(dir),
+        /_shorthand_property: ClassVar\[str \| None\] = "asset_id"/,
+      );
+    }
+    assert.match(
+      asset("go"),
+      /expansion := map\[string\]interface\{\}\{"asset_id": v\}/,
+    );
+    const cs = asset("csharp");
+    assert.match(cs, /ShorthandProperty => "asset_id"/);
+    assert.match(cs, /\["asset_id"\] = stringValue/);
+    for (const dir of ["java", "java-jackson"]) {
+      assert.match(asset(dir), /SHORTHAND_PROPERTY = "asset_id"/);
+    }
+    for (const dir of ["swift", "swift-codable"]) {
+      assert.match(
+        asset(dir),
+        /static let shorthandProperty: String\? = "asset_id"/,
+      );
+    }
+  });
+
   it("records the inherited discriminator wire name in the IR", () => {
     const ast = JSON.parse(
       readFileSync(

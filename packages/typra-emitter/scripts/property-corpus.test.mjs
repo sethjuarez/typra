@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
@@ -115,6 +116,52 @@ describe("property corpus generator", () => {
 
     assert.ok(kinds.includes("text"));
     assert.ok(kinds.some((kind) => kind.startsWith("vendor-")));
+  });
+
+  it("keys renamed properties by their @encodedName wire key", () => {
+    const root = type("Root", [
+      {
+        ...prop("fadeInMs", "int32", { isScalar: true }),
+        serializedName: "fade_in_ms",
+      },
+    ]);
+    const [entry] = buildPropertyCorpus(root, {
+      rootType: "Root",
+      seed: 0x117,
+      caseCount: 1,
+    });
+    assert.ok("fade_in_ms" in entry.input);
+    assert.equal("fadeInMs" in entry.input, false);
+  });
+
+  it("the default FixtureRoot corpus round-trips @encodedName keys in every runtime", () => {
+    // Executable conformance feeds this corpus (same seed, case count, and depth as
+    // scripts/fixtures/conformance.mjs) through every runtime. Rust and Swift emit
+    // AudioContent as an enum variant without its own sample round-trip tests, so this
+    // corpus is their executable coverage of encoded wire keys.
+    const model = JSON.parse(
+      readFileSync(
+        new URL("../generated/fixtures/json-ast/model.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    const payloads = buildPropertyCorpus(model, {
+      rootType: "FixtureRoot",
+      seed: 0x117,
+      caseCount: 8,
+      maxDepth: 5,
+    }).map((entry) => JSON.stringify(entry.input));
+    assert.ok(
+      payloads.some(
+        (payload) =>
+          payload.includes('"fade_in_ms":') &&
+          payload.includes('"fade-out {ms}":'),
+      ),
+      "some default corpus case must carry both AudioContent encoded keys",
+    );
+    for (const payload of payloads) {
+      assert.doesNotMatch(payload, /"fade(In|Out)Ms":/);
+    }
   });
 });
 

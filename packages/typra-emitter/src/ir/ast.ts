@@ -189,6 +189,12 @@ export class TypeNode {
   public childTypes: TypeNode[] = [];
   public coercions: Coercion[] = [];
   public properties: PropertyNode[] = [];
+  /**
+   * Canonical wire keys of renamed (`@encodedName`) properties inherited from base
+   * models and not redeclared here, keyed by property name. Lets property-name
+   * references such as `@coerce` expansion keys resolve to the base's wire key.
+   */
+  public inheritedSerializedNames: Record<string, string> = {};
   public isAbstract: boolean = false;
   public isProtocol: boolean = false;
   /**
@@ -552,6 +558,7 @@ export const resolveModel = (
       properties.push(prop);
     }
     node.properties = properties;
+    node.inheritedSerializedNames = inheritedSerializedNames(program, model);
 
     reportWireCollisions(program, model, properties);
     reportEncodedNameCollisions(program, model);
@@ -560,6 +567,30 @@ export const resolveModel = (
 
   return node;
 };
+
+/** Wire keys of renamed base-model properties that `model` does not redeclare. */
+function inheritedSerializedNames(
+  program: Program,
+  model: Model,
+): Record<string, string> {
+  const names: Record<string, string> = Object.create(null);
+  const visited = new Set<string>();
+  const seen = new Set<Model>([model]);
+  for (
+    let base = model.baseModel;
+    base && !seen.has(base);
+    base = base.baseModel
+  ) {
+    seen.add(base);
+    for (const [name, property] of base.properties) {
+      if (model.properties.has(name) || visited.has(name)) continue;
+      visited.add(name);
+      const wireName = jsonWireName(program, property);
+      if (wireName !== name) names[name] = wireName;
+    }
+  }
+  return names;
+}
 
 /**
  * No backend models a string indexer (`...Record<T>`, `is Record<T>`) as an
