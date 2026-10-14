@@ -6,7 +6,7 @@ import {
   resolvePath,
 } from "@typespec/compiler";
 import { getStateValue } from "../decorators.js";
-import { StateKeys, TypraEmitterOptions } from "../lib.js";
+import { EmitTarget, StateKeys, TypraEmitterOptions } from "../lib.js";
 import type { CallableContract, CallableDispatch } from "./callable.js";
 import type { PolymorphicDispatchDecl } from "./declarations.js";
 import { scalarRuntimeKind } from "./scalar-kinds.js";
@@ -105,6 +105,80 @@ export interface CallableVectorSnapshot {
    * type-check and read cleanly; readers treat its absence as an empty closure.
    */
   serializedTypes?: string[];
+  /**
+   * `false` when NO emit target emits any typed conformance rail: neither the
+   * typed seam entrypoint (`run<Seam>Conformance`) nor the per-interface typed
+   * `@dispatch` conformance. Those rails are target-specific (mostly gated on
+   * `test-dir`), while this snapshot is target-independent, so a coverage check
+   * must not credit `typed` or `dispatched` operations when this is `false`.
+   * Written ONLY when `false`; absent means the rails are emitted (and keeps
+   * snapshots from before this field, or with a test tree, byte-identical).
+   */
+  typedConformance?: false;
+  /**
+   * `false` when some target emits the typed seam entrypoint into its library
+   * (C#, Python, Java, Swift do so without `test-dir`) but NO target emits the
+   * per-interface typed `@dispatch` conformance (`test-dir`, or Swift's
+   * `harness-test-dir`). A coverage check must not credit `dispatched`
+   * operations when this is `false`. Written ONLY when `false`.
+   */
+  dispatchedConformance?: false;
+}
+
+/** Which typed conformance rails the configured emit targets actually emit. */
+export type ConformanceRailAvailability = Pick<
+  CallableVectorSnapshot,
+  "typedConformance" | "dispatchedConformance"
+>;
+
+/** Targets whose drivers emit typed conformance rails (Markdown emits none). */
+const CONFORMANCE_TARGET_TYPES = new Set([
+  "typescript",
+  "python",
+  "go",
+  "csharp",
+  "java",
+  "rust",
+  "swift",
+]);
+
+/**
+ * Library-side typed entrypoint targets: C#, Python and Swift emit
+ * `run<Seam>Conformance` into the library unconditionally, Java whenever it has
+ * an `output-dir`. TypeScript, Go and Rust emit it only alongside `test-dir`.
+ */
+function emitsLibraryTypedEntrypoint(
+  target: EmitTarget,
+  type: string,
+): boolean {
+  if (type === "csharp" || type === "python" || type === "swift") return true;
+  return type === "java" && Boolean(target["output-dir"]);
+}
+
+export function conformanceRailAvailability(
+  targets: readonly EmitTarget[],
+): ConformanceRailAvailability {
+  let typed = false;
+  let dispatched = false;
+  for (const target of targets) {
+    const type = target.type.toLowerCase().trim();
+    // Every driver emits both rails into `test-dir`; Swift also emits the
+    // dispatched conformance into `harness-test-dir` when one is set.
+    const codegen = CONFORMANCE_TARGET_TYPES.has(type);
+    const testTree =
+      (codegen && Boolean(target["test-dir"])) ||
+      (type === "swift" && Boolean(target["harness-test-dir"]));
+    if (testTree) {
+      typed = true;
+      dispatched = true;
+    } else if (emitsLibraryTypedEntrypoint(target, type)) {
+      typed = true;
+    }
+  }
+  return {
+    ...(typed ? {} : { typedConformance: false as const }),
+    ...(dispatched ? {} : { dispatchedConformance: false as const }),
+  };
 }
 
 /**
@@ -280,7 +354,9 @@ export function assertTypedDispatchSupported(
     reject("`expectedError` has no typed assertion arm (would assert success)");
   }
   if (Array.isArray(v.requires) && v.requires.length > 0) {
-    reject("`requires` capability gating is only honored by the stringly runner");
+    reject(
+      "`requires` capability gating is only honored by the stringly runner",
+    );
   }
   if (v.normalization !== undefined) {
     reject("`normalization` is applied only by the stringly runner");
@@ -327,6 +403,7 @@ export function lowerOperationVectors(
 export function buildCallableVectorSnapshot(
   contracts: CallableContract[],
   serializedTypes: ReadonlySet<string> = new Set(),
+  rails: ConformanceRailAvailability = {},
 ): CallableVectorSnapshot {
   return {
     emitter: "typra-emitter",
@@ -351,8 +428,14 @@ export function buildCallableVectorSnapshot(
           })),
         ),
       )
-      .sort((left, right) => vectorSnapshotKey(left).localeCompare(vectorSnapshotKey(right))),
+      .sort((left, right) =>
+        vectorSnapshotKey(left).localeCompare(vectorSnapshotKey(right)),
+      ),
     serializedTypes: [...serializedTypes].sort(),
+    ...(rails.typedConformance === false ? { typedConformance: false } : {}),
+    ...(rails.dispatchedConformance === false
+      ? { dispatchedConformance: false }
+      : {}),
   };
 }
 

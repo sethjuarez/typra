@@ -43,6 +43,7 @@ import {
 import type { CallableContract } from "./ir/callable.js";
 import {
   buildCallableVectorSnapshot,
+  conformanceRailAvailability,
   emitCallableVectorSnapshot,
 } from "./ir/vector.js";
 import type { CallableVectorSnapshot } from "./ir/vector.js";
@@ -359,6 +360,9 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   const callableVectorSnapshot = buildCallableVectorSnapshot(
     typeSpecCallableContracts,
     serializationClosure,
+    // The snapshot is target-independent, but the typed conformance rails it
+    // lets verify credit are only emitted by targets with a test tree.
+    conformanceRailAvailability(targets),
   );
   const generatorOptions: GeneratorOptions = {
     rootNamespace,

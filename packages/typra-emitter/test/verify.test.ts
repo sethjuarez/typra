@@ -519,6 +519,35 @@ describe("typra verifier vector coverage", () => {
     assert.match(failure!.message, /Wildcard waivers are not allowed/);
   });
 
+  it("credits a typed seam only when the snapshot does not record typedConformance: false", () => {
+    const typedSnapshot = (): CallableVectorSnapshot => ({
+      ...makeVectorSnapshot(),
+      serializedTypes: ["ProcessRequest", "ProcessResult"],
+    });
+    const credited = makeMetadata();
+    credited.vectors = typedSnapshot();
+    const creditedResult = compareTypraMetadata(makeMetadata(), credited, {
+      vectorAdapters: ["Renderer.render"],
+    });
+    assert.equal(creditedResult.ok, true);
+    assert.equal(creditedResult.summary.vectorCoverage.typed, 1);
+
+    const withheld = makeMetadata();
+    withheld.vectors = { ...typedSnapshot(), typedConformance: false };
+    const withheldResult = compareTypraMetadata(makeMetadata(), withheld, {
+      vectorAdapters: ["Renderer.render"],
+    });
+    assert.equal(withheldResult.ok, false);
+    assert.equal(withheldResult.summary.vectorCoverage.typed, 0);
+    assert.equal(withheldResult.summary.vectorCoverage.missing, 1);
+    const failure = withheldResult.failures.find(
+      (f) => f.code === "vector-adapter-coverage",
+    );
+    assert.ok(failure, "expected a vector-adapter-coverage failure");
+    assert.match(failure!.message, /Processor\.process/);
+    assert.match(failure!.message, /test-dir/);
+  });
+
   it("no-ops when the current snapshot has no vectors", () => {
     const result = compareTypraMetadata(makeMetadata(), makeMetadata());
 

@@ -507,6 +507,12 @@ outright (both when the config is loaded and by the gate itself). The verify
 summary reports `vector coverage: <covered>/<operations> covered, <waived>
 waived, <missing> missing`.
 
+Operations exercised by the emitted typed conformance entrypoint or typed
+`@dispatch` conformance are credited as `typed` / `dispatched` without an
+adapter, but only when an emit target actually emits that rail (normally one
+with `test-dir`); otherwise `vectors.json` records `typedConformance: false` (or
+`dispatchedConformance: false`) and those operations need an adapter or waiver.
+
 The config declares the runtime's *intent* — it is a consistency check, not proof
 that the named adapters exist. The generated conformance suite remains the real
 runtime enforcement (a declared-but-unimplemented adapter still fails there), so

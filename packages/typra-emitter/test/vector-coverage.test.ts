@@ -7,8 +7,9 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { generate } from "../src/generate.js";
+import { generate, type TargetLanguage } from "../src/generate.js";
 import type { CallableVectorSnapshot } from "../src/ir/vector.js";
+import { conformanceRailAvailability } from "../src/ir/vector.js";
 import {
   evaluateVectorAdapterCoverage,
   formatVectorAdapterCoverageFailure,
@@ -39,7 +40,12 @@ function snapshot(): CallableVectorSnapshot {
         params: { payload: "string" },
         returns: "string",
         sync: false,
-        vector: { operation: "echo", stage: "callable", input: {}, expected: "" },
+        vector: {
+          operation: "echo",
+          stage: "callable",
+          input: {},
+          expected: "",
+        },
       },
       {
         contract: "Echo",
@@ -75,7 +81,12 @@ function snapshot(): CallableVectorSnapshot {
         params: { note: "Note" },
         returns: "Note",
         sync: false,
-        vector: { operation: "revise", stage: "callable", input: {}, expected: {} },
+        vector: {
+          operation: "revise",
+          stage: "callable",
+          input: {},
+          expected: {},
+        },
       },
       {
         contract: "Vault",
@@ -85,7 +96,12 @@ function snapshot(): CallableVectorSnapshot {
         params: { secret: "Secret" },
         returns: "Secret",
         sync: false,
-        vector: { operation: "seal", stage: "callable", input: {}, expected: {} },
+        vector: {
+          operation: "seal",
+          stage: "callable",
+          input: {},
+          expected: {},
+        },
       },
     ],
   };
@@ -258,7 +274,11 @@ describe("vector adapter coverage gate", () => {
       adapterKeys,
       waiverKeys,
     });
-    const newOk = new Set([...result.covered, ...result.typed, ...result.waived]);
+    const newOk = new Set([
+      ...result.covered,
+      ...result.typed,
+      ...result.waived,
+    ]);
     // Every op OK under the old rules is still OK.
     for (const op of legacyOk) {
       assert.ok(newOk.has(op), `${op} must remain covered`);
@@ -306,11 +326,19 @@ describe("vector adapter coverage gate", () => {
           params: { notes: "Note[]" },
           returns: "Note[]",
           sync: false,
-          vector: { operation: "pack", stage: "callable", input: {}, expected: [] },
+          vector: {
+            operation: "pack",
+            stage: "callable",
+            input: {},
+            expected: [],
+          },
         },
       ],
     };
-    const covered = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    const covered = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: [],
+    });
     assert.ok(covered.ok);
     assert.deepEqual(covered.typed, ["Bundle.pack"]);
     assert.deepEqual(covered.covered, []);
@@ -341,11 +369,19 @@ describe("vector adapter coverage gate", () => {
           params: { note: "Note?" },
           returns: "Note?",
           sync: false,
-          vector: { operation: "peek", stage: "callable", input: {}, expected: null },
+          vector: {
+            operation: "peek",
+            stage: "callable",
+            input: {},
+            expected: null,
+          },
         },
       ],
     };
-    const missing = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    const missing = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: [],
+    });
     assert.equal(missing.ok, false);
     assert.deepEqual(missing.typed, []);
     assert.deepEqual(missing.missing, ["Bundle.peek"]);
@@ -384,7 +420,12 @@ describe("vector adapter coverage gate", () => {
           params: { notes: "Note[]" },
           returns: "Note[]",
           sync: false,
-          vector: { operation: "pack", stage: "callable", input: {}, expected: [] },
+          vector: {
+            operation: "pack",
+            stage: "callable",
+            input: {},
+            expected: [],
+          },
         },
         {
           contract: "Bundle",
@@ -394,14 +435,22 @@ describe("vector adapter coverage gate", () => {
           params: { note: "Note?" },
           returns: "Note?",
           sync: false,
-          vector: { operation: "peek", stage: "callable", input: {}, expected: null },
+          vector: {
+            operation: "peek",
+            stage: "callable",
+            input: {},
+            expected: null,
+          },
         },
       ],
     };
 
     // With no adapter for the ineligible op, the seam is INCOMPLETE: the
     // array-of-model op is typed, the optional-model op is missing, ok=false.
-    const partial = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    const partial = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: [],
+    });
     assert.equal(partial.ok, false);
     assert.deepEqual(partial.typed, ["Bundle.pack"]);
     assert.deepEqual(partial.missing, ["Bundle.peek"]);
@@ -444,7 +493,12 @@ describe("vector adapter coverage gate", () => {
           params: { note: "Note", options: "Record<unknown>" },
           returns: "Note[]",
           sync: false,
-          vector: { operation: "assemble", stage: "callable", input: {}, expected: [] },
+          vector: {
+            operation: "assemble",
+            stage: "callable",
+            input: {},
+            expected: [],
+          },
         },
         {
           contract: "Assembler",
@@ -454,13 +508,24 @@ describe("vector adapter coverage gate", () => {
           params: { note: "Note", options: "Record<unknown>?" },
           returns: "Note[]",
           sync: false,
-          vector: { operation: "reassemble", stage: "callable", input: {}, expected: [] },
+          vector: {
+            operation: "reassemble",
+            stage: "callable",
+            input: {},
+            expected: [],
+          },
         },
       ],
     };
-    const covered = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    const covered = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: [],
+    });
     assert.ok(covered.ok);
-    assert.deepEqual(covered.typed, ["Assembler.assemble", "Assembler.reassemble"]);
+    assert.deepEqual(covered.typed, [
+      "Assembler.assemble",
+      "Assembler.reassemble",
+    ]);
     assert.deepEqual(covered.covered, []);
     assert.deepEqual(covered.missing, []);
     assertPartition(covered);
@@ -486,11 +551,19 @@ describe("vector adapter coverage gate", () => {
           params: { payload: "string" },
           returns: "Record<unknown>",
           sync: false,
-          vector: { operation: "raw", stage: "callable", input: {}, expected: {} },
+          vector: {
+            operation: "raw",
+            stage: "callable",
+            input: {},
+            expected: {},
+          },
         },
       ],
     };
-    const missing = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    const missing = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: [],
+    });
     assert.equal(missing.ok, false);
     assert.deepEqual(missing.typed, []);
     assert.deepEqual(missing.missing, ["Emit.raw"]);
@@ -524,7 +597,11 @@ function assertPartition(result: {
     ...result.missing,
   ];
   // No op appears twice across buckets.
-  assert.equal(new Set(buckets).size, buckets.length, "buckets must be disjoint");
+  assert.equal(
+    new Set(buckets).size,
+    buckets.length,
+    "buckets must be disjoint",
+  );
   // The union is exactly the operation set.
   assert.deepEqual([...buckets].sort(), [...result.operations].sort());
 }
@@ -555,7 +632,13 @@ describe("vector adapter coverage gate: typed @dispatch rail (#315)", () => {
       path: "agent.template.format.kind",
       ...(withDecl ? { decl: DECL } : {}),
     },
-    vector: { operation: "render", stage: "callable", name, input: {}, expected: "" },
+    vector: {
+      operation: "render",
+      stage: "callable",
+      name,
+      input: {},
+      expected: "",
+    },
   });
 
   it("credits an adapterless, fully-dispatched seam via the dispatched bucket", () => {
@@ -568,7 +651,10 @@ describe("vector adapter coverage gate: typed @dispatch rail (#315)", () => {
         dispatchEntry("Renderer", "jinja2", true),
       ],
     };
-    const result = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    const result = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: [],
+    });
     assert.ok(result.ok, formatVectorAdapterCoverageFailure(result));
     assert.deepEqual(result.dispatched, ["Renderer.render"]);
     assert.deepEqual(result.missing, []);
@@ -596,7 +682,10 @@ describe("vector adapter coverage gate: typed @dispatch rail (#315)", () => {
       version: 1,
       vectors: [dispatchEntry("Renderer", "mustache", false)],
     };
-    const result = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    const result = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: [],
+    });
     assert.equal(result.ok, false);
     assert.deepEqual(result.dispatched, []);
     assert.deepEqual(result.missing, ["Renderer.render"]);
@@ -608,7 +697,12 @@ describe("vector adapter coverage gate: typed @dispatch rail (#315)", () => {
     try {
       const generated = await generate({
         output,
-        source: path.resolve(process.cwd(), "fixtures", "dispatch-seam", "main.tsp"),
+        source: path.resolve(
+          process.cwd(),
+          "fixtures",
+          "dispatch-seam",
+          "main.tsp",
+        ),
         rootObject: "Typra.Fixtures.DispatchSeam.Root",
         targets: ["typescript"],
         format: false,
@@ -623,14 +717,235 @@ describe("vector adapter coverage gate: typed @dispatch rail (#315)", () => {
         "typed per-interface dispatch conformance must be emitted",
       );
       const snap = JSON.parse(
-        readFileSync(path.join(output, ".typra-generated", "vectors.json"), "utf8"),
+        readFileSync(
+          path.join(output, ".typra-generated", "vectors.json"),
+          "utf8",
+        ),
       ) as CallableVectorSnapshot;
-      const result = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+      const result = evaluateVectorAdapterCoverage({
+        snapshot: snap,
+        adapterKeys: [],
+      });
       assert.ok(result.ok, formatVectorAdapterCoverageFailure(result));
       assert.deepEqual(result.dispatched, ["Renderer.render"]);
       assertPartition(result);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }
+  });
+});
+
+// Typed/dispatched credit is earned from the target-independent snapshot, but
+// the conformance rails it stands for are only emitted when an emit target
+// writes a test tree (`test-dir`). The snapshot records the absence so verify
+// does not credit a rail that does not exist.
+describe("vector adapter coverage gate: typed rails require an emitted test tree", () => {
+  const DECL = { kind: "polymorphic" } as unknown as NonNullable<
+    CallableVectorSnapshot["vectors"][number]["dispatch"]
+  >["decl"];
+  const dispatchedEntry: CallableVectorSnapshot["vectors"][number] = {
+    contract: "Renderer",
+    namespace: "Typra.Sample",
+    group: "",
+    operation: "render",
+    params: { agent: "Agent" },
+    returns: "string",
+    sync: false,
+    dispatch: {
+      discriminator: { model: "TemplateFormat", field: "kind" },
+      path: "agent.template.format.kind",
+      decl: DECL,
+    },
+    vector: { operation: "render", stage: "callable", input: {}, expected: "" },
+  };
+  const withRails = (
+    rails: Pick<
+      CallableVectorSnapshot,
+      "typedConformance" | "dispatchedConformance"
+    >,
+  ): CallableVectorSnapshot => {
+    const base = snapshot();
+    return { ...base, ...rails, vectors: [...base.vectors, dispatchedEntry] };
+  };
+
+  it("withholds typed and dispatched credit when typedConformance is false", () => {
+    const result = evaluateVectorAdapterCoverage({
+      snapshot: withRails({ typedConformance: false }),
+      adapterKeys: [MODEL_OP],
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.typed, []);
+    assert.deepEqual(result.dispatched, []);
+    assert.deepEqual(result.missing, [...TYPED_OPS, "Renderer.render"].sort());
+    assert.match(formatVectorAdapterCoverageFailure(result), /test-dir/);
+    assertPartition(result);
+  });
+
+  it("lets a waiver still cover an operation whose typed credit was withheld", () => {
+    const result = evaluateVectorAdapterCoverage({
+      snapshot: withRails({ typedConformance: false }),
+      adapterKeys: [MODEL_OP],
+      waiverKeys: [...TYPED_OPS, "Renderer.render"],
+    });
+    assert.ok(result.ok, formatVectorAdapterCoverageFailure(result));
+    assert.deepEqual(result.waived, [...TYPED_OPS, "Renderer.render"].sort());
+  });
+
+  it("withholds only dispatched credit when dispatchedConformance is false", () => {
+    const result = evaluateVectorAdapterCoverage({
+      snapshot: withRails({ dispatchedConformance: false }),
+      adapterKeys: [MODEL_OP],
+    });
+    assert.deepEqual(result.typed, TYPED_OPS);
+    assert.deepEqual(result.dispatched, []);
+    assert.deepEqual(result.missing, ["Renderer.render"]);
+    assert.match(formatVectorAdapterCoverageFailure(result), /test-dir/);
+    assertPartition(result);
+  });
+
+  it("keeps crediting both rails for a snapshot without the fields (pre-existing artifacts)", () => {
+    const result = evaluateVectorAdapterCoverage({
+      snapshot: withRails({}),
+      adapterKeys: [MODEL_OP],
+    });
+    assert.ok(result.ok, formatVectorAdapterCoverageFailure(result));
+    assert.deepEqual(result.typed, TYPED_OPS);
+    assert.deepEqual(result.dispatched, ["Renderer.render"]);
+    assert.doesNotMatch(formatVectorAdapterCoverageFailure(result), /test-dir/);
+  });
+
+  it("does not mention test-dir when missing operations were never rail-eligible", () => {
+    const result = evaluateVectorAdapterCoverage({
+      snapshot: withRails({ typedConformance: false }),
+      adapterKeys: [...TYPED_OPS, "Renderer.render"],
+    });
+    assert.deepEqual(result.missing, [MODEL_OP]);
+    assert.doesNotMatch(formatVectorAdapterCoverageFailure(result), /test-dir/);
+  });
+
+  const emitSnapshot = async (
+    target: TargetLanguage,
+    generateTests: boolean,
+  ): Promise<{ snap: CallableVectorSnapshot; raw: string }> => {
+    const output = mkdtempSync(path.join(tmpdir(), "typra-rail-snapshot-"));
+    try {
+      const generated = await generate({
+        output,
+        source: path.resolve(
+          process.cwd(),
+          "fixtures",
+          "dispatch-seam",
+          "main.tsp",
+        ),
+        rootObject: "Typra.Fixtures.DispatchSeam.Root",
+        targets: [target],
+        format: false,
+        generateTests,
+        deterministic: true,
+      });
+      assert.equal(generated.success, true, generated.errors?.join("\n"));
+      const raw = readFileSync(
+        path.join(output, ".typra-generated", "vectors.json"),
+        "utf8",
+      );
+      return { snap: JSON.parse(raw) as CallableVectorSnapshot, raw };
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  };
+
+  it("records typedConformance: false when no emit target sets test-dir", async () => {
+    const { snap } = await emitSnapshot("typescript", false);
+    assert.equal(snap.typedConformance, false);
+    const result = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: [],
+    });
+    assert.deepEqual(result.dispatched, []);
+    assert.deepEqual(result.missing, ["Renderer.render"]);
+  });
+
+  it("omits the rail fields when an emit target sets test-dir", async () => {
+    const { snap, raw } = await emitSnapshot("typescript", true);
+    assert.equal("typedConformance" in snap, false);
+    assert.equal("dispatchedConformance" in snap, false);
+    assert.doesNotMatch(raw, /typedConformance|dispatchedConformance/);
+  });
+
+  it("records only dispatchedConformance: false for a target whose typed entrypoint lives in the library", async () => {
+    // Python emits the typed `run_<seam>_conformance` entrypoint into output-dir
+    // regardless of test-dir, but the per-interface @dispatch conformance only
+    // into test-dir.
+    const { snap } = await emitSnapshot("python", false);
+    assert.equal("typedConformance" in snap, false);
+    assert.equal(snap.dispatchedConformance, false);
+  });
+});
+
+describe("conformanceRailAvailability", () => {
+  const target = (type: string, extra: Record<string, string> = {}) => ({
+    type,
+    "output-dir": "out",
+    ...extra,
+  });
+
+  it("reports no rails when no target writes a test tree or a library entrypoint", () => {
+    assert.deepEqual(
+      conformanceRailAvailability([
+        target("typescript"),
+        target("go"),
+        target("rust"),
+      ]),
+      { typedConformance: false, dispatchedConformance: false },
+    );
+    assert.deepEqual(conformanceRailAvailability([]), {
+      typedConformance: false,
+      dispatchedConformance: false,
+    });
+  });
+
+  it("reports both rails when any target sets test-dir", () => {
+    assert.deepEqual(
+      conformanceRailAvailability([
+        target("typescript"),
+        target("go", { "test-dir": "tests" }),
+      ]),
+      {},
+    );
+  });
+
+  it("credits the library typed entrypoint of csharp/python/java/swift without test-dir", () => {
+    for (const type of ["csharp", "python", "java", "swift"]) {
+      assert.deepEqual(conformanceRailAvailability([target(type)]), {
+        dispatchedConformance: false,
+      });
+    }
+    assert.deepEqual(conformanceRailAvailability([{ type: "java" }]), {
+      typedConformance: false,
+      dispatchedConformance: false,
+    });
+  });
+
+  it("does not credit a markdown target's test-dir (markdown emits no rails)", () => {
+    assert.deepEqual(
+      conformanceRailAvailability([target("markdown", { "test-dir": "t" })]),
+      { typedConformance: false, dispatchedConformance: false },
+    );
+    assert.deepEqual(
+      conformanceRailAvailability([
+        target("markdown", { "test-dir": "t" }),
+        target("typescript"),
+      ]),
+      { typedConformance: false, dispatchedConformance: false },
+    );
+  });
+
+  it("treats a swift harness-test-dir as emitting the dispatched rail", () => {
+    assert.deepEqual(
+      conformanceRailAvailability([
+        target("swift", { "harness-test-dir": "h" }),
+      ]),
+      {},
+    );
   });
 });
