@@ -14,6 +14,7 @@ import {
   postSaveExample,
   wireTestMappings,
   wireTestProviders,
+  propertyWireKey,
 } from "../../testing/test-context.js";
 
 type SwiftNativeSerialization = "none" | "codable";
@@ -201,20 +202,24 @@ function emitWireTest(
   lines.push(`    let json = ${swiftMultilineString(example.json.join("\n"))}`);
   lines.push(`    let instance = try ${typeName}.fromJSON(json)`);
   for (const provider of providers) {
-    lines.push(`    let ${provider}Wire = try instance.toWire("${provider}")`);
+    lines.push(
+      `    let ${provider}Wire = try instance.toWire(${swiftStringLiteral(provider)})`,
+    );
     for (const mapping of mappings.filter((m) => m.provider === provider)) {
       lines.push(
-        `    XCTAssertNotNil(${provider}Wire["${mapping.wireName}"])`,
+        `    XCTAssertNotNil(${provider}Wire[${swiftStringLiteral(mapping.wireName)}])`,
       );
       if (mapping.fieldName !== mapping.wireName) {
-        lines.push(`    XCTAssertNil(${provider}Wire["${mapping.fieldName}"])`);
+        lines.push(
+          `    XCTAssertNil(${provider}Wire[${swiftStringLiteral(mapping.fieldName)}])`,
+        );
       }
     }
     lines.push(
-      `    let ${provider}Restored = try ${typeName}.fromWire("${provider}", ${provider}Wire)`,
+      `    let ${provider}Restored = try ${typeName}.fromWire(${swiftStringLiteral(provider)}, ${provider}Wire)`,
     );
     lines.push(
-      `    XCTAssertEqual(Set(try ${provider}Restored.toWire("${provider}").keys), Set(${provider}Wire.keys))`,
+      `    XCTAssertEqual(Set(try ${provider}Restored.toWire(${swiftStringLiteral(provider)}).keys), Set(${provider}Wire.keys))`,
     );
   }
   lines.push("  }");
@@ -320,8 +325,8 @@ function emitStructuredValidations(
   node: TypeNode,
 ): void {
   for (const prop of node.properties) {
-    if (!(prop.name in sample)) continue;
-    const value = sample[prop.name];
+    if (!(propertyWireKey(prop) in sample)) continue;
+    const value = sample[propertyWireKey(prop)];
     const accessor = `${varName}.${swiftPropertyName(prop.name)}`;
     if (prop.isCollection) {
       const count = Array.isArray(value)
@@ -469,7 +474,7 @@ function emitChildPatternValidation(
   const rawPattern = isWildcardFallbackChild(node, child) ? ", _" : "";
   const body: string[] = [];
   for (const [key, expected] of Object.entries(sample)) {
-    if (key === node.discriminator) continue;
+    if (key === swiftSampleKey(node, node.discriminator ?? "")) continue;
     const literal = swiftExpectedLiteral(expected);
     if (literal === null) continue;
     const prop = findProperty(child, key) ?? findProperty(node, key);
@@ -499,7 +504,8 @@ function matchingPolymorphicChild(
   sample: Record<string, any>,
 ): TypeNode | undefined {
   const discriminatorValue = node.discriminator
-    ? sample[node.discriminator]
+    ? (sample[swiftSampleKey(node, node.discriminator)] ??
+      sample[node.discriminator])
     : undefined;
   return (
     node.childTypes.find(
@@ -577,7 +583,7 @@ function emitPropertyAssertion(
       const valueAccessor = requiredAccessor(accessor, prop.isOptional);
       if (prop.type.childTypes.length > 0) {
         lines.push(
-          `${indent}XCTAssertEqual(try ${valueAccessor}.save()[${swiftStringLiteral(nestedKey)}] as? String, ${expected})`,
+          `${indent}XCTAssertEqual(try ${valueAccessor}.save()[${swiftStringLiteral(swiftSampleKey(prop.type, nestedKey))}] as? String, ${expected})`,
         );
       } else {
         const nestedProp = prop.type.properties.find(
@@ -627,7 +633,16 @@ function requiredAccessor(accessor: string, isOptional: boolean): string {
   return isOptional ? `(try XCTUnwrap(${accessor}))` : accessor;
 }
 
+function swiftSampleKey(node: TypeNode, name: string): string {
+  const prop = node.properties.find((candidate) => candidate.name === name);
+  return prop ? propertyWireKey(prop) : name;
+}
+
 function findProperty(node: TypeNode, key: string): PropertyNode | undefined {
+  const byWireKey = node.properties.find(
+    (candidate) => candidate.serializedName === key,
+  );
+  if (byWireKey) return byWireKey;
   return node.properties.find(
     (candidate) =>
       swiftPropertyName(candidate.name) === swiftPropertyName(key) ||

@@ -35,6 +35,8 @@ import {
   PropertyCategory,
   MethodStubDecl,
   isClosedPolymorphicDispatch,
+  assignmentWireKey,
+  discriminatorWireKey,
 } from "../../ir/declarations.js";
 import {
   shouldGuardMissingRequiredField,
@@ -129,7 +131,8 @@ export function isCSharpSinglePrecision(scalarType: string): boolean {
  */
 export function csharpNarrowIntegerType(scalarType: string): string | null {
   const csType = CSHARP_TYPE_MAP[scalarType];
-  return csType && ["sbyte", "short", "byte", "ushort", "uint", "ulong"].includes(csType)
+  return csType &&
+    ["sbyte", "short", "byte", "ushort", "uint", "ulong"].includes(csType)
     ? csType
     : null;
 }
@@ -488,7 +491,9 @@ function emitClassDeclaration(type: TypeDecl, lines: string[]): void {
 
 function emitShorthandProperty(type: TypeDecl, lines: string[]): void {
   const new_ = type.base ? "new " : "";
-  const value = type.coercionProperty ? `"${type.coercionProperty}"` : "null";
+  const value = type.coercionProperty
+    ? csStringLiteral(type.coercionProperty)
+    : "null";
   lines.push("    /// <summary>");
   lines.push("    /// The shorthand property name for this type, if any.");
   lines.push("    /// </summary>");
@@ -775,11 +780,11 @@ function emitLoadMethod(
     );
     if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(
-      `        if (!data.TryGetValue("${assign.sourceName}", out var required${toPascalCase(assign.fieldName)}Value) || required${toPascalCase(assign.fieldName)}Value is null)`,
+      `        if (!data.TryGetValue(${csStringLiteral(assign.sourceName)}, out var required${toPascalCase(assign.fieldName)}Value) || required${toPascalCase(assign.fieldName)}Value is null)`,
     );
     lines.push("        {");
     lines.push(
-      `            throw new ArgumentException($"{context!.At("${assign.sourceName}").Path}: missing required field");`,
+      `            throw new ArgumentException(context!.At(${csStringLiteral(assign.sourceName)}).Path + ": missing required field");`,
     );
     lines.push("        }");
     lines.push("");
@@ -827,10 +832,10 @@ function emitLoadAssignment(
   lines: string[],
 ): void {
   const propName = toPascalCase(assign.fieldName);
-  const varName = `${assign.sourceName}Value`;
+  const varName = `${assign.fieldName}Value`;
 
   lines.push(
-    `        if (data.TryGetValue("${assign.sourceName}", out var ${varName}) && ${varName} is not null)`,
+    `        if (data.TryGetValue(${csStringLiteral(assign.sourceName)}, out var ${varName}) && ${varName} is not null)`,
   );
   lines.push("        {");
   lines.push(
@@ -876,9 +881,9 @@ function getLoadExpression(
     case "dict":
       return csharpDictLoadExpression(assign, propName, varName);
     case "complex":
-      return `instance.${propName} = ${cat.typeName}.Load(${varName}.GetDictionary(${cat.typeName}.ShorthandProperty), context!.At("${assign.sourceName}"));`;
+      return `instance.${propName} = ${cat.typeName}.Load(${varName}.GetDictionary(${cat.typeName}.ShorthandProperty), context!.At(${csStringLiteral(assign.sourceName)}));`;
     case "collection_complex":
-      return `instance.${propName} = Load${propName}(${varName}, context!.At("${assign.sourceName}"));`;
+      return `instance.${propName} = Load${propName}(${varName}, context!.At(${csStringLiteral(assign.sourceName)}));`;
     case "collection_scalar": {
       const csType = CSHARP_TYPE_MAP[cat.scalarType] || "object";
       if (csType === "string") {
@@ -966,7 +971,9 @@ function emitCollectionLoadHelper(
   );
   lines.push("                    {");
   lines.push('                        ["name"] = kvp.Key,');
-  lines.push(`                        ["${primaryProp || ""}"] = kvp.Value`);
+  lines.push(
+    `                        [${csStringLiteral(primaryProp || "")}] = kvp.Value`,
+  );
   lines.push("                    };");
   emitCsEntryShorthandArms(helper, lines);
   lines.push(
@@ -1082,7 +1089,9 @@ function emitUnknownCarrier(type: TypeDecl, lines: string[]): void {
     "        instance._raw = (Dictionary<string, object?>)CloneRawValue(data)!;",
   );
   for (const a of type.load.assignments) {
-    lines.push(`        instance._raw.Remove("${a.sourceName}");`);
+    lines.push(
+      `        instance._raw.Remove(${csStringLiteral(a.sourceName)});`,
+    );
   }
   lines.push("        return instance;");
   lines.push("    }");
@@ -1117,7 +1126,7 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
     !dispatch.defaultVariant || dispatch.defaultVariant.isSelfReference;
   if (throwsOnUnknown) {
     lines.push(
-      `        if (!data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) || discriminatorValue is not string discriminator || discriminator == "")`,
+      `        if (!data.TryGetValue(${csStringLiteral(discriminatorWireKey(dispatch))}, out var discriminatorValue) || discriminatorValue is not string discriminator || discriminator == "")`,
     );
     lines.push("        {");
     lines.push(
@@ -1126,7 +1135,7 @@ function emitLoadKind(type: TypeDecl, lines: string[]): void {
     lines.push("        }");
   } else {
     lines.push(
-      `        var discriminator = data.TryGetValue("${dispatch.discriminatorField}", out var discriminatorValue) && discriminatorValue is string discriminatorString ? discriminatorString : "";`,
+      `        var discriminator = data.TryGetValue(${csStringLiteral(discriminatorWireKey(dispatch))}, out var discriminatorValue) && discriminatorValue is string discriminatorString ? discriminatorString : "";`,
     );
   }
   lines.push("");
@@ -1294,10 +1303,13 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames);
     const inner = entries
-      .map(([provider, wireName]) => `["${provider}"] = "${wireName}"`)
+      .map(
+        ([provider, wireName]) =>
+          `[${csStringLiteral(provider)}] = ${csStringLiteral(wireName)}`,
+      )
       .join(", ");
     lines.push(
-      `            ["${mapping.fieldName}"] = new Dictionary<string, string> { ${inner} },`,
+      `            [${csStringLiteral(assignmentWireKey(mapping))}] = new Dictionary<string, string> { ${inner} },`,
     );
   }
 
@@ -1345,10 +1357,13 @@ function emitFromWireMethod(type: TypeDecl, lines: string[]): void {
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames);
     const inner = entries
-      .map(([provider, wireName]) => `["${provider}"] = "${wireName}"`)
+      .map(
+        ([provider, wireName]) =>
+          `[${csStringLiteral(provider)}] = ${csStringLiteral(wireName)}`,
+      )
       .join(", ");
     lines.push(
-      `            ["${mapping.fieldName}"] = new Dictionary<string, string> { ${inner} },`,
+      `            [${csStringLiteral(assignmentWireKey(mapping))}] = new Dictionary<string, string> { ${inner} },`,
     );
   }
 
@@ -1361,9 +1376,7 @@ function emitFromWireMethod(type: TypeDecl, lines: string[]): void {
   );
   lines.push("                inverse[wireName] = field;");
   lines.push("        }");
-  lines.push(
-    "        var canonical = new Dictionary<string, object?>();",
-  );
+  lines.push("        var canonical = new Dictionary<string, object?>();");
   lines.push("        foreach (var (key, value) in data)");
   lines.push(
     "            canonical[inverse.TryGetValue(key, out var field) ? field : key] = value;",
@@ -1397,27 +1410,27 @@ function getSaveExpression(assign: SaveAssignment, propName: string): string {
     const valueExpr = assign.isOptional
       ? `obj.${propName}.Value`
       : `obj.${propName}`;
-    return `result["${assign.targetName}"] = ${toPascalCase(assign.enumName)}Parser.ToValue(${valueExpr});`;
+    return `result[${csStringLiteral(assign.targetName)}] = ${toPascalCase(assign.enumName)}Parser.ToValue(${valueExpr});`;
   }
   const cat = assign.category;
   switch (cat.kind) {
     case "scalar":
-      return `result["${assign.targetName}"] = obj.${propName};`;
+      return `result[${csStringLiteral(assign.targetName)}] = obj.${propName};`;
     case "dict":
       if (
         cat.valueType &&
         cat.valueType !== "unknown" &&
         !CSHARP_TYPE_MAP[cat.valueType]
       ) {
-        return `result["${assign.targetName}"] = obj.${propName}.ToDictionary(kvp => kvp.Key, kvp => (object?)kvp.Value.Save(context));`;
+        return `result[${csStringLiteral(assign.targetName)}] = obj.${propName}.ToDictionary(kvp => kvp.Key, kvp => (object?)kvp.Value.Save(context));`;
       }
-      return `result["${assign.targetName}"] = obj.${propName};`;
+      return `result[${csStringLiteral(assign.targetName)}] = obj.${propName};`;
     case "complex":
-      return `result["${assign.targetName}"] = obj.${propName}?.Save(context);`;
+      return `result[${csStringLiteral(assign.targetName)}] = obj.${propName}?.Save(context);`;
     case "collection_complex":
-      return `result["${assign.targetName}"] = Save${propName}(obj.${propName}, context);`;
+      return `result[${csStringLiteral(assign.targetName)}] = Save${propName}(obj.${propName}, context);`;
     case "collection_scalar":
-      return `result["${assign.targetName}"] = obj.${propName};`;
+      return `result[${csStringLiteral(assign.targetName)}] = obj.${propName};`;
   }
 }
 
@@ -1434,7 +1447,7 @@ function csharpDictLoadExpression(
   const valueExpr = csharpDictValueLoadExpr(
     "kvp.Value",
     valueType,
-    `context!.At("${assign.sourceName}").At(kvp.Key)`,
+    `context!.At(${csStringLiteral(assign.sourceName)}).At(kvp.Key)`,
   );
   return `instance.${propName} = ${varName}.GetDictionary()!.ToDictionary(kvp => kvp.Key, kvp => ${valueExpr});`;
 }
@@ -1482,7 +1495,7 @@ function emitCsEntryShorthandArms(
     lines.push(`${indent}{`);
     for (const a of entryCase.assignments) {
       lines.push(
-        `${indent}    newDict["${a.fieldName}"] = ${csLiteral(a.literalValue)};`,
+        `${indent}    newDict[${csStringLiteral(a.fieldName)}] = ${csLiteral(a.literalValue)};`,
       );
     }
     lines.push(`${indent}}`);
@@ -1518,7 +1531,15 @@ function csLiteral(value: string | number | boolean | null): string {
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number") return String(value);
-  return JSON.stringify(value);
+  return csStringLiteral(value);
+}
+
+/** A C# regular string literal; escapes the line terminators C# rejects in one. */
+function csStringLiteral(value: string): string {
+  return JSON.stringify(value)
+    .replace(/\u0085/g, "\\u0085")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
 
 function emitCollectionSaveHelper(
@@ -1712,7 +1733,9 @@ function emitFromJson(type: TypeDecl, lines: string[]): void {
       // Only coercionProperty, no typed coercions
       lines.push(`            dict = new Dictionary<string, object?>`);
       lines.push("            {");
-      lines.push(`                ["${type.coercionProperty}"] = value`);
+      lines.push(
+        `                [${csStringLiteral(type.coercionProperty!)}] = value`,
+      );
       lines.push("            };");
     }
 
@@ -1805,7 +1828,9 @@ function emitFromYaml(type: TypeDecl, lines: string[]): void {
     } else {
       lines.push(`            dict = new Dictionary<string, object?>`);
       lines.push("            {");
-      lines.push(`                ["${type.coercionProperty}"] = parsed`);
+      lines.push(
+        `                [${csStringLiteral(type.coercionProperty!)}] = parsed`,
+      );
       lines.push("            };");
     }
 
@@ -1852,10 +1877,12 @@ function emitCoercionSwitchArms(
     lines.push(`${indent}{`);
     for (const assign of coercion.assignments) {
       if (assign.isInput) {
-        lines.push(`${indent}    ["${assign.fieldName}"] = ${varName},`);
+        lines.push(
+          `${indent}    [${csStringLiteral(assignmentWireKey(assign))}] = ${varName},`,
+        );
       } else {
         lines.push(
-          `${indent}    ["${assign.fieldName}"] = "${assign.literalValue}",`,
+          `${indent}    [${csStringLiteral(assignmentWireKey(assign))}] = "${assign.literalValue}",`,
         );
       }
     }
@@ -1868,10 +1895,12 @@ function emitCoercionSwitchArms(
       lines.push(`${indent}{`);
       for (const assign of coercion.assignments) {
         if (assign.isInput) {
-          lines.push(`${indent}    ["${assign.fieldName}"] = longValue,`);
+          lines.push(
+            `${indent}    [${csStringLiteral(assignmentWireKey(assign))}] = longValue,`,
+          );
         } else {
           lines.push(
-            `${indent}    ["${assign.fieldName}"] = "${assign.literalValue}",`,
+            `${indent}    [${csStringLiteral(assignmentWireKey(assign))}] = "${assign.literalValue}",`,
           );
         }
       }
@@ -1886,10 +1915,12 @@ function emitCoercionSwitchArms(
       lines.push(`${indent}{`);
       for (const assign of coercion.assignments) {
         if (assign.isInput) {
-          lines.push(`${indent}    ["${assign.fieldName}"] = doubleValue,`);
+          lines.push(
+            `${indent}    [${csStringLiteral(assignmentWireKey(assign))}] = doubleValue,`,
+          );
         } else {
           lines.push(
-            `${indent}    ["${assign.fieldName}"] = "${assign.literalValue}",`,
+            `${indent}    [${csStringLiteral(assignmentWireKey(assign))}] = "${assign.literalValue}",`,
           );
         }
       }
@@ -1901,7 +1932,9 @@ function emitCoercionSwitchArms(
   if (coercionProperty) {
     lines.push(`${indent}_ => new Dictionary<string, object?>`);
     lines.push(`${indent}{`);
-    lines.push(`${indent}    ["${coercionProperty}"] = ${switchVarName}`);
+    lines.push(
+      `${indent}    [${csStringLiteral(coercionProperty)}] = ${switchVarName}`,
+    );
     lines.push(`${indent}}`);
   } else {
     lines.push(

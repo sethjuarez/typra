@@ -448,7 +448,7 @@ export const renderTests = (
           `C# test adapter: shared validation for ${node.typeName.name}.${v.key} has no sourceKey`,
         );
       }
-      const raw = example.sample[sourceKey];
+      const raw = example.sample[v.wireKey ?? sourceKey];
       const prop = node.properties.find((p) => p.name === sourceKey);
       // Closed enums render as `EnumName.Member` (a C# expression); open enums and every
       // other field render from the raw value. Mirrors the shared enum branch and the C#

@@ -35,6 +35,9 @@ import {
   CollectionHelperDecl,
   EntryShorthandAssignment,
   isClosedPolymorphicDispatch,
+  assignmentWireKey,
+  discriminatorWireKey,
+  fieldWireKey,
 } from "../../ir/declarations.js";
 import {
   shouldGuardMissingRequiredField,
@@ -346,7 +349,9 @@ function emitGoEnum(enumDef: EnumDef, lines: string[]): void {
     for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
       if (aliases.length === 0) continue;
       // Go cases never fall through, so every alias shares one case clause.
-      lines.push(`\tcase ${aliases.map((alias) => JSON.stringify(alias)).join(", ")}:`);
+      lines.push(
+        `\tcase ${aliases.map((alias) => JSON.stringify(alias)).join(", ")}:`,
+      );
       lines.push(
         `\t\treturn ${enumDef.name}${toPascalCase(canonical)}${enumDef.isOpen ? "" : ", nil"}`,
       );
@@ -555,7 +560,10 @@ function emitStruct(
       field.enumName,
     );
     const fieldName = fieldNames.get(field.name) ?? goFieldName(field.name);
-    const tag = getStructTag(field.name, shouldPreserveOptionalAbsence(field));
+    const tag = getStructTag(
+      fieldWireKey(field),
+      shouldPreserveOptionalAbsence(field),
+    );
     lines.push(`\t${fieldName} ${goType} ${tag}`);
   }
   if (absorbsUnknownIntoBase(type.polymorphicDispatch)) {
@@ -656,17 +664,17 @@ function emitLoadFunction(
       );
       if (!shouldGuardMissingRequiredField(field)) continue;
       body.push(
-        `\t\tif requiredValue, exists := m["${assign.sourceName}"]; !exists || requiredValue == nil {`,
+        `\t\tif requiredValue, exists := m[${goLiteral(assign.sourceName)}]; !exists || requiredValue == nil {`,
       );
       body.push(
-        `\t\t\treturn result, fmt.Errorf("%s: missing required field", ctx.At("${assign.sourceName}").Path)`,
+        `\t\t\treturn result, fmt.Errorf("%s: missing required field", ctx.At(${goLiteral(assign.sourceName)}).Path)`,
       );
       body.push("\t\t}");
     }
 
     for (const assign of type.load.assignments) {
       const helper = type.collectionHelpers.find(
-        (candidate) => candidate.propertyName === assign.sourceName,
+        (candidate) => candidate.propertyName === assign.fieldName,
       );
       emitLoadAssignment(
         assign,
@@ -683,7 +691,7 @@ function emitLoadFunction(
       body.push(`\t\t\tresult.raw[key] = clone${typeName}RawValue(value)`);
       body.push("\t\t}");
       for (const field of type.fields) {
-        body.push(`\t\tdelete(result.raw, "${field.name}")`);
+        body.push(`\t\tdelete(result.raw, ${goLiteral(fieldWireKey(field))})`);
       }
     }
 
@@ -717,8 +725,12 @@ function emitLoadFunction(
  * absent, blank, unknown, and non-string discriminators, so the dispatch never emits `fmt.Errorf`.
  * `needsFmt` keys on this too: requesting `fmt` for such a dispatch leaves an unused import (#305).
  */
-function hasDeclaredDispatchDefault(dispatch: PolymorphicDispatchDecl): boolean {
-  return Boolean(dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference);
+function hasDeclaredDispatchDefault(
+  dispatch: PolymorphicDispatchDecl,
+): boolean {
+  return Boolean(
+    dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference,
+  );
 }
 
 function emitPolymorphicDispatch(
@@ -744,7 +756,7 @@ function emitPolymorphicDispatch(
   lines.push("\t// Handle polymorphic types based on discriminator");
   lines.push("\tif m, ok := data.(map[string]interface{}); ok {");
   lines.push(
-    `\t\tif discriminator, ok := m["${dispatch.discriminatorField}"]; ok {`,
+    `\t\tif discriminator, ok := m[${goLiteral(discriminatorWireKey(dispatch))}]; ok {`,
   );
   lines.push("\t\t\tswitch discriminator := discriminator.(type) {");
   lines.push("\t\t\tcase string:");
@@ -804,9 +816,7 @@ function emitPolymorphicDispatch(
   // default falls through to base construction below; otherwise reject.
   if (declaredDefault) {
     lines.push("\t\t} else {");
-    lines.push(
-      `\t\t\treturn Load${declaredDefault.typeName.name}(data, ctx)`,
-    );
+    lines.push(`\t\t\treturn Load${declaredDefault.typeName.name}(data, ctx)`);
     lines.push("\t\t}");
   } else if (!hasFallback) {
     lines.push("\t\t} else {");
@@ -900,9 +910,11 @@ function coercionExpansion(coercion: CoercionDecl): string {
   const entries: string[] = [];
   for (const assign of coercion.assignments) {
     if (assign.isInput) {
-      entries.push(`"${assign.fieldName}": v`);
+      entries.push(`${goLiteral(assignmentWireKey(assign))}: v`);
     } else {
-      entries.push(`"${assign.fieldName}": "${assign.literalValue}"`);
+      entries.push(
+        `${goLiteral(assignmentWireKey(assign))}: "${assign.literalValue}"`,
+      );
     }
   }
   return `map[string]interface{}{${entries.join(", ")}}`;
@@ -974,13 +986,13 @@ function emitLoadScalar(
     // any/unknown type
     if (assign.isOptional) {
       lines.push(
-        `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+        `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
       );
       lines.push(`\t\t\tresult.${fieldName} = &val`);
       lines.push("\t\t}");
     } else {
       lines.push(
-        `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+        `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
       );
       lines.push(`\t\t\tresult.${fieldName} = val`);
       lines.push("\t\t}");
@@ -991,14 +1003,14 @@ function emitLoadScalar(
   if (goType === "bool") {
     if (assign.isOptional) {
       lines.push(
-        `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+        `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
       );
       lines.push(`\t\t\tv := val.(bool)`);
       lines.push(`\t\t\tresult.${fieldName} = &v`);
       lines.push("\t\t}");
     } else {
       lines.push(
-        `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+        `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
       );
       lines.push(`\t\t\tresult.${fieldName} = val.(bool)`);
       lines.push("\t\t}");
@@ -1015,7 +1027,7 @@ function emitLoadScalar(
     : `${castType}(val.(string))`;
   if (assign.isOptional) {
     lines.push(
-      `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+      `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
     );
     if (useParser && !assign.isOpenEnum) {
       lines.push(`\t\t\tv, err := ${parseExpr}`);
@@ -1029,7 +1041,7 @@ function emitLoadScalar(
     lines.push("\t\t}");
   } else {
     lines.push(
-      `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+      `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
     );
     if (useParser && !assign.isOpenEnum) {
       lines.push(`\t\t\tv, err := ${parseExpr}`);
@@ -1090,7 +1102,7 @@ function emitLoadNumeric(
 
   if (assign.isOptional) {
     lines.push(
-      `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil { // Handle various numeric types from JSON/YAML/roundtrip`,
+      `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil { // Handle various numeric types from JSON/YAML/roundtrip`,
     );
     lines.push(`\t\t\tvar v ${goType}`);
     lines.push("\t\t\tswitch n := val.(type) {");
@@ -1103,7 +1115,7 @@ function emitLoadNumeric(
     lines.push("\t\t}");
   } else {
     lines.push(
-      `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil { // Handle various numeric types from JSON/YAML/roundtrip`,
+      `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil { // Handle various numeric types from JSON/YAML/roundtrip`,
     );
     lines.push(`\t\t\tvar v ${goType}`);
     lines.push("\t\t\tswitch n := val.(type) {");
@@ -1128,10 +1140,12 @@ function emitLoadComplex(
   const isPolymorphic = polymorphicTypeNames.has(typeName);
   const acceptsScalarCoercion = scalarCoercibleTypeNames.has(typeName);
 
-  lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
+  lines.push(
+    `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
+  );
   lines.push(`\t\t\tif m, ok := val.(map[string]interface{}); ok {`);
   lines.push(
-    `\t\t\t\tloaded, err := Load${typeName}(m, ctx.At("${assign.sourceName}"))`,
+    `\t\t\t\tloaded, err := Load${typeName}(m, ctx.At(${goLiteral(assign.sourceName)}))`,
   );
   lines.push("\t\t\t\tif err != nil {");
   lines.push("\t\t\t\t\treturn result, err");
@@ -1157,7 +1171,7 @@ function emitLoadComplex(
   if (acceptsScalarCoercion) {
     lines.push("\t\t\t} else {");
     lines.push(
-      `\t\t\t\tloaded, err := Load${typeName}(val, ctx.At("${assign.sourceName}"))`,
+      `\t\t\t\tloaded, err := Load${typeName}(val, ctx.At(${goLiteral(assign.sourceName)}))`,
     );
     lines.push("\t\t\t\tif err != nil {");
     lines.push("\t\t\t\t\treturn result, err");
@@ -1180,7 +1194,9 @@ function emitLoadCollectionScalar(
 ): void {
   const goType = GO_TYPE_MAP[scalarType] || "interface{}";
 
-  lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
+  lines.push(
+    `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
+  );
   lines.push("\t\t\tswitch arr := val.(type) {");
 
   if (goType === "interface{}") {
@@ -1221,7 +1237,9 @@ function emitLoadCollectionComplex(
   const isPolymorphic = polymorphicTypeNames.has(typeName);
   const goElemType = isPolymorphic ? "interface{}" : typeName;
 
-  lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
+  lines.push(
+    `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
+  );
   if (helper?.hasNameProperty) {
     lines.push("\t\t\tif named, ok := val.(map[string]interface{}); ok {");
     lines.push("\t\t\t\tkeys := make([]string, 0, len(named))");
@@ -1236,7 +1254,7 @@ function emitLoadCollectionComplex(
     lines.push("\t\t\t\t\tentry := named[key]");
     lines.push("\t\t\t\t\tif _, invalid := entry.([]interface{}); invalid {");
     lines.push(
-      `\t\t\t\t\t\treturn result, fmt.Errorf("%s: invalid named collection entry category array", ctx.At("${assign.sourceName}").At(key).Path)`,
+      `\t\t\t\t\t\treturn result, fmt.Errorf("%s: invalid named collection entry category array", ctx.At(${goLiteral(assign.sourceName)}).At(key).Path)`,
     );
     lines.push("\t\t\t\t\t}");
     lines.push("\t\t\t\t\titem, ok := entry.(map[string]interface{})");
@@ -1252,7 +1270,7 @@ function emitLoadCollectionComplex(
     lines.push("\t\t\t\t\t}");
     lines.push('\t\t\t\t\titem["name"] = key');
     lines.push(
-      `\t\t\t\t\tloaded, err := Load${typeName}(item, ctx.At("${assign.sourceName}").At(key))`,
+      `\t\t\t\t\tloaded, err := Load${typeName}(item, ctx.At(${goLiteral(assign.sourceName)}).At(key))`,
     );
     lines.push("\t\t\t\t\tif err != nil {");
     lines.push("\t\t\t\t\t\treturn result, err");
@@ -1269,7 +1287,7 @@ function emitLoadCollectionComplex(
   lines.push("\t\t\t\tfor i, v := range arr {");
   lines.push("\t\t\t\t\tif item, ok := v.(map[string]interface{}); ok {");
   lines.push(
-    `\t\t\t\t\t\tloaded, err := Load${typeName}(item, ctx.At("${assign.sourceName}").AtIndex(i))`,
+    `\t\t\t\t\t\tloaded, err := Load${typeName}(item, ctx.At(${goLiteral(assign.sourceName)}).AtIndex(i))`,
   );
   lines.push("\t\t\t\t\t\tif err != nil {");
   lines.push("\t\t\t\t\t\t\treturn result, err");
@@ -1296,7 +1314,9 @@ function emitLoadDict(
 ): void {
   const valueType =
     assign.category.kind === "dict" ? assign.category.valueType : undefined;
-  lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
+  lines.push(
+    `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
+  );
   if (!valueType || valueType === "unknown") {
     lines.push("\t\t\tif m, ok := val.(map[string]interface{}); ok {");
     lines.push(`\t\t\t\tresult.${fieldName} = m`);
@@ -1315,7 +1335,7 @@ function emitLoadDict(
       valueType,
       "item",
       "loaded",
-      `ctx.At("${assign.sourceName}").At(key)`,
+      `ctx.At(${goLiteral(assign.sourceName)}).At(key)`,
       polymorphicTypeNames,
       lines,
     );
@@ -1402,7 +1422,7 @@ function emitSaveMethod(
 
   for (const assign of type.save.assignments) {
     const helper = type.collectionHelpers.find(
-      (candidate) => candidate.propertyName === assign.targetName,
+      (candidate) => candidate.propertyName === assign.fieldName,
     );
     emitSaveAssignment(assign, helper, polymorphicTypeNames, fieldNames, lines);
   }
@@ -1458,7 +1478,9 @@ function emitGoEntryShorthandArms(
   const indent = "\t\t\t\t\t\t";
 
   if (!shorthand || shorthand.cases.length === 0) {
-    lines.push(`${indent}item["${entryShorthandTarget(helper)}"] = entry`);
+    lines.push(
+      `${indent}item[${goLiteral(entryShorthandTarget(helper))}] = entry`,
+    );
     return;
   }
 
@@ -1472,7 +1494,7 @@ function emitGoEntryShorthandArms(
   ) => {
     for (const a of entryCase.assignments) {
       lines.push(
-        `${depth}item["${a.fieldName}"] = ${goLiteral(a.literalValue)}`,
+        `${depth}item[${goLiteral(a.fieldName)}] = ${goLiteral(a.literalValue)}`,
       );
     }
   };
@@ -1483,7 +1505,9 @@ function emitGoEntryShorthandArms(
   if (integral) {
     lines.push(`${indent}case int, int32, int64:`);
     assignConstants(integral, `${indent}\t`);
-    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+    lines.push(
+      `${indent}\titem[${goLiteral(shorthand.valueField)}] = shorthandValue`,
+    );
   }
 
   if (integral && fractional) {
@@ -1493,11 +1517,15 @@ function emitGoEntryShorthandArms(
     lines.push(`${indent}\t} else {`);
     assignConstants(fractional, `${indent}\t\t`);
     lines.push(`${indent}\t}`);
-    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+    lines.push(
+      `${indent}\titem[${goLiteral(shorthand.valueField)}] = shorthandValue`,
+    );
   } else if (fractional) {
     lines.push(`${indent}case float32, float64:`);
     assignConstants(fractional, `${indent}\t`);
-    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+    lines.push(
+      `${indent}\titem[${goLiteral(shorthand.valueField)}] = shorthandValue`,
+    );
   }
 
   for (const entryCase of ordered) {
@@ -1510,11 +1538,15 @@ function emitGoEntryShorthandArms(
     if (!goCase) continue;
     lines.push(`${indent}case ${goCase}:`);
     assignConstants(entryCase, `${indent}\t`);
-    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+    lines.push(
+      `${indent}\titem[${goLiteral(shorthand.valueField)}] = shorthandValue`,
+    );
   }
 
   lines.push(`${indent}default:`);
-  lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+  lines.push(
+    `${indent}\titem[${goLiteral(shorthand.valueField)}] = shorthandValue`,
+  );
   lines.push(`${indent}}`);
 }
 
@@ -1604,10 +1636,12 @@ function emitSaveScalar(
 
   if (shouldOmitAbsentOnSave(assign, "go")) {
     lines.push(`\tif obj.${fieldName} != nil {`);
-    lines.push(`\t\tresult["${assign.targetName}"] = ${saveExprDeref}`);
+    lines.push(
+      `\t\tresult[${goLiteral(assign.targetName)}] = ${saveExprDeref}`,
+    );
     lines.push("\t}");
   } else {
-    lines.push(`\tresult["${assign.targetName}"] = ${saveExpr}`);
+    lines.push(`\tresult[${goLiteral(assign.targetName)}] = ${saveExpr}`);
   }
 }
 
@@ -1632,9 +1666,13 @@ function emitSaveComplex(
       lines.push("\t\t\tcase interface {");
       lines.push("\t\t\t\tSave(*SaveContext) map[string]interface{}");
       lines.push("\t\t\t}:");
-      lines.push(`\t\t\t\tresult["${assign.targetName}"] = v.Save(ctx)`);
+      lines.push(
+        `\t\t\t\tresult[${goLiteral(assign.targetName)}] = v.Save(ctx)`,
+      );
       lines.push("\t\t\tdefault:");
-      lines.push(`\t\t\t\tresult["${assign.targetName}"] = obj.${fieldName}`);
+      lines.push(
+        `\t\t\t\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}`,
+      );
       lines.push("\t\t\t}");
       lines.push("\t\t}");
       lines.push("\t}");
@@ -1646,23 +1684,25 @@ function emitSaveComplex(
       lines.push("\tcase interface {");
       lines.push("\t\tSave(*SaveContext) map[string]interface{}");
       lines.push("\t}:");
-      lines.push(`\t\tresult["${assign.targetName}"] = v.Save(ctx)`);
+      lines.push(`\t\tresult[${goLiteral(assign.targetName)}] = v.Save(ctx)`);
       lines.push("\tdefault:");
-      lines.push(`\t\tresult["${assign.targetName}"] = obj.${fieldName}`);
+      lines.push(
+        `\t\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}`,
+      );
       lines.push("\t}");
     }
   } else {
     if (shouldOmitAbsentOnSave(assign, "go")) {
       lines.push(`\tif obj.${fieldName} != nil {`);
       lines.push(
-        `\t\tresult["${assign.targetName}"] = obj.${fieldName}.Save(ctx)`,
+        `\t\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}.Save(ctx)`,
       );
       lines.push("\t}");
     } else {
       // Required non-polymorphic complex — blank line before
       lines.push("");
       lines.push(
-        `\tresult["${assign.targetName}"] = obj.${fieldName}.Save(ctx)`,
+        `\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}.Save(ctx)`,
       );
     }
   }
@@ -1675,10 +1715,12 @@ function emitSaveCollectionScalar(
 ): void {
   if (shouldOmitAbsentOnSave(assign, "go")) {
     lines.push(`\tif obj.${fieldName} != nil {`);
-    lines.push(`\t\tresult["${assign.targetName}"] = obj.${fieldName}`);
+    lines.push(
+      `\t\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}`,
+    );
     lines.push("\t}");
   } else {
-    lines.push(`\tresult["${assign.targetName}"] = obj.${fieldName}`);
+    lines.push(`\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}`);
   }
 }
 
@@ -1750,7 +1792,7 @@ function emitSaveCollectionComplex(
         `\t\t\tif (ctx == nil || ctx.UseShorthand) && len(copy) == 1 {`,
       );
       lines.push(
-        `\t\t\t\tif shorthand, ok := copy["${helper.coercionProperty}"]; ok {`,
+        `\t\t\t\tif shorthand, ok := copy[${goLiteral(helper.coercionProperty)}]; ok {`,
       );
       lines.push("\t\t\t\t\tobjectItems[name] = shorthand");
       lines.push("\t\t\t\t\tcontinue");
@@ -1762,12 +1804,12 @@ function emitSaveCollectionComplex(
     lines.push(
       "\t\tif losslessObject && (ctx == nil || ctx.CollectionFormat != CollectionFormatArray) {",
     );
-    lines.push(`\t\t\tresult["${assign.targetName}"] = objectItems`);
+    lines.push(`\t\t\tresult[${goLiteral(assign.targetName)}] = objectItems`);
     lines.push("\t\t} else {");
-    lines.push(`\t\t\tresult["${assign.targetName}"] = arr`);
+    lines.push(`\t\t\tresult[${goLiteral(assign.targetName)}] = arr`);
     lines.push("\t\t}");
   } else {
-    lines.push(`\t\tresult["${assign.targetName}"] = arr`);
+    lines.push(`\t\tresult[${goLiteral(assign.targetName)}] = arr`);
   }
 
   if (shouldOmitAbsentOnSave(assign, "go")) {
@@ -1818,7 +1860,7 @@ function emitGoDictSaveResult(
   indent: string,
 ): void {
   if (!serializesComplexValues) {
-    lines.push(`${indent}result["${targetName}"] = ${sourceExpr}`);
+    lines.push(`${indent}result[${goLiteral(targetName)}] = ${sourceExpr}`);
     return;
   }
   lines.push(
@@ -1837,7 +1879,7 @@ function emitGoDictSaveResult(
     lines.push(`${indent}\titems[key] = item.Save(ctx)`);
   }
   lines.push(`${indent}}`);
-  lines.push(`${indent}result["${targetName}"] = items`);
+  lines.push(`${indent}result[${goLiteral(targetName)}] = items`);
 }
 
 // ============================================================================
@@ -1858,9 +1900,12 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
 
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames)
-      .map(([provider, wireName]) => `"${provider}": "${wireName}"`)
+      .map(
+        ([provider, wireName]) =>
+          `${goLiteral(provider)}: ${goLiteral(wireName)}`,
+      )
       .join(", ");
-    lines.push(`\t\t"${mapping.fieldName}": {${entries}},`);
+    lines.push(`\t\t${goLiteral(assignmentWireKey(mapping))}: {${entries}},`);
   }
 
   lines.push(`\t}`);
@@ -1890,9 +1935,12 @@ function emitFromWireMethod(type: TypeDecl, lines: string[]): void {
 
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames)
-      .map(([provider, wireName]) => `"${provider}": "${wireName}"`)
+      .map(
+        ([provider, wireName]) =>
+          `${goLiteral(provider)}: ${goLiteral(wireName)}`,
+      )
       .join(", ");
-    lines.push(`\t\t"${mapping.fieldName}": {${entries}},`);
+    lines.push(`\t\t${goLiteral(assignmentWireKey(mapping))}: {${entries}},`);
   }
 
   lines.push(`\t}`);
@@ -2217,7 +2265,10 @@ function splitTopLevelUnion(typeStr: string): string[] {
 }
 
 /** Map a protocol type string to a Go type. */
-export function protocolGoType(typeStr: string, modelQualifier?: string): string {
+export function protocolGoType(
+  typeStr: string,
+  modelQualifier?: string,
+): string {
   // Go has no union types. `X | null` is an optional X; any other union (e.g. an HTTP op's
   // `Created | Error` response) widens to interface{}, as polymorphic results already do.
   const arms = splitTopLevelUnion(typeStr);

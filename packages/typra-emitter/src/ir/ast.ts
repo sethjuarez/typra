@@ -11,6 +11,7 @@ import {
   getNamespaceFullName,
   getDiscriminator,
   isErrorModel,
+  resolveEncodedName,
 } from "@typespec/compiler";
 import { isStatusCode } from "@typespec/http";
 import {
@@ -23,6 +24,8 @@ import {
   DefaultForEntry,
   ParseAliasEntry,
   SerializationDirection,
+  jsonEncodedNameFromDecorators,
+  overriddenBaseProperty,
 } from "../decorators.js";
 import { StateKeys } from "../lib.js";
 import { scalarRuntimeKind } from "./scalar-kinds.js";
@@ -38,6 +41,8 @@ import type { CallableDispatch } from "./callable.js";
  */
 const checkedWireCollisions = new WeakSet<Model>();
 const checkedAdditionalProperties = new WeakSet<Model>();
+const checkedEncodedNameCollisions = new WeakSet<Model>();
+const checkedEncodedNames = new WeakSet<ModelProperty>();
 
 /**
  * Warn when `@entryShorthand` cannot produce any runtime arm.
@@ -305,6 +310,13 @@ export class PropertyNode {
    */
   public isNamedCollection: boolean = false;
 
+  /**
+   * Canonical wire key from `@encodedName("application/json", ...)`. Set only when
+   * it differs from `name`; `name` stays the TypeSpec property name that backends
+   * case into idiomatic member names.
+   */
+  public serializedName: string | undefined = undefined;
+
   public property: ModelProperty;
   public type: TypeNode | undefined = undefined;
 
@@ -338,6 +350,9 @@ export class PropertyNode {
       enumName: this.enumName,
       isOpenEnum: this.isOpenEnum,
       isNamedCollection: this.isNamedCollection,
+      ...(this.serializedName !== undefined
+        ? { serializedName: this.serializedName }
+        : {}),
       type: this.type ? this.type.getSanitizedObject() : undefined,
     };
   }
@@ -517,12 +532,18 @@ export const resolveModel = (
         StateKeys.defaultFor,
         value,
       );
+      const encodedName = jsonWireName(program, value);
+      if (encodedName !== value.name) {
+        prop.serializedName = encodedName;
+        reportInvalidEncodedName(program, value, encodedName);
+      }
 
       properties.push(prop);
     }
     node.properties = properties;
 
     reportWireCollisions(program, model, properties);
+    reportEncodedNameCollisions(program, model);
     reportUnsupportedAdditionalProperties(program, model);
   }
 
@@ -594,6 +615,108 @@ function reportWireCollisions(
       severity: "error",
       target: model,
     });
+  }
+}
+
+/**
+ * The canonical JSON/YAML dict key of a property (`@encodedName` for JSON, else its name).
+ * A derived property that overrides a base property without declaring its own JSON
+ * encoded name inherits the base's key, so e.g. a variant's discriminator override stays
+ * on the wire key the base's polymorphic dispatch reads.
+ */
+export function jsonWireName(
+  program: Program,
+  property: ModelProperty,
+  visited: Set<ModelProperty> = new Set(),
+): string {
+  const resolved = resolveEncodedName(program, property, "application/json");
+  if (
+    resolved !== property.name ||
+    jsonEncodedNameFromDecorators(property) !== undefined
+  ) {
+    return resolved;
+  }
+  visited.add(property);
+  const inherited = overriddenBaseProperty(property);
+  return inherited && !visited.has(inherited)
+    ? jsonWireName(program, inherited, visited)
+    : resolved;
+}
+
+/**
+ * Why a JSON encoded name cannot be emitted faithfully, or undefined when it can.
+ * Every backend escapes wire keys as string literals, but a Go struct tag cannot
+ * carry these characters (or the bare `-` / empty name) without changing meaning.
+ */
+export function invalidEncodedNameReason(name: string): string | undefined {
+  if (name === "") return "it is empty";
+  if (name === "-")
+    return 'the name "-" means "skip this field" in Go struct tags';
+  if (/[\p{Cc}]/u.test(name)) return "it contains a control character";
+  // Mirrors Go encoding/json `isValidTag`: any other rune makes Go silently
+  // fall back to the field name, desynchronizing native and custom codecs.
+  const bad = /[^\p{L}\p{N}!#$%&()*+\-./:;<=>?@[\]^_{|}~ ]/u.exec(name);
+  if (bad) return `it contains '${bad[0]}'`;
+  return undefined;
+}
+
+/**
+ * Report `typra-emitter-invalid-encoded-name` for an `@encodedName("application/json", ...)`
+ * value that some backend cannot represent faithfully (see `invalidEncodedNameReason`).
+ */
+function reportInvalidEncodedName(
+  program: Program,
+  property: ModelProperty,
+  encodedName: string,
+): void {
+  if (checkedEncodedNames.has(property)) return;
+  checkedEncodedNames.add(property);
+  const reason = invalidEncodedNameReason(encodedName);
+  if (!reason) return;
+  program.reportDiagnostic({
+    code: "typra-emitter-invalid-encoded-name",
+    message: `Encoded name ${JSON.stringify(encodedName)} on '${property.model?.name}.${property.name}' cannot be used as a wire key because ${reason}. Use only letters, digits, spaces, and !#$%&()*+-./:;<=>?@[]^_{|}~ (the characters Go struct tags accept).`,
+    severity: "error",
+    target: property,
+  });
+}
+
+/**
+ * Report `typra-emitter-encoded-name-collision` when two distinct properties of a
+ * model's effective (inherited) property set resolve to the same canonical wire key.
+ * The compiler's `encoded-name-conflict` already covers members declared on one
+ * model, so only collisions that span the inheritance chain are reported here.
+ */
+function reportEncodedNameCollisions(program: Program, model: Model): void {
+  if (checkedEncodedNameCollisions.has(model)) return;
+  checkedEncodedNameCollisions.add(model);
+  if (!model.baseModel) return;
+
+  const seenNames = new Set<string>();
+  const byWireKey = new Map<string, ModelProperty>();
+  for (
+    let current: Model | undefined = model;
+    current;
+    current = current.baseModel
+  ) {
+    for (const property of current.properties.values()) {
+      if (seenNames.has(property.name)) continue;
+      seenNames.add(property.name);
+      if (isHttpStatusCodeMetadataProperty(program, property)) continue;
+      const wireKey = jsonWireName(program, property);
+      const existing = byWireKey.get(wireKey);
+      if (!existing) {
+        byWireKey.set(wireKey, property);
+        continue;
+      }
+      if (existing.model === property.model) continue;
+      program.reportDiagnostic({
+        code: "typra-emitter-encoded-name-collision",
+        message: `Wire key "${wireKey}" is claimed by both '${existing.model?.name}.${existing.name}' and '${property.model?.name}.${property.name}' on ${model.name}. Each property must serialize to a distinct key — adjust the @encodedName("application/json", ...) value.`,
+        severity: "error",
+        target: existing,
+      });
+    }
   }
 }
 
@@ -1197,8 +1320,7 @@ export interface PythonClassContext {
   coercions: Array<{ scalar: string; alternate: string }>;
   /** Polymorphic type information if this is a discriminated type */
   polymorphicTypes:
-    | ReturnType<TypeNode["retrievePolymorphicTypes"]>
-    | undefined;
+    ReturnType<TypeNode["retrievePolymorphicTypes"]> | undefined;
   /** Import types needed from other modules */
   imports: string[];
   /** Collection properties with their nested type info for load_* methods */
@@ -1298,6 +1420,8 @@ export interface BaseRenderContext {
 export interface PropertyValidation {
   /** Original schema property name before target-language identifier normalization. */
   sourceKey?: string;
+  /** Sample dict key when the property's `@encodedName` JSON key differs from `sourceKey`. */
+  wireKey?: string;
   /** Property name in target language casing (PascalCase, snake_case, camelCase) */
   key: string;
   /** Expected value after loading */

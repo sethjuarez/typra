@@ -373,7 +373,7 @@ describe("missing required complex fields always fail load", () => {
     );
     assert.match(
       code,
-      /context\.at\('connection'\)\.path\}: missing required field/,
+      /context\.at\("connection"\)\.path \+ ": missing required field"/,
     );
     assert.doesNotMatch(code, /isinstance\(data\.get\("kind"\), str\)/);
     assert.doesNotMatch(
@@ -405,7 +405,10 @@ describe("missing required complex fields always fail load", () => {
       code,
       /if \(!data\.TryGetValue\("connection", out var requiredConnectionValue\) \|\| requiredConnectionValue is null\)/,
     );
-    assert.match(code, /At\("connection"\)\.Path\}: missing required field/);
+    assert.match(
+      code,
+      /At\("connection"\)\.Path \+ ": missing required field"/,
+    );
     assert.doesNotMatch(
       code,
       /IsNullOrEmpty\(data\.GetValueOrDefault\("kind"\)/,
@@ -493,7 +496,10 @@ describe("missing required complex fields always fail load", () => {
       code,
       /context\.at\("connection"\)\.path \+ ": missing required field"/,
     );
-    assert.match(code, /let discriminator = object\["kind"\] as\? String \?\? ""/);
+    assert.match(
+      code,
+      /let discriminator = object\["kind"\] as\? String \?\? ""/,
+    );
     assert.doesNotMatch(
       code,
       /if let discriminator = object\["kind"\] as\? String, !discriminator\.isEmpty \{/,

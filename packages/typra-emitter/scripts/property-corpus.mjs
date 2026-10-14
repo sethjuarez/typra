@@ -302,14 +302,16 @@ function generateConcretePayload(
     if (!shouldIncludeOptional(prop, state, path)) continue;
     const value = generatePropertyValue(prop, state, `${path}.${prop.name}`);
     if (value !== undefined) {
-      payload[prop.name] = value;
+      payload[prop.serializedName ?? prop.name] = value;
     } else if (!prop.isOptional) {
       return undefined;
     }
   }
 
   if (type.discriminator && wildcardDiscriminator) {
-    payload[type.discriminator] = wildcardDiscriminator;
+    const discriminatorProp = properties.get(type.discriminator);
+    payload[discriminatorProp?.serializedName ?? type.discriminator] =
+      wildcardDiscriminator;
   }
   return payload;
 }

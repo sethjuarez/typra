@@ -723,6 +723,7 @@ function assertFocusedFeatureFixtures() {
     "features/polymorphism/main.tsp",
     "features/protocols/main.tsp",
     "features/wire/main.tsp",
+    "features/encoded-name/main.tsp",
     "features/transport/main.tsp",
     "features/dispatch/main.tsp",
     "features/dispatch-union-coerce/main.tsp",
@@ -1899,7 +1900,13 @@ function assertStaticFixtureCoverage() {
   // filled or waived-with-reason.
   // ---------------------------------------------------------------------------
   const wireOptionsTestFiles = {
-    go: path.join("generated", "fixtures", "go", "tests", "wire_options_test.go"),
+    go: path.join(
+      "generated",
+      "fixtures",
+      "go",
+      "tests",
+      "wire_options_test.go",
+    ),
     java: path.join(
       "generated",
       "fixtures",
@@ -1988,7 +1995,10 @@ function assertStaticFixtureCoverage() {
     negativeInput: {
       go: ["func TestWireOptionsFromJSONInvalid", 'WireOptionsFromJSON("{")'],
       java: ['assertThrows(() -> WireOptions.fromJson("{")'],
-      python: ["def test_load_wireoptions_invalid", "WireOptions.load(object())"],
+      python: [
+        "def test_load_wireoptions_invalid",
+        "WireOptions.load(object())",
+      ],
       typescript: ["should reject malformed JSON", 'WireOptions.fromJson("{")'],
       csharp: ["public void RejectsMalformedJson", 'WireOptions.FromJson("{")'],
       rust: [

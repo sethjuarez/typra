@@ -37,3 +37,39 @@ export function assertDistinctRustVariants(enumDef: {
     seen.set(variant, value);
   }
 }
+
+/**
+ * Escape arbitrary text into the body of a double-quoted Rust string literal.
+ * Every non-ASCII code point is emitted as `\u{..}` so the generated source is
+ * pure ASCII — this sidesteps both the Rust raw-string `#`-fence ceiling and the
+ * `text_direction_codepoint_in_literal` deny-lint (bidi controls such as U+202E
+ * are rejected even inside raw strings). The unescaped &str still carries the
+ * exact original characters, so `serde_json::from_str` sees faithful JSON.
+ */
+export function rustStringLiteralBody(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    if (ch === '"') {
+      out += '\\"';
+    } else if (ch === "\\") {
+      out += "\\\\";
+    } else if (cp === 0x0a) {
+      out += "\\n";
+    } else if (cp === 0x0d) {
+      out += "\\r";
+    } else if (cp === 0x09) {
+      out += "\\t";
+    } else if (cp >= 0x20 && cp <= 0x7e) {
+      out += ch;
+    } else {
+      out += `\\u{${cp.toString(16)}}`;
+    }
+  }
+  return out;
+}
+
+/** A complete double-quoted Rust string literal for arbitrary text. */
+export function rustStringLiteral(text: string): string {
+  return `"${rustStringLiteralBody(text)}"`;
+}

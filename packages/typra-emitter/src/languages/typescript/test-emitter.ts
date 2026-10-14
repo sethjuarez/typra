@@ -210,11 +210,11 @@ export function emitTypeScriptTest(
           (entry) => entry.provider === provider,
         )) {
           lines.push(
-            `      expect(Object.keys(${provider}Wire).includes("${mapping.wireName}")).toBe(true);`,
+            `      expect(Object.keys(${provider}Wire).includes(${JSON.stringify(mapping.wireName)})).toBe(true);`,
           );
           if (mapping.fieldName !== mapping.wireName) {
             lines.push(
-              `      expect(Object.keys(${provider}Wire).includes("${mapping.fieldName}")).toBe(false);`,
+              `      expect(Object.keys(${provider}Wire).includes(${JSON.stringify(mapping.fieldName)})).toBe(false);`,
             );
           }
         }

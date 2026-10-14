@@ -15,11 +15,13 @@ import { TypeRegistry } from "../../ir/expansion.js";
 import { RustExprVisitor } from "./visitor.js";
 import {
   buildBaseTestContext,
+  propertyWireKey,
   rustTestOptions,
   wireTestMappings,
   wireTestProviders,
 } from "../../testing/test-context.js";
 import { toSnakeCase } from "../../ir/utilities.js";
+import { rustStringLiteral, rustStringLiteralBody } from "./identifiers.js";
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
@@ -920,7 +922,10 @@ function collectRustGroupPaths(groups: Iterable<string>): string[] {
   return Array.from(paths).sort();
 }
 
-function immediateChildModules(group: string, groups: Iterable<string>): string[] {
+function immediateChildModules(
+  group: string,
+  groups: Iterable<string>,
+): string[] {
   const children = new Set<string>();
   const prefix = group ? `${group}/` : "";
   const depth = group ? group.split("/").filter(Boolean).length : 0;
@@ -1262,9 +1267,12 @@ export function emitRustTest(ctx: RustTestContext): string {
             // default (materialized on load, so present on save even when the `@sample`
             // omits it, e.g. prompty's `status`/`contextState`) — must be present in the
             // sample for whole-object byte-identity vs that sample to be valid.
-            if ((!p.isOptional || p.hasExplicitDefault) && !(p.name in obj))
+            if (
+              (!p.isOptional || p.hasExplicitDefault) &&
+              !(propertyWireKey(p) in obj)
+            )
               return false;
-            const pv = obj[p.name];
+            const pv = obj[propertyWireKey(p)];
             // Cause D (mirror image of the above): a REQUIRED field authored in the sample
             // at its zero/empty value is OMITTED by to_value — required string == "", int
             // == 0, float == 0.0, and empty collections are all dropped (see emitScalarSave /
@@ -1272,7 +1280,7 @@ export function emitRustTest(ctx: RustTestContext): string {
             // whole-object byte-identity vs it is invalid (e.g. prompty's validation_result
             // `errors:[]`, turn_model_request `iteration:0`). Optional fields authored at zero
             // ARE emitted (`Some(0)`), so this only applies to required (non-`?`) fields.
-            if (!p.isOptional && p.name in obj) {
+            if (!p.isOptional && propertyWireKey(p) in obj) {
               if (p.isCollection && Array.isArray(pv) && pv.length === 0)
                 return false;
               if (
@@ -1353,7 +1361,9 @@ export function emitRustTest(ctx: RustTestContext): string {
       // (`[{"name":"alpha",...}]`).
       for (const prop of node.properties) {
         if (!isKeyedCollection(prop)) continue;
-        const sampleVal = sample.sample ? sample.sample[prop.name] : undefined;
+        const sampleVal = sample.sample
+          ? sample.sample[propertyWireKey(prop)]
+          : undefined;
         let keys: string[] = [];
         if (Array.isArray(sampleVal)) {
           keys = sampleVal
@@ -1369,8 +1379,8 @@ export function emitRustTest(ctx: RustTestContext): string {
           continue;
         }
         if (keys.length === 0) continue;
-        out += `    assert!(value.get(${JSON.stringify(prop.name)}).map(|v| v.is_object()).unwrap_or(false), "keyed collection must serialize to canonical name-keyed map, not an array");\n`;
-        out += `    assert!(value.get(${JSON.stringify(prop.name)}).and_then(|v| v.get(${JSON.stringify(keys[0])})).is_some(), "keyed collection map must be keyed by the element name");\n`;
+        out += `    assert!(value.get(${JSON.stringify(propertyWireKey(prop))}).map(|v| v.is_object()).unwrap_or(false), "keyed collection must serialize to canonical name-keyed map, not an array");\n`;
+        out += `    assert!(value.get(${JSON.stringify(propertyWireKey(prop))}).and_then(|v| v.get(${JSON.stringify(keys[0])})).is_some(), "keyed collection map must be keyed by the element name");\n`;
       }
       // Whole-object byte-identity: for byte-stable types the serde re-serialization
       // must equal the canonical wire EXACTLY. This proves flat structs honor the
@@ -1385,7 +1395,9 @@ export function emitRustTest(ctx: RustTestContext): string {
         let byteStable = coercions.length === 0;
         if (byteStable) {
           for (const prop of node.properties) {
-            const sv = sample.sample ? sample.sample[prop.name] : undefined;
+            const sv = sample.sample
+              ? sample.sample[propertyWireKey(prop)]
+              : undefined;
             // A keyed collection sampled in ARRAY shorthand (`[{"name":..}]`) has a
             // canonical wire (name-keyed MAP) that legitimately differs from the sample
             // text, so whole-object byte-identity is invalid — the keyed-map assertion
@@ -1430,7 +1442,9 @@ export function emitRustTest(ctx: RustTestContext): string {
         const mapSample: Record<string, unknown> = { ...(sample.sample ?? {}) };
         for (const prop of node.properties) {
           if (!isKeyedCollection(prop)) continue;
-          const sv = sample.sample ? sample.sample[prop.name] : undefined;
+          const sv = sample.sample
+            ? sample.sample[propertyWireKey(prop)]
+            : undefined;
           if (!Array.isArray(sv) || sv.length === 0) continue;
           const asMap: Record<string, unknown> = {};
           let ok = true;
@@ -1450,8 +1464,8 @@ export function emitRustTest(ctx: RustTestContext): string {
             asMap[nm] = rest;
           }
           if (!ok) continue;
-          mapSample[prop.name] = asMap;
-          keyedMapProps.push(prop.name);
+          mapSample[propertyWireKey(prop)] = asMap;
+          keyedMapProps.push(propertyWireKey(prop));
         }
         if (keyedMapProps.length > 0) {
           const mapJson = JSON.stringify(mapSample, null, 2);
@@ -1497,9 +1511,9 @@ export function emitRustTest(ctx: RustTestContext): string {
         for (const mapping of wireMappings.filter(
           (m) => m.provider === provider,
         )) {
-          out += `    assert!(${provider}_obj.contains_key("${mapping.wireName}"), "Expected ${provider} wire output to include ${mapping.wireName}");\n`;
+          out += `    assert!(${provider}_obj.contains_key(${rustStringLiteral(mapping.wireName)}), "Expected {} wire output to include {}", ${rustStringLiteral(provider)}, ${rustStringLiteral(mapping.wireName)});\n`;
           if (mapping.fieldName !== mapping.wireName) {
-            out += `    assert!(!${provider}_obj.contains_key("${mapping.fieldName}"), "Expected ${provider} wire output to omit ${mapping.fieldName}");\n`;
+            out += `    assert!(!${provider}_obj.contains_key(${rustStringLiteral(mapping.fieldName)}), "Expected {} wire output to omit {}", ${rustStringLiteral(provider)}, ${rustStringLiteral(mapping.fieldName)});\n`;
           }
         }
         out += `    let ${provider}_restored = ${typeName}::from_wire("${provider}", &${provider}_wire, &ctx);\n`;
@@ -1589,37 +1603,6 @@ export function emitRustTest(ctx: RustTestContext): string {
     out += "\n";
   }
 
-  return out;
-}
-
-/**
- * Escape arbitrary text into the body of a double-quoted Rust string literal.
- * Every non-ASCII code point is emitted as `\u{..}` so the generated source is
- * pure ASCII — this sidesteps both the Rust raw-string `#`-fence ceiling and the
- * `text_direction_codepoint_in_literal` deny-lint (bidi controls such as U+202E
- * are rejected even inside raw strings). The unescaped &str still carries the
- * exact original characters, so `serde_json::from_str` sees faithful JSON.
- */
-function rustStringLiteralBody(text: string): string {
-  let out = "";
-  for (const ch of text) {
-    const cp = ch.codePointAt(0)!;
-    if (ch === '"') {
-      out += '\\"';
-    } else if (ch === "\\") {
-      out += "\\\\";
-    } else if (cp === 0x0a) {
-      out += "\\n";
-    } else if (cp === 0x0d) {
-      out += "\\r";
-    } else if (cp === 0x09) {
-      out += "\\t";
-    } else if (cp >= 0x20 && cp <= 0x7e) {
-      out += ch;
-    } else {
-      out += `\\u{${cp.toString(16)}}`;
-    }
-  }
   return out;
 }
 
@@ -1929,7 +1912,7 @@ function emitRustVectorRunner(): string {
     "                Some(key) => key,",
     "                None => panic!(",
     `                    "{}: @dispatch path '{}' did not resolve to a string discriminator \\`,
-    "on the vector input.\",",
+    'on the vector input.",',
     "                    vector_id, dispatch_path",
     "                ),",
     "            };",
@@ -1977,7 +1960,7 @@ function emitRustVectorRunner(): string {
     "    // synchronously, so reject it before running the vector.",
     "    if sync {",
     "        if let vector_adapters::Invoke::Async(_) = adapter.invoke {",
-    '            panic!(',
+    "            panic!(",
     '                "{}: operation is @sync but its adapter is registered Invoke::Async. \\',
     "A @sync operation must resolve synchronously — register it Invoke::Sync (drop \\",
     '@sync to keep it async-capable).",',
@@ -1999,7 +1982,7 @@ function emitRustVectorRunner(): string {
     "",
     "    // Requirement guard (emitted unconditionally; inert when a vector declares",
     "    // no `requires`): a vector may declare abstract capability tokens in",
-    "    // \"requires\". Each is resolved against the seam-injected capability table",
+    '    // "requires". Each is resolved against the seam-injected capability table',
     "    // (populated by the harness only when some vector declares `requires`)",
     "    // BEFORE the adapter runs. An unregistered token is a hard failure (never",
     "    // skip silently). Rust has no runtime-conditional skip (#[ignore] is",
@@ -2015,7 +1998,7 @@ function emitRustVectorRunner(): string {
     "        for token in &requires {",
     "            if let Some(token) = token.as_str() {",
     "                if !capabilities.map_or(false, |c| c.contains_key(token)) {",
-    '                    panic!(',
+    "                    panic!(",
     '                        "No capability predicate registered for requirement token \\"{}\\". \\',
     "Register it in the module referenced by 'vector-adapter-path'. @vector \\",
     'conformance never skips silently.",',
@@ -2046,7 +2029,7 @@ function emitRustVectorRunner(): string {
     "",
     "",
     "    // Per-vector waiver, consulted even when an adapter IS registered. Keyed by",
-    "    // the vector id (\"Contract.operation:name\") or \"operation:name\" so it never",
+    '    // the vector id ("Contract.operation:name") or "operation:name" so it never',
     "    // collides with an operation-level waiver. xfail: a waived vector that fails",
     "    // is an expected failure (green); xpass: a waived vector that passes panics",
     "    // so stale waivers get removed.",
@@ -2194,7 +2177,9 @@ function emitRustVectorConformanceTest(
     const vectorLiteral = `"${rustStringLiteralBody(JSON.stringify(entry.vector))}"`;
     lines.push("#[tokio::test]");
     lines.push(`async fn ${rustVectorSlug(index, entry)}() {`);
-    lines.push(`    let vector: Value = serde_json::from_str(${vectorLiteral})`);
+    lines.push(
+      `    let vector: Value = serde_json::from_str(${vectorLiteral})`,
+    );
     lines.push('        .expect("failed to decode vector");');
     lines.push(
       entry.dispatch
@@ -2300,7 +2285,9 @@ function emitRustVectorConformanceEntrypoint(
     // `Deserialize` on the plain target), so both need a `LoadContext`.
     const needsModelDecode = (typeRef: string): boolean => {
       const shape = classifyCallableParam(typeRef);
-      return shape.bareModel || (shape.array && shape.isModel && !shape.optional);
+      return (
+        shape.bareModel || (shape.array && shape.isModel && !shape.optional)
+      );
     };
     // A `LoadContext` is needed whenever a vector must decode a model through its
     // `from_json` loader — a bare-model or array-of-model PARAM, or an expected
@@ -2308,7 +2295,8 @@ function emitRustVectorConformanceEntrypoint(
     const needsCtx = entries.some(
       (entry) =>
         Object.values(entry.params).some(needsModelDecode) ||
-        (entry.vector.expected !== undefined && needsModelDecode(entry.returns)),
+        (entry.vector.expected !== undefined &&
+          needsModelDecode(entry.returns)),
     );
 
     lines.push(
@@ -2352,13 +2340,17 @@ function emitRustVectorConformanceEntrypoint(
         const local = rustFieldName(paramName);
         const paramJson = JSON.stringify(input[paramName] ?? {}, null, 2);
         if (shape.bareModel) {
-          lines.push(`        let ${local} = ${inCrate}::${paramType}::from_json(`);
+          lines.push(
+            `        let ${local} = ${inCrate}::${paramType}::from_json(`,
+          );
           lines.push(`            r####"`);
           lines.push(paramJson);
           lines.push(`"####,`);
           lines.push("            &ctx,");
           lines.push("        )");
-          lines.push(`        .expect(${JSON.stringify(`${paramName} parses`)});`);
+          lines.push(
+            `        .expect(${JSON.stringify(`${paramName} parses`)});`,
+          );
         } else if (shape.array && shape.isModel && !shape.optional) {
           // Array-of-model param: parse the outer JSON array to values, then decode
           // each element through the model's serde-free `from_json` loader (the
@@ -2366,12 +2358,16 @@ function emitRustVectorConformanceEntrypoint(
           // `Vec<Model>`. Symmetric with the array-of-model RETURN compare below.
           const elem = `${inCrate}::${shape.base}`;
           lines.push(`        let ${local}: Vec<${elem}> = {`);
-          lines.push("            let items: Vec<Value> = serde_json::from_str(");
+          lines.push(
+            "            let items: Vec<Value> = serde_json::from_str(",
+          );
           lines.push(`                r####"`);
           lines.push(paramJson);
           lines.push(`"####,`);
           lines.push("            )");
-          lines.push(`            .expect(${JSON.stringify(`${paramName} parses`)});`);
+          lines.push(
+            `            .expect(${JSON.stringify(`${paramName} parses`)});`,
+          );
           lines.push("            items");
           lines.push("                .iter()");
           lines.push(
@@ -2390,7 +2386,9 @@ function emitRustVectorConformanceEntrypoint(
           lines.push(paramJson);
           lines.push(`"####,`);
           lines.push("        )");
-          lines.push(`        .expect(${JSON.stringify(`${paramName} parses`)});`);
+          lines.push(
+            `        .expect(${JSON.stringify(`${paramName} parses`)});`,
+          );
         }
       }
       const callArgs = paramNames
@@ -2444,14 +2442,20 @@ function emitRustVectorConformanceEntrypoint(
                 `${label} misrouted`,
               )});`,
             );
-          } else if (returnShape.array && returnShape.isModel && !returnShape.optional) {
+          } else if (
+            returnShape.array &&
+            returnShape.isModel &&
+            !returnShape.optional
+          ) {
             // Array-of-model return: build the expected `Vec<Model>` element-wise
             // through the model's serde-free loader and compare with the plain
             // `PartialEq` lifted over `Vec` — `actual` has no `Serialize`, so the
             // scalar `serde_json::to_value(actual)` path would not compile.
             const elem = `${inCrate}::${returnShape.base}`;
             lines.push(`        let expected: Vec<${elem}> = {`);
-            lines.push("            let items: Vec<Value> = serde_json::from_str(");
+            lines.push(
+              "            let items: Vec<Value> = serde_json::from_str(",
+            );
             lines.push(`                r####"`);
             lines.push(expectedJson);
             lines.push(`"####,`);
@@ -2631,7 +2635,9 @@ function emitRustInterfaceConformanceTest(
     }
     lines.push(`    let kind = ${accessor};`);
     lines.push(`    let provider = vector_adapters::${providerFactory}();`);
-    lines.push(`    let seam_impl = ${resolverModule}::resolve(kind, &provider)`);
+    lines.push(
+      `    let seam_impl = ${resolverModule}::resolve(kind, &provider)`,
+    );
     lines.push(
       `        .unwrap_or_else(|| panic!(${JSON.stringify(
         `${label}: no ${seam} attached for {kind}`,
@@ -2741,7 +2747,8 @@ function uniqueRustTestName(
 ): string {
   const raw = `${seam} ${entry.operation} ${entry.vector.name ?? "unnamed"}`;
   const base =
-    `test_${toSnakeCase(raw.replace(/[^A-Za-z0-9]+/g, "_"))}` || `test_${index}`;
+    `test_${toSnakeCase(raw.replace(/[^A-Za-z0-9]+/g, "_"))}` ||
+    `test_${index}`;
   const prior = seen.get(base);
   if (prior === undefined) {
     seen.set(base, 0);

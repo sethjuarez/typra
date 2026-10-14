@@ -33,7 +33,11 @@
  *         - Method stubs (as trait)
  */
 
-import { rustEnumVariantName, assertDistinctRustVariants } from "./identifiers.js";
+import {
+  rustEnumVariantName,
+  assertDistinctRustVariants,
+  rustStringLiteral,
+} from "./identifiers.js";
 import {
   FileDecl,
   TypeDecl,
@@ -50,6 +54,9 @@ import {
   MethodStubDecl,
   WireDecl,
   isClosedPolymorphicDispatch,
+  assignmentWireKey,
+  discriminatorWireKey,
+  fieldWireKey,
 } from "../../ir/declarations.js";
 import {
   shouldGuardMissingRequiredField,
@@ -110,7 +117,6 @@ function renderLines(lines: string[]): string {
   }
   return `${lines.join("\n")}\n`;
 }
-
 
 const RUST_KEYWORDS = new Set([
   "as",
@@ -253,7 +259,9 @@ function emitStringEnum(
   for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
     for (const alias of aliases) {
       lines.push(`        if s.eq_ignore_ascii_case("${alias}") {`);
-      lines.push(`            return Some(Self::${rustEnumVariantName(canonical)});`);
+      lines.push(
+        `            return Some(Self::${rustEnumVariantName(canonical)});`,
+      );
       lines.push("        }");
     }
   }
@@ -267,7 +275,9 @@ function emitStringEnum(
   lines.push("    pub fn as_str(&self) -> &str {");
   lines.push("        match self {");
   for (const value of enumDef.values) {
-    lines.push(`            Self::${rustEnumVariantName(value)} => "${value}",`);
+    lines.push(
+      `            Self::${rustEnumVariantName(value)} => "${value}",`,
+    );
   }
   if (enumDef.isOpen) {
     lines.push("            Self::Other(s) => s.as_str(),");
@@ -427,7 +437,6 @@ export function emitRustFile(
     } else {
       lines.push(`use ${modPath}::{${names}};`);
     }
-
   }
 
   lines.push("");
@@ -887,7 +896,7 @@ function emitDelegatingSerde(type: TypeDecl, lines: string[]): void {
     const discField = rustFieldName(
       type.polymorphicDispatch.discriminatorField,
     );
-    const discWire = type.polymorphicDispatch.discriminatorField;
+    const discWire = discriminatorWireKey(type.polymorphicDispatch);
     lines.push("");
     lines.push(
       `// Serde for \`${kindName}\` wraps the variant into its parent \`${name}\` and delegates`,
@@ -1119,9 +1128,7 @@ function emitTryLoadFromValue(
   lines.push(
     "    /// `load_from_value` with the same validation policy as `from_json`.",
   );
-  lines.push(
-    "    pub fn try_load_from_value(",
-  );
+  lines.push("    pub fn try_load_from_value(");
   lines.push("        value: &serde_json::Value,");
   lines.push("        ctx: &LoadContext,");
   lines.push("    ) -> Result<Self, serde_json::Error> {");
@@ -1147,7 +1154,7 @@ function emitClosedDiscriminatorValidation(
     "    fn validate_discriminator(value: &serde_json::Value) -> Result<(), String> {",
   );
   lines.push(
-    `        let discriminator = value.get("${dispatch.discriminatorField}")`,
+    `        let discriminator = value.get(${rustStringLiteral(discriminatorWireKey(dispatch))})`,
   );
   lines.push("            .and_then(|candidate| candidate.as_str())");
   lines.push(
@@ -1192,7 +1199,7 @@ function emitInputValidation(
     discriminatorField === undefined
       ? type.load.assignments
       : type.load.assignments.filter(
-          (assignment) => assignment.sourceName !== discriminatorField,
+          (assignment) => assignment.fieldName !== discriminatorField,
         );
   emitFieldInputValidation(type, baseAssignments, lines, "        ");
   if (type.polymorphicDispatch) {
@@ -1206,7 +1213,7 @@ function emitInputValidation(
       // Erroring here would make the coerce shorthand (object with no
       // discriminator) fail validation.
       lines.push(
-        `        let discriminator = value.get("${dispatch.discriminatorField}").and_then(|candidate| candidate.as_str()).unwrap_or("");`,
+        `        let discriminator = value.get(${rustStringLiteral(discriminatorWireKey(dispatch))}).and_then(|candidate| candidate.as_str()).unwrap_or("");`,
       );
     } else {
       // Closed union, abstract open carrier, or a non-abstract open union that
@@ -1215,7 +1222,7 @@ function emitInputValidation(
       // union has additionally been rejected by validate_discriminator() above.)
       // Unknown NON-blank values still pass and route to the `_` arm below.
       lines.push(
-        `        let discriminator = value.get("${dispatch.discriminatorField}")`,
+        `        let discriminator = value.get(${rustStringLiteral(discriminatorWireKey(dispatch))})`,
       );
       lines.push(
         `            .ok_or_else(|| "Missing ${type.typeName.name} discriminator property: '${dispatch.discriminatorField}'".to_string())?;`,
@@ -1278,18 +1285,18 @@ function emitFieldInputValidation(
     const field = assignment.sourceName;
     const category = assignment.category;
     const helper = type.collectionHelpers.find(
-      (candidate) => candidate.propertyName === field,
+      (candidate) => candidate.propertyName === assignment.fieldName,
     );
     if (category.kind === "complex") {
       const fieldDecl = type.fields.find(
         (candidate) => candidate.name === assignment.fieldName,
       );
       lines.push(
-        `${indent}let child_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`,
+        `${indent}let child_path = if path.is_empty() { ${rustStringLiteral(field)}.to_string() } else { format!("{}.{}", path, ${rustStringLiteral(field)}) };`,
       );
       if (shouldGuardMissingRequiredField(fieldDecl)) {
         lines.push(
-          `${indent}let child = value.get("${field}").filter(|candidate| !candidate.is_null())`,
+          `${indent}let child = value.get(${rustStringLiteral(field)}).filter(|candidate| !candidate.is_null())`,
         );
         lines.push(
           `${indent}    .ok_or_else(|| format!("{}: missing required field", child_path))?;`,
@@ -1298,7 +1305,9 @@ function emitFieldInputValidation(
           `${indent}${category.typeName}::validate_input_at(child, &child_path)?;`,
         );
       } else {
-        lines.push(`${indent}if let Some(child) = value.get("${field}") {`);
+        lines.push(
+          `${indent}if let Some(child) = value.get(${rustStringLiteral(field)}) {`,
+        );
         lines.push(
           `${indent}    ${category.typeName}::validate_input_at(child, &child_path)?;`,
         );
@@ -1309,9 +1318,11 @@ function emitFieldInputValidation(
       helper?.hasNameProperty
     ) {
       const shorthandField = helper.innerFields[0] || "value";
-      lines.push(`${indent}if let Some(collection) = value.get("${field}") {`);
       lines.push(
-        `${indent}    let collection_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`,
+        `${indent}if let Some(collection) = value.get(${rustStringLiteral(field)}) {`,
+      );
+      lines.push(
+        `${indent}    let collection_path = if path.is_empty() { ${rustStringLiteral(field)}.to_string() } else { format!("{}.{}", path, ${rustStringLiteral(field)}) };`,
       );
       lines.push(`${indent}    match collection {`);
       lines.push(`${indent}        serde_json::Value::Object(entries) => {`);
@@ -1330,7 +1341,7 @@ function emitFieldInputValidation(
       lines.push(`${indent}                    entry.clone()`);
       lines.push(`${indent}                } else {`);
       lines.push(
-        `${indent}                    serde_json::json!({ "${shorthandField}": entry })`,
+        `${indent}                    serde_json::json!({ ${rustStringLiteral(shorthandField)}: entry })`,
       );
       lines.push(`${indent}                };`);
       lines.push(
@@ -1362,10 +1373,10 @@ function emitFieldInputValidation(
       lines.push(`${indent}}`);
     } else if (category.kind === "collection_complex") {
       lines.push(
-        `${indent}if let Some(entries) = value.get("${field}").and_then(|candidate| candidate.as_array()) {`,
+        `${indent}if let Some(entries) = value.get(${rustStringLiteral(field)}).and_then(|candidate| candidate.as_array()) {`,
       );
       lines.push(
-        `${indent}    let collection_path = if path.is_empty() { "${field}".to_string() } else { format!("{}.${field}", path) };`,
+        `${indent}    let collection_path = if path.is_empty() { ${rustStringLiteral(field)}.to_string() } else { format!("{}.{}", path, ${rustStringLiteral(field)}) };`,
       );
       lines.push(
         `${indent}    for (index, entry) in entries.iter().enumerate() {`,
@@ -1754,7 +1765,7 @@ function emitPolymorphicLoad(
   const enumName = name + "Kind";
 
   lines.push(
-    `        let ${discSnake}_str = value.get("${dispatch.discriminatorField}").and_then(|v| v.as_str()).unwrap_or("");`,
+    `        let ${discSnake}_str = value.get(${rustStringLiteral(discriminatorWireKey(dispatch))}).and_then(|v| v.as_str()).unwrap_or("");`,
   );
   lines.push(`        let ${discSnake} = match ${discSnake}_str {`);
 
@@ -1782,7 +1793,12 @@ function emitPolymorphicLoad(
         `            "${variant.value}" => ${enumName}::${variantName} {`,
       );
       for (const field of variantFields) {
-        const assignment = variantLoadExpr(field, name, polymorphicTypeNames, declsByName);
+        const assignment = variantLoadExpr(
+          field,
+          name,
+          polymorphicTypeNames,
+          declsByName,
+        );
         lines.push(
           `                ${rustFieldName(field.name)}: ${assignment},`,
         );
@@ -1820,7 +1836,9 @@ function emitPolymorphicLoad(
         "                    let mut raw = value.as_object().cloned().unwrap_or_default();",
       );
       for (const fieldName of baseFieldNames) {
-        lines.push(`                    raw.remove("${fieldName}");`);
+        lines.push(
+          `                    raw.remove(${rustStringLiteral(rustRawKey(type, childTypes, fieldName))});`,
+        );
       }
       lines.push("                    raw");
       lines.push("                },");
@@ -1828,7 +1846,12 @@ function emitPolymorphicLoad(
     } else {
       lines.push(`            _ => ${enumName}::${variantName} {`);
       for (const field of variantFields) {
-        const assignment = variantLoadExpr(field, name, polymorphicTypeNames, declsByName);
+        const assignment = variantLoadExpr(
+          field,
+          name,
+          polymorphicTypeNames,
+          declsByName,
+        );
         lines.push(
           `                ${rustFieldName(field.name)}: ${assignment},`,
         );
@@ -1844,7 +1867,9 @@ function emitPolymorphicLoad(
         ...baseFieldNames,
         ...variantFields.map((field) => field.name),
       ]) {
-        lines.push(`                    raw.remove("${fieldName}");`);
+        lines.push(
+          `                    raw.remove(${rustStringLiteral(rustRawKey(type, childTypes, fieldName))});`,
+        );
       }
       lines.push("                    raw");
       lines.push("                },");
@@ -1864,7 +1889,9 @@ function emitPolymorphicLoad(
       "                    let mut raw = value.as_object().cloned().unwrap_or_default();",
     );
     for (const fieldName of baseFieldNames) {
-      lines.push(`                    raw.remove("${fieldName}");`);
+      lines.push(
+        `                    raw.remove(${rustStringLiteral(rustRawKey(type, childTypes, fieldName))});`,
+      );
     }
     lines.push("                    raw");
     lines.push("                },");
@@ -1978,7 +2005,7 @@ function emitToValue(
     );
     lines.push(`        // Write the discriminator`);
     lines.push(
-      `        result.insert("${type.polymorphicDispatch.discriminatorField}".to_string(), serde_json::Value::String(self.${discSnake}_str().to_string()));`,
+      `        result.insert(${rustStringLiteral(discriminatorWireKey(type.polymorphicDispatch))}.to_string(), serde_json::Value::String(self.${discSnake}_str().to_string()));`,
     );
   }
 
@@ -2091,7 +2118,10 @@ function emitVariantSave(
       new Set([...baseFieldNames, ...variantFields.map((field) => field.name)]),
     );
     const rawFieldPattern = rawSkipFields
-      .map((fieldName) => `"${fieldName}"`)
+      .map(
+        (fieldName) =>
+          `${rustStringLiteral(rustRawKey(type, childTypes, fieldName))}`,
+      )
       .join(" | ");
     if (isSelfRef) {
       lines.push(`            ${enumName}::${variantName} { raw, .. } => {`);
@@ -2148,7 +2178,10 @@ function emitVariantSave(
     lines.push(`            ${enumName}::Unknown { raw, .. } => {`);
     lines.push("                for (key, value) in raw {");
     const baseFieldPattern = Array.from(baseFieldNames)
-      .map((fieldName) => `"${fieldName}"`)
+      .map(
+        (fieldName) =>
+          `${rustStringLiteral(rustRawKey(type, childTypes, fieldName))}`,
+      )
       .join(" | ");
     lines.push(
       `                    if matches!(key.as_str(), ${baseFieldPattern}) { continue; }`,
@@ -2216,10 +2249,13 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames);
     const inner = entries
-      .map(([provider, wireName]) => `("${provider}", "${wireName}")`)
+      .map(
+        ([provider, wireName]) =>
+          `(${rustStringLiteral(provider)}, ${rustStringLiteral(wireName)})`,
+      )
       .join(", ");
     lines.push(
-      `            ("${mapping.fieldName}", std::collections::HashMap::from([${inner}])),`,
+      `            (${rustStringLiteral(assignmentWireKey(mapping))}, std::collections::HashMap::from([${inner}])),`,
     );
   }
   lines.push(`        ]);`);
@@ -2258,10 +2294,13 @@ function emitFromWireMethod(type: TypeDecl, lines: string[]): void {
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames);
     const inner = entries
-      .map(([provider, wireName]) => `("${provider}", "${wireName}")`)
+      .map(
+        ([provider, wireName]) =>
+          `(${rustStringLiteral(provider)}, ${rustStringLiteral(wireName)})`,
+      )
       .join(", ");
     lines.push(
-      `            ("${mapping.fieldName}", std::collections::HashMap::from([${inner}])),`,
+      `            (${rustStringLiteral(assignmentWireKey(mapping))}, std::collections::HashMap::from([${inner}])),`,
     );
   }
   lines.push(`        ]);`);
@@ -2400,7 +2439,7 @@ function emitEntryShorthandArms(
   if (!shorthand || shorthand.cases.length === 0) {
     lines.push(`${indent}} else {`);
     lines.push(
-      `${indent}    serde_json::json!({ "${shorthandField}": value })`,
+      `${indent}    serde_json::json!({ ${rustStringLiteral(shorthandField)}: value })`,
     );
     return;
   }
@@ -2411,8 +2450,11 @@ function emitEntryShorthandArms(
     const check = rustScalarValueCheck(entryCase.scalarType);
     if (!check) continue;
     const fields = entryCase.assignments
-      .map((a) => `"${a.fieldName}": ${JSON.stringify(a.literalValue)}`)
-      .concat(`"${shorthand.valueField}": value`)
+      .map(
+        (a) =>
+          `${rustStringLiteral(a.fieldName)}: ${JSON.stringify(a.literalValue)}`,
+      )
+      .concat(`${rustStringLiteral(shorthand.valueField)}: value`)
       .join(", ");
     lines.push(`${indent}} else if value.${check} {`);
     lines.push(`${indent}    serde_json::json!({ ${fields} })`);
@@ -2420,7 +2462,7 @@ function emitEntryShorthandArms(
 
   lines.push(`${indent}} else {`);
   lines.push(
-    `${indent}    serde_json::json!({ "${shorthand.valueField}": value })`,
+    `${indent}    serde_json::json!({ ${rustStringLiteral(shorthand.valueField)}: value })`,
   );
 }
 
@@ -2868,8 +2910,8 @@ function valueBackedCoerceExpansion(
   if (!coercion || coercion.assignments.length === 0) return null;
   const entries = coercion.assignments.map((a) =>
     a.isInput
-      ? `"${a.fieldName}": s`
-      : `"${a.fieldName}": ${JSON.stringify(a.literalValue ?? "")}`,
+      ? `${rustStringLiteral(assignmentWireKey(a))}: s`
+      : `${rustStringLiteral(assignmentWireKey(a))}: ${JSON.stringify(a.literalValue ?? "")}`,
   );
   return `serde_json::json!({ ${entries.join(", ")} })`;
 }
@@ -2888,9 +2930,9 @@ function loadExpr(
     const defaultVal =
       dv && a.allowedValues.includes(dv) ? dv : a.allowedValues[0];
     if (a.isOptional) {
-      return `value.get("${key}").and_then(|v| v.as_str()).and_then(|s| ${a.enumName}::from_str_opt(s))`;
+      return `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_str()).and_then(|s| ${a.enumName}::from_str_opt(s))`;
     }
-    return `value.get("${key}").and_then(|v| v.as_str()).and_then(|s| ${a.enumName}::from_str_opt(s)).unwrap_or(${a.enumName}::${rustEnumVariantName(defaultVal)})`;
+    return `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_str()).and_then(|s| ${a.enumName}::from_str_opt(s)).unwrap_or(${a.enumName}::${rustEnumVariantName(defaultVal)})`;
   }
 
   switch (cat.kind) {
@@ -2906,15 +2948,15 @@ function loadExpr(
         // template so the stored Value is always the canonical object.
         const expansion = valueBackedCoerceExpansion(cat.typeName, declsByName);
         if (expansion) {
-          return `value.get("${key}").map(|v| if let Some(s) = v.as_str() { ${expansion} } else { v.clone() }).unwrap_or(serde_json::Value::Null)`;
+          return `value.get(${rustStringLiteral(key)}).map(|v| if let Some(s) = v.as_str() { ${expansion} } else { v.clone() }).unwrap_or(serde_json::Value::Null)`;
         }
         // Struct fields keep Value::Null as the "absent" sentinel (see fieldType).
-        return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
+        return `value.get(${rustStringLiteral(key)}).cloned().unwrap_or(serde_json::Value::Null)`;
       }
       if (a.isOptional) {
-        return `value.get("${key}").filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx))`;
+        return `value.get(${rustStringLiteral(key)}).filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx))`;
       }
-      return `value.get("${key}").filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx)).unwrap_or_default()`;
+      return `value.get(${rustStringLiteral(key)}).filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx)).unwrap_or_default()`;
     }
     case "collection_scalar": {
       return collectionScalarLoadExpr(
@@ -2924,7 +2966,7 @@ function loadExpr(
       );
     }
     case "collection_complex": {
-      const loaded = `value.get("${key}").map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx))`;
+      const loaded = `value.get(${rustStringLiteral(key)}).map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx))`;
       return shouldPreserveOptionalAbsence(a)
         ? loaded
         : `${loaded}.unwrap_or_default()`;
@@ -2940,9 +2982,9 @@ function dictLoadExpr(
   isOptional: boolean,
 ): string {
   if (!valueType || valueType === "unknown") {
-    return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
+    return `value.get(${rustStringLiteral(key)}).cloned().unwrap_or(serde_json::Value::Null)`;
   }
-  const loaded = `value.get("${key}").and_then(|v| v.as_object()).map(|items| items.iter().map(|(key, item)| (key.clone(), ${rustDictValueLoadExpr("item", valueType)})).collect())`;
+  const loaded = `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_object()).map(|items| items.iter().map(|(key, item)| (key.clone(), ${rustDictValueLoadExpr("item", valueType)})).collect())`;
   return isOptional ? loaded : `${loaded}.unwrap_or_default()`;
 }
 
@@ -2982,31 +3024,31 @@ function scalarLoadExpr(
   if (isValueType(scalarType)) {
     // dictionary is never optional; any/object/unknown may be optional
     if (scalarType === "dictionary") {
-      return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
+      return `value.get(${rustStringLiteral(key)}).cloned().unwrap_or(serde_json::Value::Null)`;
     }
     return isOptional
-      ? `value.get("${key}").cloned()`
-      : `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
+      ? `value.get(${rustStringLiteral(key)}).cloned()`
+      : `value.get(${rustStringLiteral(key)}).cloned().unwrap_or(serde_json::Value::Null)`;
   }
 
   switch (scalarType) {
     case "string":
       return isOptional
-        ? `value.get("${key}").and_then(|v| v.as_str()).map(|s| s.to_string())`
-        : `value.get("${key}").and_then(|v| v.as_str()).unwrap_or_default().to_string()`;
+        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_str()).map(|s| s.to_string())`
+        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_str()).unwrap_or_default().to_string()`;
     case "boolean":
       return isOptional
-        ? `value.get("${key}").and_then(|v| v.as_bool())`
-        : `value.get("${key}").and_then(|v| v.as_bool()).unwrap_or(false)`;
+        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_bool())`
+        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_bool()).unwrap_or(false)`;
     case "int32":
       return isOptional
-        ? `value.get("${key}").and_then(|v| v.as_i64()).map(|v| v as i32)`
-        : `value.get("${key}").and_then(|v| v.as_i64()).unwrap_or(0) as i32`;
+        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64()).map(|v| v as i32)`
+        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64()).unwrap_or(0) as i32`;
     case "int64":
     case "integer":
       return isOptional
-        ? `value.get("${key}").and_then(|v| v.as_i64())`
-        : `value.get("${key}").and_then(|v| v.as_i64()).unwrap_or(0)`;
+        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64())`
+        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64()).unwrap_or(0)`;
     case "int8":
     case "int16":
     case "safeint":
@@ -3014,7 +3056,7 @@ function scalarLoadExpr(
     case "uint16":
     case "uint32":
     case "uint64": {
-      const loaded = `value.get("${key}").and_then(|v| ${rustSizedIntFromValue("v", RUST_TYPE_MAP[scalarType])})`;
+      const loaded = `value.get(${rustStringLiteral(key)}).and_then(|v| ${rustSizedIntFromValue("v", RUST_TYPE_MAP[scalarType])})`;
       return isOptional ? loaded : `${loaded}.unwrap_or(0)`;
     }
     case "float64":
@@ -3022,14 +3064,14 @@ function scalarLoadExpr(
     case "number":
     case "numeric":
       return isOptional
-        ? `value.get("${key}").and_then(|v| v.as_f64())`
-        : `value.get("${key}").and_then(|v| v.as_f64()).unwrap_or(0.0)`;
+        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64())`
+        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64()).unwrap_or(0.0)`;
     case "float32":
       return isOptional
-        ? `value.get("${key}").and_then(|v| v.as_f64()).map(|v| v as f32)`
-        : `value.get("${key}").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32`;
+        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64()).map(|v| v as f32)`
+        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32`;
     default:
-      return `value.get("${key}").cloned().unwrap_or(serde_json::Value::Null)`;
+      return `value.get(${rustStringLiteral(key)}).cloned().unwrap_or(serde_json::Value::Null)`;
   }
 }
 
@@ -3040,8 +3082,8 @@ function collectionScalarLoadExpr(
 ): string {
   const element = rustArrayElementLoadExpr(scalarType);
   const loaded = element
-    ? `value.get("${key}").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| ${element}).collect())`
-    : `value.get("${key}").and_then(|v| v.as_array()).map(|arr| arr.to_vec())`;
+    ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| ${element}).collect())`
+    : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_array()).map(|arr| arr.to_vec())`;
   return isOptional ? loaded : `${loaded}.unwrap_or_default()`;
 }
 
@@ -3106,16 +3148,16 @@ function variantLoadExpr(
   declsByName: Map<string, TypeDecl> = new Map(),
 ): string {
   // Delegate to the same patterns as base field loading, but with "value" as the source
-  const key = field.name;
+  const key = fieldWireKey(field);
   const cat = field.category;
 
   // Named enum — parse from string via from_str_opt
   if (field.enumName && field.allowedValues.length > 0) {
     const defaultVal = String(field.defaultValue || field.allowedValues[0]);
     if (field.isOptional) {
-      return `value.get("${key}").and_then(|v| v.as_str()).and_then(|s| ${field.enumName}::from_str_opt(s))`;
+      return `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_str()).and_then(|s| ${field.enumName}::from_str_opt(s))`;
     }
-    return `value.get("${key}").and_then(|v| v.as_str()).and_then(|s| ${field.enumName}::from_str_opt(s)).unwrap_or(${field.enumName}::${rustEnumVariantName(defaultVal)})`;
+    return `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_str()).and_then(|s| ${field.enumName}::from_str_opt(s)).unwrap_or(${field.enumName}::${rustEnumVariantName(defaultVal)})`;
   }
 
   switch (cat.kind) {
@@ -3128,16 +3170,16 @@ function variantLoadExpr(
         // shorthand rather than store the raw string.
         const expansion = valueBackedCoerceExpansion(cat.typeName, declsByName);
         const mapped = expansion
-          ? `value.get("${key}").map(|v| if let Some(s) = v.as_str() { ${expansion} } else { v.clone() })`
-          : `value.get("${key}").cloned()`;
+          ? `value.get(${rustStringLiteral(key)}).map(|v| if let Some(s) = v.as_str() { ${expansion} } else { v.clone() })`
+          : `value.get(${rustStringLiteral(key)}).cloned()`;
         return field.isOptional
           ? mapped
           : `${mapped}.unwrap_or(serde_json::Value::Null)`;
       }
       if (field.isOptional) {
-        return `value.get("${key}").filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx))`;
+        return `value.get(${rustStringLiteral(key)}).filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx))`;
       }
-      return `value.get("${key}").filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx)).unwrap_or_default()`;
+      return `value.get(${rustStringLiteral(key)}).filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| ${cat.typeName}::load_from_value(v, ctx)).unwrap_or_default()`;
     }
     case "collection_scalar": {
       return collectionScalarLoadExpr(
@@ -3148,7 +3190,7 @@ function variantLoadExpr(
     }
     case "collection_complex": {
       // Collection in a variant — use the parent type's helper
-      const loaded = `value.get("${key}").map(|v| Self::load_${toSnakeCase(field.name)}(v, ctx))`;
+      const loaded = `value.get(${rustStringLiteral(key)}).map(|v| Self::load_${toSnakeCase(field.name)}(v, ctx))`;
       return shouldPreserveOptionalAbsence(field)
         ? loaded
         : `${loaded}.unwrap_or_default()`;
@@ -3178,12 +3220,12 @@ function emitSaveField(
     if (shouldOmitAbsentOnSave(a)) {
       lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
       lines.push(
-        `${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.to_string()));`,
+        `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::String(val.to_string()));`,
       );
       lines.push(`${indent}}`);
     } else {
       lines.push(
-        `${indent}result.insert("${key}".to_string(), serde_json::Value::String(${fieldRef}.to_string()));`,
+        `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::String(${fieldRef}.to_string()));`,
       );
     }
     return;
@@ -3207,12 +3249,12 @@ function emitSaveField(
         if (shouldOmitAbsentOnSave(a, "rust-value-sentinel")) {
           lines.push(`${indent}if !${fieldRef}.is_null() {`);
           lines.push(
-            `${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+            `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
           );
           lines.push(`${indent}}`);
         } else {
           lines.push(
-            `${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+            `${indent}result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
           );
         }
         return;
@@ -3222,14 +3264,16 @@ function emitSaveField(
         lines.push(`${indent}    let nested = val.to_value(ctx);`);
         lines.push(`${indent}    if !nested.is_null() {`);
         lines.push(
-          `${indent}        result.insert("${key}".to_string(), nested);`,
+          `${indent}        result.insert(${rustStringLiteral(key)}.to_string(), nested);`,
         );
         lines.push(`${indent}    }`);
         lines.push(`${indent}}`);
       } else {
         lines.push(`${indent}{`);
         lines.push(`${indent}    let nested = ${fieldRef}.to_value(ctx);`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), nested);`);
+        lines.push(
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), nested);`,
+        );
         lines.push(`${indent}}`);
       }
       return;
@@ -3238,17 +3282,17 @@ function emitSaveField(
       if (shouldOmitAbsentOnSave(a, "rust-collection-default")) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`,
         );
         lines.push(`${indent}}`);
       } else if (shouldMaterializeCollectionDefault(a, "explicit-only")) {
         const borrowed = prefix ? `&${fieldRef}` : fieldRef;
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::to_value(${borrowed}).unwrap_or(serde_json::Value::Null));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::to_value(${borrowed}).unwrap_or(serde_json::Value::Null));`,
         );
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::to_value(&${fieldRef}).unwrap_or(serde_json::Value::Null));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::to_value(&${fieldRef}).unwrap_or(serde_json::Value::Null));`,
         );
       }
       return;
@@ -3257,17 +3301,17 @@ function emitSaveField(
       if (shouldOmitAbsentOnSave(a, "rust-collection-default")) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(items, ctx));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), Self::save_${toSnakeCase(a.fieldName)}(items, ctx));`,
         );
         lines.push(`${indent}}`);
       } else if (shouldMaterializeCollectionDefault(a, "explicit-only")) {
         const borrowed = prefix ? `&${fieldRef}` : fieldRef;
         lines.push(
-          `${indent}result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(${borrowed}, ctx));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), Self::save_${toSnakeCase(a.fieldName)}(${borrowed}, ctx));`,
         );
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), Self::save_${toSnakeCase(a.fieldName)}(&${fieldRef}, ctx));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), Self::save_${toSnakeCase(a.fieldName)}(&${fieldRef}, ctx));`,
         );
       }
       return;
@@ -3277,23 +3321,23 @@ function emitSaveField(
         if (shouldOmitAbsentOnSave(a)) {
           lines.push(`${indent}if !${fieldRef}.is_null() {`);
           lines.push(
-            `${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+            `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
           );
           lines.push(`${indent}}`);
         } else {
           lines.push(
-            `${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+            `${indent}result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
           );
         }
       } else if (shouldOmitAbsentOnSave(a)) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), ${rustDictSaveExpr("items", cat.valueType)});`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), ${rustDictSaveExpr("items", cat.valueType)});`,
         );
         lines.push(`${indent}}`);
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), ${rustDictSaveExpr(`&${fieldRef}`, cat.valueType)});`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), ${rustDictSaveExpr(`&${fieldRef}`, cat.valueType)});`,
         );
       }
       return;
@@ -3321,19 +3365,19 @@ function emitScalarSave(
       // Optional value types (any, object, unknown) are Option<Value>
       lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
       lines.push(
-        `${indent}    result.insert("${key}".to_string(), val.clone());`,
+        `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), val.clone());`,
       );
       lines.push(`${indent}}`);
     } else if (omitAbsentOnSave) {
       // Optional dictionary fields use Value::Null as the absent sentinel.
       lines.push(`${indent}if !${fieldRef}.is_null() {`);
       lines.push(
-        `${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+        `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
       );
       lines.push(`${indent}}`);
     } else {
       lines.push(
-        `${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+        `${indent}result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
       );
     }
     return;
@@ -3344,12 +3388,12 @@ function emitScalarSave(
       if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.clone()));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::String(val.clone()));`,
         );
         lines.push(`${indent}}`);
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::Value::String(${fieldRef}.clone()));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::String(${fieldRef}.clone()));`,
         );
       }
       return;
@@ -3357,13 +3401,13 @@ function emitScalarSave(
       if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), serde_json::Value::Bool(*val));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Bool(*val));`,
         );
         lines.push(`${indent}}`);
       } else {
         // Always write booleans
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::Value::Bool(${fieldRef}));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Bool(${fieldRef}));`,
         );
       }
       return;
@@ -3380,12 +3424,12 @@ function emitScalarSave(
       if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(*val)));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Number(serde_json::Number::from(*val)));`,
         );
         lines.push(`${indent}}`);
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(${fieldRef})));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Number(serde_json::Number::from(${fieldRef})));`,
         );
       }
       return;
@@ -3397,12 +3441,12 @@ function emitScalarSave(
       if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), serde_json::Number::from_f64(*val as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Number::from_f64(*val as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`,
         );
         lines.push(`${indent}}`);
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::Number::from_f64(${fieldRef} as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Number::from_f64(${fieldRef} as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`,
         );
       }
       return;
@@ -3419,7 +3463,7 @@ function emitVariantSaveField(
   lines: string[],
   collectionHelper?: CollectionHelperDecl,
 ): void {
-  const key = field.name;
+  const key = fieldWireKey(field);
   const fieldRef = rustFieldName(field.name);
   const cat = field.category;
   const indent = "                ";
@@ -3429,12 +3473,12 @@ function emitVariantSaveField(
     if (shouldOmitAbsentOnSave(field)) {
       lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
       lines.push(
-        `${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.to_string()));`,
+        `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::String(val.to_string()));`,
       );
       lines.push(`${indent}}`);
     } else {
       lines.push(
-        `${indent}result.insert("${key}".to_string(), serde_json::Value::String(${fieldRef}.to_string()));`,
+        `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::String(${fieldRef}.to_string()));`,
       );
     }
     return;
@@ -3457,18 +3501,18 @@ function emitVariantSaveField(
         if (shouldOmitAbsentOnSave(field)) {
           lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
           lines.push(
-            `${indent}    result.insert("${key}".to_string(), val.clone());`,
+            `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), val.clone());`,
           );
           lines.push(`${indent}}`);
         } else if (shouldOmitAbsentOnSave(field, "rust-value-sentinel")) {
           lines.push(`${indent}if !${fieldRef}.is_null() {`);
           lines.push(
-            `${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+            `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
           );
           lines.push(`${indent}}`);
         } else {
           lines.push(
-            `${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+            `${indent}result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
           );
         }
         return;
@@ -3476,13 +3520,15 @@ function emitVariantSaveField(
       if (shouldOmitAbsentOnSave(field)) {
         lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), val.to_value(ctx));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), val.to_value(ctx));`,
         );
         lines.push(`${indent}}`);
       } else {
         lines.push(`${indent}{`);
         lines.push(`${indent}    let nested = ${fieldRef}.to_value(ctx);`);
-        lines.push(`${indent}    result.insert("${key}".to_string(), nested);`);
+        lines.push(
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), nested);`,
+        );
         lines.push(`${indent}}`);
       }
       return;
@@ -3491,16 +3537,16 @@ function emitVariantSaveField(
       if (shouldOmitAbsentOnSave(field, "rust-collection-default")) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::to_value(items).unwrap_or(serde_json::Value::Null));`,
         );
         lines.push(`${indent}}`);
       } else if (shouldMaterializeCollectionDefault(field, "explicit-only")) {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::to_value(${fieldRef}).unwrap_or(serde_json::Value::Null));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::to_value(${fieldRef}).unwrap_or(serde_json::Value::Null));`,
         );
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::to_value(${fieldRef}).unwrap_or(serde_json::Value::Null));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::to_value(${fieldRef}).unwrap_or(serde_json::Value::Null));`,
         );
       }
       return;
@@ -3511,16 +3557,16 @@ function emitVariantSaveField(
         if (shouldOmitAbsentOnSave(field, "rust-collection-default")) {
           lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
           lines.push(
-            `${indent}    result.insert("${key}".to_string(), ${saveHelper}(items, ctx));`,
+            `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), ${saveHelper}(items, ctx));`,
           );
           lines.push(`${indent}}`);
         } else if (shouldMaterializeCollectionDefault(field, "explicit-only")) {
           lines.push(
-            `${indent}result.insert("${key}".to_string(), ${saveHelper}(${fieldRef}, ctx));`,
+            `${indent}result.insert(${rustStringLiteral(key)}.to_string(), ${saveHelper}(${fieldRef}, ctx));`,
           );
         } else {
           lines.push(
-            `${indent}result.insert("${key}".to_string(), ${saveHelper}(${fieldRef}, ctx));`,
+            `${indent}result.insert(${rustStringLiteral(key)}.to_string(), ${saveHelper}(${fieldRef}, ctx));`,
           );
         }
         return;
@@ -3528,16 +3574,16 @@ function emitVariantSaveField(
       if (shouldOmitAbsentOnSave(field, "rust-collection-default")) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), serde_json::Value::Array(items.iter().map(|item| item.to_value(ctx)).collect()));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Array(items.iter().map(|item| item.to_value(ctx)).collect()));`,
         );
         lines.push(`${indent}}`);
       } else if (shouldMaterializeCollectionDefault(field, "explicit-only")) {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`,
         );
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Array(${fieldRef}.iter().map(|item| item.to_value(ctx)).collect()));`,
         );
       }
       return;
@@ -3547,23 +3593,23 @@ function emitVariantSaveField(
         if (shouldOmitAbsentOnSave(field)) {
           lines.push(`${indent}if !${fieldRef}.is_null() {`);
           lines.push(
-            `${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+            `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
           );
           lines.push(`${indent}}`);
         } else {
           lines.push(
-            `${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+            `${indent}result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
           );
         }
       } else if (shouldOmitAbsentOnSave(field)) {
         lines.push(`${indent}if let Some(items) = ${fieldRef}.as_ref() {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), ${rustDictSaveExpr("items", cat.valueType)});`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), ${rustDictSaveExpr("items", cat.valueType)});`,
         );
         lines.push(`${indent}}`);
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), ${rustDictSaveExpr(fieldRef, cat.valueType)});`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), ${rustDictSaveExpr(fieldRef, cat.valueType)});`,
         );
       }
       return;
@@ -3584,18 +3630,18 @@ function emitVariantScalarSave(
       // Optional value types — variant fields are references, use direct pattern
       lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
       lines.push(
-        `${indent}    result.insert("${key}".to_string(), val.clone());`,
+        `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), val.clone());`,
       );
       lines.push(`${indent}}`);
     } else if (omitAbsentOnSave) {
       lines.push(`${indent}if !${fieldRef}.is_null() {`);
       lines.push(
-        `${indent}    result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+        `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
       );
       lines.push(`${indent}}`);
     } else {
       lines.push(
-        `${indent}result.insert("${key}".to_string(), ${fieldRef}.clone());`,
+        `${indent}result.insert(${rustStringLiteral(key)}.to_string(), ${fieldRef}.clone());`,
       );
     }
     return;
@@ -3606,12 +3652,12 @@ function emitVariantScalarSave(
       if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), serde_json::Value::String(val.clone()));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::String(val.clone()));`,
         );
         lines.push(`${indent}}`);
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::Value::String(${fieldRef}.clone()));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::String(${fieldRef}.clone()));`,
         );
       }
       return;
@@ -3619,12 +3665,12 @@ function emitVariantScalarSave(
       if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), serde_json::Value::Bool(*val));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Bool(*val));`,
         );
         lines.push(`${indent}}`);
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::Value::Bool(*${fieldRef}));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Bool(*${fieldRef}));`,
         );
       }
       return;
@@ -3641,12 +3687,12 @@ function emitVariantScalarSave(
       if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(*val)));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Number(serde_json::Number::from(*val)));`,
         );
         lines.push(`${indent}}`);
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::Value::Number(serde_json::Number::from(*${fieldRef})));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Value::Number(serde_json::Number::from(*${fieldRef})));`,
         );
       }
       return;
@@ -3658,14 +3704,28 @@ function emitVariantScalarSave(
       if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef} {`);
         lines.push(
-          `${indent}    result.insert("${key}".to_string(), serde_json::Number::from_f64(*val as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`,
+          `${indent}    result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Number::from_f64(*val as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`,
         );
         lines.push(`${indent}}`);
       } else {
         lines.push(
-          `${indent}result.insert("${key}".to_string(), serde_json::Number::from_f64(*${fieldRef} as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`,
+          `${indent}result.insert(${rustStringLiteral(key)}.to_string(), serde_json::Number::from_f64(*${fieldRef} as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null));`,
         );
       }
       return;
   }
+}
+
+/** Canonical dict key of a base or variant field named `fieldName` (its `@encodedName`, else the name). */
+function rustRawKey(
+  type: TypeDecl,
+  childTypes: TypeDecl[],
+  fieldName: string,
+): string {
+  const field =
+    type.fields.find((candidate) => candidate.name === fieldName) ??
+    childTypes
+      .flatMap((child) => child.fields)
+      .find((candidate) => candidate.name === fieldName);
+  return field ? fieldWireKey(field) : fieldName;
 }

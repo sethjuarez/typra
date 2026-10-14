@@ -561,6 +561,17 @@ model AudioContent extends FixtureContent {
 
   @sample(#{ frameCount: 9007199254740991 })
   frameCount?: safeint;
+
+  // `@encodedName` sets the canonical JSON/YAML key on load and save (#337).
+  @encodedName("application/json", "fade_in_ms")
+  @sample(#{ fade_in_ms: 250 })
+  fadeInMs?: int32;
+
+  // A wire key that is not a valid identifier in any target and holds format-string
+  // metacharacters, so every runtime must escape it as a string literal (#337).
+  @encodedName("application/json", "fade-out {ms}")
+  @sample(#{ `fade-out {ms}`: 120 })
+  fadeOutMs?: int32;
 }
 
 union FixtureAudioMix {

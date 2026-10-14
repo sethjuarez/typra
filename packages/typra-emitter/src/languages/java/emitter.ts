@@ -11,6 +11,9 @@ import {
   TypeDecl,
   WireDecl,
   isClosedPolymorphicDispatch,
+  assignmentWireKey,
+  discriminatorWireKey,
+  fieldWireKey,
 } from "../../ir/declarations.js";
 import {
   shouldGuardMissingRequiredField,
@@ -239,7 +242,7 @@ function emitType(
   }
   lines.push(`${modifiers} class ${typeName}${extendsClause} {`);
   lines.push(
-    `  public static final String SHORTHAND_PROPERTY = ${type.coercionProperty ? `"${type.coercionProperty}"` : "null"};`,
+    `  public static final String SHORTHAND_PROPERTY = ${type.coercionProperty ? `"${escapeJava(type.coercionProperty)}"` : "null"};`,
   );
   lines.push("");
 
@@ -248,7 +251,7 @@ function emitType(
     (field) => !inheritedFields.has(field.name),
   )) {
     if (nativeSerialization === "jackson") {
-      lines.push(`  @JsonProperty("${escapeJava(field.name)}")`);
+      lines.push(`  @JsonProperty("${escapeJava(fieldWireKey(field))}")`);
       lines.push("  @JsonInclude(JsonInclude.Include.NON_NULL)");
     }
     lines.push(
@@ -536,7 +539,7 @@ function emitLoad(
   lines.push(`    ${typeName} result = new ${typeName}();`);
   if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
     lines.push(
-      `    if (map.get("${escapeJava(type.polymorphicDispatch.discriminatorField)}") instanceof String) {`,
+      `    if (map.get("${escapeJava(discriminatorWireKey(type.polymorphicDispatch))}") instanceof String) {`,
     );
     lines.push("      result.rawPayload = cloneRawMap(map);");
     for (const assignment of type.load.assignments) {
@@ -623,7 +626,7 @@ function emitCoercions(
           (candidate) => candidate.name === assignment.fieldName,
         );
         lines.push(
-          `      coerced.put("${escapeJava(assignment.fieldName)}", ${coercionValue(assignment, coercion.scalarType, field)});`,
+          `      coerced.put("${escapeJava(assignmentWireKey(assignment))}", ${coercionValue(assignment, coercion.scalarType, field)});`,
         );
       }
       lines.push(`      return ${typeName}.load(coerced, ctx);`);
@@ -696,7 +699,7 @@ function emitPolymorphicDispatch(
   const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push("    if (data instanceof Map<?, ?> dispatchMap) {");
   lines.push(
-    `      Object discriminator = dispatchMap.get("${escapeJava(dispatch.discriminatorField)}");`,
+    `      Object discriminator = dispatchMap.get("${escapeJava(discriminatorWireKey(dispatch))}");`,
   );
   if (!dispatch.defaultVariant || dispatch.defaultVariant.isSelfReference) {
     // Closed union, an abstract open union whose only fallback is an unknown
@@ -717,7 +720,7 @@ function emitPolymorphicDispatch(
     // same catch-all the @dispatch rail selects — so the coerce shorthand (map
     // with no discriminator) hydrates instead of throwing.
     lines.push(
-      "      String discriminatorString = discriminator instanceof String discriminatorRaw ? discriminatorRaw : \"\";",
+      '      String discriminatorString = discriminator instanceof String discriminatorRaw ? discriminatorRaw : "";',
     );
   }
   lines.push("      switch (discriminatorString) {");
@@ -750,7 +753,7 @@ function emitLoadField(
   lines: string[],
   polymorphicTypeNames: Set<string>,
 ): void {
-  const wireName = escapeJava(field.name);
+  const wireName = escapeJava(fieldWireKey(field));
   const name = javaPropertyName(field.name);
   lines.push(
     `    if (map.containsKey("${wireName}") && map.get("${wireName}") != null) {`,
@@ -867,7 +870,9 @@ function emitJavaEntryShorthandArms(
   const cases = shorthand ? orderedEntryShorthandCases(shorthand.cases) : [];
 
   if (!shorthand || cases.length === 0) {
-    return [`${indent}itemData.put("${target}", entry.getValue());`];
+    return [
+      `${indent}itemData.put("${escapeJava(target)}", entry.getValue());`,
+    ];
   }
 
   const lines: string[] = [
@@ -881,13 +886,13 @@ function emitJavaEntryShorthandArms(
     first = false;
     for (const a of entryCase.assignments) {
       lines.push(
-        `${indent}  itemData.put("${a.fieldName}", ${javaShorthandLiteral(a.literalValue)});`,
+        `${indent}  itemData.put("${escapeJava(a.fieldName)}", ${javaShorthandLiteral(a.literalValue)});`,
       );
     }
   }
   if (!first) lines.push(`${indent}}`);
   lines.push(
-    `${indent}itemData.put("${shorthand.valueField}", shorthandValue);`,
+    `${indent}itemData.put("${escapeJava(shorthand.valueField)}", shorthandValue);`,
   );
   return lines;
 }
@@ -970,7 +975,7 @@ function emitSaveField(
   const name = field.fieldName;
   const category = field.category;
   const enumName = field.isOpenEnum ? null : field.enumName;
-  const wireName = escapeJava(name);
+  const wireName = escapeJava(field.targetName);
   const propertyName = javaPropertyName(name);
   switch (category.kind) {
     case "scalar":
@@ -1190,7 +1195,7 @@ function emitToWire(wire: WireDecl, lines: string[]): void {
       );
     }
     lines.push(
-      `      if (wireName != null && data.get("${escapeJava(field.fieldName)}") != null) result.put(wireName, data.get("${escapeJava(field.fieldName)}"));`,
+      `      if (wireName != null && data.get("${escapeJava(assignmentWireKey(field))}") != null) result.put(wireName, data.get("${escapeJava(assignmentWireKey(field))}"));`,
     );
     lines.push("    }");
   }
@@ -1220,7 +1225,9 @@ function emitFromWire(typeName: string, wire: WireDecl, lines: string[]): void {
         `      m.put("${escapeJava(provider)}", "${escapeJava(name)}");`,
       );
     }
-    lines.push(`      wireMap.put("${escapeJava(field.fieldName)}", m);`);
+    lines.push(
+      `      wireMap.put("${escapeJava(assignmentWireKey(field))}", m);`,
+    );
     lines.push("    }");
   }
   lines.push("    Map<String, String> inverse = new LinkedHashMap<>();");

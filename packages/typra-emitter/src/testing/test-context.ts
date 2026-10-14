@@ -176,6 +176,33 @@ const WIRE_SCALAR_DEFAULTS: Record<string, unknown> = {
  * Returns `undefined` when nothing can be derived, leaving the property absent rather than
  * emitting a payload that is confidently wrong.
  */
+/** The canonical sample dict key for a property: its JSON `@encodedName`, or its name. */
+export function propertyWireKey(prop: PropertyNode): string {
+  return prop.serializedName ?? prop.name;
+}
+
+/** Resolve a sample dict key back to the property that owns it. */
+export function samplePropertyFor(
+  node: TypeNode,
+  key: string,
+): PropertyNode | undefined {
+  return (
+    node.properties.find((p) => propertyWireKey(p) === key) ??
+    node.properties.find((p) => p.name === key && !p.serializedName)
+  );
+}
+
+/** The sample dict key for the property of `node` named `name` (the name when unknown). */
+export function wireKeyForName(node: TypeNode, name: string): string {
+  const prop = node.properties.find((p) => p.name === name);
+  return prop ? propertyWireKey(prop) : name;
+}
+
+/** The sample dict key carrying a polymorphic base's discriminator. */
+function discriminatorSampleKey(node: TypeNode): string {
+  return wireKeyForName(node, node.discriminator ?? "");
+}
+
 /** The literal a concrete variant pins for its base's discriminator, if it pins one. */
 function discriminatorLiteral(
   child: TypeNode,
@@ -227,7 +254,7 @@ function synthesizeComplexSample(
 
     const value = synthesizeRequiredValue(prop, resolveType, nested);
     if (value !== undefined) {
-      payload[prop.name] = value;
+      payload[propertyWireKey(prop)] = value;
     }
   }
   return payload;
@@ -268,7 +295,7 @@ function synthesizeCompleteComplexSample(
     if (value === undefined) {
       return undefined;
     }
-    payload[prop.name] = value;
+    payload[propertyWireKey(prop)] = value;
   }
   return payload;
 }
@@ -342,7 +369,7 @@ export function withRequiredComplexSamples(
   // combination already supplied win, so this only fills genuine gaps.
   if (
     node.discriminator &&
-    !(node.discriminator in completed) &&
+    !(discriminatorSampleKey(node) in completed) &&
     node.childTypes.length > 0
   ) {
     const variant = synthesizeComplexSample(node, resolveType, new Set());
@@ -352,7 +379,7 @@ export function withRequiredComplexSamples(
   }
 
   for (const prop of node.properties) {
-    if (prop.name in completed) continue;
+    if (propertyWireKey(prop) in completed) continue;
     if (prop.isOptional || prop.hasExplicitDefault) continue;
     if (prop.isScalar || prop.isAny || prop.isDict || prop.enumName) continue;
 
@@ -362,7 +389,7 @@ export function withRequiredComplexSamples(
     const payload = synthesizeComplexSample(target, resolveType, seed);
     if (payload === undefined) continue;
 
-    completed[prop.name] = prop.isCollection ? [payload] : payload;
+    completed[propertyWireKey(prop)] = prop.isCollection ? [payload] : payload;
   }
 
   return completed;
@@ -499,7 +526,7 @@ function buildValidations(
 ): PropertyValidation[] {
   return Object.keys(sample)
     .filter((key) => {
-      const prop = node.properties.find((p) => p.name === key);
+      const prop = samplePropertyFor(node, key);
       const supportsScalarCoercion =
         options.includeCoercedComplexValues &&
         (prop?.type?.coercions.length ?? 0) > 0;
@@ -508,9 +535,11 @@ function buildValidations(
         (prop?.isScalar || prop?.enumName || supportsScalarCoercion)
       );
     })
-    .map((key) => {
-      const prop = node.properties.find((p) => p.name === key);
-      const rawValue = sample[key];
+    .map((wireKey) => {
+      const prop = samplePropertyFor(node, wireKey);
+      const rawValue = sample[wireKey];
+      const key = prop?.name ?? wireKey;
+      const wireKeyField = wireKey !== key ? { wireKey } : {};
 
       // Check for enum field (skip discriminator fields)
       const isDiscriminator = node.discriminator === key;
@@ -535,6 +564,7 @@ function buildValidations(
             delimiter: enumResult.delimiter,
             isOptional: prop?.isOptional || false,
             withheldOnSave: (prop?.sensitive ?? []).includes("save"),
+            ...wireKeyField,
           };
         }
       }
@@ -558,6 +588,7 @@ function buildValidations(
         delimiter,
         isOptional: prop?.isOptional || false,
         withheldOnSave: (prop?.sensitive ?? []).includes("save"),
+        ...wireKeyField,
       };
     });
 }
@@ -570,7 +601,7 @@ function withheldOnSaveKeys(node: TypeNode): Set<string> {
   return new Set(
     node.properties
       .filter((prop) => (prop.sensitive ?? []).includes("save"))
-      .map((prop) => prop.name),
+      .map((prop) => propertyWireKey(prop)),
   );
 }
 
@@ -608,7 +639,8 @@ export function postSaveExample(
 
 /**
  * A single provider wire-name assertion the generated conversion test should make:
- * source field `fieldName` is renamed to `wireName` for `provider`.
+ * canonical key `fieldName` (the `@encodedName` JSON key, else the property name) is renamed to
+ * `wireName` for `provider`.
  */
 export interface WireTestMapping {
   fieldName: string;
@@ -633,10 +665,10 @@ export function wireTestMappings(
 ): WireTestMapping[] {
   const present = sample ?? {};
   return node.properties
-    .filter((prop) => prop.name in present)
+    .filter((prop) => propertyWireKey(prop) in present)
     .flatMap((prop) =>
       (prop.knownAs ?? []).map((mapping) => ({
-        fieldName: prop.name,
+        fieldName: propertyWireKey(prop),
         provider: mapping.provider,
         wireName: mapping.name,
       })),
@@ -847,6 +879,13 @@ export const pythonTestOptions: TestContextOptions = {
 /**
  * TypeScript test context options.
  */
+function escapeTemplateLiteralBody(text: string): string {
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\$\{/g, "\\${");
+}
+
 export const typescriptTestOptions: TestContextOptions = {
   renderKey: (key: string) => key, // camelCase - already correct from TypeSpec
   renderBoolean: (val: boolean) => (val ? "true" : "false"),
@@ -858,10 +897,10 @@ export const typescriptTestOptions: TestContextOptions = {
       .replace(/\t/g, "\\t")
       .replace(/"/g, '\\"'),
   getDelimiter: (str: string) => '"',
-  // Escape backslashes in JSON so escape sequences like \n remain as literals in template strings
-  escapeJsonForTemplate: (json: string) => json.replace(/\\/g, "\\\\"),
-  // Escape backslashes in YAML so escape sequences remain as literals in template strings
-  escapeYamlForTemplate: (yaml: string) => yaml.replace(/\\/g, "\\\\"),
+  // Escape JSON/YAML into a template-literal body: backslashes keep escape sequences
+  // like \n literal, and backticks / `${` (e.g. in a wire key) stay inert text.
+  escapeJsonForTemplate: escapeTemplateLiteralBody,
+  escapeYamlForTemplate: escapeTemplateLiteralBody,
   scalarValues: {
     boolean: "false",
     float: "3.14",

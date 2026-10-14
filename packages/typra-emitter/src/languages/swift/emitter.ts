@@ -9,6 +9,8 @@ import {
   TypeDecl,
   WireFieldMapping,
   isClosedPolymorphicDispatch,
+  assignmentWireKey,
+  discriminatorWireKey,
 } from "../../ir/declarations.js";
 import {
   shouldGuardMissingRequiredField,
@@ -256,11 +258,11 @@ function emitPolymorphicEnum(
     // variant and is rejected up front. Unknown NON-blank values still flow to
     // the switch default (closed → throw; carrier/self-reference → base).
     lines.push(
-      `    let discriminator = try TypraRuntime.string(object[${swiftStringLiteral(dispatch.discriminatorField)}] ?? NSNull(), field: ${swiftStringLiteral(dispatch.discriminatorField)})`,
+      `    let discriminator = try TypraRuntime.string(object[${swiftStringLiteral(discriminatorWireKey(dispatch))}] ?? NSNull(), field: ${swiftStringLiteral(discriminatorWireKey(dispatch))})`,
     );
     lines.push("    if discriminator.isEmpty {");
     lines.push(
-      `      throw TypraRuntimeError.invalidField(field: context.at(${swiftStringLiteral(dispatch.discriminatorField)}).path, expected: "non-blank string")`,
+      `      throw TypraRuntimeError.invalidField(field: context.at(${swiftStringLiteral(discriminatorWireKey(dispatch))}).path, expected: "non-blank string")`,
     );
     lines.push("    }");
   } else {
@@ -270,7 +272,7 @@ function emitPolymorphicEnum(
     // selects — letting the coerce shorthand (object with no discriminator)
     // hydrate instead of throwing.
     lines.push(
-      `    let discriminator = object[${swiftStringLiteral(dispatch.discriminatorField)}] as? String ?? ""`,
+      `    let discriminator = object[${swiftStringLiteral(discriminatorWireKey(dispatch))}] as? String ?? ""`,
     );
   }
   lines.push("    switch discriminator {");
@@ -405,7 +407,7 @@ function emitPolymorphicCoercion(
           type.fields.find((field) => field.name === assignment.fieldName),
           assignment.literalValue ?? "",
         );
-    return `${swiftStringLiteral(assignment.fieldName)}: ${value}`;
+    return `${swiftStringLiteral(assignmentWireKey(assignment))}: ${value}`;
   });
   lines.push(`      normalizedData = [${entries.join(", ")}]`);
   lines.push("    }");
@@ -597,7 +599,7 @@ function emitLoad(
       `    if let value = object[${swiftStringLiteral(assignment.sourceName)}] {`,
     );
     lines.push(
-      `      instance.${swiftPropertyName(assignment.fieldName)} = ${swiftLoadExpression(assignment.category, assignment.enumName, assignment.fieldName, "value", polymorphicTypeNames, collectionHelper)}`,
+      `      instance.${swiftPropertyName(assignment.fieldName)} = ${swiftLoadExpression(assignment.category, assignment.enumName, assignment.sourceName, "value", polymorphicTypeNames, collectionHelper)}`,
     );
     lines.push("    }");
     if (
@@ -904,7 +906,9 @@ function emitFromWire(type: TypeDecl, lines: string[]): void {
           `${swiftStringLiteral(provider)}: ${swiftStringLiteral(wireName)}`,
       )
       .join(", ");
-    lines.push(`      ${swiftStringLiteral(mapping.fieldName)}: [${inner}],`);
+    lines.push(
+      `      ${swiftStringLiteral(assignmentWireKey(mapping))}: [${inner}],`,
+    );
   }
   lines.push("    ]");
   lines.push("    var inverse: [String: String] = [:]");

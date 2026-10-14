@@ -43,6 +43,8 @@ import {
   PropertyCategory,
   WireDecl,
   isClosedPolymorphicDispatch,
+  assignmentWireKey,
+  discriminatorWireKey,
 } from "../../ir/declarations.js";
 import {
   shouldGuardMissingRequiredField,
@@ -212,7 +214,6 @@ export function emitTypeScriptFile(
     } else {
       lines.push(`export type ${enumDef.name} = ${values};`);
     }
-
   }
   if (decl.enums.length > 0) {
     lines.push("");
@@ -321,7 +322,7 @@ function emitType(
 
   // shorthandProperty static
   const shorthand = type.coercionProperty
-    ? `"${type.coercionProperty}"`
+    ? `${JSON.stringify(type.coercionProperty)}`
     : "undefined";
   lines.push(
     `  static readonly shorthandProperty: string | undefined = ${shorthand};`,
@@ -503,7 +504,7 @@ function emitUnknownCarrier(type: TypeDecl, lines: string[]): void {
     `    instance.raw = ${parentName}.cloneRawValue(data) as Record<string, unknown>;`,
   );
   for (const a of type.load.assignments) {
-    lines.push(`    delete instance.raw["${a.sourceName}"];`);
+    lines.push(`    delete instance.raw[${JSON.stringify(a.sourceName)}];`);
   }
   lines.push("    return instance;");
   lines.push("  }");
@@ -602,7 +603,7 @@ function zodWireSchemaExpression(type: TypeDecl): string {
   const knownSchema =
     dispatch.variants.length === 1
       ? variantSchemas
-      : `z.discriminatedUnion("${dispatch.discriminatorField}", [${variantSchemas}])`;
+      : `z.discriminatedUnion(${JSON.stringify(discriminatorWireKey(dispatch))}, [${variantSchemas}])`;
 
   if (isClosedPolymorphicDispatch(dispatch)) {
     return knownSchema;
@@ -613,7 +614,7 @@ function zodWireSchemaExpression(type: TypeDecl): string {
       ? `${dispatch.defaultVariant.typeName.name}.wireObjectSchema`
       : `${type.typeName.name}.wireObjectSchema.passthrough()`;
   const knownValues = `[${dispatch.variants.map((variant) => JSON.stringify(variant.value)).join(", ")}]`;
-  const guardedFallback = `${fallback}.refine(data => !${knownValues}.includes(String((data as Record<string, unknown>)["${dispatch.discriminatorField}"])), { message: "Known ${dispatch.discriminatorField} discriminator values must match their concrete schema." })`;
+  const guardedFallback = `${fallback}.refine(data => !${knownValues}.includes(String((data as Record<string, unknown>)[${JSON.stringify(discriminatorWireKey(dispatch))}])), { message: "Known ${dispatch.discriminatorField} discriminator values must match their concrete schema." })`;
   return `z.union([${knownSchema}, ${guardedFallback}])`;
 }
 
@@ -626,7 +627,7 @@ function zodObjectExpression(
     .filter((a) => a.fieldName !== omitField)
     .map(
       (a) =>
-        `    "${a.targetName}": ${zodFieldSchema(type, a, allTypes)}${a.isOptional ? ".optional()" : ""},`,
+        `    ${JSON.stringify(a.targetName)}: ${zodFieldSchema(type, a, allTypes)}${a.isOptional ? ".optional()" : ""},`,
     );
   const objectBody =
     entries.length > 0 ? `{\n${entries.join("\n")}\n  }` : "{}";
@@ -1050,10 +1051,10 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
     );
     if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(
-      `    if (data["${a.sourceName}"] === undefined || data["${a.sourceName}"] === null) {`,
+      `    if (data[${JSON.stringify(a.sourceName)}] === undefined || data[${JSON.stringify(a.sourceName)}] === null) {`,
     );
     lines.push(
-      `      throw new Error(\`\${context.at("${a.sourceName}").path}: missing required field\`);`,
+      `      throw new Error(\`\${context.at(${JSON.stringify(a.sourceName)}).path}: missing required field\`);`,
     );
     lines.push("    }");
   }
@@ -1071,7 +1072,7 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   // Per-property assignments
   for (const a of type.load.assignments) {
     lines.push(
-      `    if (data["${a.sourceName}"] !== undefined && data["${a.sourceName}"] !== null) {`,
+      `    if (data[${JSON.stringify(a.sourceName)}] !== undefined && data[${JSON.stringify(a.sourceName)}] !== null) {`,
     );
     lines.push(`      ${emitLoadAssignment(a)}`);
     lines.push("    }");
@@ -1099,9 +1100,9 @@ function emitLoadAssignment(a: LoadAssignment): string {
   // Named enum — cast string to enum type alias
   if (a.enumName && a.allowedValues.length > 0) {
     if (Object.keys(a.parseAliases).length > 0) {
-      return `instance.${a.fieldName} = ${enumParserName(a.enumName)}(data["${a.sourceName}"]);`;
+      return `instance.${a.fieldName} = ${enumParserName(a.enumName)}(data[${JSON.stringify(a.sourceName)}]);`;
     }
-    return `instance.${a.fieldName} = String(data["${a.sourceName}"]) as ${a.enumName};`;
+    return `instance.${a.fieldName} = String(data[${JSON.stringify(a.sourceName)}]) as ${a.enumName};`;
   }
   const cat = a.category;
   switch (cat.kind) {
@@ -1109,32 +1110,32 @@ function emitLoadAssignment(a: LoadAssignment): string {
       const tsType = TYPE_MAP[cat.scalarType];
       switch (tsType) {
         case "string":
-          return `instance.${a.fieldName} = String(data["${a.sourceName}"]);`;
+          return `instance.${a.fieldName} = String(data[${JSON.stringify(a.sourceName)}]);`;
         case "number":
-          return `instance.${a.fieldName} = Number(data["${a.sourceName}"]);`;
+          return `instance.${a.fieldName} = Number(data[${JSON.stringify(a.sourceName)}]);`;
         case "boolean":
-          return `instance.${a.fieldName} = Boolean(data["${a.sourceName}"]);`;
+          return `instance.${a.fieldName} = Boolean(data[${JSON.stringify(a.sourceName)}]);`;
         default:
-          return `instance.${a.fieldName} = data["${a.sourceName}"] as ${tsType};`;
+          return `instance.${a.fieldName} = data[${JSON.stringify(a.sourceName)}] as ${tsType};`;
       }
     }
     case "complex":
-      return `instance.${a.fieldName} = ${cat.typeName}.load(data["${a.sourceName}"] as Record<string, unknown>, context.at("${a.sourceName}"));`;
+      return `instance.${a.fieldName} = ${cat.typeName}.load(data[${JSON.stringify(a.sourceName)}] as Record<string, unknown>, context.at(${JSON.stringify(a.sourceName)}));`;
     case "collection_scalar": {
       const tsType = TYPE_MAP[cat.scalarType];
       switch (tsType) {
         case "string":
-          return `instance.${a.fieldName} = (data["${a.sourceName}"] as unknown[]).map(v => String(v));`;
+          return `instance.${a.fieldName} = (data[${JSON.stringify(a.sourceName)}] as unknown[]).map(v => String(v));`;
         case "number":
-          return `instance.${a.fieldName} = (data["${a.sourceName}"] as unknown[]).map(v => Number(v));`;
+          return `instance.${a.fieldName} = (data[${JSON.stringify(a.sourceName)}] as unknown[]).map(v => Number(v));`;
         case "boolean":
-          return `instance.${a.fieldName} = (data["${a.sourceName}"] as unknown[]).map(v => Boolean(v));`;
+          return `instance.${a.fieldName} = (data[${JSON.stringify(a.sourceName)}] as unknown[]).map(v => Boolean(v));`;
         default:
-          return `instance.${a.fieldName} = data["${a.sourceName}"] as ${tsType}[];`;
+          return `instance.${a.fieldName} = data[${JSON.stringify(a.sourceName)}] as ${tsType}[];`;
       }
     }
     case "collection_complex":
-      return `instance.${a.fieldName} = ${a.parentTypeName}.load${capitalize(a.fieldName)}(data["${a.sourceName}"] as unknown[], context.at("${a.sourceName}"));`;
+      return `instance.${a.fieldName} = ${a.parentTypeName}.load${capitalize(a.fieldName)}(data[${JSON.stringify(a.sourceName)}] as unknown[], context.at(${JSON.stringify(a.sourceName)}));`;
     case "dict":
       return dictLoadAssignment(a.fieldName, a.sourceName, cat.valueType);
   }
@@ -1146,14 +1147,14 @@ function dictLoadAssignment(
   valueType: string | undefined,
 ): string {
   if (!valueType || valueType === "unknown") {
-    return `instance.${fieldName} = data["${sourceName}"] as Record<string, unknown>;`;
+    return `instance.${fieldName} = data[${JSON.stringify(sourceName)}] as Record<string, unknown>;`;
   }
   const valueExpr = dictValueLoadExpr(
     "value",
     valueType,
-    `context.at("${sourceName}").at(key)`,
+    `context.at(${JSON.stringify(sourceName)}).at(key)`,
   );
-  return `instance.${fieldName} = Object.fromEntries(Object.entries(data["${sourceName}"] as Record<string, unknown>).map(([key, value]) => [key, ${valueExpr}]));`;
+  return `instance.${fieldName} = Object.fromEntries(Object.entries(data[${JSON.stringify(sourceName)}] as Record<string, unknown>).map(([key, value]) => [key, ${valueExpr}]));`;
 }
 
 function dictValueLoadExpr(
@@ -1264,7 +1265,7 @@ function emitCoercionBody(
     // Dynamic discriminator — must go through dispatch
     const dictFields = c.assignments.map((a) => {
       const val = a.isInput ? "data" : `"${a.literalValue}"`;
-      return `"${a.fieldName}": ${val}`;
+      return `${JSON.stringify(assignmentWireKey(a))}: ${val}`;
     });
     lines.push(
       `${indent}return ${typeName}.loadKind({ ${dictFields.join(", ")} } as Record<string, unknown>, context);`,
@@ -1361,7 +1362,7 @@ function emitPolymorphicDispatch(
     `  private static loadKind(data: Record<string, unknown>, context?: LoadContext): ${parentName} {`,
   );
   lines.push(
-    `    const discriminatorValue = data["${dispatch.discriminatorField}"];`,
+    `    const discriminatorValue = data[${JSON.stringify(discriminatorWireKey(dispatch))}];`,
   );
   if (hasFallback) {
     lines.push(
@@ -1480,7 +1481,7 @@ function emitTsEntryShorthandArms(
     );
 
   if (!shorthand || shorthand.cases.length === 0) {
-    load(`{ name: k, "${shorthandField}": v }`);
+    load(`{ name: k, ${JSON.stringify(shorthandField)}: v }`);
     return;
   }
 
@@ -1490,15 +1491,20 @@ function emitTsEntryShorthandArms(
     const check = tsScalarValueCheck(entryCase.scalarType);
     if (!check) continue;
     const fields = entryCase.assignments
-      .map((a) => `"${a.fieldName}": ${JSON.stringify(a.literalValue)}`)
-      .concat(`"${shorthand.valueField}": v`)
+      .map(
+        (a) =>
+          `${JSON.stringify(a.fieldName)}: ${JSON.stringify(a.literalValue)}`,
+      )
+      .concat(`${JSON.stringify(shorthand.valueField)}: v`)
       .join(", ");
     lines.push(`          ${first ? "if" : "} else if"} (${check}) {`);
     lines.push(`            shorthand = { ${fields} };`);
     first = false;
   }
   lines.push("          } else {");
-  lines.push(`            shorthand = { "${shorthand.valueField}": v };`);
+  lines.push(
+    `            shorthand = { ${JSON.stringify(shorthand.valueField)}: v };`,
+  );
   lines.push("          }");
   load("{ name: k, ...shorthand }");
 }
@@ -1660,13 +1666,13 @@ function emitSaveAssignment(a: SaveAssignment): string {
         cat.valueType !== "unknown" &&
         !TYPE_MAP[cat.valueType]
       ) {
-        return `result["${a.targetName}"] = Object.fromEntries(Object.entries(obj.${a.fieldName}).map(([key, value]) => [key, value.save(context)]));`;
+        return `result[${JSON.stringify(a.targetName)}] = Object.fromEntries(Object.entries(obj.${a.fieldName}).map(([key, value]) => [key, value.save(context)]));`;
       }
-      return `result["${a.targetName}"] = obj.${a.fieldName};`;
+      return `result[${JSON.stringify(a.targetName)}] = obj.${a.fieldName};`;
     case "collection_complex":
-      return `result["${a.targetName}"] = ${a.parentTypeName}.save${capitalize(a.fieldName)}(obj.${a.fieldName}, context);`;
+      return `result[${JSON.stringify(a.targetName)}] = ${a.parentTypeName}.save${capitalize(a.fieldName)}(obj.${a.fieldName}, context);`;
     case "complex":
-      return `result["${a.targetName}"] = obj.${a.fieldName}.save(context);`;
+      return `result[${JSON.stringify(a.targetName)}] = obj.${a.fieldName}.save(context);`;
   }
 }
 
@@ -1684,9 +1690,14 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
 
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames)
-      .map(([prov, wireName]) => `"${prov}": "${wireName}"`)
+      .map(
+        ([prov, wireName]) =>
+          `${JSON.stringify(prov)}: ${JSON.stringify(wireName)}`,
+      )
       .join(", ");
-    lines.push(`      "${mapping.fieldName}": { ${entries} },`);
+    lines.push(
+      `      ${JSON.stringify(assignmentWireKey(mapping))}: { ${entries} },`,
+    );
   }
 
   lines.push("    };");
@@ -1715,9 +1726,14 @@ function emitFromWireMethod(
 
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames)
-      .map(([prov, wireName]) => `"${prov}": "${wireName}"`)
+      .map(
+        ([prov, wireName]) =>
+          `${JSON.stringify(prov)}: ${JSON.stringify(wireName)}`,
+      )
       .join(", ");
-    lines.push(`      "${mapping.fieldName}": { ${entries} },`);
+    lines.push(
+      `      ${JSON.stringify(assignmentWireKey(mapping))}: { ${entries} },`,
+    );
   }
 
   lines.push("    };");

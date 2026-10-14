@@ -131,7 +131,7 @@ export interface TypeDecl {
   description: string;
   /** All fields defined on this type */
   fields: FieldDecl[];
-  /** The property name that receives scalar coercion value, if any */
+  /** Dict key (the `@encodedName` JSON key when declared, else the property name) that receives scalar coercion value, if any */
   coercionProperty: string | null;
   /** Load method specification */
   load: LoadDecl;
@@ -190,6 +190,30 @@ export interface FieldDecl {
   description: string;
   /** Wire name mappings per provider (e.g., { openai: "max_completion_tokens" }) */
   knownAs: Record<string, string>;
+  /**
+   * Canonical dict/JSON/YAML key from `@encodedName("application/json", ...)`.
+   * Present only when it differs from `name`; use {@link fieldWireKey} to read it.
+   */
+  serializedName?: string;
+}
+
+/** The canonical serialized dict key of a field (its encoded name, else its name). */
+export function fieldWireKey(field: {
+  name: string;
+  serializedName?: string;
+}): string {
+  return field.serializedName ?? field.name;
+}
+
+/** Canonical dict key of a coercion assignment or `@knownAs` wire mapping. */
+export function assignmentWireKey(assignment: {
+  fieldName: string;
+  sourceName?: string;
+  serializedName?: string;
+}): string {
+  return (
+    assignment.sourceName ?? assignment.serializedName ?? assignment.fieldName
+  );
 }
 
 // ============================================================================
@@ -235,6 +259,8 @@ export interface CoercionDecl {
 export interface CoercionAssignment {
   /** Property name (camelCase, as declared in TypeSpec) */
   fieldName: string;
+  /** Dict key for the property when its `@encodedName` JSON key differs from `fieldName`. */
+  sourceName?: string;
   /** True when the value comes from the scalar input data */
   isInput: boolean;
   /** Literal string value when `isInput` is false */
@@ -246,9 +272,9 @@ export interface CoercionAssignment {
  * The category determines the deserialization pattern used by each language emitter.
  */
 export interface LoadAssignment {
-  /** Original property name (dict key, camelCase) */
+  /** Dict key to read (the `@encodedName` JSON key when declared, else the property name) */
   sourceName: string;
-  /** Field to assign to (same as sourceName — emitters apply their own casing) */
+  /** Property name to assign to (camelCase — emitters apply their own casing) */
   fieldName: string;
   /** Category determines the load pattern */
   category: PropertyCategory;
@@ -290,9 +316,9 @@ export interface SaveDecl {
  * A single property save assignment.
  */
 export interface SaveAssignment {
-  /** Property name (dict key to write to, camelCase) */
+  /** Dict key to write (the `@encodedName` JSON key when declared, else the property name) */
   targetName: string;
-  /** Field name to read from (same as targetName — emitters apply their own casing) */
+  /** Property name to read from (camelCase — emitters apply their own casing) */
   fieldName: string;
   /** Category determines the serialization pattern */
   category: PropertyCategory;
@@ -319,6 +345,11 @@ export interface SaveAssignment {
 export interface PolymorphicDispatchDecl {
   /** Discriminator field name (e.g., "kind") */
   discriminatorField: string;
+  /**
+   * Dict key the discriminator is read from/written to, when `@encodedName` renames
+   * it; absent otherwise. Use {@link discriminatorWireKey} to read it.
+   */
+  discriminatorSerializedName?: string;
   /** Concrete variant types with their discriminator values */
   variants: PolymorphicVariant[];
   /** Default/fallback type (wildcard or self-reference for non-abstract bases) */
@@ -337,6 +368,13 @@ export interface PolymorphicDispatchDecl {
  * absorbs values no concrete variant claims. Treating such a dispatch as closed emits
  * validation that rejects those values before dispatch, leaving the fallback arm unreachable.
  */
+/** The dict key the discriminator is serialized under. */
+export function discriminatorWireKey(
+  dispatch: PolymorphicDispatchDecl,
+): string {
+  return dispatch.discriminatorSerializedName ?? dispatch.discriminatorField;
+}
+
 export function isClosedPolymorphicDispatch(
   dispatch: PolymorphicDispatchDecl,
 ): boolean {
@@ -444,7 +482,7 @@ export interface PolymorphicDefault {
  * contexts and may populate different fields.
  */
 export interface EntryShorthandDecl {
-  /** Element field that receives the raw scalar value. */
+  /** Element dict key (the `@encodedName` JSON key, else the field name) that receives the raw scalar value. */
   valueField: string;
   /**
    * Per-scalar-type constant assignments inferred from the element's `@coerce`
@@ -471,7 +509,7 @@ export interface EntryShorthandCase {
  * quoted string would silently retype such a field.
  */
 export interface EntryShorthandAssignment {
-  /** Property name (camelCase, as declared in TypeSpec) */
+  /** Element dict key (the `@encodedName` JSON key, else the property name) */
   fieldName: string;
   /** Constant value, preserving its declared JSON type. */
   literalValue: string | number | boolean | null;
@@ -482,9 +520,9 @@ export interface CollectionHelperDecl {
   propertyName: string;
   /** Element type name (the type being loaded/saved) */
   elementTypeName: TypeName;
-  /** Field names on the element type (excluding "name" — used for shorthand detection) */
+  /** Element dict keys (excluding "name" — used for shorthand detection); `@encodedName` JSON keys when declared */
   innerFields: string[];
-  /** Element field populated by scalar @coerce shorthand, when declared. */
+  /** Element dict key populated by scalar @coerce shorthand, when declared. */
   coercionProperty?: string | null;
   /** Immediate-scalar entry expansion declared via `@entryShorthand`, when present. */
   entryShorthand?: EntryShorthandDecl | null;
@@ -562,6 +600,11 @@ export interface WireDecl {
 export interface WireFieldMapping {
   /** Original field name (camelCase) */
   fieldName: string;
+  /**
+   * Canonical dict key the field is saved under when `@encodedName` renames it;
+   * `@knownAs` maps this canonical key to the provider key. Absent otherwise.
+   */
+  serializedName?: string;
   /** Category of the field (for serialization) */
   category: PropertyCategory;
   /** Whether the field is optional */

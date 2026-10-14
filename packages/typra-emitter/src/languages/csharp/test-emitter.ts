@@ -359,7 +359,9 @@ function emitCSharpWireTest(
   L.push("    [Fact]");
   L.push("    public void WireConversion()");
   L.push("    {");
-  L.push(...emitRawStringLiteral("jsonData", example.json).map((l) => `    ${l}`));
+  L.push(
+    ...emitRawStringLiteral("jsonData", example.json).map((l) => `    ${l}`),
+  );
   L.push("");
   L.push(`        var instance = ${typeName}.FromJson(jsonData);`);
   L.push("        Assert.NotNull(instance);");
@@ -368,11 +370,11 @@ function emitCSharpWireTest(
     L.push(`        var ${provider}Wire = instance.ToWire("${provider}");`);
     for (const mapping of mappings.filter((m) => m.provider === provider)) {
       L.push(
-        `        Assert.Contains("${mapping.wireName}", ${provider}Wire.Keys);`,
+        `        Assert.Contains(${csharpStringLiteral(mapping.wireName)}, ${provider}Wire.Keys);`,
       );
       if (mapping.fieldName !== mapping.wireName) {
         L.push(
-          `        Assert.DoesNotContain("${mapping.fieldName}", ${provider}Wire.Keys);`,
+          `        Assert.DoesNotContain(${csharpStringLiteral(mapping.fieldName)}, ${provider}Wire.Keys);`,
         );
       }
     }

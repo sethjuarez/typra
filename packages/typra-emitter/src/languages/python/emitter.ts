@@ -37,6 +37,8 @@ import {
   PropertyCategory,
   WireFieldMapping,
   isClosedPolymorphicDispatch,
+  assignmentWireKey,
+  discriminatorWireKey,
 } from "../../ir/declarations.js";
 import {
   shouldGuardMissingRequiredField,
@@ -474,7 +476,7 @@ function emitType(
   // _shorthand_property ClassVar
   lines.push("");
   const shorthand = type.coercionProperty
-    ? `"${type.coercionProperty}"`
+    ? `${pythonLiteral(type.coercionProperty)}`
     : "None";
   lines.push(`    _shorthand_property: ClassVar[str | None] = ${shorthand}`);
   if (usePydantic) {
@@ -618,7 +620,9 @@ function emitUnknownCarrier(
   lines.push(`        instance = ${carrier}()`);
   lines.push("        instance._raw = copy.deepcopy(data)");
   for (const a of type.load.assignments) {
-    lines.push(`        instance._raw.pop("${a.sourceName}", None)`);
+    lines.push(
+      `        instance._raw.pop(${pythonLiteral(a.sourceName)}, None)`,
+    );
   }
   lines.push("        return instance");
   lines.push("");
@@ -732,7 +736,10 @@ function isMethodStyle(name: string): boolean {
 /** Map a protocol type string to a Python type annotation. */
 function protocolType(typeStr: string): string {
   if (typeStr.includes(" | ")) {
-    return typeStr.split(" | ").map((part) => protocolType(part.trim())).join(" | ");
+    return typeStr
+      .split(" | ")
+      .map((part) => protocolType(part.trim()))
+      .join(" | ");
   }
   // Handle nullable types
   if (typeStr.endsWith("?")) {
@@ -1120,10 +1127,10 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
     );
     if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(
-      `        if "${a.sourceName}" not in data or data["${a.sourceName}"] is None:`,
+      `        if ${pythonLiteral(a.sourceName)} not in data or data[${pythonLiteral(a.sourceName)}] is None:`,
     );
     lines.push(
-      `            raise ValueError(f"{context.at('${a.sourceName}').path}: missing required field")`,
+      `            raise ValueError(context.at(${pythonLiteral(a.sourceName)}).path + ": missing required field")`,
     );
   }
 
@@ -1147,7 +1154,9 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
 
   // Per-property assignments
   for (const a of type.load.assignments) {
-    lines.push(`        if data is not None and "${a.sourceName}" in data:`);
+    lines.push(
+      `        if data is not None and ${pythonLiteral(a.sourceName)} in data:`,
+    );
     lines.push(`            ${emitLoadAssignment(a)}`);
   }
   if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
@@ -1172,18 +1181,18 @@ function emitLoadAssignment(a: LoadAssignment): string {
     a.allowedValues.length > 0 &&
     Object.keys(a.parseAliases).length > 0
   ) {
-    return `instance.${snake} = ${enumParserName(a.enumName)}(data["${a.sourceName}"])`;
+    return `instance.${snake} = ${enumParserName(a.enumName)}(data[${pythonLiteral(a.sourceName)}])`;
   }
   switch (cat.kind) {
     case "scalar":
     case "collection_scalar":
-      return `instance.${snake} = data["${a.sourceName}"]`;
+      return `instance.${snake} = data[${pythonLiteral(a.sourceName)}]`;
     case "dict":
       return dictLoadAssignment(snake, a.sourceName, cat.valueType);
     case "collection_complex":
-      return `instance.${snake} = ${a.parentTypeName}.load_${snake}(data["${a.sourceName}"], context.at("${a.sourceName}"))`;
+      return `instance.${snake} = ${a.parentTypeName}.load_${snake}(data[${pythonLiteral(a.sourceName)}], context.at(${pythonLiteral(a.sourceName)}))`;
     case "complex":
-      return `instance.${snake} = ${cat.typeName}.load(data["${a.sourceName}"], context.at("${a.sourceName}"))`;
+      return `instance.${snake} = ${cat.typeName}.load(data[${pythonLiteral(a.sourceName)}], context.at(${pythonLiteral(a.sourceName)}))`;
   }
 
   function dictLoadAssignment(
@@ -1192,14 +1201,14 @@ function emitLoadAssignment(a: LoadAssignment): string {
     valueType: string | undefined,
   ): string {
     if (!valueType || valueType === "unknown") {
-      return `instance.${fieldName} = data["${sourceName}"]`;
+      return `instance.${fieldName} = data[${pythonLiteral(sourceName)}]`;
     }
     const valueExpr = dictValueLoadExpr(
       "value",
       valueType,
-      `context.at("${sourceName}").at(key)`,
+      `context.at(${pythonLiteral(sourceName)}).at(key)`,
     );
-    return `instance.${fieldName} = {key: ${valueExpr} for key, value in data["${sourceName}"].items()}`;
+    return `instance.${fieldName} = {key: ${valueExpr} for key, value in data[${pythonLiteral(sourceName)}].items()}`;
   }
 
   function dictValueLoadExpr(
@@ -1245,7 +1254,7 @@ function emitCoercionBranch(
     // Build a minimal dict for the dispatch method
     const dictFields = c.assignments.map((a) => {
       const val = a.isInput ? "data" : `"${a.literalValue}"`;
-      return `"${a.fieldName}": ${val}`;
+      return `${pythonLiteral(assignmentWireKey(a))}: ${val}`;
     });
     lines.push(
       `            return ${typeName}.load_${discSnake}({${dictFields.join(", ")}}, context)`,
@@ -1332,7 +1341,7 @@ function emitPyEntryShorthandArms(
   if (!shorthand || shorthand.cases.length === 0) {
     lines.push(`${indent}# value is a scalar, use it as the primary property`);
     lines.push(
-      `${indent}result.append(${elemName}.load({"name": k, "${shorthandField}": v}, context.at(k)))`,
+      `${indent}result.append(${elemName}.load({"name": k, ${pythonLiteral(shorthandField)}: v}, context.at(k)))`,
     );
     return;
   }
@@ -1345,15 +1354,20 @@ function emitPyEntryShorthandArms(
     const check = pyScalarValueCheck(entryCase.scalarType);
     if (!check) continue;
     const fields = entryCase.assignments
-      .map((a) => `"${a.fieldName}": ${pythonLiteral(a.literalValue)}`)
-      .concat(`"${shorthand.valueField}": v`)
+      .map(
+        (a) =>
+          `${pythonLiteral(a.fieldName)}: ${pythonLiteral(a.literalValue)}`,
+      )
+      .concat(`${pythonLiteral(shorthand.valueField)}: v`)
       .join(", ");
     lines.push(`${indent}${first ? "if" : "elif"} ${check}:`);
     lines.push(`${indent}    shorthand = {${fields}}`);
     first = false;
   }
   lines.push(`${indent}else:`);
-  lines.push(`${indent}    shorthand = {"${shorthand.valueField}": v}`);
+  lines.push(
+    `${indent}    shorthand = {${pythonLiteral(shorthand.valueField)}: v}`,
+  );
   lines.push(
     `${indent}result.append(${elemName}.load({"name": k, **shorthand}, context.at(k)))`,
   );
@@ -1515,7 +1529,7 @@ function emitPolymorphicDispatch(
   );
   lines.push(`        # load polymorphic ${parentName} instance`);
   lines.push(
-    `        discriminator_raw = data.get("${dispatch.discriminatorField}") if data is not None else None`,
+    `        discriminator_raw = data.get(${pythonLiteral(discriminatorWireKey(dispatch))}) if data is not None else None`,
   );
   if (hasFallback) {
     lines.push('        discriminator_value = ""');
@@ -1646,20 +1660,20 @@ function emitSaveAssignment(a: SaveAssignment): string {
   switch (cat.kind) {
     case "scalar":
     case "collection_scalar":
-      return `result["${a.targetName}"] = obj.${snake}`;
+      return `result[${pythonLiteral(a.targetName)}] = obj.${snake}`;
     case "dict":
       if (
         cat.valueType &&
         cat.valueType !== "unknown" &&
         !TYPE_MAP[cat.valueType]
       ) {
-        return `result["${a.targetName}"] = {key: value.save(context) for key, value in obj.${snake}.items()}`;
+        return `result[${pythonLiteral(a.targetName)}] = {key: value.save(context) for key, value in obj.${snake}.items()}`;
       }
-      return `result["${a.targetName}"] = obj.${snake}`;
+      return `result[${pythonLiteral(a.targetName)}] = obj.${snake}`;
     case "collection_complex":
-      return `result["${a.targetName}"] = ${a.parentTypeName}.save_${snake}(obj.${snake}, context)`;
+      return `result[${pythonLiteral(a.targetName)}] = ${a.parentTypeName}.save_${snake}(obj.${snake}, context)`;
     case "complex":
-      return `result["${a.targetName}"] = obj.${snake}.save(context)`;
+      return `result[${pythonLiteral(a.targetName)}] = obj.${snake}.save(context)`;
   }
 }
 
@@ -1690,9 +1704,14 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
   lines.push("        wire_map: dict[str, dict[str, str]] = {");
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames)
-      .map(([provider, wireName]) => `"${provider}": "${wireName}"`)
+      .map(
+        ([provider, wireName]) =>
+          `${pythonLiteral(provider)}: ${pythonLiteral(wireName)}`,
+      )
       .join(", ");
-    lines.push(`            "${mapping.fieldName}": {${entries}},`);
+    lines.push(
+      `            ${pythonLiteral(assignmentWireKey(mapping))}: {${entries}},`,
+    );
   }
   lines.push("        }");
 
@@ -1734,9 +1753,14 @@ function emitFromWireMethod(type: TypeDecl, lines: string[]): void {
   lines.push("        wire_map: dict[str, dict[str, str]] = {");
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames)
-      .map(([provider, wireName]) => `"${provider}": "${wireName}"`)
+      .map(
+        ([provider, wireName]) =>
+          `${pythonLiteral(provider)}: ${pythonLiteral(wireName)}`,
+      )
       .join(", ");
-    lines.push(`            "${mapping.fieldName}": {${entries}},`);
+    lines.push(
+      `            ${pythonLiteral(assignmentWireKey(mapping))}: {${entries}},`,
+    );
   }
   lines.push("        }");
 

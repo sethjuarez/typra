@@ -46,6 +46,7 @@ import {
   ImportRef,
   WireDecl,
   WireFieldMapping,
+  fieldWireKey,
 } from "./declarations.js";
 
 // ============================================================================
@@ -387,6 +388,9 @@ function lowerField(
     isOpenEnum: prop.isOpenEnum,
     description: prop.description,
     knownAs,
+    ...(prop.serializedName !== undefined
+      ? { serializedName: prop.serializedName }
+      : {}),
   };
 }
 
@@ -414,6 +418,9 @@ function lowerLoad(
     const assignments: CoercionAssignment[] = Object.entries(c.expansion).map(
       ([key, value]) => ({
         fieldName: key,
+        ...(propertyWireKey(node, key) !== key
+          ? { sourceName: propertyWireKey(node, key) }
+          : {}),
         isInput: value === "{value}",
         literalValue: value === "{value}" ? undefined : String(value),
       }),
@@ -440,7 +447,7 @@ function lowerLoad(
   const assignments: LoadAssignment[] = fields
     .filter((_f, i) => !node.properties[i]?.sensitive.includes("load"))
     .map((f) => ({
-      sourceName: f.name,
+      sourceName: fieldWireKey(f),
       fieldName: f.name,
       category: f.category,
       isOptional: f.isOptional,
@@ -475,7 +482,7 @@ function lowerSave(node: TypeNode, fields: FieldDecl[]): SaveDecl {
   const assignments: SaveAssignment[] = fields
     .filter((_f, i) => !node.properties[i]?.sensitive.includes("save"))
     .map((f) => ({
-      targetName: f.name,
+      targetName: fieldWireKey(f),
       fieldName: f.name,
       category: f.category,
       isOptional: f.isOptional,
@@ -563,6 +570,9 @@ export function lowerPolymorphicDispatch(
 
   const baseDispatch: PolymorphicDispatchDecl = {
     discriminatorField: node.discriminator!,
+    ...(discriminatorProperty?.serializedName !== undefined
+      ? { discriminatorSerializedName: discriminatorProperty.serializedName }
+      : {}),
     variants,
     defaultVariant,
     isAbstract: node.isAbstract,
@@ -603,7 +613,7 @@ function lowerCollectionHelpers(
         innerFields:
           elementType?.properties
             .filter((t) => t.name !== "name")
-            .map((t) => t.name) || [],
+            .map((t) => t.serializedName ?? t.name) || [],
         coercionProperty: elementType
           ? findCoercionProperty(elementType)
           : null,
@@ -622,8 +632,8 @@ function lowerCollectionHelpers(
  * declared field instead.
  */
 function lowerEntryShorthand(node: TypeNode): EntryShorthandDecl | null {
-  const valueField = node.entryShorthand;
-  if (!valueField) return null;
+  if (!node.entryShorthand) return null;
+  const valueField = propertyWireKey(node, node.entryShorthand);
 
   const cases: EntryShorthandCase[] = (node.coercions || []).map(
     (coercion) => ({
@@ -631,7 +641,7 @@ function lowerEntryShorthand(node: TypeNode): EntryShorthandDecl | null {
       assignments: Object.entries(coercion.expansion)
         .filter(([, value]) => value !== "{value}")
         .map(([fieldName, value]) => ({
-          fieldName,
+          fieldName: propertyWireKey(node, fieldName),
           literalValue: value as string | number | boolean | null,
         })),
     }),
@@ -700,6 +710,9 @@ function lowerWire(node: TypeNode, fields: FieldDecl[]): WireDecl | null {
       }
       mappings.push({
         fieldName: field.name,
+        ...(field.serializedName !== undefined
+          ? { serializedName: field.serializedName }
+          : {}),
         category: field.category,
         isOptional: field.isOptional,
         parentTypeName: node.typeName.name,
@@ -788,11 +801,17 @@ function findCoercionProperty(node: TypeNode): string | null {
   for (const alt of node.coercions) {
     for (const [key, value] of Object.entries(alt.expansion)) {
       if (value === "{value}") {
-        return key;
+        return propertyWireKey(node, key);
       }
     }
   }
   return null;
+}
+
+/** Canonical dict key of a named property on `node` (its `@encodedName`, else the name). */
+function propertyWireKey(node: TypeNode, propertyName: string): string {
+  const property = node.properties.find((p) => p.name === propertyName);
+  return property?.serializedName ?? propertyName;
 }
 
 // ============================================================================

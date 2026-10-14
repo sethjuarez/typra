@@ -337,9 +337,13 @@ function emitPythonWireTest(
     for (const mapping of mappings.filter(
       (entry) => entry.provider === provider,
     )) {
-      lines.push(`    assert "${mapping.wireName}" in ${provider}_wire`);
+      lines.push(
+        `    assert ${JSON.stringify(mapping.wireName)} in ${provider}_wire`,
+      );
       if (mapping.fieldName !== mapping.wireName) {
-        lines.push(`    assert "${mapping.fieldName}" not in ${provider}_wire`);
+        lines.push(
+          `    assert ${JSON.stringify(mapping.fieldName)} not in ${provider}_wire`,
+        );
       }
     }
     lines.push(
