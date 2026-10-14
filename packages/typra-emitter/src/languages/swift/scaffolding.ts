@@ -418,15 +418,17 @@ export function emitSwiftPackage(
   moduleName: string,
   testPath?: string,
   testResources?: readonly string[],
+  resources?: readonly string[],
 ): string {
-  const resourcesArg =
-    testPath && testResources && testResources.length > 0
-      ? `, resources: [${testResources
+  const processArg = (names?: readonly string[]): string =>
+    names && names.length > 0
+      ? `, resources: [${names
           .map((name) => `.process(${swiftStringLiteral(name)})`)
           .join(", ")}]`
       : "";
+  const resourcesArg = testPath ? processArg(testResources) : "";
   const targets = [
-    `    .target(name: ${swiftStringLiteral(moduleName)}, dependencies: [.product(name: "Yams", package: "Yams")], path: "Sources/${moduleName}")`,
+    `    .target(name: ${swiftStringLiteral(moduleName)}, dependencies: [.product(name: "Yams", package: "Yams")], path: "Sources/${moduleName}"${processArg(resources)})`,
     ...(testPath
       ? [
           `    .testTarget(name: ${swiftStringLiteral(`${moduleName}Tests`)}, dependencies: [${swiftStringLiteral(moduleName)}], path: ${swiftStringLiteral(testPath)}${resourcesArg})`,

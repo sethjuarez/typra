@@ -237,12 +237,13 @@ describe("generate", () => {
     assert.deepEqual(
       validateTargetOptionScopes([
         { type: "Java", "harness-test-dir": "sdk/src/test/java" },
-        { type: "rust", "test-resources": ["fixtures"] },
+        { type: "rust", "test-resources": ["fixtures"], resources: ["Resources"] },
         { type: "go", "test-resources": ["data"], "harness-test-dir": "conformance" },
       ]),
       [
         'Target "Java" does not support the swift-only option "harness-test-dir" (#261). It is honored only by the Swift target; remove it, or open an emitter-drift report with your layout so it can be generalized deliberately.',
         'Target "rust" does not support the swift-only option "test-resources" (#260). It is honored only by the Swift target; remove it, or open an emitter-drift report with your layout so it can be generalized deliberately.',
+        'Target "rust" does not support the swift-only option "resources" (#332). It is honored only by the Swift target; remove it, or open an emitter-drift report with your layout so it can be generalized deliberately.',
         'Target "go" does not support the swift-only option "test-resources" (#260). It is honored only by the Swift target; remove it, or open an emitter-drift report with your layout so it can be generalized deliberately.',
         'Target "go" does not support the swift-only option "harness-test-dir" (#261). It is honored only by the Swift target; remove it, or open an emitter-drift report with your layout so it can be generalized deliberately.',
       ],

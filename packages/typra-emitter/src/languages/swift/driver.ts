@@ -128,7 +128,12 @@ export const generateSwift = async (
   await emitSwiftGeneratedFile(
     context,
     "Package.swift",
-    emitSwiftPackage(moduleName, packageTestPath, emitTarget["test-resources"]),
+    emitSwiftPackage(
+      moduleName,
+      packageTestPath,
+      emitTarget["test-resources"],
+      emitTarget.resources,
+    ),
     outputDir,
     outputDir,
     { marker: false },

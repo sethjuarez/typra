@@ -16,6 +16,7 @@ export interface EmitTarget {
   "cancellation-token-path"?: string;
   "vector-adapter-path"?: string;
   "test-resources"?: string[];
+  resources?: string[];
   "harness-test-dir"?: string;
   "native-serialization"?:
     | "none"
@@ -266,6 +267,13 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
             nullable: true,
             description:
               "Swift only. Resource directory/file names (relative to the generated test target) to declare as bundled test resources on the emitted Package.swift test target, e.g. ['Resources'] emits `resources: [.process(\"Resources\")]`. Keeps hand-added test resource wiring reproducible across regeneration instead of being dropped when Package.swift is regenerated.",
+          },
+          resources: {
+            type: "array",
+            items: { type: "string" },
+            nullable: true,
+            description:
+              "Swift only. Resource directory/file names (relative to the main library target, Sources/<module>) to declare on the emitted Package.swift main target, e.g. ['Resources'] emits `resources: [.process(\"Resources\")]`. Required when production code loads bundled files via `Bundle.module`, which SwiftPM only synthesizes for a target that owns resources.",
           },
           "harness-test-dir": {
             type: "string",
