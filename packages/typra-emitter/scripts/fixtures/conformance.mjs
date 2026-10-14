@@ -235,6 +235,8 @@ export const fixtureRootExpected = {
   },
 };
 
+let defaultCorpusCoverageChecked = false;
+
 export const PROPERTY_CORPUS_SEED = parsePropertySeed(
   process.env.TYPRA_PROPERTY_SEED,
 );
@@ -358,7 +360,60 @@ export function buildFixtureRootPropertyCorpus() {
       `TYPRA_PROPERTY_CASE did not match any generated property corpus case: ${process.env.TYPRA_PROPERTY_CASE}`,
     );
   }
+  if (
+    !defaultCorpusCoverageChecked &&
+    process.env.TYPRA_PROPERTY_CASE === undefined &&
+    process.env.TYPRA_PROPERTY_SEED === undefined &&
+    process.env.TYPRA_PROPERTY_CASE_COUNT === undefined
+  ) {
+    defaultCorpusCoverageChecked = true;
+    assertDefaultCorpusCoverage(corpus);
+  }
   return corpus;
+}
+
+
+/**
+ * Executable conformance feeds this corpus through every runtime and compares
+ * load -> save output verbatim, so it is the cross-runtime proof of
+ * `@encodedName` wire keys (#337) and required-nullable null preservation (#339).
+ * Rust and Swift have no AudioContent sample round-trip tests, so guard that the
+ * default corpus keeps exercising both.
+ */
+function assertDefaultCorpusCoverage(corpus) {
+  const audio = [];
+  const collect = (value) => {
+    if (Array.isArray(value)) value.forEach(collect);
+    else if (value && typeof value === "object") {
+      if (value.kind === "audio") audio.push(value);
+      Object.values(value).forEach(collect);
+    }
+  };
+  for (const entry of corpus) collect(entry.input);
+  if (audio.length === 0) {
+    fail("Default property corpus no longer reaches AudioContent.");
+    return;
+  }
+  if (!audio.some((c) => "fade_in_ms" in c && "fade-out {ms}" in c)) {
+    fail(
+      "Default property corpus must carry AudioContent's @encodedName keys (fade_in_ms, \"fade-out {ms}\").",
+    );
+  }
+  if (audio.some((c) => "fadeInMs" in c || "fadeOutMs" in c)) {
+    fail("Default property corpus keyed AudioContent by property name instead of @encodedName.");
+  }
+  if (!audio.every((c) => "transcript" in c && "loudness" in c)) {
+    fail("Default property corpus dropped a required nullable AudioContent key.");
+  }
+  if (!audio.some((c) => c.transcript === null && c.loudness === null)) {
+    fail("Default property corpus must feed explicit nulls into AudioContent's required nullable keys.");
+  }
+  if (
+    !audio.some((c) => typeof c.transcript === "string") ||
+    !audio.some((c) => typeof c.loudness === "number")
+  ) {
+    fail("Default property corpus must also feed non-null AudioContent transcript/loudness values.");
+  }
 }
 
 export function assertConformanceResult(target, rawOutput) {

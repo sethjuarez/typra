@@ -227,8 +227,9 @@ describe("Java emitter naming", () => {
     );
     assert.match(
       source,
-      /generator\.writeObject\(value == null \? null : value\.save\(new SaveContext\(\)\)\);/,
+      /writeTypraValue\(generator, serializers, value == null \? null : value\.save\(new SaveContext\(\)\)\);/,
     );
+    assert.doesNotMatch(source, /generator\.writeObject\(/);
     assert.match(
       source,
       /Object data = parser\.getCodec\(\)\.readValue\(parser, Object\.class\);/,

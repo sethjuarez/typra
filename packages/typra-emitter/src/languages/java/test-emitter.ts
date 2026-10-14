@@ -873,6 +873,13 @@ function emitAssertions(
     lines.push(
       '      assertEquals(mapper.readValue(typraJson, Object.class), mapper.readValue(jacksonJson, Object.class), message + " serialization");',
     );
+    // A host mapper that drops nulls globally must still keep required nullable keys (#339).
+    lines.push(
+      "      com.fasterxml.jackson.databind.ObjectMapper nonNullMapper = new com.fasterxml.jackson.databind.ObjectMapper().setSerializationInclusion(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL);",
+    );
+    lines.push(
+      '      assertEquals(mapper.readValue(typraJson, Object.class), mapper.readValue(nonNullMapper.writeValueAsString(instance), Object.class), message + " NON_NULL mapper serialization");',
+    );
     lines.push("      T jacksonLoaded = mapper.readValue(sourceJson, type);");
     lines.push(
       '      String jacksonLoadedJson = (String) type.getMethod("toJson").invoke(jacksonLoaded);',

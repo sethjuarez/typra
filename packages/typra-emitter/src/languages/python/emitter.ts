@@ -55,6 +55,7 @@ import {
   isBooleanScalar,
 } from "../../ir/scalar-kinds.js";
 import { ExprVisitor } from "../../ir/visitor.js";
+import { inheritedRequiredNullableAssignments } from "../../ir/inheritance.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 
 /**
@@ -285,7 +286,7 @@ export function emitPythonFile(
   for (const type of decl.types) {
     lines.push("");
     lines.push("");
-    emitType(type, lines, visitor, options);
+    emitType(type, lines, visitor, options, decl.types);
   }
 
   return pruneUnusedDataclassField(
@@ -445,6 +446,7 @@ function emitType(
   lines: string[],
   visitor: ExprVisitor,
   options: PythonEmitterOptions,
+  fileTypes: TypeDecl[],
 ): void {
   const name = type.typeName.name;
   const usePydantic = options.nativeSerialization === "pydantic";
@@ -511,7 +513,7 @@ function emitType(
   if (type.serialized) {
     // load() method
     lines.push("");
-    emitLoadMethod(type, lines);
+    emitLoadMethod(type, lines, fileTypes);
 
     // Collection helpers (between load and polymorphic dispatch)
     for (const helper of type.collectionHelpers) {
@@ -1085,7 +1087,11 @@ function pythonDefaultValue(
 // load() method
 // ============================================================================
 
-function emitLoadMethod(type: TypeDecl, lines: string[]): void {
+function emitLoadMethod(
+  type: TypeDecl,
+  lines: string[],
+  fileTypes: TypeDecl[],
+): void {
   const name = type.typeName.name;
 
   lines.push("    @staticmethod");
@@ -1121,6 +1127,15 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   lines.push(
     `            raise ValueError(f"Invalid data for ${name}: {data}")`,
   );
+
+  // Derived loaders do not load inherited fields (a polymorphic family shares
+  // one module), so guard inherited required nullable keys here too.
+  for (const a of inheritedRequiredNullableAssignments(type, fileTypes)) {
+    lines.push(`        if ${pythonLiteral(a.sourceName)} not in data:`);
+    lines.push(
+      `            raise ValueError(context.at(${pythonLiteral(a.sourceName)}).path + ": missing required field")`,
+    );
+  }
 
   for (const a of type.load.assignments) {
     const field = type.fields.find(

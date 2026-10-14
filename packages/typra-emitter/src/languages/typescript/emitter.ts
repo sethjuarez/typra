@@ -59,6 +59,7 @@ import {
   scalarRuntimeKind,
 } from "../../ir/scalar-kinds.js";
 import { ExprVisitor } from "../../ir/visitor.js";
+import { inheritedRequiredNullableAssignments } from "../../ir/inheritance.js";
 import { toKebabCase } from "../../ir/utilities.js";
 
 export interface TypeScriptEmitterOptions {
@@ -370,7 +371,7 @@ function emitType(
     lines.push("");
 
     // load() static method
-    emitLoadMethod(type, lines);
+    emitLoadMethod(type, lines, allTypes);
 
     // Polymorphic dispatch
     if (type.polymorphicDispatch) {
@@ -1029,7 +1030,11 @@ function tsConstructorDefault(
 // load() method
 // ============================================================================
 
-function emitLoadMethod(type: TypeDecl, lines: string[]): void {
+function emitLoadMethod(
+  type: TypeDecl,
+  lines: string[],
+  allTypes: TypeDecl[],
+): void {
   const name = type.typeName.name;
 
   lines.push(
@@ -1052,6 +1057,18 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   }
 
   lines.push("");
+
+  // Derived loaders do not load inherited fields, so guard inherited required
+  // nullable keys here too; base dispatch re-checks them harmlessly.
+  for (const a of inheritedRequiredNullableAssignments(type, allTypes)) {
+    lines.push(
+      `    if (data[${JSON.stringify(a.sourceName)}] === undefined) {`,
+    );
+    lines.push(
+      `      throw new Error(\`\${context.at(${JSON.stringify(a.sourceName)}).path}: missing required field\`);`,
+    );
+    lines.push("    }");
+  }
 
   for (const a of type.load.assignments) {
     const field = type.fields.find(

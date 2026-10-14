@@ -257,6 +257,7 @@ function synthesizeComplexSample(
       payload[propertyWireKey(prop)] = value;
     }
   }
+  fillInheritedRequiredNullables(payload, concrete, resolveType);
   return payload;
 }
 
@@ -297,12 +298,40 @@ function synthesizeCompleteComplexSample(
     }
     payload[propertyWireKey(prop)] = value;
   }
+  fillInheritedRequiredNullables(payload, concrete, resolveType);
   return payload;
 }
 
 /** A required `T | null` property (#339): its key must be present, but `null` is valid. */
 function isRequiredNullableProperty(prop: PropertyNode): boolean {
   return prop.isNullable === true && !prop.isOptional;
+}
+
+/**
+ * Derived loaders require their inherited required nullable keys too (#339), but a variant's
+ * own properties never mention them; fill each missing one with null, its cheapest valid value.
+ */
+function fillInheritedRequiredNullables(
+  payload: Record<string, any>,
+  type: TypeNode,
+  resolveType: TypeResolver,
+): void {
+  const visited = new Set<string>();
+  let ancestor = type.base ? resolveType(type.base.name) : undefined;
+  while (ancestor) {
+    const key = `${ancestor.typeName.namespace}.${ancestor.typeName.name}`;
+    if (visited.has(key)) break;
+    visited.add(key);
+    for (const prop of ancestor.properties) {
+      if (
+        isRequiredNullableProperty(prop) &&
+        !(propertyWireKey(prop) in payload)
+      ) {
+        payload[propertyWireKey(prop)] = null;
+      }
+    }
+    ancestor = ancestor.base ? resolveType(ancestor.base.name) : undefined;
+  }
 }
 
 /** Derive a wire value for a single required property that carries no `@sample`. */
@@ -404,6 +433,7 @@ export function withRequiredComplexSamples(
     completed[propertyWireKey(prop)] = prop.isCollection ? [payload] : payload;
   }
 
+  fillInheritedRequiredNullables(completed, node, resolveType);
   return completed;
 }
 

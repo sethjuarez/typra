@@ -1,4 +1,4 @@
-import { TypeDecl, WireDecl } from "./declarations.js";
+import { LoadAssignment, TypeDecl, WireDecl } from "./declarations.js";
 
 function mergeInheritedByKey<T>(groups: T[][], key: (item: T) => string): T[] {
   const order: string[] = [];
@@ -96,4 +96,21 @@ export function flattenInheritance(
       wire,
     };
   });
+}
+
+/**
+ * Required nullable (#339) load assignments a derived model inherits from its ancestors.
+ * Targets whose derived loader does not delegate base-field loading still have to guard
+ * these keys so a direct derived load keeps the "key required, null accepted" contract.
+ */
+export function inheritedRequiredNullableAssignments(
+  type: TypeDecl,
+  declarationUniverse: TypeDecl[],
+): LoadAssignment[] {
+  if (!type.base) return [];
+  const own = new Set(type.load.assignments.map((a) => a.fieldName));
+  const [flattened] = flattenInheritance([type], declarationUniverse);
+  return flattened.load.assignments.filter(
+    (assignment) => assignment.isNullable === true && !own.has(assignment.fieldName),
+  );
 }

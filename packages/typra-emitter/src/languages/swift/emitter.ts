@@ -291,7 +291,25 @@ function emitPolymorphicEnum(
       `    default: throw TypraRuntimeError.unknownDiscriminator(type: ${swiftStringLiteral(typeName)}, field: ${swiftStringLiteral(dispatch.discriminatorField)}, value: discriminator)`,
     );
   } else {
-    lines.push("    default: return .unknown(object)");
+    // Required nullable base fields (#339) keep their contract on the raw
+    // `.unknown` carrier: the key must be present (null allowed), as in every
+    // other runtime's unknown-discriminator path.
+    const nullableBaseKeys = type.load.assignments
+      .filter((assignment) => isRequiredNullable(assignment))
+      .map((assignment) => assignment.sourceName);
+    if (nullableBaseKeys.length === 0) {
+      lines.push("    default: return .unknown(object)");
+    } else {
+      lines.push("    default:");
+      for (const key of nullableBaseKeys) {
+        lines.push(`      if object[${swiftStringLiteral(key)}] == nil {`);
+        lines.push(
+          `        throw TypraRuntimeError.unsupported(context.at(${swiftStringLiteral(key)}).path + ": missing required field")`,
+        );
+        lines.push("      }");
+      }
+      lines.push("      return .unknown(object)");
+    }
   }
   lines.push("    }");
   lines.push("  }");

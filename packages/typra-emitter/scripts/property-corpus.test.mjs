@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
@@ -133,35 +132,23 @@ describe("property corpus generator", () => {
     assert.ok("fade_in_ms" in entry.input);
     assert.equal("fadeInMs" in entry.input, false);
   });
-
-  it("the default FixtureRoot corpus round-trips @encodedName keys in every runtime", () => {
-    // Executable conformance feeds this corpus (same seed, case count, and depth as
-    // scripts/fixtures/conformance.mjs) through every runtime. Rust and Swift emit
-    // AudioContent as an enum variant without its own sample round-trip tests, so this
-    // corpus is their executable coverage of encoded wire keys.
-    const model = JSON.parse(
-      readFileSync(
-        new URL("../generated/fixtures/json-ast/model.json", import.meta.url),
-        "utf8",
-      ),
-    );
-    const payloads = buildPropertyCorpus(model, {
-      rootType: "FixtureRoot",
+  it("keeps required nullable keys present, sometimes as an explicit null", () => {
+    const root = type("Root", [
+      { ...prop("caption", "string", { isScalar: true }), isNullable: true },
+    ]);
+    const values = buildPropertyCorpus(root, {
+      rootType: "Root",
       seed: 0x117,
       caseCount: 8,
-      maxDepth: 5,
-    }).map((entry) => JSON.stringify(entry.input));
+    }).map((entry) => {
+      assert.ok("caption" in entry.input, "required nullable key is always present");
+      return entry.input.caption;
+    });
+    assert.ok(values.includes(null), "some case carries an explicit null");
     assert.ok(
-      payloads.some(
-        (payload) =>
-          payload.includes('"fade_in_ms":') &&
-          payload.includes('"fade-out {ms}":'),
-      ),
-      "some default corpus case must carry both AudioContent encoded keys",
+      values.some((value) => typeof value === "string"),
+      "some case carries a non-null value",
     );
-    for (const payload of payloads) {
-      assert.doesNotMatch(payload, /"fade(In|Out)Ms":/);
-    }
   });
 });
 
@@ -200,5 +187,22 @@ describe("property corpus shrink output", () => {
       shrinkPropertyDifference(expected, actual),
       shrinkPropertyDifference(expected, actual),
     );
+  });
+
+  it("reports a dropped required nullable key instead of treating it as null", () => {
+    const entry = { id: "root-0x117-case-007", seed: "0x117", caseId: "case-007" };
+    const expected = {
+      propertyCases: [
+        { ...entry, root: { content: { kind: "audio", transcript: null } } },
+      ],
+    };
+    const actual = {
+      propertyCases: [{ ...entry, root: { content: { kind: "audio" } } }],
+    };
+    // The conformance gate compares JSON text, where a missing key and `"key": null` differ.
+    assert.notEqual(JSON.stringify(expected), JSON.stringify(actual));
+    const difference = shrinkPropertyDifference(expected, actual);
+    assert.equal(difference.path, "$.content.transcript");
+    assert.equal(difference.expected, null);
   });
 });

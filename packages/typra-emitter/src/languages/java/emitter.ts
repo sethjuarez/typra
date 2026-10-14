@@ -457,8 +457,39 @@ function emitJacksonHelpers(typeName: string, lines: string[]): void {
     `    public void serialize(${typeName} value, com.fasterxml.jackson.core.JsonGenerator generator, com.fasterxml.jackson.databind.SerializerProvider serializers) throws java.io.IOException {`,
   );
   lines.push(
-    "      generator.writeObject(value == null ? null : value.save(new SaveContext()));",
+    "      writeTypraValue(generator, serializers, value == null ? null : value.save(new SaveContext()));",
   );
+  lines.push("    }");
+  lines.push("");
+  // Write the save() tree node by node instead of handing the Map to Jackson's
+  // MapSerializer: a mapper configured with `setSerializationInclusion(NON_NULL)`
+  // (or a NON_NULL content inclusion) would otherwise drop the explicit `null`
+  // that a required nullable key (#339) must keep on the wire.
+  lines.push(
+    "    private static void writeTypraValue(com.fasterxml.jackson.core.JsonGenerator generator, com.fasterxml.jackson.databind.SerializerProvider serializers, Object value) throws java.io.IOException {",
+  );
+  lines.push("      if (value == null) {");
+  lines.push("        generator.writeNull();");
+  lines.push("      } else if (value instanceof java.util.Map<?, ?> map) {");
+  lines.push("        generator.writeStartObject();");
+  lines.push("        for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {");
+  lines.push(
+    "          generator.writeFieldName(String.valueOf(entry.getKey()));",
+  );
+  lines.push(
+    "          writeTypraValue(generator, serializers, entry.getValue());",
+  );
+  lines.push("        }");
+  lines.push("        generator.writeEndObject();");
+  lines.push("      } else if (value instanceof Iterable<?> items) {");
+  lines.push("        generator.writeStartArray();");
+  lines.push("        for (Object item : items) {");
+  lines.push("          writeTypraValue(generator, serializers, item);");
+  lines.push("        }");
+  lines.push("        generator.writeEndArray();");
+  lines.push("      } else {");
+  lines.push("        serializers.defaultSerializeValue(value, generator);");
+  lines.push("      }");
   lines.push("    }");
   lines.push("  }");
   lines.push("");

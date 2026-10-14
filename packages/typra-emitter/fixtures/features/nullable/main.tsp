@@ -9,6 +9,36 @@ namespace Typra.Fixtures.Features.Nullable;
 @serializable
 model Root {
   row: Row;
+
+  // Reached through polymorphic dispatch on `kind`: the inherited base field and the
+  // variant's own nullable field must both keep the required-nullable contract.
+  shape: Shape;
+  shapes: Shape[];
+}
+
+@discriminator("kind")
+model Shape {
+  kind: string;
+
+  // Inherited required-nullable field declared on the discriminated base.
+  @sample(#{ label: null })
+  @sample(#{ label: "unit" })
+  label: string | null;
+}
+
+model Circle extends Shape {
+  kind: "circle";
+  radius: int32;
+
+  // The variant's own required-nullable field.
+  @sample(#{ center: null })
+  @sample(#{ center: 4 })
+  center: int32 | null;
+}
+
+model Square extends Shape {
+  kind: "square";
+  side: int32;
 }
 
 alias Mood = "calm" | "busy";
