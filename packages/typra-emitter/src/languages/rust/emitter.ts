@@ -2739,8 +2739,10 @@ function emitProtocolTrait(type: TypeDecl, lines: string[]): void {
         }
         lines.push("    }");
       } else {
+        // Same error channel as an async op (typra#338): a sync op can fail, and
+        // `expectedError` vectors assert it through the typed conformance rail.
         lines.push(
-          `    fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> ${ret};`,
+          `    fn ${toSnakeCase(method.name)}(&self${signatureParams}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>>;`,
         );
       }
     } else {

@@ -386,6 +386,33 @@ adapter happens to resolve synchronously still passes, so no discovery adapter
 needs a rewrite. To make a `@sync` operation async-capable, drop `@sync`; to keep
 `@sync`, make the adapter resolve synchronously.
 
+### Typed conformance entrypoints and the error channel
+
+A plain (undispatched) seam whose params and return are scalars, `@serializable`
+models, arrays of those models, or (params only) untyped carriers also gets a
+**typed** entrypoint — Rust `run_<seam>_conformance(&impl)`, Go
+`Run<Seam>Conformance(t, seam)`, TypeScript `run<Seam>Conformance(seam)`, Python
+`run_<seam>_conformance(seam)`, and so on. It calls your real seam implementation
+directly, with no adapter registry. For an `expectedError` vector, the operation
+must fail through the target's native error channel, and the failure message must
+contain the expected string. A success vector must not fail.
+
+| Target | Error channel on a seam operation (sync or async) |
+| --- | --- |
+| TypeScript / Python / C# / Java | a thrown exception (or a rejected awaitable) |
+| Go | the trailing `error` return: `(T, error)` |
+| Swift | `throws` |
+| Rust | `Result<T, Box<dyn std::error::Error + Send + Sync>>`, so an `Err` matches `expectedError` and an `Ok` matches `expected` |
+
+Rust `@sync` operations now use the same `Result<T, Box<dyn std::error::Error +
+Send + Sync>>` return type as async operations. Previously they returned a bare
+`T`, so the typed entrypoint skipped their `expectedError` vectors. **This is a
+breaking change for Rust implementers.** Change each `fn op(&self, ..) -> T` to
+`fn op(&self, ..) -> Result<T, Box<dyn std::error::Error + Send + Sync>>` and
+return `Ok(value)`. An `@optionalOperation @sync` operation keeps its default body
+and in-band return type (`Option<T>`, `()`, or `T`), matching Go. Optional
+operations are not part of the typed entrypoint.
+
 ## Collaborator injection seams
 
 Some operations do not run in isolation — they select a strategy per

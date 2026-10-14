@@ -727,7 +727,7 @@ export function runRustVectorConformanceCompile(context) {
   // migrates a plain seam off the stringly adapter registry by authoring only a
   // real `impl <Seam>` and one typed call. This gate proves that path stays
   // compilable end-to-end: generate the typed-seam-conformance fixture, attach
-  // the committed typed double as a test module, and `cargo build --tests`.
+  // the committed typed double as a test module, and `cargo test --lib`.
   //
   // Red-first: if the entrypoint is not emitted, `crate::model::vector_conformance`
   // is unresolved and the double fails to compile — so this gate fails on `main`.
@@ -826,7 +826,10 @@ export function runRustVectorConformanceCompile(context) {
       ].join("\n"),
     );
     try {
-      execFileSync("cargo", ["build", "--tests"], {
+      // `cargo test --lib` (not just `build --tests`) so the typed vectors
+      // EXECUTE: `expectedError` vectors must observe `Err` and success vectors
+      // `Ok` through the typed rail (typra#338), not merely type-check.
+      execFileSync("cargo", ["test", "--lib"], {
         cwd: sourceDir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
@@ -836,7 +839,7 @@ export function runRustVectorConformanceCompile(context) {
       const output =
         `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
       fail(
-        `Rust typed-seam-conformance compile gate failed:\n${output || error.message}`,
+        `Rust typed-seam-conformance compile/run gate failed:\n${output || error.message}`,
       );
     }
   } finally {

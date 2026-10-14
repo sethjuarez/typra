@@ -193,7 +193,7 @@ describe("@method effect metadata", () => {
     );
     assert.match(
       rust,
-      /fn format\(&self, messages: &Vec<Message>\) -> Vec<Message>;/,
+      /fn format\(&self, messages: &Vec<Message>\) -> Result<Vec<Message>, Box<dyn std::error::Error \+ Send \+ Sync>>;/,
     );
     assert.doesNotMatch(rust, /PortError/);
 

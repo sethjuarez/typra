@@ -424,12 +424,20 @@ export function emitRustProtocolScaffolds(
       }
       const paramPrefix = params.length > 0 ? `, ${params.join(", ")}` : "";
       const ret = rustType(method.returns);
-      if (method.sync) {
+      if (method.sync && method.optional) {
         lines.push(
           `    fn ${toSnakeCase(method.name)}(&self${paramPrefix}) -> ${ret} {`,
         );
         lines.push(
           `        panic!("${protocolName}.${method.name} is a compile-only protocol scaffold.")`,
+        );
+        lines.push("    }");
+      } else if (method.sync) {
+        lines.push(
+          `    fn ${toSnakeCase(method.name)}(&self${paramPrefix}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>> {`,
+        );
+        lines.push(
+          `        Err("${protocolName}.${method.name} is a compile-only protocol scaffold.".into())`,
         );
         lines.push("    }");
       } else {

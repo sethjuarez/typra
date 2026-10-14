@@ -2225,8 +2225,10 @@ function emitRustVectorConformanceTest(
  * `pub async fn` until a typed test calls it.
  *
  * Scope of this slice: `expected` (structural compare) and `expectedError` on
- * ASYNC ops. A `@sync` op has no error channel (its trait method returns a bare
- * value), so an `expectedError` vector on a sync op is skipped with a note;
+ * every op. Every seam method — sync or async — returns `Result<T, Box<dyn
+ * std::error::Error + Send + Sync>>` (typra#338), so an `expectedError` vector
+ * asserts `Err` whose message contains the expected substring (the same match
+ * the other runtimes apply to a thrown error) and a success vector asserts `Ok`;
  * `requires`/capability gating, `normalization`, and provider/targetApi routing
  * are deferred follow-ups (not exercised by the typed-seam fixture).
  */
@@ -2327,15 +2329,6 @@ function emitRustVectorConformanceEntrypoint(
       const hasExpectedError = entry.vector.expectedError !== undefined;
       const isAsyncOp = !entry.sync;
 
-      // A sync op has no error channel (bare-value return), so it cannot express
-      // expectedError in the typed path — skip that vector with a breadcrumb.
-      if (hasExpectedError && !isAsyncOp) {
-        lines.push(
-          `    // skipped: ${label} — expectedError on a @sync op has no typed error channel`,
-        );
-        return;
-      }
-
       lines.push(`    // vector: ${label}`);
       lines.push("    {");
       for (const paramName of paramNames) {
@@ -2401,27 +2394,35 @@ function emitRustVectorConformanceEntrypoint(
       const invocation = `seam.${method}(${callArgs})${isAsyncOp ? ".await" : ""}`;
 
       if (hasExpectedError) {
-        // Async op only reaches here. Assert the awaited Result erred; when
-        // expectedError is a string, also require the message to contain it.
+        // Every op (sync or async) returns `Result<T, Box<dyn Error + Send +
+        // Sync>>` (typra#338). Assert it erred — an `Ok` fails the vector — and,
+        // when expectedError is a string, that the error message contains it:
+        // the same substring match the other runtimes apply to a thrown error.
         lines.push(`        let result = ${invocation};`);
         lines.push(
-          `        assert!(result.is_err(), ${JSON.stringify(`${label}: expected an error`)});`,
+          `        assert!(result.is_err(), "{}: expected an error, got Ok", ${JSON.stringify(label)});`,
         );
         if (typeof entry.vector.expectedError === "string") {
-          lines.push("        let message = result.unwrap_err().to_string();");
+          lines.push(
+            "        let message = result.err().map(|error| error.to_string()).unwrap_or_default();",
+          );
           lines.push(
             `        assert!(message.contains(${JSON.stringify(
               entry.vector.expectedError,
-            )}), ${JSON.stringify(`${label}: error message mismatch`)});`,
+            )}), "{}: error {:?} does not contain {:?}", ${JSON.stringify(
+              label,
+            )}, message, ${JSON.stringify(entry.vector.expectedError)});`,
           );
         }
       } else {
-        // `expected` present (or absent). Async op unwraps the awaited Result; a
-        // sync op returns the value directly.
-        const bind = isAsyncOp
-          ? `${invocation}.expect(${JSON.stringify(`${label}: seam ok`)})`
-          : invocation;
-        lines.push(`        let actual = ${bind};`);
+        // `expected` present (or absent): the op must return `Ok` — an `Err`
+        // fails the vector with its message.
+        lines.push(`        let actual = ${invocation}`);
+        lines.push(
+          `            .unwrap_or_else(|error| panic!("{}: expected Ok, got Err: {}", ${JSON.stringify(
+            label,
+          )}, error));`,
+        );
         if (entry.vector.expected !== undefined) {
           const returnShape = classifyCallableParam(entry.returns);
           const expectedJson = JSON.stringify(entry.vector.expected, null, 2);
@@ -2650,12 +2651,9 @@ function emitRustInterfaceConformanceTest(
     const callArgs = paramNames
       .map((name) => `&${rustFieldName(name)}`)
       .join(", ");
-    // A seam method is async => `-> Result<T, _>` (unwrap the awaited Result); a
-    // sync seam method returns the value directly (rust/emitter.ts:2568), so it
-    // has neither `.await` nor a Result to `.expect`.
-    const invocationTail = entry.sync
-      ? ""
-      : `.await.expect(${JSON.stringify("seam invocation")})`;
+    // Every seam method returns `Result<T, _>` (sync ops too, typra#338): unwrap
+    // the (awaited, when async) Result.
+    const invocationTail = `${entry.sync ? "" : ".await"}.expect(${JSON.stringify("seam invocation")})`;
     lines.push(
       `    let actual = seam_impl.${method}(${callArgs})${invocationTail};`,
     );
