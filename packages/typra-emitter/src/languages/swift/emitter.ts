@@ -416,8 +416,15 @@ function swiftWireLiteral(field: FieldDecl | undefined, value: string): string {
     switch (field.category.scalarType) {
       case "boolean":
         return value === "true" ? "true" : "false";
+      case "int8":
+      case "int16":
       case "int32":
       case "int64":
+      case "safeint":
+      case "uint8":
+      case "uint16":
+      case "uint32":
+      case "uint64":
       case "integer":
       case "float32":
       case "float64":
@@ -1114,6 +1121,14 @@ function scalarDefault(typeName: string): string {
       return "0";
     case "int64":
       return "0";
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
+      return "0";
     case "integer":
       return "0";
     case "float32":
@@ -1191,7 +1206,15 @@ function scalarLoadExpression(
     case "int32":
       return `try TypraRuntime.int32(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
     case "int64":
+    case "safeint":
       return `try TypraRuntime.int64(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
+    case "int8":
+    case "int16":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
+      return `try TypraRuntime.${scalarType}(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
     case "integer":
       return `try TypraRuntime.int(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
     case "float32":
@@ -1248,8 +1271,15 @@ function swiftCoercionCheck(scalarType: string): string | undefined {
       return "data as? String";
     case "boolean":
       return "data as? Bool";
+    case "int8":
+    case "int16":
     case "int32":
     case "int64":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "integer":
       return "data as? Int";
     case "float32":

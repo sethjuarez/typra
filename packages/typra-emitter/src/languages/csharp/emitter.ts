@@ -60,8 +60,15 @@ const CSHARP_TYPE_MAP: Record<string, string> = {
   string: "string",
   number: "double",
   boolean: "bool",
+  int8: "sbyte",
+  int16: "short",
   int32: "int",
   int64: "long",
+  safeint: "long",
+  uint8: "byte",
+  uint16: "ushort",
+  uint32: "uint",
+  uint64: "ulong",
   float: "double",
   float32: "float",
   float64: "double",
@@ -76,16 +83,28 @@ const CSHARP_TYPE_MAP: Record<string, string> = {
 
 const CONVERT_MAP: Record<string, string> = {
   bool: "Boolean",
+  sbyte: "SByte",
+  short: "Int16",
   int: "Int32",
   long: "Int64",
+  byte: "Byte",
+  ushort: "UInt16",
+  uint: "UInt32",
+  ulong: "UInt64",
   float: "Single",
   double: "Double",
 };
 
 const NON_NULLABLE_VALUE_TYPES = new Set([
   "bool",
+  "sbyte",
+  "short",
   "int",
   "long",
+  "byte",
+  "ushort",
+  "uint",
+  "ulong",
   "float",
   "double",
 ]);
@@ -100,6 +119,19 @@ const NON_NULLABLE_VALUE_TYPES = new Set([
  */
 export function isCSharpSinglePrecision(scalarType: string): boolean {
   return CSHARP_TYPE_MAP[scalarType] === "float";
+}
+
+/**
+ * C# type of a sized/unsigned integer scalar whose test literal needs an explicit cast.
+ *
+ * An `int`/`long` literal does not infer against `byte?`/`ulong?` etc. in
+ * `Assert.Equal<T>`, so the literal is cast to the property type.
+ */
+export function csharpNarrowIntegerType(scalarType: string): string | null {
+  const csType = CSHARP_TYPE_MAP[scalarType];
+  return csType && ["sbyte", "short", "byte", "ushort", "uint", "ulong"].includes(csType)
+    ? csType
+    : null;
 }
 
 function csharpString(value: string): string {
@@ -1956,6 +1988,14 @@ function getCSharpFactoryParamType(typeStr: string): string {
       return "int";
     case "int64":
       return "long";
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
+      return CSHARP_TYPE_MAP[typeStr];
     case "float":
     case "float32":
       return "float";

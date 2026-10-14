@@ -33,6 +33,7 @@ import {
 import {
   javaEnumMemberName,
   javaEnumTypeName,
+  javaIntegralScalar,
   javaMethodName,
   javaPropertyName,
   javaTypeName,
@@ -43,8 +44,15 @@ type JavaNativeSerialization = "none" | "jackson";
 const JAVA_TYPE_MAP: Record<string, string> = {
   string: "String",
   boolean: "Boolean",
+  int8: "Integer",
+  int16: "Integer",
   int32: "Integer",
   int64: "Long",
+  safeint: "Long",
+  uint8: "Integer",
+  uint16: "Integer",
+  uint32: "Long",
+  uint64: "Long",
   integer: "Integer",
   number: "Double",
   float: "Double",
@@ -667,9 +675,7 @@ function numericCoercionRank(scalarType: string): number {
 }
 
 function isIntegralCoercion(scalarType: string): boolean {
-  return (
-    scalarType === "int32" || scalarType === "int64" || scalarType === "integer"
-  );
+  return isIntegralScalar(scalarType);
 }
 
 function isBroadNumberCoercion(scalarType: string): boolean {
@@ -1465,6 +1471,27 @@ function javaDictValueLoad(
   return `${javaTypeName(valueType)}.load(${valueExpr}, ${contextExpr})`;
 }
 
+const JAVA_SIZED_INTEGER_BOUNDS: Record<string, [string, string]> = {
+  int8: ["-128L", "127L"],
+  int16: ["-32768L", "32767L"],
+  uint8: ["0L", "255L"],
+  uint16: ["0L", "65535L"],
+  uint32: ["0L", "4294967295L"],
+  uint64: ["0L", "Long.MAX_VALUE"],
+  safeint: ["-9007199254740991L", "9007199254740991L"],
+};
+
+/** Exact, bounds-checked load for sized/unsigned integers; int32/int64 keep their loaders. */
+function javaSizedIntegerLoad(
+  valueExpr: string,
+  scalarType: string,
+): string | null {
+  const bounds = JAVA_SIZED_INTEGER_BOUNDS[scalarType];
+  if (!bounds) return null;
+  const call = `LoadContext.exactInteger(${valueExpr}, ${bounds[0]}, ${bounds[1]}, "${scalarType}")`;
+  return javaIntegralScalar(scalarType) === "int32" ? `(int) ${call}` : call;
+}
+
 function loadScalar(
   valueExpr: string,
   scalarType: string,
@@ -1477,7 +1504,9 @@ function loadScalar(
   if (parseAliasFunction) {
     return `${parseAliasFunction}(String.valueOf(${valueExpr}))`;
   }
-  switch (scalarType) {
+  const sized = javaSizedIntegerLoad(valueExpr, scalarType);
+  if (sized) return sized;
+  switch (javaIntegralScalar(scalarType)) {
     case "string":
       return `String.valueOf(${valueExpr})`;
     case "boolean":
@@ -1500,7 +1529,7 @@ function loadScalar(
 }
 
 function coercionCheck(valueExpr: string, scalarType: string): string | null {
-  switch (scalarType) {
+  switch (javaIntegralScalar(scalarType)) {
     case "string":
       return `${valueExpr} instanceof String`;
     case "boolean":
@@ -1560,7 +1589,7 @@ function scalarTypeOf(field: FieldDecl): string | null {
 }
 
 function javaNumericLiteral(value: number, scalarType: string): string {
-  switch (scalarType) {
+  switch (javaIntegralScalar(scalarType)) {
     case "int64":
       return `${value}L`;
     case "float32":

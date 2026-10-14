@@ -66,6 +66,13 @@ const GO_TYPE_MAP: Record<string, string> = {
   boolean: "bool",
   int64: "int64",
   int32: "int32",
+  int16: "int16",
+  int8: "int8",
+  safeint: "int64",
+  uint64: "uint64",
+  uint32: "uint32",
+  uint16: "uint16",
+  uint8: "uint8",
   float64: "float64",
   float32: "float32",
   integer: "int",
@@ -79,8 +86,14 @@ const GO_TYPE_MAP: Record<string, string> = {
 /** Go types that need numeric type-switch coercion in Load. */
 const NUMERIC_GO_TYPES = new Set([
   "int",
+  "int8",
+  "int16",
   "int32",
   "int64",
+  "uint8",
+  "uint16",
+  "uint32",
+  "uint64",
   "float32",
   "float64",
 ]);
@@ -1044,6 +1057,11 @@ function goNumericCases(
   cases.push({ caseType: "int", expr: `${goType}(n)` });
   cases.push({ caseType: "int32", expr: `${goType}(n)` });
   cases.push({ caseType: "int64", expr: `${goType}(n)` });
+  // Sized/unsigned targets also need an identity arm: a saved map hands the typed value back
+  // on round-trip, and yaml.v3 decodes integers above math.MaxInt64 as uint64.
+  if (!["int", "int32", "int64", "float32", "float64"].includes(goType)) {
+    cases.push({ caseType: goType, expr: "n" });
+  }
 
   if (isFloat) {
     // Identity case for float types uses direct assignment
@@ -1339,6 +1357,10 @@ function emitGoDictValueLoad(
     lines.push(`\t\t\t\t\t\t${targetName} = ${goType}(n)`);
     lines.push("\t\t\t\t\tcase float64:");
     lines.push(`\t\t\t\t\t\t${targetName} = ${goType}(n)`);
+    if (!["int", "int32", "int64", "float32", "float64"].includes(goType)) {
+      lines.push(`\t\t\t\t\tcase ${goType}:`);
+      lines.push(`\t\t\t\t\t\t${targetName} = n`);
+    }
     lines.push("\t\t\t\t\t}");
     return;
   }
@@ -2107,7 +2129,15 @@ function goFactoryParamType(typeStr: string): string {
       return "bool";
     case "int32":
       return "int32";
+    case "int8":
+    case "int16":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
+      return typeStr;
     case "int64":
+    case "safeint":
     case "integer":
       return "int64";
     case "float32":

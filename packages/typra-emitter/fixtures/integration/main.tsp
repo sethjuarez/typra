@@ -539,6 +539,28 @@ model AudioContent extends FixtureContent {
   // Multi-word enum values must yield one Rust variant name across model, defaults, and tests (#340).
   @sample(#{ mix: "wide_hold_then_push" })
   mix: FixtureAudioMix = FixtureAudioMix.subtlePush;
+
+  // Sized and unsigned integers must emit native runtime types and round-trip (#342).
+  @sample(#{ gain: -128 })
+  gain?: int8;
+
+  @sample(#{ pan: -32768 })
+  pan?: int16;
+
+  @sample(#{ peak: 255 })
+  peak?: uint8;
+
+  @sample(#{ sampleRateHz: 65535 })
+  sampleRateHz?: uint16;
+
+  @sample(#{ durationMs: 4294967295 })
+  durationMs?: uint32;
+
+  @sample(#{ byteSize: 4294967296000 })
+  byteSize?: uint64;
+
+  @sample(#{ frameCount: 9007199254740991 })
+  frameCount?: safeint;
 }
 
 union FixtureAudioMix {

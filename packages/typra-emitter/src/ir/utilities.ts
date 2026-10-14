@@ -6,6 +6,13 @@ export const scalarValue: Record<string, string> = {
   number: "3.14",
   int32: "3",
   int64: "3",
+  int8: "3",
+  int16: "3",
+  safeint: "3",
+  uint8: "3",
+  uint16: "3",
+  uint32: "3",
+  uint64: "3",
   integer: "3",
   string: '"example"',
 };

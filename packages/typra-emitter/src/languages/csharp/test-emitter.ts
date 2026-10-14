@@ -43,6 +43,8 @@ export interface CSharpTestContext {
   factories: FactoryEntry[];
   /** Property keys whose C# type is 32-bit `float`, so their test literals need an `f` suffix. */
   singlePrecisionKeys: ReadonlySet<string>;
+  /** Property keys whose C# type is a sized/unsigned integer, mapped to the cast their test literals need. */
+  narrowIntegerKeys?: ReadonlyMap<string, string>;
   renderName: (name: string) => string;
   renderCsharpFactoryMethodName: (factoryName: string) => string;
   renderCsharpFactoryTestValue: (typeStr: string) => string;
@@ -88,6 +90,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
       sample.validations,
       "instance",
       ctx.singlePrecisionKeys,
+      ctx.narrowIntegerKeys,
     );
     if (yamlAssertions) L.push(yamlAssertions);
     L.push("    }");
@@ -105,6 +108,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
       sample.validations,
       "instance",
       ctx.singlePrecisionKeys,
+      ctx.narrowIntegerKeys,
     );
     if (jsonAssertions) L.push(jsonAssertions);
     L.push("    }");
@@ -131,6 +135,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
       sample.validations.filter((v) => !v.withheldOnSave),
       "reloaded",
       ctx.singlePrecisionKeys,
+      ctx.narrowIntegerKeys,
     );
     if (rtJsonAssertions) L.push(rtJsonAssertions);
     L.push("    }");
@@ -157,6 +162,7 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
       sample.validations.filter((v) => !v.withheldOnSave),
       "reloaded",
       ctx.singlePrecisionKeys,
+      ctx.narrowIntegerKeys,
     );
     if (rtYamlAssertions) L.push(rtYamlAssertions);
     L.push("    }");
@@ -398,6 +404,7 @@ function emitExampleAssertions(
   }>,
   varName: string,
   singlePrecisionKeys: ReadonlySet<string>,
+  narrowIntegerKeys: ReadonlyMap<string, string> = new Map(),
 ): string {
   return validations
     .map((v) => {
@@ -411,10 +418,16 @@ function emitExampleAssertions(
         typeof v.value === "number" &&
         !Number.isInteger(v.value) &&
         singlePrecisionKeys.has(v.key);
+      const integerCast =
+        typeof v.value === "number" && Number.isInteger(v.value)
+          ? narrowIntegerKeys.get(v.key)
+          : undefined;
       const expected =
         typeof v.value === "string"
           ? csharpStringLiteral(v.value)
-          : `${v.value}${needsFloatSuffix ? "f" : ""}`;
+          : integerCast
+            ? `(${integerCast})${v.value}`
+            : `${v.value}${needsFloatSuffix ? "f" : ""}`;
       return `        Assert.Equal(${expected}, ${varName}.${v.key});`;
     })
     .join("\n");

@@ -73,6 +73,13 @@ export const rustTypeMapper: Record<string, string> = {
   boolean: "bool",
   int64: "i64",
   int32: "i32",
+  int16: "i16",
+  int8: "i8",
+  safeint: "i64",
+  uint64: "u64",
+  uint32: "u32",
+  uint16: "u16",
+  uint8: "u8",
   float64: "f64",
   float32: "f32",
   integer: "i64",
@@ -984,8 +991,15 @@ function factoryParamTestValue(typeStr: string): string {
       return "true";
     case "integer":
     case "int32":
+    case "int8":
+    case "int16":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
       return "42";
     case "int64":
+    case "safeint":
       return "42i64";
     case "float":
     case "float64":

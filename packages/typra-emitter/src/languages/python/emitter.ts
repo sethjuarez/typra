@@ -64,6 +64,13 @@ const TYPE_MAP: Record<string, string> = {
   object: "dict",
   boolean: "bool",
   int64: "int",
+  int8: "int",
+  int16: "int",
+  safeint: "int",
+  uint8: "int",
+  uint16: "int",
+  uint32: "int",
+  uint64: "int",
   int32: "int",
   float64: "float",
   float32: "float",
@@ -77,8 +84,7 @@ const TYPE_MAP: Record<string, string> = {
 function paramType(typeStr: string): string {
   if (typeStr === "string") return "str";
   if (typeStr === "boolean") return "bool";
-  if (typeStr === "integer" || typeStr === "int32" || typeStr === "int64")
-    return "int";
+  if (isIntegralScalar(typeStr)) return "int";
   if (typeStr === "float" || typeStr === "float64" || typeStr === "float32")
     return "float";
   return "Any";
@@ -87,8 +93,7 @@ function paramType(typeStr: string): string {
 function returnType(typeStr: string): string {
   if (typeStr === "string") return "str";
   if (typeStr === "boolean") return "bool";
-  if (typeStr === "integer" || typeStr === "int32" || typeStr === "int64")
-    return "int";
+  if (isIntegralScalar(typeStr)) return "int";
   if (typeStr === "float" || typeStr === "float64" || typeStr === "float32")
     return "float";
   return typeStr;
@@ -1002,7 +1007,7 @@ function pythonDefaultValue(
         t === "float"
       ) {
         args.push(`default=${f.defaultValue ?? "0.0"}`);
-      } else if (t === "int64" || t === "int32" || t === "integer") {
+      } else if (isIntegralScalar(t)) {
         args.push(`default=${f.defaultValue ?? "0"}`);
       } else if (t === "dictionary") {
         args.push("default_factory=dict");
@@ -1048,7 +1053,7 @@ function pythonDefaultValue(
     ) {
       return ` = field(default=${f.defaultValue ?? "0.0"})`;
     }
-    if (t === "int64" || t === "int32" || t === "integer") {
+    if (isIntegralScalar(t)) {
       return ` = field(default=${f.defaultValue ?? "0"})`;
     }
     if (t === "dictionary") {

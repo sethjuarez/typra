@@ -590,11 +590,11 @@ describe("Swift inherited model fields", () => {
       );
       assert.match(
         runtime,
-        /public static func double\(_ data: Any, field: String\) throws -> Double \{\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/,
+        /public static func double\(_ data: Any, field: String\) throws -> Double \{\s+if isNativeBool\(data\) \{ throw TypraRuntimeError\.invalidField[^\n]*\n\s+if let value = nativeSigned\(data\)[^\n]*\n\s+if let value = nativeUnsigned\(data\)[^\n]*\n\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/,
       );
       assert.match(
         runtime,
-        /public static func int64\(_ data: Any, field: String\) throws -> Int64 \{\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/,
+        /public static func int64\(_ data: Any, field: String\) throws -> Int64 \{\s+if isNativeBool\(data\) \{ throw TypraRuntimeError\.invalidField[^\n]*\n\s+if let value = nativeSigned\(data\) \{ return value \}[\s\S]*?\n\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/,
       );
     });
   });

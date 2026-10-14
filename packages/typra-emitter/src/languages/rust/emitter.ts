@@ -314,8 +314,15 @@ function emitStringEnum(
 const RUST_TYPE_MAP: Record<string, string> = {
   string: "String",
   boolean: "bool",
+  int8: "i8",
+  int16: "i16",
   int32: "i32",
   int64: "i64",
+  safeint: "i64",
+  uint8: "u8",
+  uint16: "u16",
+  uint32: "u32",
+  uint64: "u64",
   float32: "f32",
   float64: "f64",
   integer: "i64",
@@ -2555,6 +2562,14 @@ function factoryParamType(typeStr: string): string {
     case "int64":
     case "integer":
       return "i64";
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
+      return RUST_TYPE_MAP[typeStr];
     case "float32":
       return "f32";
     case "float64":
@@ -2941,6 +2956,13 @@ function rustDictValueLoadExpr(valueExpr: string, valueType: string): string {
       return `${valueExpr}.as_i64().unwrap_or_default() as i32`;
     case "i64":
       return `${valueExpr}.as_i64().unwrap_or_default()`;
+    case "i8":
+    case "i16":
+    case "u8":
+    case "u16":
+    case "u32":
+    case "u64":
+      return `${rustSizedIntFromValue(valueExpr, RUST_TYPE_MAP[valueType])}.unwrap_or_default()`;
     case "f32":
       return `${valueExpr}.as_f64().unwrap_or_default() as f32`;
     case "f64":
@@ -2985,6 +3007,16 @@ function scalarLoadExpr(
       return isOptional
         ? `value.get("${key}").and_then(|v| v.as_i64())`
         : `value.get("${key}").and_then(|v| v.as_i64()).unwrap_or(0)`;
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64": {
+      const loaded = `value.get("${key}").and_then(|v| ${rustSizedIntFromValue("v", RUST_TYPE_MAP[scalarType])})`;
+      return isOptional ? loaded : `${loaded}.unwrap_or(0)`;
+    }
     case "float64":
     case "float":
     case "number":
@@ -3029,12 +3061,38 @@ function rustArrayElementLoadExpr(scalarType: string): string | null {
       return "v.as_i64().map(|n| n as i32)";
     case "i64":
       return "v.as_i64()";
+    case "i8":
+    case "i16":
+    case "u8":
+    case "u16":
+    case "u32":
+    case "u64":
+      return rustSizedIntFromValue("v", RUST_TYPE_MAP[scalarType]);
     case "f32":
       return "v.as_f64().map(|n| n as f32)";
     case "f64":
       return "v.as_f64()";
     default:
       return null;
+  }
+}
+
+/**
+ * `Option<T>` decode of a JSON number into a sized/unsigned Rust integer. Out-of-range and
+ * wrong-sign values yield `None` instead of wrapping, as an `as` cast would.
+ */
+function rustSizedIntFromValue(valueExpr: string, rustType: string): string {
+  switch (rustType) {
+    case "i64":
+      return `${valueExpr}.as_i64()`;
+    case "u64":
+      return `${valueExpr}.as_u64()`;
+    case "u8":
+    case "u16":
+    case "u32":
+      return `${valueExpr}.as_u64().and_then(|n| ${rustType}::try_from(n).ok())`;
+    default:
+      return `${valueExpr}.as_i64().and_then(|n| ${rustType}::try_from(n).ok())`;
   }
 }
 
@@ -3309,8 +3367,15 @@ function emitScalarSave(
         );
       }
       return;
+    case "int8":
+    case "int16":
     case "int32":
     case "int64":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "integer":
       if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef}.as_ref() {`);
@@ -3563,8 +3628,15 @@ function emitVariantScalarSave(
         );
       }
       return;
+    case "int8":
+    case "int16":
     case "int32":
     case "int64":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "integer":
       if (omitAbsentOnSave) {
         lines.push(`${indent}if let Some(val) = ${fieldRef} {`);

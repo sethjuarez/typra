@@ -21,6 +21,7 @@ import {
   emitCSharpClass,
   emitCSharpEnum,
   isCSharpSinglePrecision,
+  csharpNarrowIntegerType,
   protocolCSharpType,
 } from "./emitter.js";
 import { emitCSharpContext, emitCSharpUtils } from "./scaffolding.js";
@@ -530,6 +531,15 @@ export const renderTests = (
         )
         .map((p) => renderName(p.name)),
     ),
+    narrowIntegerKeys: new Map(
+      node.properties
+        .filter((p) => p.isScalar && !p.isCollection)
+        .map((p): [string, string | null] => [
+          renderName(p.name),
+          csharpNarrowIntegerType(p.typeName.name),
+        ])
+        .filter((entry): entry is [string, string] => entry[1] !== null),
+    ),
     renderName,
     renderCsharpFactoryMethodName: (factoryName: string) =>
       renderCsharpFactoryMethodName(factoryName, node),
@@ -554,7 +564,20 @@ const renderCsharpFactoryParamType = (typeStr: string): string => {
     case "int32":
       return "int";
     case "int64":
+    case "safeint":
       return "long";
+    case "int8":
+      return "sbyte";
+    case "int16":
+      return "short";
+    case "uint8":
+      return "byte";
+    case "uint16":
+      return "ushort";
+    case "uint32":
+      return "uint";
+    case "uint64":
+      return "ulong";
     case "float":
     case "float32":
       return "float";
@@ -598,8 +621,15 @@ const renderCsharpFactoryTestValue = (typeStr: string): string => {
       return "true";
     case "integer":
     case "int32":
+    case "int8":
+    case "int16":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
       return "42";
     case "int64":
+    case "safeint":
       return "42L";
     case "float":
     case "float32":

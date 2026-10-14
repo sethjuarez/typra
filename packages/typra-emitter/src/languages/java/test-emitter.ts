@@ -8,9 +8,11 @@ import {
 } from "../../ir/ast.js";
 import {
   javaEnumTypeName,
+  javaIntegralScalar,
   javaPropertyName,
   javaTypeName,
 } from "./identifiers.js";
+import { isIntegralScalar } from "../../ir/scalar-kinds.js";
 import {
   postSaveExample,
   wireTestMappings,
@@ -259,7 +261,7 @@ function javaDirectCoercionCases(
   expected: string | number | boolean;
   overrideExpected: boolean;
 }> {
-  switch (coercion.scalarType.toLowerCase()) {
+  switch (javaIntegralScalar(coercion.scalarType.toLowerCase())) {
     case "int32":
     case "int64":
     case "integer":
@@ -359,7 +361,7 @@ function emitValidation(
 
   const numeric = Number(validation.value);
   const expected = Number.isFinite(numeric)
-    ? String(numeric)
+    ? javaNumberLiteral(numeric)
     : validation.value;
   lines.push(
     `    assertEquals(${expected}, ${varName}.${javaPropertyName(validation.key)}, "Expected ${validation.key}");`,
@@ -738,10 +740,8 @@ function findScalarCoercionField(
 ): string | undefined {
   const coercion = node.coercions.find((entry) =>
     scalarType === "number"
-      ? [
-          "int32",
-          "int64",
-          "integer",
+      ? isIntegralScalar(entry.scalar) ||
+        [
           "number",
           "float",
           "numeric",
@@ -770,7 +770,15 @@ function isPolymorphicProperty(prop: PropertyNode): boolean {
 
 function javaLiteral(value: string | number | boolean): string {
   if (typeof value === "string") return javaString(value);
+  if (typeof value === "number") return javaNumberLiteral(value);
   return String(value);
+}
+
+/** Java int literals overflow above 2^31; widen whole numbers outside that range to long. */
+function javaNumberLiteral(value: number): string {
+  return Number.isInteger(value) && (value > 2147483647 || value < -2147483648)
+    ? `${value}L`
+    : String(value);
 }
 
 function javaExpectedLiteral(

@@ -52,6 +52,7 @@ import {
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
+  isIntegralScalar,
   scalarRuntimeKind,
 } from "../../ir/scalar-kinds.js";
 import { ExprVisitor } from "../../ir/visitor.js";
@@ -69,6 +70,13 @@ const TYPE_MAP: Record<string, string> = {
   boolean: "boolean",
   int32: "number",
   int64: "number",
+  int8: "number",
+  int16: "number",
+  safeint: "number",
+  uint8: "number",
+  uint16: "number",
+  uint32: "number",
+  uint64: "number",
   float32: "number",
   float64: "number",
   number: "number",
@@ -96,6 +104,13 @@ function typeofCheck(scalarType: string): string | null {
       return "boolean";
     case "int32":
     case "int64":
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "float32":
     case "float64":
     case "number":
@@ -889,6 +904,13 @@ function tsScalarDefault(
     case "number":
     case "int32":
     case "int64":
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "float32":
     case "float64":
     case "integer":
@@ -976,6 +998,13 @@ function tsConstructorDefault(
     case "number":
     case "int32":
     case "int64":
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "float32":
     case "float64":
     case "integer":
@@ -1201,9 +1230,7 @@ function emitCoercionBranches(
 }
 
 function isIntegerScalar(scalarType: string): boolean {
-  return (
-    scalarType === "int32" || scalarType === "int64" || scalarType === "integer"
-  );
+  return isIntegralScalar(scalarType);
 }
 
 /**

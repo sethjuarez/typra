@@ -45,6 +45,13 @@ function factoryParamTestValue(typeStr: string): string {
     case "integer":
     case "int32":
     case "int64":
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
       return "42";
     case "float":
     case "float64":
