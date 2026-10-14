@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft. All rights reserved.
 
 import type { CallableVectorSnapshot } from "./vector.js";
-import { isTypedSeamEntry } from "./vector.js";
+import { isTypedDispatchEntry, isTypedSeamEntry } from "./vector.js";
 
 /**
  * Static coverage gate for the enforced @vector conformance tier.
@@ -26,6 +26,12 @@ import { isTypedSeamEntry } from "./vector.js";
  * (adapters stay authoritative), and the typed rail only ever rescues operations
  * that would otherwise be `missing` (or made a waiver redundant). Each operation
  * lands in exactly one bucket.
+ *
+ * A third code-verified rail (#315) covers the typed `@dispatch` resolver: an
+ * operation whose every vector is `isTypedDispatchEntry` is exercised by the
+ * emitted per-interface typed conformance file (routed through the emitted
+ * resolver + consumer provider), and the stringly runner is not emitted for it,
+ * so it lands in `dispatched` rather than `missing` when no adapter exists.
  */
 export interface VectorAdapterCoverageInput {
   snapshot: CallableVectorSnapshot;
@@ -48,6 +54,11 @@ export interface VectorAdapterCoverageResult {
    * for gate purposes.
    */
   typed: string[];
+  /**
+   * Seams covered by the emitted typed `@dispatch` per-interface conformance
+   * (every vector carries a lowered `dispatch.decl`), no hand adapter required.
+   */
+  dispatched: string[];
   waived: string[];
   missing: string[];
   /** Waiver keys that use a wildcard; these are never allowed. */
@@ -92,6 +103,23 @@ function typedOperationKeys(snapshot: CallableVectorSnapshot): Set<string> {
   return typed;
 }
 
+/** Operations whose every vector rides the typed `@dispatch` resolver rail. */
+function dispatchedOperationKeys(snapshot: CallableVectorSnapshot): Set<string> {
+  const byOperation = new Map<string, boolean>();
+  for (const entry of snapshot.vectors) {
+    const key = `${entry.contract}.${entry.operation}`;
+    byOperation.set(
+      key,
+      (byOperation.get(key) ?? true) && isTypedDispatchEntry(entry),
+    );
+  }
+  const dispatched = new Set<string>();
+  for (const [key, eligible] of byOperation) {
+    if (eligible) dispatched.add(key);
+  }
+  return dispatched;
+}
+
 function bareOperation(operationKey: string): string {
   const index = operationKey.indexOf(".");
   return index === -1 ? operationKey : operationKey.slice(index + 1);
@@ -107,19 +135,24 @@ export function evaluateVectorAdapterCoverage(
 
   const operations = operationKeys(input.snapshot);
   const typedOperations = typedOperationKeys(input.snapshot);
+  const dispatchedOperations = dispatchedOperationKeys(input.snapshot);
   const covered: string[] = [];
   const typed: string[] = [];
+  const dispatched: string[] = [];
   const waived: string[] = [];
   const missing: string[] = [];
 
   for (const operationKey of operations) {
     const bare = bareOperation(operationKey);
     // Precedence — adapter (authoritative, preserves today) → typed rail (the
-    // emitted entrypoint, honest code coverage) → enumerated waiver → missing.
+    // emitted entrypoint, honest code coverage) → typed @dispatch rail →
+    // enumerated waiver → missing.
     if (adapters.has(operationKey) || adapters.has(bare)) {
       covered.push(operationKey);
     } else if (typedOperations.has(operationKey)) {
       typed.push(operationKey);
+    } else if (dispatchedOperations.has(operationKey)) {
+      dispatched.push(operationKey);
     } else if (waivers.has(operationKey) || waivers.has(bare)) {
       waived.push(operationKey);
     } else {
@@ -132,6 +165,7 @@ export function evaluateVectorAdapterCoverage(
     operations,
     covered,
     typed,
+    dispatched,
     waived,
     missing,
     wildcardWaivers,

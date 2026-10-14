@@ -3,6 +3,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { generate } from "../src/generate.js";
 import type { CallableVectorSnapshot } from "../src/ir/vector.js";
 import {
   evaluateVectorAdapterCoverage,
@@ -507,12 +512,14 @@ function assertPartition(result: {
   operations: string[];
   covered: string[];
   typed: string[];
+  dispatched: string[];
   waived: string[];
   missing: string[];
 }): void {
   const buckets = [
     ...result.covered,
     ...result.typed,
+    ...result.dispatched,
     ...result.waived,
     ...result.missing,
   ];
@@ -521,3 +528,109 @@ function assertPartition(result: {
   // The union is exactly the operation set.
   assert.deepEqual([...buckets].sort(), [...result.operations].sort());
 }
+
+// Issue #315: a fully-dispatched seam (every vector carries a lowered
+// `dispatch.decl`) is exercised by the emitted per-interface typed conformance
+// file that routes through the emitted resolver, and the stringly
+// `Contract.operation#value` runner is not emitted for it. Deleting its hand
+// adapter must therefore not read as `missing`.
+describe("vector adapter coverage gate: typed @dispatch rail (#315)", () => {
+  const DECL = { kind: "polymorphic" } as unknown as NonNullable<
+    CallableVectorSnapshot["vectors"][number]["dispatch"]
+  >["decl"];
+  const dispatchEntry = (
+    contract: string,
+    name: string,
+    withDecl: boolean,
+  ): CallableVectorSnapshot["vectors"][number] => ({
+    contract,
+    namespace: "Typra.Sample",
+    group: "",
+    operation: "render",
+    params: { agent: "Agent" },
+    returns: "string",
+    sync: false,
+    dispatch: {
+      discriminator: { model: "TemplateFormat", field: "kind" },
+      path: "agent.template.format.kind",
+      ...(withDecl ? { decl: DECL } : {}),
+    },
+    vector: { operation: "render", stage: "callable", name, input: {}, expected: "" },
+  });
+
+  it("credits an adapterless, fully-dispatched seam via the dispatched bucket", () => {
+    const snap: CallableVectorSnapshot = {
+      emitter: "typra-emitter",
+      version: 1,
+      serializedTypes: [],
+      vectors: [
+        dispatchEntry("Renderer", "mustache", true),
+        dispatchEntry("Renderer", "jinja2", true),
+      ],
+    };
+    const result = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    assert.ok(result.ok, formatVectorAdapterCoverageFailure(result));
+    assert.deepEqual(result.dispatched, ["Renderer.render"]);
+    assert.deepEqual(result.missing, []);
+    assertPartition(result);
+  });
+
+  it("keeps a registered adapter authoritative over the dispatched rail", () => {
+    const snap: CallableVectorSnapshot = {
+      emitter: "typra-emitter",
+      version: 1,
+      vectors: [dispatchEntry("Renderer", "mustache", true)],
+    };
+    const result = evaluateVectorAdapterCoverage({
+      snapshot: snap,
+      adapterKeys: ["Renderer.render"],
+    });
+    assert.deepEqual(result.covered, ["Renderer.render"]);
+    assert.deepEqual(result.dispatched, []);
+    assertPartition(result);
+  });
+
+  it("does NOT credit a decl-less @dispatch (it stays on the stringly runner)", () => {
+    const snap: CallableVectorSnapshot = {
+      emitter: "typra-emitter",
+      version: 1,
+      vectors: [dispatchEntry("Renderer", "mustache", false)],
+    };
+    const result = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.dispatched, []);
+    assert.deepEqual(result.missing, ["Renderer.render"]);
+    assertPartition(result);
+  });
+
+  it("credits the committed dispatch-seam fixture's adapterless snapshot, whose typed conformance is emitted", async () => {
+    const output = mkdtempSync(path.join(tmpdir(), "typra-dispatch-coverage-"));
+    try {
+      const generated = await generate({
+        output,
+        source: path.resolve(process.cwd(), "fixtures", "dispatch-seam", "main.tsp"),
+        rootObject: "Typra.Fixtures.DispatchSeam.Root",
+        targets: ["typescript"],
+        format: false,
+        generateTests: true,
+        deterministic: true,
+      });
+      assert.equal(generated.success, true, generated.errors?.join("\n"));
+      // The rail being credited must actually exist on disk.
+      const emitted = readdirSync(output, { recursive: true }).map(String);
+      assert.ok(
+        emitted.some((file) => file.endsWith("renderer.conformance.test.ts")),
+        "typed per-interface dispatch conformance must be emitted",
+      );
+      const snap = JSON.parse(
+        readFileSync(path.join(output, ".typra-generated", "vectors.json"), "utf8"),
+      ) as CallableVectorSnapshot;
+      const result = evaluateVectorAdapterCoverage({ snapshot: snap, adapterKeys: [] });
+      assert.ok(result.ok, formatVectorAdapterCoverageFailure(result));
+      assert.deepEqual(result.dispatched, ["Renderer.render"]);
+      assertPartition(result);
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+});
