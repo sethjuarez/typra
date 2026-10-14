@@ -37,6 +37,7 @@ import type { CallableDispatch } from "./callable.js";
  * Keyed by the compiler `Model` object, which is unique per compilation.
  */
 const checkedWireCollisions = new WeakSet<Model>();
+const checkedAdditionalProperties = new WeakSet<Model>();
 
 /**
  * Warn when `@entryShorthand` cannot produce any runtime arm.
@@ -522,10 +523,42 @@ export const resolveModel = (
     node.properties = properties;
 
     reportWireCollisions(program, model, properties);
+    reportUnsupportedAdditionalProperties(program, model);
   }
 
   return node;
 };
+
+/**
+ * No backend models a string indexer (`...Record<T>`, `is Record<T>`) as an
+ * unknown-field passthrough, so extra keys are dropped on load → save. Warn
+ * rather than discard the spread silently (#336).
+ */
+function reportUnsupportedAdditionalProperties(
+  program: Program,
+  model: Model,
+): void {
+  if (checkedAdditionalProperties.has(model)) return;
+  checkedAdditionalProperties.add(model);
+  const indexer = model.indexer;
+  if (!indexer || isIntrinsicRecord(model)) return;
+  if (indexer.key.name !== "string") return;
+  program.reportDiagnostic({
+    code: "typra-emitter-unsupported-additional-properties",
+    message: `Model '${model.name}' declares additional properties (a string-keyed Record spread or 'is Record<T>'), but no Typra backend emits an unknown-field passthrough yet; keys not declared as properties are dropped on load and save.`,
+    severity: "warning",
+    target: model,
+  });
+}
+
+function isIntrinsicRecord(model: Model): boolean {
+  const ns = model.namespace;
+  return (
+    model.name === "Record" &&
+    ns?.name === "TypeSpec" &&
+    (ns.namespace === undefined || ns.namespace.name === "")
+  );
+}
 
 /**
  * Report `typra-emitter-wire-collision` when two canonical fields on the same
