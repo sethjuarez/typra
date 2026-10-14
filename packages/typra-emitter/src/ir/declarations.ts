@@ -155,6 +155,24 @@ export interface TypeDecl {
   methods: MethodStubDecl[];
   /** Wire conversion specification (generated when any field has knownAs mappings) */
   wire: WireDecl | null;
+  /**
+   * Unknown-field passthrough (`...Record<unknown>` / `is Record<unknown>`, #336),
+   * present only when this model or an ancestor declares it.
+   */
+  additionalProperties?: AdditionalPropertiesDecl;
+}
+
+/**
+ * Unknown-field passthrough for a model whose string indexer is `unknown`. Load
+ * captures every input key not in `knownWireKeys` into the runtime's
+ * `additionalProperties` map; save writes the captured entries back after the
+ * declared fields, skipping any key in `knownWireKeys` (declared fields win).
+ */
+export interface AdditionalPropertiesDecl {
+  /** Every declared wire key of the model, including inherited fields and the discriminator. */
+  knownWireKeys: string[];
+  /** True when an ancestor already declares the passthrough (inherited member). */
+  inherited: boolean;
 }
 
 // ============================================================================

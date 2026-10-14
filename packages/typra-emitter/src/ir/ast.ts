@@ -46,6 +46,7 @@ function isNullType(type: Type): boolean {
  */
 const checkedWireCollisions = new WeakSet<Model>();
 const checkedAdditionalProperties = new WeakSet<Model>();
+const checkedAdditionalPropertiesCollisions = new WeakSet<Model>();
 const checkedEncodedNameCollisions = new WeakSet<Model>();
 const checkedEncodedNames = new WeakSet<ModelProperty>();
 
@@ -198,6 +199,16 @@ export class TypeNode {
   public isAbstract: boolean = false;
   public isProtocol: boolean = false;
   /**
+   * True when this model passes unknown fields through (#336): its string
+   * indexer, or an ancestor's, is `unknown` (`...Record<unknown>`,
+   * `is Record<unknown>`, `extends Record<unknown>`).
+   */
+  public additionalProperties: boolean = false;
+  /** True when the passthrough is inherited from a base model that declares it. */
+  public additionalPropertiesInherited: boolean = false;
+  /** Every declared wire key including inherited ones; populated for passthrough models. */
+  public knownWireKeys: string[] = [];
+  /**
    * True when this model is a `@serializable` root: the emitter emits load/save
    * over its serialization closure (transitive property reach + discriminated
    * variant expansion). Populated from `StateKeys.serializable`.
@@ -265,6 +276,7 @@ export class TypeNode {
       base: this.base || {},
       isAbstract: this.isAbstract,
       isProtocol: this.isProtocol,
+      ...(this.additionalProperties ? { additionalProperties: true } : {}),
       entryShorthand: this.entryShorthand,
       discriminator: this.discriminator,
       coercions: this.coercions,
@@ -509,7 +521,7 @@ export const resolveModel = (
     visited.add(model.name);
   }
 
-  if (model.baseModel) {
+  if (model.baseModel && !isIntrinsicRecord(model.baseModel)) {
     node.base = getModelType(model.baseModel, rootNamespace, rootAlias);
   }
 
@@ -563,10 +575,142 @@ export const resolveModel = (
     reportWireCollisions(program, model, properties);
     reportEncodedNameCollisions(program, model);
     reportUnsupportedAdditionalProperties(program, model);
+    const ownModel =
+      model.name === "Named" ? (getTemplateModel(model) ?? model) : model;
+    const passthrough = additionalPropertiesSource(ownModel);
+    if (passthrough) {
+      node.additionalProperties = true;
+      node.additionalPropertiesInherited = passthrough !== ownModel;
+      node.knownWireKeys = [
+        ...new Set([
+          ...knownWireKeys(program, model),
+          ...knownWireKeys(program, ownModel),
+        ]),
+      ];
+      reportAdditionalPropertiesCollision(program, model);
+    }
   }
 
   return node;
 };
+
+/**
+ * The model in `model`'s inheritance chain (itself first) that declares an
+ * unknown-field passthrough — a string indexer whose value is `unknown` — or
+ * `undefined` when none does. `extends Record<unknown>` resolves to `model`.
+ */
+function additionalPropertiesSource(model: Model): Model | undefined {
+  const seen = new Set<Model>();
+  let previous: Model | undefined;
+  for (
+    let current: Model | undefined = model;
+    current && !seen.has(current);
+    current = current.baseModel
+  ) {
+    seen.add(current);
+    if (isIntrinsicRecord(current)) {
+      return isUnknownStringIndexer(current) ? previous : undefined;
+    }
+    if (isUnknownStringIndexer(current)) return current;
+    previous = current;
+  }
+  return undefined;
+}
+
+function isUnknownStringIndexer(model: Model): boolean {
+  const indexer = model.indexer;
+  return (
+    indexer !== undefined &&
+    indexer.key.name === "string" &&
+    indexer.value.kind === "Intrinsic" &&
+    indexer.value.name === "unknown"
+  );
+}
+
+/** Declared wire keys of `model` and every ancestor (the nearest redeclaration wins). */
+function knownWireKeys(program: Program, model: Model): string[] {
+  const keys: string[] = [];
+  const names = new Set<string>();
+  const seen = new Set<Model>();
+  for (
+    let current: Model | undefined = model;
+    current && !seen.has(current) && !isIntrinsicRecord(current);
+    current = current.baseModel
+  ) {
+    seen.add(current);
+    for (const [name, property] of current.properties) {
+      if (names.has(name)) continue;
+      if (isHttpStatusCodeMetadataProperty(program, property)) continue;
+      names.add(name);
+      const wireName = jsonWireName(program, property);
+      if (!keys.includes(wireName)) keys.push(wireName);
+    }
+  }
+  return keys;
+}
+
+/**
+ * Member names a passthrough model's generated code adds next to its declared
+ * properties, as casing-insensitive keys (non-alphanumerics and case dropped):
+ * the extras member `additionalProperties` (`additional_properties`,
+ * `AdditionalProperties`), the TS/Java/C# known-key method `isKnownWireKey` /
+ * `IsKnownWireKey`, and the Swift `additionalPropertiesKnownKeys` set. Each
+ * target maps a property name through camel/Pascal/snake casing, which only
+ * changes case and underscores, so a property with the same key would collide
+ * in at least one target.
+ */
+const RESERVED_PASSTHROUGH_MEMBERS = new Set([
+  "additionalproperties",
+  "isknownwirekey",
+  "additionalpropertiesknownkeys",
+]);
+
+/** The generated member a property named `name` would collide with, if any. */
+function reservedPassthroughMember(name: string): string | undefined {
+  const key = name.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+  if (RESERVED_PASSTHROUGH_MEMBERS.has(key)) {
+    return key === "isknownwirekey"
+      ? "isKnownWireKey"
+      : key === "additionalpropertiesknownkeys"
+        ? "additionalPropertiesKnownKeys"
+        : "additionalProperties";
+  }
+  // Python's `_known_wire_keys` class attribute: snake_case keeps a leading
+  // underscore, so only `_`-prefixed spellings can reach it.
+  if (name.startsWith("_") && key === "knownwirekeys") return "_known_wire_keys";
+  return undefined;
+}
+
+/**
+ * A passthrough model's generated members (see `RESERVED_PASSTHROUGH_MEMBERS`)
+ * share a namespace with its declared and inherited properties, so a property
+ * that any target would spell the same way must be renamed.
+ */
+function reportAdditionalPropertiesCollision(
+  program: Program,
+  model: Model,
+): void {
+  if (checkedAdditionalPropertiesCollisions.has(model)) return;
+  checkedAdditionalPropertiesCollisions.add(model);
+  const seen = new Set<Model>();
+  for (
+    let current: Model | undefined = model;
+    current && !seen.has(current) && !isIntrinsicRecord(current);
+    current = current.baseModel
+  ) {
+    seen.add(current);
+    for (const [name, property] of current.properties) {
+      const member = reservedPassthroughMember(name);
+      if (!member) continue;
+      program.reportDiagnostic({
+        code: "typra-emitter-additional-properties-collision",
+        message: `Model '${model.name}' passes unknown fields through (Record<unknown>), which generates a '${member}' member that collides with its property '${name}'. Rename the property.`,
+        severity: "error",
+        target: current === model ? property : model,
+      });
+    }
+  }
+}
 
 /** Wire keys of renamed base-model properties that `model` does not redeclare. */
 function inheritedSerializedNames(
@@ -593,9 +737,10 @@ function inheritedSerializedNames(
 }
 
 /**
- * No backend models a string indexer (`...Record<T>`, `is Record<T>`) as an
- * unknown-field passthrough, so extra keys are dropped on load → save. Warn
- * rather than discard the spread silently (#336).
+ * Only a string indexer whose value is `unknown` (`...Record<unknown>`) lowers to
+ * an unknown-field passthrough (#336). A typed indexer (`...Record<string>`,
+ * `is Record<int32>`) is not modeled, so its extra keys are dropped on load and
+ * save; warn rather than discard the spread silently.
  */
 function reportUnsupportedAdditionalProperties(
   program: Program,
@@ -603,12 +748,17 @@ function reportUnsupportedAdditionalProperties(
 ): void {
   if (checkedAdditionalProperties.has(model)) return;
   checkedAdditionalProperties.add(model);
-  const indexer = model.indexer;
+  const recordBase =
+    model.baseModel && isIntrinsicRecord(model.baseModel)
+      ? model.baseModel
+      : undefined;
+  const indexer = model.indexer ?? recordBase?.indexer;
   if (!indexer || isIntrinsicRecord(model)) return;
   if (indexer.key.name !== "string") return;
+  if (isUnknownStringIndexer(model) || (recordBase && isUnknownStringIndexer(recordBase))) return;
   program.reportDiagnostic({
     code: "typra-emitter-unsupported-additional-properties",
-    message: `Model '${model.name}' declares additional properties (a string-keyed Record spread or 'is Record<T>'), but no Typra backend emits an unknown-field passthrough yet; keys not declared as properties are dropped on load and save.`,
+    message: `Model '${model.name}' declares typed additional properties (a string-keyed Record spread or 'is Record<T>' whose value is not 'unknown'). Only 'Record<unknown>' is supported as an unknown-field passthrough; keys not declared as properties are dropped on load and save.`,
     severity: "warning",
     target: model,
   });

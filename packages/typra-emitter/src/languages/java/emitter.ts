@@ -267,7 +267,28 @@ function emitType(
     if (nativeSerialization === "jackson") lines.push("  @JsonIgnore");
     lines.push("  protected Map<String, Object> rawPayload;");
   }
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    lines.push(
+      "  /** Undeclared fields captured on load and written back on save (unknown-field passthrough). */",
+    );
+    if (nativeSerialization === "jackson") lines.push("  @JsonIgnore");
+    lines.push(
+      "  public Map<String, Object> additionalProperties = new LinkedHashMap<>();",
+    );
+  }
   lines.push("");
+  if (type.additionalProperties) {
+    const keys = [...new Set(type.additionalProperties.knownWireKeys)];
+    if (type.additionalProperties.inherited) lines.push("  @Override");
+    lines.push("  protected boolean isKnownWireKey(String key) {");
+    lines.push(
+      keys.length === 0
+        ? "    return false;"
+        : `    return switch (key) { case ${keys.map((key) => `"${escapeJava(key)}"`).join(", ")} -> true; default -> false; };`,
+    );
+    lines.push("  }");
+    lines.push("");
+  }
   const inheritedDefaults = type.fields.filter(
     (field) =>
       inheritedFields.has(field.name) &&
@@ -637,6 +658,16 @@ function emitLoadBaseInto(
     if (field)
       emitLoadField(field, collectionHelper, lines, polymorphicTypeNames);
   }
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    // isKnownWireKey is virtual, so a derived instance applies its own key set.
+    lines.push("    result.additionalProperties = new LinkedHashMap<>();");
+    lines.push("    for (Map.Entry<?, ?> entry : map.entrySet()) {");
+    lines.push("      String key = String.valueOf(entry.getKey());");
+    lines.push("      if (!result.isKnownWireKey(key)) {");
+    lines.push("        result.additionalProperties.put(key, entry.getValue());");
+    lines.push("      }");
+    lines.push("    }");
+  }
   lines.push("  }");
   lines.push("");
 }
@@ -990,6 +1021,18 @@ function emitSave(
     lines.push("    Map<String, Object> result = new LinkedHashMap<>();");
   }
   lines.push("    obj.saveFields(result, ctx);");
+  if (type.additionalProperties) {
+    // Undeclared fields follow the declared ones; a declared wire key always wins.
+    lines.push("    if (obj.additionalProperties != null) {");
+    lines.push(
+      "      for (Map.Entry<String, Object> entry : obj.additionalProperties.entrySet()) {",
+    );
+    lines.push(
+      "        if (!obj.isKnownWireKey(entry.getKey())) result.put(entry.getKey(), entry.getValue());",
+    );
+    lines.push("      }");
+    lines.push("    }");
+  }
   lines.push("    return ctx.processDict(result);");
   lines.push("  }");
   lines.push("");

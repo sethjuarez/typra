@@ -502,23 +502,41 @@ function emitStruct(
       `  public var ${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`,
     );
   }
+  const passthrough = type.additionalProperties;
+  if (passthrough) {
+    lines.push(
+      "  /// Undeclared fields captured on load and written back on save (unknown-field passthrough).",
+    );
+    lines.push("  public var additionalProperties: [String: Any] = [:]");
+    lines.push(
+      `  static let additionalPropertiesKnownKeys: Set<String> = [${[
+        ...new Set(passthrough.knownWireKeys),
+      ]
+        .map((key) => swiftStringLiteral(key))
+        .join(", ")}]`,
+    );
+  }
   lines.push("");
   lines.push(
-    `  public init(${type.fields
-      .map((field) => {
+    `  public init(${[
+      ...type.fields.map((field) => {
         const defaultValue = swiftFieldDefaultValue(
           field,
           polymorphicTypeNames,
           polymorphicDefaultCases,
         );
         return `${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`;
-      })
-      .join(", ")}) {`,
+      }),
+      ...(passthrough ? ["additionalProperties: [String: Any] = [:]"] : []),
+    ].join(", ")}) {`,
   );
   for (const field of type.fields) {
     lines.push(
       `    self.${swiftPropertyName(field.name)} = ${swiftPropertyName(field.name)}`,
     );
+  }
+  if (passthrough) {
+    lines.push("    self.additionalProperties = additionalProperties");
   }
   lines.push("  }");
   lines.push("");
@@ -643,6 +661,11 @@ function emitLoad(
       );
       lines.push("    }");
     }
+  }
+  if (type.additionalProperties) {
+    lines.push(
+      "    instance.additionalProperties = object.filter { !Self.additionalPropertiesKnownKeys.contains($0.key) }",
+    );
   }
   lines.push("    return instance");
   lines.push("  }");
@@ -902,6 +925,14 @@ function emitSave(
         `    result[${swiftStringLiteral(assignment.targetName)}] = ${serialized}`,
       );
     }
+  }
+  if (type.additionalProperties) {
+    // Undeclared fields follow the declared ones; a declared wire key always wins.
+    lines.push(
+      "    for (key, value) in self.additionalProperties where !Self.additionalPropertiesKnownKeys.contains(key) {",
+    );
+    lines.push("      result[key] = value");
+    lines.push("    }");
   }
   lines.push("    return result");
   lines.push("  }");

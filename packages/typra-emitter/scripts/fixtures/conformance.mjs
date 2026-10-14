@@ -179,6 +179,33 @@ export const fixtureRootSample = {
       },
     ],
   },
+  // Unknown-field passthrough (#336). Every key the model does not declare -- scalars, a nested
+  // object and an array of mixed values -- must survive load -> save unchanged, while the declared
+  // `started_at`/`event_id` wire keys stay declared fields. The derived click variant proves the
+  // known-key set includes inherited fields. See FixturePassthrough in main.tsp.
+  passthrough: {
+    label: "declared label",
+    started_at: "2024-01-02T03:04:05Z",
+    unknownText: "kept verbatim",
+    unknownCount: 7,
+    unknownFlag: false,
+    unknownNested: { depth: { leaf: "deep value" }, list: [1, "two", { three: 3 }] },
+    unknownList: [{ id: "a" }, { id: "b" }],
+  },
+  passthroughEvents: [
+    {
+      kind: "click",
+      event_id: "event-1",
+      x: 3,
+      clickSource: "touch",
+      clickMeta: { pressure: 0.5, fingers: [1, 2] },
+    },
+    {
+      kind: "vendor-hover",
+      event_id: "event-2",
+      hoverTarget: { id: "menu" },
+    },
+  ],
 };
 
 // One canonical conformance input, embedded into every target program.

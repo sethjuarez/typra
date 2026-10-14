@@ -38,6 +38,14 @@ be explicit in diagnostics, the conformance matrix, or a tracked known failure.
   a load error.
 - Regular models are not an unbounded extension bag. Unknown fields may be
   ignored unless a feature explicitly preserves them.
+- A model that declares `...Record<unknown>` (or `is Record<unknown>` /
+  `extends Record<unknown>`) is an explicit unknown-field passthrough: load
+  collects every key that is not a declared wire key (including inherited
+  fields, the discriminator, and `@encodedName` keys) into the generated
+  `additionalProperties` member, and save writes those entries back after the
+  declared fields. Declared fields always win over a same-named extras entry.
+  Derived models of a passthrough base pass through too. See
+  [Collections and records](/mappings/collections/#unknown-field-passthrough).
 - Unknown discriminator carriers are different: when an open discriminated base
   accepts an unclaimed discriminator value, the carrier must preserve the raw
   payload, including unknown fields and explicit nulls, so save/reload is stable.

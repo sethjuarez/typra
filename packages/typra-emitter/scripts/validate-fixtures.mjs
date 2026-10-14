@@ -725,6 +725,7 @@ function assertFocusedFeatureFixtures() {
     "features/wire/main.tsp",
     "features/encoded-name/main.tsp",
     "features/nullable/main.tsp",
+    "features/additional-properties/main.tsp",
     "features/transport/main.tsp",
     "features/dispatch/main.tsp",
     "features/dispatch-union-coerce/main.tsp",
@@ -862,6 +863,31 @@ function assertFocusedFeatureFixtures() {
       if (JSON.stringify(flags) !== JSON.stringify(expected)) {
         fail(
           `Nullable fixture must preserve required/optional + nullable flags in the IR.\n` +
+            `  expected: ${JSON.stringify(expected)}\n  actual:   ${JSON.stringify(flags)}`,
+        );
+      }
+    }
+
+    if (featureName === "additional-properties") {
+      // Issue #336: a model whose string indexer is `unknown` passes undeclared
+      // fields through load and save. The IR must flag every such model (spread,
+      // `is Record<unknown>`, and a polymorphic base) and leave plain models alone.
+      const flags = Object.fromEntries(
+        (model.properties ?? []).map((field) => [
+          field.name,
+          field.type?.additionalProperties === true,
+        ]),
+      );
+      const expected = {
+        row: true,
+        bag: true,
+        plain: false,
+        event: true,
+        events: true,
+      };
+      if (JSON.stringify(flags) !== JSON.stringify(expected)) {
+        fail(
+          `Additional-properties fixture must flag Record<unknown> passthrough models in the IR.\n` +
             `  expected: ${JSON.stringify(expected)}\n  actual:   ${JSON.stringify(flags)}`,
         );
       }

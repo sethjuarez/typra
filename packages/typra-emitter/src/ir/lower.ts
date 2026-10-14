@@ -318,6 +318,14 @@ export function lowerType(
     polymorphicDispatch,
     methods: lowerMethods(node),
     wire: lowerWire(node, fields),
+    ...(node.additionalProperties
+      ? {
+          additionalProperties: {
+            knownWireKeys: [...node.knownWireKeys],
+            inherited: node.additionalPropertiesInherited,
+          },
+        }
+      : {}),
   };
 }
 

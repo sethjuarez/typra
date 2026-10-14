@@ -474,7 +474,7 @@ export function emitRustFile(
   }
 
   // Emit struct + impl for the base type (only one struct per file in Rust)
-  emitStruct(baseType, polymorphicTypeNames, lines);
+  emitStruct(baseType, polymorphicTypeNames, lines, childTypes);
   emitImpl(
     baseType,
     childTypes,
@@ -768,6 +768,7 @@ function emitStruct(
   type: TypeDecl,
   polymorphicTypeNames: Set<string>,
   lines: string[],
+  childTypes: TypeDecl[] = [],
 ): void {
   if (type.description) {
     emitDocComment(type.description, "", lines);
@@ -807,6 +808,14 @@ function emitStruct(
     );
     lines.push(
       `    pub ${rustFieldName(type.polymorphicDispatch.discriminatorField)}: ${type.typeName.name}Kind,`,
+    );
+  }
+  if (rustHasAdditionalProperties(type, childTypes)) {
+    lines.push(
+      "    /// Undeclared fields captured on load and written back on save (unknown-field passthrough).",
+    );
+    lines.push(
+      "    pub additional_properties: serde_json::Map<String, serde_json::Value>,",
     );
   }
 
@@ -1489,6 +1498,11 @@ function emitLoadFromValue(
         `            ${rustFieldName(a.fieldName)}: ${loadExpr(a, polymorphicTypeNames, declsByName)},`,
       );
     }
+    if (type.additionalProperties) {
+      lines.push(
+        '            additional_properties: Self::capture_additional_properties(&value, ""),',
+      );
+    }
     // A field withheld from load (a bare `@sensitive` or `@sensitive("load")`
     // field) has no load assignment yet is still a struct field, so an explicit
     // `Self { .. }` literal that lists only loaded fields is incomplete and fails
@@ -1508,6 +1522,7 @@ function emitLoadFromValue(
 
   lines.push("    }");
   lines.push("");
+  emitRustAdditionalPropertiesHelpers(type, childTypes, lines);
 }
 
 function emitCoercionBranch(
@@ -1924,7 +1939,121 @@ function emitPolymorphicLoad(
     );
   }
   lines.push(`            ${discSnake}: ${discSnake},`);
+  if (rustHasAdditionalProperties(type, childTypes)) {
+    lines.push(
+      `            additional_properties: Self::capture_additional_properties(&value, ${discSnake}_str),`,
+    );
+  }
   lines.push("        }");
+}
+
+/**
+ * Unknown-field passthrough (#336). A polymorphic base collapses its variants into one
+ * struct, so the struct carries the extras map when the base or any variant declares
+ * `...Record<unknown>`; a variant that does not declare it treats every key as known.
+ */
+function rustHasAdditionalProperties(
+  type: TypeDecl,
+  childTypes: TypeDecl[],
+): boolean {
+  if (type.additionalProperties) return true;
+  const dispatch = type.polymorphicDispatch;
+  if (!dispatch) return false;
+  const names = new Set(dispatch.variants.map((v) => v.typeName.name));
+  if (dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference) {
+    names.add(dispatch.defaultVariant.typeName.name);
+  }
+  return childTypes.some(
+    (child) => names.has(child.typeName.name) && child.additionalProperties,
+  );
+}
+
+function rustKeyMatch(keys: string[]): string {
+  const unique = [...new Set(keys)];
+  return unique.length === 0
+    ? "false"
+    : `matches!(key, ${unique.map((key) => rustStringLiteral(key)).join(" | ")})`;
+}
+
+function emitRustAdditionalPropertiesHelpers(
+  type: TypeDecl,
+  childTypes: TypeDecl[],
+  lines: string[],
+): void {
+  if (!rustHasAdditionalProperties(type, childTypes)) return;
+  const dispatch = type.polymorphicDispatch;
+  const baseKeys = type.additionalProperties?.knownWireKeys ?? [
+    ...type.load.assignments.map((assignment) => assignment.sourceName),
+    ...type.save.assignments.map((assignment) => assignment.targetName),
+    ...(dispatch ? [discriminatorWireKey(dispatch)] : []),
+  ];
+  lines.push(
+    "    /// True when `key` is a declared wire key for the given discriminator value.",
+  );
+  lines.push(
+    "    fn additional_properties_known_key(kind: &str, key: &str) -> bool {",
+  );
+  if (!dispatch) {
+    lines.push(`        ${rustKeyMatch(baseKeys)}`);
+  } else {
+    lines.push(`        if ${rustKeyMatch(baseKeys)} {`);
+    lines.push("            return true;");
+    lines.push("        }");
+    lines.push("        match kind {");
+    for (const variant of dispatch.variants) {
+      const child = childTypes.find(
+        (candidate) => candidate.typeName.name === variant.typeName.name,
+      );
+      lines.push(
+        `            ${rustStringLiteral(variant.value)} => ${
+          child?.additionalProperties
+            ? rustKeyMatch(child.additionalProperties.knownWireKeys)
+            : "true"
+        },`,
+      );
+    }
+    const fallback =
+      dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference
+        ? childTypes.find(
+            (candidate) =>
+              candidate.typeName.name ===
+              dispatch.defaultVariant!.typeName.name,
+          )
+        : undefined;
+    lines.push(
+      `            _ => ${
+        fallback
+          ? fallback.additionalProperties
+            ? rustKeyMatch(fallback.additionalProperties.knownWireKeys)
+            : "true"
+          : type.additionalProperties
+            ? "false"
+            : "true"
+      },`,
+    );
+    lines.push("        }");
+  }
+  lines.push("    }");
+  lines.push("");
+  lines.push(
+    "    fn capture_additional_properties(value: &serde_json::Value, kind: &str) -> serde_json::Map<String, serde_json::Value> {",
+  );
+  lines.push("        value");
+  lines.push("            .as_object()");
+  lines.push("            .map(|object| {");
+  lines.push("                object");
+  lines.push("                    .iter()");
+  lines.push(
+    "                    .filter(|(key, _)| !Self::additional_properties_known_key(kind, key))",
+  );
+  lines.push(
+    "                    .map(|(key, value)| (key.clone(), value.clone()))",
+  );
+  lines.push("                    .collect()");
+  lines.push("            })");
+  lines.push("            .unwrap_or_default()");
+  lines.push("    }");
+  lines.push("");
 }
 
 // ============================================================================
@@ -2046,6 +2175,21 @@ function emitToValue(
       polymorphicTypeNames,
       lines,
     );
+  }
+
+  if (rustHasAdditionalProperties(type, childTypes)) {
+    // Undeclared fields follow the declared ones; a declared wire key always wins.
+    const kind = type.polymorphicDispatch
+      ? `self.${rustFieldName(type.polymorphicDispatch.discriminatorField)}_str()`
+      : '""';
+    lines.push("        for (key, value) in &self.additional_properties {");
+    lines.push(
+      `            if Self::additional_properties_known_key(${kind}, key) {`,
+    );
+    lines.push("                continue;");
+    lines.push("            }");
+    lines.push("            result.insert(key.clone(), value.clone());");
+    lines.push("        }");
   }
 
   lines.push("        ctx.process_dict(serde_json::Value::Object(result))");

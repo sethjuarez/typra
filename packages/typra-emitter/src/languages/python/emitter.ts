@@ -506,6 +506,19 @@ function emitType(
         : "    _raw: dict[str, Any] = field(default_factory=dict, init=False, repr=False)",
     );
   }
+  if (type.additionalProperties) {
+    // Unknown-field passthrough (#336): undeclared keys survive load -> save.
+    if (!type.additionalProperties.inherited) {
+      lines.push(
+        usePydantic
+          ? "    additional_properties: dict[str, Any] = Field(default_factory=dict)"
+          : "    additional_properties: dict[str, Any] = field(default_factory=dict)",
+      );
+    }
+    lines.push(
+      `    _known_wire_keys: ClassVar[frozenset[str]] = frozenset({${type.additionalProperties.knownWireKeys.map((key) => pythonLiteral(key)).join(", ")}})`,
+    );
+  }
 
   // Serialization surface (load/save + collection helpers, polymorphic
   // dispatch, format wrappers) is opt-in: emitted only when the type is in the
@@ -1190,6 +1203,15 @@ function emitLoadMethod(
     lines.push(`        if type(instance) is ${name}:`);
     lines.push("            instance._raw = copy.deepcopy(data)");
   }
+  if (type.additionalProperties) {
+    // A base loader re-captures after variant dispatch; `_known_wire_keys` is the
+    // instance's own (variant) key set.
+    lines.push("        instance.additional_properties = {");
+    lines.push("            key: value");
+    lines.push("            for key, value in data.items()");
+    lines.push("            if key not in instance._known_wire_keys");
+    lines.push("        }");
+  }
 
   // Context post-processing
   lines.push("        if context is not None:");
@@ -1672,6 +1694,13 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
     } else {
       lines.push(`        ${emitSaveAssignment(a)}`);
     }
+  }
+
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    // Undeclared fields follow the declared ones; a declared wire key always wins.
+    lines.push("        for key, value in (obj.additional_properties or {}).items():");
+    lines.push("            if key not in obj._known_wire_keys:");
+    lines.push("                result[key] = value");
   }
 
   // Context post-processing (only for root types without base)

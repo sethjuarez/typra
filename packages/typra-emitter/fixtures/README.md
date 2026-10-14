@@ -39,6 +39,7 @@ behavior is genuinely runtime-specific.
 | Provider wire | `features/wire/main.tsp` | Provider-specific names with `@@knownAs` and provider defaults with `@@defaultFor`. |
 | Encoded names | `features/encoded-name/main.tsp` | `@encodedName("application/json", ...)` as the canonical dict/JSON/YAML key on load and save (scalar, nested model, collection, discriminator, inherited `@coerce` target, and `@@knownAs` interplay); non-JSON mimes are ignored. |
 | Nullable fields | `features/nullable/main.tsp` | `x: T \| null` (required key, value may be null: load rejects an absent key and accepts `null`; save always writes the key, as `null` when unset) versus `x?: T` and `x?: T \| null` (both omitted when unset) across scalars, enums, models, arrays, and records. |
+| Additional properties | `features/additional-properties/main.tsp` | Unknown-field passthrough (#336): `...Record<unknown>` and `is Record<unknown>` models keep every undeclared key in a generated `additionalProperties` member on load and write it back on save; known keys are matched by wire name (`@encodedName`), and a polymorphic base passes its passthrough to derived variants. A plain model stays closed. |
 | Transport | `features/transport/main.tsp` | Path, query, header, cookie, body, status, success/error body envelopes, and wildcard status bodies. |
 | Namespaces | `features/namespaces/main.tsp` | Nested namespaces and cross-namespace references. |
 | Documentation | `features/docs/main.tsp` | `@doc` metadata and multiline sample text. |

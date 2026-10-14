@@ -573,6 +573,14 @@ function emitStruct(
   if (absorbsUnknownIntoBase(type.polymorphicDispatch)) {
     lines.push("\traw map[string]interface{}");
   }
+  if (type.additionalProperties) {
+    lines.push(
+      "\t// AdditionalProperties holds undeclared fields so they survive load -> save.",
+    );
+    lines.push(
+      '\tAdditionalProperties map[string]interface{} `json:"-" yaml:"-"`',
+    );
+  }
 
   lines.push("}");
   lines.push("");
@@ -708,6 +716,15 @@ function emitLoadFunction(
       for (const field of type.fields) {
         body.push(`\t\tdelete(result.raw, ${goLiteral(fieldWireKey(field))})`);
       }
+    }
+    if (type.additionalProperties) {
+      body.push("\t\tresult.AdditionalProperties = make(map[string]interface{})");
+      body.push("\t\tfor key, value := range m {");
+      body.push(
+        ...goKnownWireKeyGuard(type.additionalProperties.knownWireKeys, "\t\t\t"),
+      );
+      body.push("\t\t\tresult.AdditionalProperties[key] = value");
+      body.push("\t\t}");
     }
 
     body.push("\t}");
@@ -1441,11 +1458,32 @@ function emitSaveMethod(
     );
     emitSaveAssignment(assign, helper, polymorphicTypeNames, fieldNames, lines);
   }
+  if (type.additionalProperties) {
+    // Undeclared fields follow the declared ones; a declared wire key always wins.
+    lines.push("\tfor key, value := range obj.AdditionalProperties {");
+    lines.push(
+      ...goKnownWireKeyGuard(type.additionalProperties.knownWireKeys, "\t\t"),
+    );
+    lines.push("\t\tresult[key] = value");
+    lines.push("\t}");
+  }
 
   lines.push("");
   lines.push("\treturn result");
   lines.push("}");
   lines.push("");
+}
+
+/** `continue`s the enclosing `for key, value := range ...` loop for declared wire keys. */
+function goKnownWireKeyGuard(knownWireKeys: string[], indent: string): string[] {
+  const keys = [...new Set(knownWireKeys)];
+  if (keys.length === 0) return [];
+  return [
+    `${indent}switch key {`,
+    `${indent}case ${keys.map((key) => goLiteral(key)).join(", ")}:`,
+    `${indent}\tcontinue`,
+    `${indent}}`,
+  ];
 }
 
 // ============================================================================

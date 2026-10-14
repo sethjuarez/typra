@@ -576,6 +576,29 @@ function emitProperties(
     lines.push("    }");
     lines.push("");
   }
+  if (type.additionalProperties) {
+    if (!type.additionalProperties.inherited) {
+      emitXmlDocComment(
+        "Undeclared fields captured on load and written back on save (unknown-field passthrough).",
+        "    ",
+        lines,
+      );
+      lines.push(
+        "    public Dictionary<string, object?> AdditionalProperties { get; set; } = new();",
+      );
+      lines.push("");
+    }
+    const keys = [...new Set(type.additionalProperties.knownWireKeys)];
+    const modifier = type.additionalProperties.inherited ? "override" : "virtual";
+    lines.push(
+      `    protected ${modifier} bool IsKnownWireKey(string key) => ${
+        keys.length === 0
+          ? "false"
+          : `key is ${keys.map((key) => csStringLiteral(key)).join(" or ")}`
+      };`,
+    );
+    lines.push("");
+  }
   lines.push("");
 }
 
@@ -826,6 +849,19 @@ function emitLoadMethod(
     lines.push(
       `            instance._raw = (Dictionary<string, object?>)CloneRawValue(data)!;`,
     );
+    lines.push("        }");
+    lines.push("");
+  }
+  if (type.additionalProperties) {
+    // A base loader re-captures after variant dispatch; IsKnownWireKey is virtual so
+    // the variant's own key set applies.
+    lines.push("        instance.AdditionalProperties = new Dictionary<string, object?>();");
+    lines.push("        foreach (var entry in data)");
+    lines.push("        {");
+    lines.push("            if (!instance.IsKnownWireKey(entry.Key))");
+    lines.push("            {");
+    lines.push("                instance.AdditionalProperties[entry.Key] = entry.Value;");
+    lines.push("            }");
     lines.push("        }");
     lines.push("");
   }
@@ -1274,6 +1310,16 @@ function emitSaveMethod(
   // Per-field saves
   for (const assign of type.save.assignments) {
     emitSaveAssignment(assign, lines);
+  }
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    // Undeclared fields follow the declared ones; a declared wire key always wins.
+    lines.push("        foreach (var entry in obj.AdditionalProperties ?? new())");
+    lines.push("        {");
+    lines.push("            if (!obj.IsKnownWireKey(entry.Key))");
+    lines.push("            {");
+    lines.push("                result[entry.Key] = entry.Value;");
+    lines.push("            }");
+    lines.push("        }");
   }
 
   // ProcessDict only if no base

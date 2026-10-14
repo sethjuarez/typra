@@ -233,7 +233,55 @@ export function emitTypeScriptFile(
     lines.push("");
   }
 
+  if (
+    emitZod &&
+    decl.types.some((type) => type.serialized && type.additionalProperties)
+  ) {
+    emitZodProtoKeyHelper(lines);
+  }
+
   return lines.join("\n") + "\n";
+}
+
+/**
+ * Zod's `.passthrough()` silently drops an own `__proto__` key, so a passthrough
+ * model's wire schema validates with its object schema and then restores that
+ * key as own data on the parsed result (#336).
+ */
+function emitZodProtoKeyHelper(lines: string[]): void {
+  lines.push(
+    ...[
+      "/** Validates with `schema`, then restores an own `__proto__` key that zod's `.passthrough()` drops. */",
+      "function typraKeepProtoKey(",
+      "  schema: z.ZodTypeAny,",
+      "): z.ZodType<Record<string, unknown>> {",
+      "  return z.any().transform((value, ctx) => {",
+      "    const parsed = schema.safeParse(value);",
+      "    if (!parsed.success) {",
+      "      for (const issue of parsed.error.issues) {",
+      "        ctx.addIssue(issue);",
+      "      }",
+      "      return z.NEVER;",
+      "    }",
+      "    const data = parsed.data as Record<string, unknown>;",
+      "    if (",
+      "      value !== null &&",
+      '      typeof value === "object" &&',
+      '      Object.prototype.hasOwnProperty.call(value, "__proto__")',
+      "    ) {",
+      '      Object.defineProperty(data, "__proto__", {',
+      '        value: (value as Record<string, unknown>)["__proto__"],',
+      "        enumerable: true,",
+      "        writable: true,",
+      "        configurable: true,",
+      "      });",
+      "    }",
+      "    return data;",
+      "  });",
+      "}",
+      "",
+    ],
+  );
 }
 
 function relativeModulePath(
@@ -354,10 +402,39 @@ function emitType(
     // separate subclass and has to populate this.
     lines.push("  protected raw: Record<string, unknown> = {};");
   }
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    lines.push(
+      "  /** Fields not declared by the schema, preserved verbatim across load/save (#336). */",
+    );
+    // A null-prototype dictionary keeps an unknown `__proto__` key as data
+    // instead of hitting Object.prototype's `__proto__` setter.
+    lines.push(
+      "  additionalProperties: Record<string, unknown> = Object.create(null);",
+    );
+  }
   lines.push("");
 
   if (absorbsUnknownValues(type.polymorphicDispatch)) {
     emitRawCloneMethod(lines);
+  }
+  if (type.additionalProperties) {
+    lines.push(
+      "  /** True when `key` is a declared wire key of this model (including inherited fields). */",
+    );
+    lines.push("  protected isKnownWireKey(key: string): boolean {");
+    // A switch stays formatter-stable regardless of how many keys there are.
+    lines.push("    switch (key) {");
+    for (const key of [...new Set(type.additionalProperties.knownWireKeys)]) {
+      lines.push(`      case ${JSON.stringify(key)}:`);
+    }
+    if (type.additionalProperties.knownWireKeys.length > 0) {
+      lines.push("        return true;");
+    }
+    lines.push("      default:");
+    lines.push("        return false;");
+    lines.push("    }");
+    lines.push("  }");
+    lines.push("");
   }
 
   // Constructor
@@ -596,6 +673,11 @@ function emitZodSchemas(
 }
 
 function zodWireSchemaExpression(type: TypeDecl): string {
+  const schema = zodWireSchemaBody(type);
+  return type.additionalProperties ? `typraKeepProtoKey(${schema})` : schema;
+}
+
+function zodWireSchemaBody(type: TypeDecl): string {
   const dispatch = type.polymorphicDispatch;
   if (!dispatch || dispatch.variants.length === 0) {
     return `${type.typeName.name}.wireObjectSchema`;
@@ -638,7 +720,8 @@ function zodObjectExpression(
   const object = type.base
     ? `${type.base.name}.${omitField === "name" ? "wireObjectSchemaWithoutName" : "wireObjectSchema"}.extend(${objectBody})`
     : `z.object(${objectBody})`;
-  return absorbsUnknownValues(type.polymorphicDispatch)
+  return absorbsUnknownValues(type.polymorphicDispatch) ||
+    type.additionalProperties
     ? `${object}.passthrough()`
     : object;
 }
@@ -985,6 +1068,14 @@ function emitConstructor(type: TypeDecl, lines: string[]): void {
     }
   }
 
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    lines.push("    if (init?.additionalProperties !== undefined) {");
+    lines.push(
+      "      this.additionalProperties = Object.assign(Object.create(null), init.additionalProperties);",
+    );
+    lines.push("    }");
+  }
+
   lines.push("  }");
   lines.push("");
 }
@@ -1119,6 +1210,17 @@ function emitLoadMethod(
     lines.push(
       `      instance.raw = ${name}.cloneRawValue(data) as Record<string, unknown>;`,
     );
+    lines.push("    }");
+  }
+  if (type.additionalProperties) {
+    // Every undeclared key is captured; a base loader re-captures after variant
+    // dispatch, and `isKnownWireKey` is the instance's own (variant) key set.
+    lines.push("");
+    lines.push("    instance.additionalProperties = Object.create(null);");
+    lines.push("    for (const [key, value] of Object.entries(data)) {");
+    lines.push("      if (!instance.isKnownWireKey(key)) {");
+    lines.push("        instance.additionalProperties[key] = value;");
+    lines.push("      }");
     lines.push("    }");
   }
 
@@ -1679,6 +1781,24 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
     } else {
       lines.push(`    ${emitSaveAssignment(a)}`);
     }
+  }
+
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    // Undeclared fields follow the declared ones; a declared wire key always wins.
+    lines.push("");
+    lines.push("    const extras = obj.additionalProperties ?? {};");
+    lines.push("    for (const [key, value] of Object.entries(extras)) {");
+    lines.push("      if (!obj.isKnownWireKey(key)) {");
+    // defineProperty makes `__proto__` an own enumerable key rather than a
+    // prototype assignment, so JSON/YAML output keeps it.
+    lines.push("        Object.defineProperty(result, key, {");
+    lines.push("          value,");
+    lines.push("          enumerable: true,");
+    lines.push("          writable: true,");
+    lines.push("          configurable: true,");
+    lines.push("        });");
+    lines.push("      }");
+    lines.push("    }");
   }
 
   // Context post-processing (only for root types without base)

@@ -77,6 +77,46 @@ model FixtureRoot {
 
   @doc("Ordered complex collection with non-unique names")
   checkpoint?: FixtureCheckpoint;
+
+  @sample(#{ passthrough: #{ label: "declared label" } })
+  @doc("A model that preserves undeclared fields through load and save (#336)")
+  passthrough: FixturePassthrough;
+
+  @sample(#{ passthroughEvents: #[#{ kind: "click", event_id: "event-1", x: 3 }] })
+  @doc("Polymorphic models whose base preserves undeclared fields (#336)")
+  passthroughEvents: FixturePassthroughEvent[];
+}
+
+@doc("""
+Unknown-field passthrough (#336): every key the model does not declare is kept on load and
+written back on save. Known keys are matched by wire name, so `started_at` is declared.
+""")
+@serializable
+model FixturePassthrough {
+  @sample(#{ label: "declared label" })
+  label: string;
+
+  @encodedName("application/json", "started_at")
+  startedAt?: string;
+
+  ...Record<unknown>;
+}
+
+@doc("A polymorphic base that preserves undeclared fields; variants inherit the passthrough.")
+@discriminator("kind")
+@serializable
+model FixturePassthroughEvent {
+  kind: string;
+
+  @encodedName("application/json", "event_id")
+  eventId: string;
+
+  ...Record<unknown>;
+}
+
+model FixturePassthroughClick extends FixturePassthroughEvent {
+  kind: "click";
+  x: int32;
 }
 
 @doc("Typed record values must preserve their declared value type.")
