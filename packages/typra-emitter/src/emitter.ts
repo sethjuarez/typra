@@ -64,6 +64,7 @@ export interface GeneratorOptions {
   namespaceOutput?: "structural" | "flat";
   omitModels?: string[];
   additionalModels?: TypeNode[];
+  callableContracts?: CallableContract[];
   callableVectors?: CallableVectorSnapshot;
   transportContracts?: TransportContract[];
 }
@@ -384,6 +385,7 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     namespaceOutput,
     omitModels: options["omit-models"] || [],
     additionalModels: additionalModels,
+    callableContracts: typeSpecCallableContracts,
     callableVectors: callableVectorSnapshot,
     transportContracts,
   };

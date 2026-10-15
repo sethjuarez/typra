@@ -1,4 +1,8 @@
-import { createTypeSpecLibrary, JSONSchemaType } from "@typespec/compiler";
+import {
+  createTypeSpecLibrary,
+  JSONSchemaType,
+  paramMessage,
+} from "@typespec/compiler";
 
 export interface EmitTarget {
   type: string;
@@ -363,7 +367,66 @@ const TypraEmitterOptionsSchema: JSONSchemaType<TypraEmitterOptions> = {
 
 export const $lib = createTypeSpecLibrary({
   name: "typra-emitter",
-  diagnostics: {},
+  diagnostics: {
+    "typra-emitter-delegate-requires-dispatch": {
+      severity: "error",
+      messages: {
+        default:
+          "@delegate is valid only on an interface that also declares @dispatch.",
+      },
+    },
+    "typra-emitter-delegate-invalid-dispatch": {
+      severity: "error",
+      messages: {
+        default: paramMessage`@delegate on ${"interface"} requires @dispatch to resolve to a polymorphic discriminator.`,
+      },
+    },
+    "typra-emitter-delegate-invalid-map": {
+      severity: "error",
+      messages: {
+        default: paramMessage`@delegate on ${"interface"} requires an object mapping dispatch slots to simple symbols.`,
+      },
+    },
+    "typra-emitter-delegate-wildcard-misuse": {
+      severity: "error",
+      messages: {
+        reserved: paramMessage`@delegate on ${"interface"} cannot bind a known variant that normalizes to the reserved wildcard slot; "wildcard" is reserved for the explicit '*' dispatch child.`,
+        absent: paramMessage`@delegate on ${"interface"} declares wildcard, but its @dispatch shape has no explicit '*' variant.`,
+      },
+    },
+    "typra-emitter-delegate-unknown-slot": {
+      severity: "error",
+      messages: {
+        default: paramMessage`@delegate on ${"interface"} contains unknown dispatch slot "${"slot"}". Expected: ${"expected"}.`,
+      },
+    },
+    "typra-emitter-delegate-unsafe-symbol": {
+      severity: "error",
+      messages: {
+        unsafe: paramMessage`@delegate binding "${"slot"}" on ${"interface"} must name a safe simple same-module symbol; dotted or qualified paths are not allowed.`,
+        reserved: paramMessage`@delegate binding "${"slot"}" on ${"interface"} uses reserved consumer symbol "${"symbol"}", which is not portable across all generated targets.`,
+      },
+    },
+    "typra-emitter-delegate-missing-slot": {
+      severity: "error",
+      messages: {
+        default: paramMessage`@delegate on ${"interface"} is missing required dispatch slot "${"slot"}".`,
+      },
+    },
+    "typra-emitter-delegate-symbol-collision": {
+      severity: "error",
+      messages: {
+        generated: paramMessage`@delegate binding "${"slot"}" on ${"interface"} uses "${"symbol"}", which collides with a generated or schema symbol.`,
+        duplicate: paramMessage`@delegate on ${"interface"} maps both "${"owner"}" and "${"slot"}" to "${"symbol"}". Each slot must bind a distinct consumer symbol.`,
+      },
+    },
+    "typra-emitter-delegate-slot-collision": {
+      severity: "error",
+      messages: {
+        default: paramMessage`@delegate on ${"interface"} has dispatch slots "${"owner"}" and "${"slot"}" that both normalize to "${"identifier"}" for ${"target"}.`,
+      },
+    },
+  },
   emitter: { options: TypraEmitterOptionsSchema },
   state: {
     samples: { description: "Sample values for properties" },
@@ -379,6 +442,10 @@ export const $lib = createTypeSpecLibrary({
     dispatch: {
       description:
         "Behavioral polymorphic dispatch discriminator for a seam interface",
+    },
+    delegate: {
+      description:
+        "Explicit normalized dispatch-slot to consumer implementation bindings",
     },
     serializable: {
       description:

@@ -39,6 +39,7 @@ import {
 } from "../../ir/expansion.js";
 import { ExprVisitor, renderObjectLiteral } from "../../ir/visitor.js";
 import { PythonExprVisitor } from "./visitor.js";
+import { pythonDispatchIdentifier } from "./identifiers.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 import {
@@ -150,6 +151,10 @@ export const generatePython = async (
   });
   const packageName = namespaceProjection.packageName!;
   const importPath = namespaceProjection.importPath!;
+  const resolverImportPath =
+    emitTarget["import-path"] ??
+    emitTarget["package-name"] ??
+    packageName.split(".")[0];
   const nativeSerialization = pythonNativeSerialization(emitTarget);
   const modelTypes = collectLoadSaveTypeNames(nodes);
 
@@ -292,9 +297,13 @@ export const generatePython = async (
   // slot (a forgotten attachment cannot silently skip), and a resolve_X switch
   // that raises on an unknown discriminator for a closed dispatch. Gated on the
   // presence of @vector cases, independent of test-dir.
-  if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
+  if (
+    (options?.callableVectors?.vectors.length ?? 0) > 0 ||
+    collectDispatchedContracts([], options?.callableContracts).length > 0
+  ) {
     for (const dispatched of collectDispatchedContracts(
-      options!.callableVectors!.vectors,
+      options?.callableVectors?.vectors ?? [],
+      options?.callableContracts,
     )) {
       const resolverDir = dispatched.group
         ? `${emitTarget["output-dir"]}/${dispatched.group}`
@@ -325,7 +334,7 @@ export const generatePython = async (
     // param (optional or not); it decodes via the same `json.loads(...)` pass-
     // through (dict / None) with no extra emission, and stays param-only so the
     // return keeps its own rule.
-    const conformanceEntries = options!.callableVectors!.vectors.filter((entry) =>
+    const conformanceEntries = (options?.callableVectors?.vectors ?? []).filter((entry) =>
       isTypedSeamEntry(entry, serializationClosure, {
         arrays: true,
         carriers: true,
@@ -362,9 +371,12 @@ export const generatePython = async (
 
   if (
     emitTarget["test-dir"] &&
-    (options?.callableVectors?.vectors.length ?? 0) > 0
+    ((options?.callableVectors?.vectors.length ?? 0) > 0 ||
+      collectDispatchedContracts([], options?.callableContracts).some(
+        (entry) => entry.bindings,
+      ))
   ) {
-    const allVectors = options!.callableVectors!.vectors;
+    const allVectors = options?.callableVectors?.vectors ?? [];
     // §8: a @dispatch seam that resolved to a lowered decl gets a TYPED
     // per-interface `test_${iface}_conformance.py` that routes through the
     // emitted resolver via a consumer-authored `${iface}_provider` conftest
@@ -394,7 +406,10 @@ export const generatePython = async (
       );
     }
 
-    for (const dispatched of collectDispatchedContracts(allVectors)) {
+    for (const dispatched of collectDispatchedContracts(
+      allVectors,
+      options?.callableContracts,
+    )) {
       const ifaceVectors = allVectors.filter(
         (entry) =>
           isTypedDispatchEntry(entry) &&
@@ -403,7 +418,7 @@ export const generatePython = async (
           entry.contract === dispatched.contract,
       );
       // §8.5: never emit an empty conformance file.
-      if (ifaceVectors.length === 0) continue;
+      if (ifaceVectors.length === 0 && !dispatched.bindings) continue;
       const conformanceDir = dispatched.group
         ? `${emitTarget["test-dir"]}/${dispatched.group}`
         : emitTarget["test-dir"];
@@ -414,6 +429,8 @@ export const generatePython = async (
           dispatched,
           ifaceVectors,
           importPath,
+          resolverImportPath,
+          emitTarget["vector-adapter-path"] ?? "vector_adapters",
         ),
         conformanceDir,
         emitTarget["test-dir"],
@@ -902,11 +919,20 @@ function emitPythonInterfaceConformanceTest(
   dispatched: DispatchedContract,
   entries: CallableVectorSnapshotEntry[],
   importPath: string,
+  resolverImportPath: string,
+  adapterImportPath: string,
 ): string {
   const iface = toSnakeCase(dispatched.contract);
-  const resolverModule = `${importPath.split(".")[0]}._${iface}_resolver`;
+  const resolverModule = pythonDispatchResolverModule(
+    resolverImportPath,
+    dispatched.group,
+    dispatched.contract,
+  );
   const resolveFn = `resolve_${iface}`;
   const fixture = `${iface}_provider`;
+  const providerType = dispatched.bindings
+    ? `TypraGenerated${dispatched.contract}Provider`
+    : `${dispatched.contract}Provider`;
   // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
   const sorted = [...entries].sort((left, right) =>
     (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
@@ -938,15 +964,29 @@ function emitPythonInterfaceConformanceTest(
     "# raises at fixture setup, so conformance never silently skips.",
     "# See docs: reference/vector-conformance.",
     "",
-    "import asyncio",
-    "import inspect",
-    "import json",
-    ...(dispatched.openness === "closed" ? ["import pytest"] : []),
+    ...(sorted.length > 0 ? ["import asyncio", "import inspect", "import json"] : []),
+    ...(dispatched.openness === "closed" || dispatched.bindings
+      ? ["import pytest"]
+      : []),
     "",
     modelTypes.length > 0
       ? `from ${importPath} import ${modelTypes.join(", ")}`
       : "",
-    `from ${resolverModule} import ${resolveFn}`,
+    `from ${resolverModule} import ${resolveFn}${dispatched.bindings ? `, ${providerType}` : ""}`,
+    ...(dispatched.bindings
+      ? [
+          `import ${adapterImportPath} as delegate_adapters`,
+          "",
+          "@pytest.fixture",
+          `def ${fixture}():`,
+          `    return ${providerType}(`,
+          ...dispatched.bindings.map(
+            (binding) =>
+              `        ${pythonDispatchIdentifier(binding.slot)}=delegate_adapters.${binding.symbol}(),`,
+          ),
+          "    )",
+        ]
+      : []),
   ].filter((line, index, all) => !(line === "" && all[index - 1] === ""));
 
   const seen = new Map<string, number>();
@@ -1044,6 +1084,20 @@ function emitPythonInterfaceConformanceTest(
       lines.push("    assert result is not None");
     }
   });
+  if (sorted.length === 0 && dispatched.bindings) {
+    const probe = dispatched.decl.variants[0]?.value ?? dispatched.wildcard?.name;
+    if (probe) {
+      lines.push(
+        "",
+        "",
+        `def test_${iface}_delegate_provider_resolves(${fixture}):`,
+        `    impl = ${resolveFn}(${JSON.stringify(probe)}, ${fixture})`,
+        `    assert impl is not None, ${JSON.stringify(
+          `${dispatched.contract}: generated delegate provider did not resolve ${probe}`,
+        )}`,
+      );
+    }
+  }
   if (dispatched.openness === "closed") {
     lines.push(
       "",
@@ -1055,6 +1109,17 @@ function emitPythonInterfaceConformanceTest(
   }
   lines.push("");
   return lines.join("\n");
+}
+
+export function pythonDispatchResolverModule(
+  importPath: string,
+  group: string,
+  contract: string,
+): string {
+  const resolverPackage = group
+    ? `${importPath}.${group.replace(/[\\/]+/g, ".")}`
+    : importPath;
+  return `${resolverPackage}._${toSnakeCase(contract)}_resolver`;
 }
 
 /**
@@ -1237,7 +1302,6 @@ function emitPythonVectorConformanceEntrypoint(
       }
     });
   });
-
   lines.push("");
   return lines.join("\n");
 }
@@ -2433,9 +2497,11 @@ function getUniqueImportTypes(node: TypeNode): string[] {
  */
 function emitPythonDispatchResolver(entry: DispatchedContract): string {
   const seam = entry.contract;
-  const provider = `${seam}Provider`;
+  const provider = entry.bindings
+    ? `TypraGenerated${seam}Provider`
+    : `${seam}Provider`;
   const rawField = entry.decl.discriminatorField;
-  const param = pyDispatchIdentifier(toSnakeCase(rawField) || "discriminator");
+  const param = pythonDispatchIdentifier(rawField || "discriminator");
   // Preserve the SAME variant order the shape load switch emits, keeping the two
   // switches a faithful twin.
   const variants = entry.decl.variants;
@@ -2448,8 +2514,7 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
   // the behavioral twin of the shape loader's `*`-tolerant fallback. Closed
   // dispatch / open self-reference has no distinct child slot — keep raise/None.
   const defaultSlot = entry.wildcard?.name ?? null;
-  const slot = (value: string): string =>
-    pyDispatchIdentifier(toSnakeCase(value) || "value");
+  const slot = pythonDispatchIdentifier;
 
   const lines: string[] = [
     "# <auto-generated by typra-emitter>",
@@ -2602,56 +2667,6 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
   lines.push("");
   return lines.join("\n");
 }
-
-// A discriminator field or variant value that snake-cases to a Python keyword
-// cannot be a bare dataclass field or parameter name. PEP 8 recommends a single
-// trailing underscore to sidestep the clash (e.g. ``class_``). The raw variant
-// value is still used verbatim as the mapping key and switch literal — only the
-// emitted Python identifier is adjusted, keeping the resolver a faithful twin.
-function pyDispatchIdentifier(candidate: string): string {
-  return PY_KEYWORDS.has(candidate) ? `${candidate}_` : candidate;
-}
-
-// Python 3 hard keywords (keyword.kwlist). ``toSnakeCase`` lowercases its input,
-// so only the lowercase spellings can ever collide, but the full set is listed
-// for clarity.
-const PY_KEYWORDS = new Set<string>([
-  "false",
-  "none",
-  "true",
-  "and",
-  "as",
-  "assert",
-  "async",
-  "await",
-  "break",
-  "class",
-  "continue",
-  "def",
-  "del",
-  "elif",
-  "else",
-  "except",
-  "finally",
-  "for",
-  "from",
-  "global",
-  "if",
-  "import",
-  "in",
-  "is",
-  "lambda",
-  "nonlocal",
-  "not",
-  "or",
-  "pass",
-  "raise",
-  "return",
-  "try",
-  "while",
-  "with",
-  "yield",
-]);
 
 /**
  * Write generated Python content to file using TypeSpec's emitFile API.

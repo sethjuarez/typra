@@ -199,6 +199,14 @@ describe("typed @dispatch conformance emits an expectedError arm (every runtime)
         "utf8",
       );
       const body = sliceBody(src, entry.start, entry.end);
+      if (entry.target === "typescript") {
+        assert.ok(
+          src.includes(
+            `    expect(message).toContain(${JSON.stringify(MESSAGE)});\n  });`,
+          ),
+          "unformatted TypeScript expectedError test must close with the exact emitted text `  });`",
+        );
+      }
       for (const needle of entry.mustInclude) {
         assert.ok(
           body.includes(needle),

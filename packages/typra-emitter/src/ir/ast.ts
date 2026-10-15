@@ -289,7 +289,7 @@ export class TypeNode {
 }
 
 function normalizedDispatchProviderSlot(value: string): string {
-  return value.replace(/[-_]/g, "").toLowerCase();
+  return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
 }
 
 /**

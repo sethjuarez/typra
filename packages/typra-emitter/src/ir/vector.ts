@@ -7,7 +7,11 @@ import {
 } from "@typespec/compiler";
 import { getStateValue } from "../decorators.js";
 import { EmitTarget, StateKeys, TypraEmitterOptions } from "../lib.js";
-import type { CallableContract, CallableDispatch } from "./callable.js";
+import type {
+  CallableContract,
+  CallableDispatch,
+  DispatchDelegateBinding,
+} from "./callable.js";
 import {
   explicitDefaultVariant,
   isClosedPolymorphicDispatch,
@@ -206,6 +210,8 @@ export interface DispatchedContract {
    * type such as `CustomModel`.
    */
   wildcard: DispatchWildcardSlot | null;
+  /** Exact normalized attach-only bindings, absent for undecorated dispatches. */
+  bindings?: DispatchDelegateBinding[];
   namespace: string;
   group: string;
 }
@@ -242,8 +248,24 @@ export function dispatchBehavior(
  */
 export function collectDispatchedContracts(
   entries: CallableVectorSnapshotEntry[],
+  contracts: readonly CallableContract[] = [],
 ): DispatchedContract[] {
   const byContract = new Map<string, DispatchedContract>();
+  for (const contract of contracts) {
+    const decl = contract.dispatch?.decl;
+    if (!decl) continue;
+    const key = `${contract.namespace}\u0000${contract.group}\u0000${contract.name}`;
+    byContract.set(key, {
+      contract: contract.name,
+      decl,
+      ...dispatchBehavior(decl),
+      ...(contract.dispatch?.bindings
+        ? { bindings: contract.dispatch.bindings }
+        : {}),
+      namespace: contract.namespace,
+      group: contract.group,
+    });
+  }
   for (const entry of entries) {
     const decl = entry.dispatch?.decl;
     if (!decl) continue;
@@ -253,6 +275,9 @@ export function collectDispatchedContracts(
         contract: entry.contract,
         decl,
         ...dispatchBehavior(decl),
+        ...(entry.dispatch?.bindings
+          ? { bindings: entry.dispatch.bindings }
+          : {}),
         namespace: entry.namespace,
         group: entry.group,
       });

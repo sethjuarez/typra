@@ -203,6 +203,23 @@ extern dec parseAlias(target: Union, canonical: valueof string, aliases: valueof
 extern dec dispatch(target: Interface, discriminator: ModelProperty);
 
 /**
+ * Binds every normalized `@dispatch` provider slot to a consumer implementation
+ * symbol. Keys are discriminator values plus `wildcard` for an explicit `*`
+ * variant; values must be simple same-module symbols (no dotted paths).
+ *
+ * The mapping is valid only on an interface that also has `@dispatch`, and must
+ * be exact: no missing or unknown slots are accepted.
+ *
+ * @example
+ * ```typespec
+ * @dispatch(TemplateFormat.kind)
+ * @delegate(#{ jinja2: "Jinja2Renderer", mustache: "MustacheRenderer" })
+ * interface Renderer {}
+ * ```
+ */
+extern dec delegate(target: Interface, bindings: valueof unknown);
+
+/**
  * Declares which field of this model receives an immediate scalar value when the
  * model appears as an entry of a name-keyed collection.
  *

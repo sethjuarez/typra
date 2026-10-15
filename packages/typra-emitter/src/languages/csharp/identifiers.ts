@@ -81,3 +81,14 @@ const CSHARP_KEYWORDS = new Set([
 export function csharpIdentifier(name: string): string {
   return CSHARP_KEYWORDS.has(name) ? `@${name}` : name;
 }
+
+export function csharpDispatchMemberName(name: string): string {
+  const normalized = name
+    .replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
+    .replace(/^(.)/, (_, char: string) => char.toUpperCase())
+    .replace(/[^A-Za-z0-9_]/g, "_");
+  const started = /^[A-Za-z_]/.test(normalized)
+    ? normalized
+    : `Slot${normalized}`;
+  return csharpIdentifier(started || "Value");
+}

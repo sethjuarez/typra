@@ -206,6 +206,16 @@ describe("language-target conformance/model regressions (2.0.0 target fixes)", (
       python,
       /getattr\(getattr\(getattr\(agent, "template", None\), "format", None\), "kind", None\)/,
     );
+    assert.match(
+      python,
+      /from typra\.fixtures\.features\.dispatchtargetregression import Agent/,
+      "model imports must remain in the semantic subpackage",
+    );
+    assert.match(
+      python,
+      /from typra\._renderer_resolver import resolve_renderer/,
+      "an undecorated sub-namespace seam must import its root-emitted resolver from the package root",
+    );
 
     const csharp = readFileSync(
       findFile(path.join(output, "csharp"), "RendererConformanceTests.cs"),
