@@ -45,16 +45,17 @@ If any answer is no, keep the implementation consumer-owned. Typra may still pro
 
 These are projections: changing the TypeSpec changes the generated surface predictably.
 
-## In scope, not yet implemented
+## Prefer existing language
 
-Some planned capabilities satisfy the boundary but are not shipped:
+Passing the projection boundary is necessary, but not sufficient. Before adding a Typra capability, prefer:
 
-- Generated provider doubles derived from a documented convention or an explicit delegate declaration (#297).
-- Declarative seam argument and return mapping (#298).
-- Schema-evolution decorators and loader migration such as `@renamedFrom` (#302).
+1. Native TypeSpec constructs and libraries.
+2. Existing Typra contracts such as interfaces, operations, `@dispatch`, `@sample`, and `@vector`.
+3. Small consumer-authored implementations pinned by generated conformance.
 
-Being in scope does not imply current support. Each capability still needs explicit semantics, domain-neutral fixtures,
-and cross-target conformance evidence.
+Add a Typra concept only when those cannot express a general, deterministic contract. Saving a small amount of
+registration or adapter code does not justify a permanent decorator, mapping language, or seven-target runtime
+surface.
 
 ## What consumers own
 
@@ -109,7 +110,8 @@ name to prevent cleanup. See [Generated output](/concepts/generated-output/) for
 | Preserve `@encodedName` during load/save | Schema projection | Emit it. |
 | Route unknown open-union values to a wildcard provider | Schema projection | Emit routing; require a consumer implementation. |
 | Generate a template parser/evaluator | Algorithm | Keep consumer-owned. |
-| Add `@renamedFrom` loader migration | Schema projection, once semantics are specified | Emit it with cross-target vectors. |
+| Represent a historical property rename | Native TypeSpec versioning | Consume `TypeSpec.Versioning.@renamedFrom`; do not create a Typra equivalent. |
+| Accept an old payload in a current runtime | Mixed | Project native version history where useful; keep migration policy consumer-owned unless the contract determines it completely. |
 | Retry failed operations three times | Runtime policy | Keep consumer-owned. |
 | Generate a seam that accepts a retry policy | Mixed | Emit the seam; consumer owns policy behavior. |
 

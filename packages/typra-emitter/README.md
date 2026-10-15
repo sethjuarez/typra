@@ -63,35 +63,6 @@ API-key lookup, mTLS context, test credential, or no credential at all. Typra
 does not synthesize an `Authorization` header, manage refresh, persist tokens,
 retry after challenges, or interpret provider-specific identity policy.
 
-## Delegated dispatch attachments
-
-`@delegate` removes handwritten provider glue from a typed `@dispatch`
-conformance surface while leaving runtime implementations consumer-owned:
-
-```typespec
-@dispatch(TemplateFormat.kind)
-@delegate(#{
-  jinja2: "Jinja2Renderer",
-  mustache: "MustacheRenderer",
-  wildcard: "CustomRenderer",
-})
-interface Renderer {
-  render(request: RenderRequest): string;
-}
-```
-
-Keys are normalized provider slots: every known discriminator value is required,
-and an open dispatch with an explicit `*` child also requires `wildcard`.
-`wildcard` is rejected when no explicit `*` exists. Values are safe simple
-symbols in the consumer adapter module; dotted or qualified strings are
-rejected. Generated per-interface conformance constructs each symbol with the
-target's zero-argument/default constructor and attaches it to the emitted
-provider contract. Without `@delegate`, existing consumer-authored provider
-behavior is unchanged.
-`@delegate` only attaches implementations whose method signatures already match
-the generated seam; it performs no argument or return transformation. Any
-wrapper needed to adapt a consumer API remains consumer-owned (tracked in #298).
-
 ## Install
 
 ```powershell

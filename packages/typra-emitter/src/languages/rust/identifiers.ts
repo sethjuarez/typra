@@ -1,27 +1,3 @@
-import { toSnakeCase } from "../../ir/utilities.js";
-
-const RUST_FIELD_KEYWORDS = new Set([
-  "as", "break", "const", "continue", "crate", "else", "enum", "extern",
-  "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod",
-  "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct",
-  "super", "trait", "true", "type", "unsafe", "use", "where", "while",
-  "async", "await", "dyn",
-]);
-
-export function rustFieldName(name: string): string {
-  const normalized =
-    toSnakeCase(name)
-      .replace(/[^A-Za-z0-9_]+/g, "_")
-      .replace(/^_+|_+$/g, "") || "value";
-  const snake = /^[A-Za-z_]/.test(normalized)
-    ? normalized
-    : `slot_${normalized}`;
-  if (["self", "super", "crate", "Self"].includes(snake)) {
-    return `slot_${snake.toLowerCase()}`;
-  }
-  return RUST_FIELD_KEYWORDS.has(snake) ? `r#${snake}` : snake;
-}
-
 /**
  * Rust variant name for a string-enum wire value. The model, load defaults, the expression
  * visitor, and generated tests must all agree, so every site calls this one rule:

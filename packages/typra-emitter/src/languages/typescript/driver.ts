@@ -207,15 +207,9 @@ export const generateTypeScript = async (
   // (issue #282). The provider is a real consumer extension point, so a forgotten
   // slot fails to compile. NOTE: emission currently rides the presence of @vector
   // cases; decoupling it is a tracked #282 follow-up.
-  if (
-    collectDispatchedContracts(
-      options?.callableVectors?.vectors ?? [],
-      options?.callableContracts,
-    ).length > 0
-  ) {
+  if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
     for (const dispatched of collectDispatchedContracts(
-      options?.callableVectors?.vectors ?? [],
-      options?.callableContracts,
+      options!.callableVectors!.vectors,
     )) {
       const resolverDir = dispatched.group
         ? `${emitTarget["output-dir"]}/${dispatched.group}`
@@ -277,13 +271,8 @@ export const generateTypeScript = async (
       );
     }
 
-    if (
-      (options?.callableVectors?.vectors.length ?? 0) > 0 ||
-      collectDispatchedContracts([], options?.callableContracts).some(
-        (entry) => entry.bindings,
-      )
-    ) {
-      const allVectors = options?.callableVectors?.vectors ?? [];
+    if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
+      const allVectors = options!.callableVectors!.vectors;
       // §8: a @dispatch seam that lowered to a decl gets a TYPED per-interface
       // `${iface}.conformance.test.ts` that routes through the emitted resolver
       // against a consumer-attached `${iface}Provider`. Everything else —
@@ -352,10 +341,7 @@ export const generateTypeScript = async (
         );
       }
 
-      for (const dispatched of collectDispatchedContracts(
-        allVectors,
-        options?.callableContracts,
-      )) {
+      for (const dispatched of collectDispatchedContracts(allVectors)) {
         const ifaceVectors = allVectors.filter(
           (entry) =>
             isTypedDispatchEntry(entry) &&
@@ -364,7 +350,7 @@ export const generateTypeScript = async (
             entry.contract === dispatched.contract,
         );
         // §8.5: never emit an empty conformance file.
-        if (ifaceVectors.length === 0 && !dispatched.bindings) continue;
+        if (ifaceVectors.length === 0) continue;
         const group = dispatched.group || "";
         const conformanceDir = group
           ? `${emitTarget["test-dir"]}/${group}`
@@ -1134,9 +1120,7 @@ function emitTypeScriptInterfaceConformanceTest(
 ): string {
   const iface = dispatched.contract;
   const resolveFn = `resolve${iface}`;
-  const providerType = dispatched.bindings
-    ? `TypraGenerated${iface}Provider`
-    : `${iface}Provider`;
+  const providerType = `${iface}Provider`;
   const providerVar = `${iface.charAt(0).toLowerCase()}${iface.slice(1)}Provider`;
   const field = dispatched.decl.discriminatorField;
 
@@ -1164,40 +1148,19 @@ function emitTypeScriptInterfaceConformanceTest(
     `// Part III TYPED @vector conformance for ${iface} — the per-interface twin of`,
     "// the per-model ${model}.test.ts file (issue #282 §8). Each test builds the",
     "// operation inputs from the vector JSON, reads the shape discriminator, routes",
-    `// it through the emitted ${resolveFn} against the ${
-      dispatched.bindings ? "generated attach-only" : "consumer-authored"
-    }`,
+    `// it through the emitted ${resolveFn} against the consumer-authored`,
     `// '${providerVar}' provider, invokes the typed seam, and asserts 'expected'.`,
-    dispatched.bindings
-      ? `// The provider VALUE is generated from @delegate; only the concrete implementations`
-      : `// The provider VALUE is authored by the consumer as a '${providerVar}' export`,
-    dispatched.bindings
-      ? `// remain in the 'vector-adapter-path' module. The emitted '${providerType}' Record`
-      : `// in the 'vector-adapter-path' module; the emitted '${providerType}' Record`,
+    `// The provider VALUE is authored by the consumer as a '${providerVar}' export`,
+    `// in the 'vector-adapter-path' module; the emitted '${providerType}' Record`,
     "// makes a dropped @dispatch slot a compile error, so conformance never skips.",
     "// See docs: reference/vector-conformance.",
     "",
     modelTypes.length > 0
       ? `import { ${modelTypes.join(", ")} } from ${JSON.stringify(importPath)};`
       : "",
-    dispatched.bindings
-      ? `import { ${resolveFn}, type ${providerType} } from ${JSON.stringify(resolverImport)};`
-      : `import { ${resolveFn} } from ${JSON.stringify(resolverImport)};`,
-    dispatched.bindings
-      ? `import * as delegateAdapters from ${JSON.stringify(adapterImportPath)};`
-      : `import { ${providerVar} } from ${JSON.stringify(adapterImportPath)};`,
+    `import { ${resolveFn} } from ${JSON.stringify(resolverImport)};`,
+    `import { ${providerVar} } from ${JSON.stringify(adapterImportPath)};`,
     "",
-    ...(dispatched.bindings
-      ? [
-          `const ${providerVar}: ${providerType} = {`,
-          ...dispatched.bindings.map(
-            (binding) =>
-              `  ${JSON.stringify(binding.slot)}: new delegateAdapters.${binding.symbol}(),`,
-          ),
-          "};",
-          "",
-        ]
-      : []),
     `describe(${JSON.stringify(`${iface} @vector conformance`)}, () => {`,
   ].filter((line, index, all) => !(line === "" && all[index - 1] === ""));
 
@@ -1268,16 +1231,6 @@ function emitTypeScriptInterfaceConformanceTest(
     lines.push(`    expect(result).toEqual(${JSON.stringify(expected)});`);
     lines.push("  });");
   });
-  if (sorted.length === 0 && dispatched.bindings) {
-    const probe = dispatched.decl.variants[0]?.value ?? dispatched.wildcard?.name;
-    if (probe) {
-      lines.push(
-        `  it("instantiates and resolves the generated delegate provider", () => {`,
-        `    expect(${resolveFn}(${JSON.stringify(probe)}, ${providerVar})).not.toBeNull();`,
-        "  });",
-      );
-    }
-  }
   if (dispatched.openness === "closed") {
     lines.push(
       `  it("rejects an unknown discriminator at the resolver boundary", () => {`,
@@ -1458,9 +1411,7 @@ function buildTestContext(
  */
 function emitTypeScriptDispatchResolver(entry: DispatchedContract): string {
   const seam = entry.contract;
-  const provider = entry.bindings
-    ? `TypraGenerated${seam}Provider`
-    : `${seam}Provider`;
+  const provider = `${seam}Provider`;
   const kindType = `${seam}Kind`;
   const field = entry.decl.discriminatorField;
   const variants = entry.decl.variants;

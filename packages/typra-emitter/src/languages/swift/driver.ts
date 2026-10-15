@@ -203,13 +203,7 @@ export const generateSwift = async (
   }
 
   const harnessRoot = emitTarget["harness-test-dir"] ?? testRoot;
-  if (
-    harnessRoot &&
-    ((options?.callableVectors?.vectors.length ?? 0) > 0 ||
-      collectDispatchedContracts([], options?.callableContracts).some(
-        (entry) => entry.bindings,
-      ))
-  ) {
+  if (harnessRoot && (options?.callableVectors?.vectors.length ?? 0) > 0) {
     // A split-package runtime can point the harness at a separate SDK/aggregate
     // package (via 'harness-test-dir') so every stage's adapter is reachable.
     // The file is still owned by this Swift target's stable outputDir root, so
@@ -217,7 +211,7 @@ export const generateSwift = async (
     // now-empty harness leaves no orphan) while only ever pruning marker-owned
     // files — never the SDK's hand-written tests.
     const adapterEnum = emitTarget["vector-adapter-path"] ?? "VectorAdapters";
-    const allVectors = options?.callableVectors?.vectors ?? [];
+    const allVectors = options!.callableVectors!.vectors;
     // A `@dispatch` seam routes through the typed resolver rail (issue #282 §8):
     // its vectors get a per-interface, typed `${Interface}ConformanceTests`
     // XCTestCase in the seam's namespace folder. Undispatched seams — INCLUDING a
@@ -251,10 +245,7 @@ export const generateSwift = async (
       );
     }
 
-    for (const dispatched of collectDispatchedContracts(
-      allVectors,
-      options?.callableContracts,
-    )) {
+    for (const dispatched of collectDispatchedContracts(allVectors)) {
       const ifaceVectors = allVectors.filter(
         (entry) =>
           isTypedDispatchEntry(entry) &&
@@ -264,7 +255,7 @@ export const generateSwift = async (
       );
       // §8.5: never emit an empty conformance file — but the resolver below is
       // still emitted for a zero-vector dispatched seam so control 2 keeps biting.
-      if (ifaceVectors.length === 0 && !dispatched.bindings) continue;
+      if (ifaceVectors.length === 0) continue;
       const iface = swiftTypeName(dispatched.contract);
       const outDir = dispatched.group
         ? `${harnessRoot}/${dispatched.group}`
@@ -292,15 +283,9 @@ export const generateSwift = async (
   // compile — the same rail as the shape discriminator switch, itself a library
   // artifact. NOTE: emission currently rides the presence of @vector cases;
   // decoupling it is a tracked follow-up (issue #282).
-  if (
-    collectDispatchedContracts(
-      options?.callableVectors?.vectors ?? [],
-      options?.callableContracts,
-    ).length > 0
-  ) {
+  if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
     for (const dispatched of collectDispatchedContracts(
-      options?.callableVectors?.vectors ?? [],
-      options?.callableContracts,
+      options!.callableVectors!.vectors,
     )) {
       const outDir = dispatched.group
         ? `${sourceRoot}/${dispatched.group}`
@@ -314,26 +299,23 @@ export const generateSwift = async (
       );
     }
 
-  }
-
-  // Typed conformance ENTRYPOINT (issue #511 Cat 1 / typra#306, Track A): for
-  // every eligible plain seam, emit `run<Seam>Conformance<S: <Seam>>` in
-  // the library module. It runs the seam's vectors by calling the impl DIRECTLY
-  // — no VectorAdapters registry, no string keys, no per-op marshalling double.
-  // The generic constraint `S: <Seam>` makes the Swift compiler prove the
-  // consumer's type implements the whole seam protocol, so completeness is a
-  // COMPILE error, not a runtime lookup. Emitted additively beside the stringly
-  // runner. Phase 2 widens eligibility from scalar-only to model-in/model-out
-  // seams whose boundary models live in the `@serializable` closure (see
-  // `isTypedSeamEntry`): a model param decodes via `<Model>.load(...)` and a
-  // model return compares through `try actual.save()`, keeping it zero-diff on
-  // real surfaces. Array parity (`{ arrays: true }`) admits `Model[]` seams
-  // (per-element `.load()` / `.save()`). Carrier parity (`{ carriers: true }`)
-  // admits an untyped `Record<unknown>` param (optional or not): a non-optional
-  // carrier decodes via `input[key] as! [String: Any]`, an optional one via
-  // `input[key] as? [String: Any]` (nil when absent). Param-only — the return
-  // keeps its own rule.
-  if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
+    // Typed conformance ENTRYPOINT (issue #511 Cat 1 / typra#306, Track A): for
+    // every eligible plain seam, emit `run<Seam>Conformance<S: <Seam>>` in
+    // the library module. It runs the seam's vectors by calling the impl DIRECTLY
+    // — no VectorAdapters registry, no string keys, no per-op marshalling double.
+    // The generic constraint `S: <Seam>` makes the Swift compiler prove the
+    // consumer's type implements the whole seam protocol, so completeness is a
+    // COMPILE error, not a runtime lookup. Emitted additively beside the stringly
+    // runner. Phase 2 widens eligibility from scalar-only to model-in/model-out
+    // seams whose boundary models live in the `@serializable` closure (see
+    // `isTypedSeamEntry`): a model param decodes via `<Model>.load(...)` and a
+    // model return compares through `try actual.save()`, keeping it zero-diff on
+    // real surfaces. Array parity (`{ arrays: true }`) admits `Model[]` seams
+    // (per-element `.load()` / `.save()`). Carrier parity (`{ carriers: true }`)
+    // admits an untyped `Record<unknown>` param (optional or not): a non-optional
+    // carrier decodes via `input[key] as! [String: Any]`, an optional one via
+    // `input[key] as? [String: Any]` (nil when absent). Param-only — the return
+    // keeps its own rule.
     const conformanceEntries = options!.callableVectors!.vectors.filter((entry) =>
       isTypedSeamEntry(entry, serializationClosure, {
         arrays: true,
@@ -862,9 +844,7 @@ function emitSwiftDispatchResolver(entry: DispatchedContract): string {
   // seam protocol via swiftTypeName), so the resolver's type references and the
   // seam declaration cannot drift apart for a name that sanitizes differently.
   const seam = swiftTypeName(entry.contract);
-  const provider = entry.bindings
-    ? `TypraGenerated${seam}Provider`
-    : `${seam}Provider`;
+  const provider = `${seam}Provider`;
   const resolver = `${seam}Resolver`;
   const rawField = entry.decl.discriminatorField;
   // The parameter/local is a Swift identifier (sanitized); the raw wire field is
@@ -1065,9 +1045,7 @@ function emitSwiftInterfaceConformanceTest(
   // Reference the seam / resolver / provider by their EMITTED Swift spelling so
   // the test's type references cannot drift from the library declarations.
   const seam = swiftTypeName(dispatched.contract);
-  const provider = dispatched.bindings
-    ? `TypraGenerated${seam}Provider`
-    : `${seam}Provider`;
+  const provider = `${seam}Provider`;
   const resolver = `${seam}Resolver`;
   // The consumer authors `VectorProviders.${seam}()`; derive that enum from the
   // adapter enum by swapping the trailing `Adapters` for `Providers`.
@@ -1103,28 +1081,9 @@ function emitSwiftInterfaceConformanceTest(
     "",
     `final class ${seam}ConformanceTests: XCTestCase {`,
     "  // The consumer-attached provider of typed seam impls, one slot per @dispatch",
-    dispatched.bindings
-      ? "  // variant. @delegate generates this attach-only value; implementations stay consumer-owned."
-      : "  // variant. Authored outside this tree; a forgotten slot cannot compile.",
-    ...(dispatched.bindings
-      ? [
-          `  private struct DelegateProvider: ${provider} {`,
-          ...dispatched.bindings.map(
-            (binding) =>
-              `    let ${swiftPropertyName(binding.slot)}: ${
-                binding.slot === "wildcard"
-                  ? `any ${seam}`
-                  : `(any ${seam})?`
-              } = ${binding.symbol}()`,
-          ),
-          "  }",
-          "",
-        ]
-      : []),
+    "  // variant. Authored outside this tree; a forgotten slot cannot compile.",
     `  private func provider() -> any ${provider} {`,
-    dispatched.bindings
-      ? "    DelegateProvider()"
-      : `    ${providersEnum}.${swiftFunctionName(dispatched.contract)}()`,
+    `    ${providersEnum}.${swiftFunctionName(dispatched.contract)}()`,
     "  }",
     "",
   ];
@@ -1250,23 +1209,6 @@ function emitSwiftInterfaceConformanceTest(
     }
     lines.push("  }", "");
   });
-
-  if (sorted.length === 0 && dispatched.bindings) {
-    const probe = dispatched.decl.variants[0]?.value ?? dispatched.wildcard?.name;
-    if (probe) {
-      lines.push(
-        `  func testDelegateProviderResolves()${resolveTry ? " throws" : ""} {`,
-        `    let impl = ${resolveTry}${resolver}.resolve(${swiftPropertyName(
-          rawField,
-        )}: ${swiftStringLiteral(probe)}, registry: self.provider())`,
-        `    XCTAssertNotNil(impl, ${swiftStringLiteral(
-          `${seam}: generated delegate provider did not resolve ${probe}`,
-        )})`,
-        "  }",
-        "",
-      );
-    }
-  }
 
   if (dispatched.openness === "closed") {
     lines.push(

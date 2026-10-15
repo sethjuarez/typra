@@ -25,10 +25,7 @@ import {
   protocolCSharpType,
 } from "./emitter.js";
 import { emitCSharpContext, emitCSharpUtils } from "./scaffolding.js";
-import {
-  csharpDispatchMemberName,
-  csharpIdentifier,
-} from "./identifiers.js";
+import { csharpIdentifier } from "./identifiers.js";
 import { emitCSharpTest } from "./test-emitter.js";
 import { toPascalCase } from "../../ir/visitor.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
@@ -265,14 +262,11 @@ export const generateCsharp = async (
 
   if (
     emitTarget["test-dir"] &&
-    ((options?.callableVectors?.vectors.length ?? 0) > 0 ||
-      collectDispatchedContracts([], options?.callableContracts).some(
-        (entry) => entry.bindings,
-      ))
+    (options?.callableVectors?.vectors.length ?? 0) > 0
   ) {
     const adapterNamespace =
       emitTarget["vector-adapter-path"] ?? `${csharpNamespace}.Conformance`;
-    const allVectors = options?.callableVectors?.vectors ?? [];
+    const allVectors = options!.callableVectors!.vectors;
     // A `@dispatch` seam routes through the typed resolver rail (issue #282 §8):
     // its vectors get a per-interface, typed `${Interface}ConformanceTests` file
     // in the seam's namespace folder. Undispatched seams — INCLUDING a @dispatch
@@ -306,10 +300,7 @@ export const generateCsharp = async (
       );
     }
 
-    for (const dispatched of collectDispatchedContracts(
-      allVectors,
-      options?.callableContracts,
-    )) {
+    for (const dispatched of collectDispatchedContracts(allVectors)) {
       const ifaceVectors = allVectors.filter(
         (entry) =>
           isTypedDispatchEntry(entry) &&
@@ -319,7 +310,7 @@ export const generateCsharp = async (
       );
       // §8.5: never emit an empty conformance file — but the resolver below is
       // still emitted for a zero-vector dispatched seam so control 2 keeps biting.
-      if (ifaceVectors.length === 0 && !dispatched.bindings) continue;
+      if (ifaceVectors.length === 0) continue;
       const conformanceFolder = csharpGroupFolder(dispatched.group);
       const conformanceDir = conformanceFolder
         ? `${emitTarget["test-dir"]}/${conformanceFolder}`
@@ -349,15 +340,9 @@ export const generateCsharp = async (
   // artifact. NOTE: emission currently rides the presence of @vector cases;
   // decoupling it to emit for every dispatched contract regardless of test
   // coverage is a tracked follow-up (issue #282).
-  if (
-    collectDispatchedContracts(
-      options?.callableVectors?.vectors ?? [],
-      options?.callableContracts,
-    ).length > 0
-  ) {
+  if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
     for (const dispatched of collectDispatchedContracts(
-      options?.callableVectors?.vectors ?? [],
-      options?.callableContracts,
+      options!.callableVectors!.vectors,
     )) {
       const resolverFolder = csharpGroupFolder(dispatched.group);
       const resolverDir = resolverFolder
@@ -1269,9 +1254,7 @@ function emitCSharpInterfaceConformanceTest(
   adapterNamespace: string,
   declsByName: Map<string, TypeDecl>,
 ): string {
-  const provider = dispatched.bindings
-    ? `ITypraGenerated${dispatched.contract}Provider`
-    : `I${dispatched.contract}Provider`;
+  const provider = `I${dispatched.contract}Provider`;
   const resolver = `${dispatched.contract}Resolver`;
   const field = dispatched.decl.discriminatorField;
   // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
@@ -1300,37 +1283,17 @@ function emitCSharpInterfaceConformanceTest(
     "using System.Text.Json;",
     "using System.Threading.Tasks;",
     "using Xunit;",
-    ...(dispatched.bindings ? [] : [`using ${adapterNamespace};`]),
+    `using ${adapterNamespace};`,
     "",
     `namespace ${testNamespace};`,
     "",
     `public class ${dispatched.contract}ConformanceTests`,
     "{",
     "    // The consumer-attached provider of typed seam impls, one slot per @dispatch",
-    dispatched.bindings
-      ? "    // variant. @delegate generates this attach-only value; implementations stay consumer-owned."
-      : "    // variant. Authored outside this tree; a forgotten slot cannot compile.",
-    dispatched.bindings
-      ? `    private sealed class DelegateProvider : ${provider}`
-      : "",
-    ...(dispatched.bindings
-      ? [
-          "    {",
-          ...dispatched.bindings.map((binding) => {
-            const type = `I${dispatched.contract}${
-              binding.slot === "wildcard" ? "" : "?"
-            }`;
-            return `        public ${type} ${csharpDispatchMemberName(binding.slot)} { get; } = new global::${adapterNamespace}.${binding.symbol}();`;
-          }),
-          "    }",
-          "",
-          `    private static ${provider} Provider() => new DelegateProvider();`,
-        ]
-      : [
-          `    private static ${provider} Provider() => VectorProviders.${dispatched.contract}();`,
-        ]),
+    "    // variant. Authored outside this tree; a forgotten slot cannot compile.",
+    `    private static ${provider} Provider() => VectorProviders.${dispatched.contract}();`,
     "",
-  ].filter(Boolean);
+  ];
 
   sorted.forEach((entry, index) => {
     assertTypedDispatchSupported(entry);
@@ -1458,21 +1421,6 @@ function emitCSharpInterfaceConformanceTest(
     lines.push("    }");
     lines.push("");
   });
-
-  if (sorted.length === 0 && dispatched.bindings) {
-    const probe = dispatched.decl.variants[0]?.value ?? dispatched.wildcard?.name;
-    if (probe) {
-      lines.push(
-        "    [Fact]",
-        "    public void DelegateProviderResolves()",
-        "    {",
-        `        var impl = ${resolver}.Resolve(${JSON.stringify(probe)}, Provider());`,
-        `        Assert.NotNull(impl);`,
-        "    }",
-        "",
-      );
-    }
-  }
 
   if (dispatched.openness === "closed") {
     lines.push(
@@ -1751,9 +1699,7 @@ function emitCSharpDispatchResolver(
   seamNamespace: string,
 ): string {
   const seam = `I${entry.contract}`;
-  const provider = entry.bindings
-    ? `ITypraGenerated${entry.contract}Provider`
-    : `I${entry.contract}Provider`;
+  const provider = `I${entry.contract}Provider`;
   const resolver = `${entry.contract}Resolver`;
   const field = entry.decl.discriminatorField;
   // Preserve the SAME variant order the shape `Load` switch emits
@@ -1772,7 +1718,7 @@ function emitCSharpDispatchResolver(
   // instead of yielding null — the behavioral twin of the shape loader's
   // `*`-tolerant fallback. Closed / open-self-reference keeps its throw/null arm.
   const defaultSlot = entry.wildcard
-    ? csharpDispatchMemberName(entry.wildcard.name)
+    ? toPascalCase(entry.wildcard.name)
     : null;
 
   const lines: string[] = [
@@ -1804,7 +1750,7 @@ function emitCSharpDispatchResolver(
   // collision guard. Deferred until a fixture exercises one (reproduce-before-fix).
   for (const variant of variants) {
     lines.push(
-      `    ${seam}? ${csharpDispatchMemberName(variant.value)} { get; }`,
+      `    ${seam}? ${toPascalCase(variant.value)} { get; }`,
     );
   }
   if (defaultSlot) {
@@ -1830,7 +1776,7 @@ function emitCSharpDispatchResolver(
   lines.push("        {");
   for (const variant of variants) {
     lines.push(
-      `            ${JSON.stringify(variant.value)} => registry.${csharpDispatchMemberName(
+      `            ${JSON.stringify(variant.value)} => registry.${toPascalCase(
         variant.value,
       )},`,
     );

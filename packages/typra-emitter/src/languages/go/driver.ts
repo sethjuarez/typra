@@ -204,15 +204,9 @@ export const generateGo = async (
   // silently skip), and a ResolveX switch that errors on an unknown
   // discriminator. NOTE: emission currently rides the presence of @vector cases;
   // decoupling it is a tracked follow-up (issue #282).
-  if (
-    collectDispatchedContracts(
-      options?.callableVectors?.vectors ?? [],
-      options?.callableContracts,
-    ).length > 0
-  ) {
+  if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
     for (const dispatched of collectDispatchedContracts(
-      options?.callableVectors?.vectors ?? [],
-      options?.callableContracts,
+      options!.callableVectors!.vectors,
     )) {
       await emitGoFile(
         context,
@@ -245,16 +239,13 @@ export const generateGo = async (
 
   if (
     emitTarget["test-dir"] &&
-    ((options?.callableVectors?.vectors.length ?? 0) > 0 ||
-      collectDispatchedContracts([], options?.callableContracts).some(
-        (entry) => entry.bindings,
-      ))
+    (options?.callableVectors?.vectors.length ?? 0) > 0
   ) {
     const adapterImportPath =
       emitTarget["vector-adapter-path"] ?? "vectoradapters";
     const runnerImportPath = goVectorRunnerImportPath(adapterImportPath);
     const importPath = emitTarget["import-path"] || packageName;
-    const allVectors = options?.callableVectors?.vectors ?? [];
+    const allVectors = options!.callableVectors!.vectors;
     // A `@dispatch` seam routes through the typed resolver rail (issue #282 §8):
     // its vectors get a per-interface, typed `${iface}_conformance_test.go` file
     // in the seam's package. Undispatched seams — INCLUDING a @dispatch whose
@@ -350,10 +341,7 @@ export const generateGo = async (
       );
     }
 
-    for (const dispatched of collectDispatchedContracts(
-      allVectors,
-      options?.callableContracts,
-    )) {
+    for (const dispatched of collectDispatchedContracts(allVectors)) {
       const ifaceVectors = allVectors.filter(
         (entry) =>
           isTypedDispatchEntry(entry) &&
@@ -363,7 +351,7 @@ export const generateGo = async (
       );
       // §8.5: never emit an empty conformance file — but the resolver above is
       // still emitted for a zero-vector dispatched seam so control 2 keeps biting.
-      if (ifaceVectors.length === 0 && !dispatched.bindings) continue;
+      if (ifaceVectors.length === 0) continue;
       await emitGoFile(
         context,
         `${toSnakeCase(dispatched.contract)}_conformance_test.go`,
@@ -488,9 +476,7 @@ function emitGoDispatchResolver(
   packageName: string,
 ): string {
   const seam = goFieldName(entry.contract);
-  const provider = entry.bindings
-    ? `TypraGenerated${seam}Provider`
-    : `${seam}Provider`;
+  const provider = `${seam}Provider`;
   const rawField = entry.decl.discriminatorField;
   // Preserve the SAME variant order the shape load switch emits, keeping the two
   // switches a faithful twin without a locale-dependent comparator.
@@ -1570,9 +1556,6 @@ function emitGoInterfaceConformanceTest(
   polymorphicTypeNames: Set<string>,
 ): string {
   const seam = goFieldName(dispatched.contract);
-  const provider = dispatched.bindings
-    ? `TypraGenerated${seam}Provider`
-    : `${seam}Provider`;
   const rawField = dispatched.decl.discriminatorField;
   // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
   const sorted = [...entries].sort((left, right) =>
@@ -1599,7 +1582,7 @@ function emitGoInterfaceConformanceTest(
     `package ${packageName}_test`,
     "",
     "import (",
-    ...(sorted.length > 0 ? ['\t"encoding/json"'] : []),
+    '\t"encoding/json"',
     ...(sorted.some((entry) => typeof entry.vector.expectedError === "string")
       ? ['\t"strings"']
       : []),
@@ -1609,21 +1592,6 @@ function emitGoInterfaceConformanceTest(
     `\tvectoradapters ${JSON.stringify(adapterImportPath)}`,
     ")",
     "",
-    ...(dispatched.bindings
-      ? [
-          `func delegate${seam}Provider() fixtures.${provider} {`,
-          `\tprovider, err := fixtures.New${provider}(map[string]fixtures.${seam}{`,
-          ...dispatched.bindings.map(
-            (binding) =>
-              `\t\t${JSON.stringify(binding.slot)}: &vectoradapters.${binding.symbol}{},`,
-          ),
-          "\t})",
-          "\tif err != nil { panic(err) }",
-          "\treturn provider",
-          "}",
-          "",
-        ]
-      : []),
   ];
 
   sorted.forEach((entry, index) => {
@@ -1728,11 +1696,7 @@ function emitGoInterfaceConformanceTest(
     lines.push(
       `\timpl, err := fixtures.Resolve${seam}(${goDispatchParam(
         rawField,
-      )}, ${
-        dispatched.bindings
-          ? `delegate${seam}Provider()`
-          : `vectoradapters.${seam}Provider()`
-      })`,
+      )}, vectoradapters.${seam}Provider())`,
     );
     lines.push("\tif err != nil {");
     lines.push(
@@ -1809,33 +1773,10 @@ function emitGoInterfaceConformanceTest(
     lines.push("}");
     lines.push("");
   });
-  if (sorted.length === 0 && dispatched.bindings) {
-    const probe = dispatched.decl.variants[0]?.value ?? dispatched.wildcard?.name;
-    if (probe) {
-      lines.push(
-        `func Test${seam}DelegateProviderResolves(t *testing.T) {`,
-        `\timpl, err := fixtures.Resolve${seam}(${JSON.stringify(probe)}, delegate${seam}Provider())`,
-        "\tif err != nil {",
-        `\t\tt.Fatalf("resolve delegate provider: %v", err)`,
-        "\t}",
-        "\tif impl == nil {",
-        `\t\tt.Fatal(${JSON.stringify(
-          `${dispatched.contract}: generated delegate provider did not resolve ${probe}`,
-        )})`,
-        "\t}",
-        "}",
-        "",
-      );
-    }
-  }
   if (dispatched.openness === "closed") {
     lines.push(
       `func Test${seam}ResolverRejectsUnknownDiscriminator(t *testing.T) {`,
-      `\tprovider := ${
-        dispatched.bindings
-          ? `delegate${seam}Provider()`
-          : `vectoradapters.${seam}Provider()`
-      }`,
+      `\tprovider := vectoradapters.${seam}Provider()`,
       `\t_, err := fixtures.Resolve${seam}("typra-unknown-discriminator", provider)`,
       "\tif err == nil {",
       `\t\tt.Fatal("closed ${dispatched.contract} resolver accepted an unknown discriminator")`,

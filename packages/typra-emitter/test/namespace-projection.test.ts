@@ -10,7 +10,6 @@ import {
   swiftModuleName,
 } from "../src/ir/namespace.js";
 import { TypeNode } from "../src/ir/ast.js";
-import { pythonDispatchResolverModule } from "../src/languages/python/driver.js";
 
 describe("namespace projection", () => {
   it("computes relative namespace segments from the semantic root", () => {
@@ -208,22 +207,10 @@ describe("namespace projection", () => {
       semanticRoot: ROOT,
       emitTarget: { "import-path": "prompty" },
     });
-
     assert.equal(projection.importPath, "prompty");
     assert.equal(projection.moduleName, "contracts.core");
     assert.deepEqual(projection.filesystemPath, ["contracts", "core"]);
     assert.equal(projection.filesystemPathKind, "root-relative");
-  });
-
-  it("appends grouped Python resolver modules to the full dotted import root", () => {
-    assert.equal(
-      pythonDispatchResolverModule(
-        "acme.generated.models",
-        "contracts/rendering",
-        "TemplateRenderer",
-      ),
-      "acme.generated.models.contracts.rendering._template_renderer_resolver",
-    );
   });
 
   it("nests Swift source folders but keeps a single flat module", () => {

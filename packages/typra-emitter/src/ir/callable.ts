@@ -15,23 +15,13 @@ import {
 import {
   getStateScalar,
   getStateValue,
-  isDelegateState,
   OperationEffectEntry,
 } from "../decorators.js";
-import { reportDiagnostic, StateKeys } from "../lib.js";
+import { StateKeys } from "../lib.js";
 import { Coercion, resolveModel, TypeNode } from "./ast.js";
-import {
-  explicitDefaultVariant,
-  type PolymorphicDispatchDecl,
-} from "./declarations.js";
+import type { PolymorphicDispatchDecl } from "./declarations.js";
 import { lowerPolymorphicDispatch } from "./lower.js";
 import { CallableVector, lowerOperationVectors } from "./vector.js";
-import { csharpDispatchMemberName } from "../languages/csharp/identifiers.js";
-import { goFieldName } from "../languages/go/identifiers.js";
-import { javaMethodName } from "../languages/java/identifiers.js";
-import { pythonDispatchIdentifier } from "../languages/python/identifiers.js";
-import { rustFieldName } from "../languages/rust/identifiers.js";
-import { swiftPropertyName } from "../languages/swift/identifiers.js";
 
 export type CallableContractSourceKind =
   | "legacy-protocol-model"
@@ -83,13 +73,6 @@ export interface CallableDispatch {
    * byte-identical.
    */
   decl?: PolymorphicDispatchDecl;
-  /** Exact, normalized provider-slot bindings declared by `@delegate`. */
-  bindings?: DispatchDelegateBinding[];
-}
-
-export interface DispatchDelegateBinding {
-  slot: string;
-  symbol: string;
 }
 
 export interface CallableOperation {
@@ -274,17 +257,6 @@ function resolveCallableDispatch(
   rootNamespace: string,
   rootAlias: string,
 ): { dispatch: CallableDispatch } | undefined {
-  const delegateState = getStateScalar<unknown>(
-    program,
-    StateKeys.delegate,
-    iface,
-  );
-  // The brand prevents unrelated values from collapsed mock state maps from
-  // being reinterpreted as @delegate state.
-  const hasDelegateBindings = isDelegateState(delegateState);
-  const rawBindings = hasDelegateBindings
-    ? delegateState.bindings
-    : undefined;
   const discriminator = getStateScalar<ModelProperty>(
     program,
     StateKeys.dispatch,
@@ -292,23 +264,7 @@ function resolveCallableDispatch(
   );
   // Guard against non-ModelProperty state (a mock program's stateMap may fall
   // back to another map): only a real discriminator ModelProperty is resolved.
-  if (!discriminator || discriminator.kind !== "ModelProperty") {
-    if (hasDelegateBindings) {
-      let reported = delegateRequiresDispatchDiagnosticCache.get(program);
-      if (!reported) {
-        reported = new WeakSet();
-        delegateRequiresDispatchDiagnosticCache.set(program, reported);
-      }
-      if (!reported.has(iface)) {
-        reported.add(iface);
-        reportDiagnostic(program, {
-          code: "typra-emitter-delegate-requires-dispatch",
-          target: iface,
-        });
-      }
-    }
-    return undefined;
-  }
+  if (!discriminator || discriminator.kind !== "ModelProperty") return undefined;
 
   const paths = new Set<string>();
   for (const operation of iface.operations.values()) {
@@ -350,403 +306,18 @@ function resolveCallableDispatch(
     return undefined;
   }
 
-  const resolvedDecl = resolveDispatchDecl(
-    program,
-    discriminator,
-    rootNamespace,
-    rootAlias,
-  );
-  const bindings =
-    !hasDelegateBindings
-      ? undefined
-      : validateDelegateBindings(
-          program,
-          iface,
-          rawBindings,
-          resolvedDecl.decl,
-        );
-
   return {
     dispatch: {
       discriminator: { model, field },
       path: candidates[0],
-      ...resolvedDecl,
-      ...(bindings ? { bindings } : {}),
+      ...resolveDispatchDecl(
+        program,
+        discriminator,
+        rootNamespace,
+        rootAlias,
+      ),
     },
   };
-}
-
-const SAFE_DELEGATE_SYMBOL = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const PORTABLE_RESERVED_DELEGATE_SYMBOLS = new Set([
-  "Self",
-  "abstract",
-  "and",
-  "as",
-  "async",
-  "await",
-  "base",
-  "bool",
-  "break",
-  "case",
-  "catch",
-  "char",
-  "class",
-  "const",
-  "continue",
-  "crate",
-  "def",
-  "default",
-  "defer",
-  "delegate",
-  "delete",
-  "do",
-  "double",
-  "dyn",
-  "else",
-  "enum",
-  "except",
-  "explicit",
-  "export",
-  "extends",
-  "extern",
-  "false",
-  "final",
-  "finally",
-  "float",
-  "fn",
-  "for",
-  "foreach",
-  "from",
-  "func",
-  "global",
-  "goto",
-  "guard",
-  "if",
-  "implements",
-  "implicit",
-  "import",
-  "in",
-  "init",
-  "instanceof",
-  "int",
-  "interface",
-  "internal",
-  "is",
-  "lambda",
-  "let",
-  "lock",
-  "long",
-  "match",
-  "mod",
-  "module",
-  "move",
-  "mut",
-  "namespace",
-  "native",
-  "new",
-  "nil",
-  "none",
-  "nonlocal",
-  "not",
-  "null",
-  "object",
-  "operator",
-  "or",
-  "out",
-  "override",
-  "package",
-  "params",
-  "pass",
-  "private",
-  "protected",
-  "protocol",
-  "pub",
-  "public",
-  "raise",
-  "readonly",
-  "ref",
-  "repeat",
-  "return",
-  "sealed",
-  "self",
-  "short",
-  "signed",
-  "sizeof",
-  "static",
-  "strictfp",
-  "struct",
-  "super",
-  "switch",
-  "synchronized",
-  "this",
-  "throw",
-  "throws",
-  "trait",
-  "transient",
-  "true",
-  "try",
-  "type",
-  "typeof",
-  "uint",
-  "ulong",
-  "unchecked",
-  "unsafe",
-  "unsigned",
-  "use",
-  "using",
-  "var",
-  "virtual",
-  "void",
-  "volatile",
-  "when",
-  "where",
-  "while",
-  "with",
-  "yield",
-]);
-
-function portableDelegateSlotIdentifiers(slot: string): Record<string, string> {
-  return {
-    typescript: slot,
-    python: pythonDispatchIdentifier(slot),
-    rust: rustFieldName(slot),
-    go: goFieldName(slot),
-    csharp: csharpDispatchMemberName(slot),
-    java: javaMethodName(slot),
-    swift: swiftPropertyName(slot),
-  };
-}
-
-function collectNamespaceSymbols(
-  namespace: Namespace | undefined,
-  symbols = new Set<string>(),
-): Set<string> {
-  if (!namespace) return symbols;
-  for (const name of namespace.models.keys()) symbols.add(name);
-  for (const name of namespace.interfaces.keys()) symbols.add(name);
-  for (const name of namespace.unions.keys()) symbols.add(name);
-  for (const name of namespace.enums.keys()) symbols.add(name);
-  for (const name of namespace.scalars.keys()) symbols.add(name);
-  for (const child of namespace.namespaces.values()) {
-    collectNamespaceSymbols(child, symbols);
-  }
-  return symbols;
-}
-
-function schemaNamespaceRoot(namespace: Namespace | undefined): Namespace | undefined {
-  let root = namespace;
-  while (root?.namespace?.name) root = root.namespace;
-  return root;
-}
-
-const delegateBindingValidationCache = new WeakMap<
-  Program,
-  WeakMap<Interface, DispatchDelegateBinding[] | null>
->();
-const delegateRequiresDispatchDiagnosticCache = new WeakMap<
-  Program,
-  WeakSet<Interface>
->();
-
-function validateDelegateBindings(
-  program: Program,
-  iface: Interface,
-  raw: unknown,
-  decl: PolymorphicDispatchDecl | undefined,
-): DispatchDelegateBinding[] | undefined {
-  let programCache = delegateBindingValidationCache.get(program);
-  if (!programCache) {
-    programCache = new WeakMap();
-    delegateBindingValidationCache.set(program, programCache);
-  }
-  if (programCache.has(iface)) {
-    return programCache.get(iface) ?? undefined;
-  }
-  const finish = (
-    result: DispatchDelegateBinding[] | undefined,
-  ): DispatchDelegateBinding[] | undefined => {
-    programCache!.set(iface, result ?? null);
-    return result;
-  };
-
-  if (!decl) {
-    reportDiagnostic(program, {
-      code: "typra-emitter-delegate-invalid-dispatch",
-      format: { interface: iface.name },
-      target: iface,
-    });
-    return finish(undefined);
-  }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    reportDiagnostic(program, {
-      code: "typra-emitter-delegate-invalid-map",
-      format: { interface: iface.name },
-      target: iface,
-    });
-    return finish(undefined);
-  }
-
-  const explicitWildcard = explicitDefaultVariant(decl) !== null;
-  const isReservedWildcardVariant = (value: string): boolean =>
-    value === "*" ||
-    value.replace(/[^A-Za-z0-9]/g, "").toLowerCase() === "wildcard";
-  const reservedVariantValues = new Set(
-    decl.variants
-      .map((variant) => variant.value)
-      .filter(isReservedWildcardVariant),
-  );
-  const expected = [
-    ...decl.variants
-      .map((variant) => variant.value)
-      .filter((value) => !isReservedWildcardVariant(value)),
-    ...(explicitWildcard ? ["wildcard"] : []),
-  ];
-  const expectedSet = new Set(expected);
-  const entries = Object.entries(raw as Record<string, unknown>);
-  let valid = true;
-
-  if (decl.variants.some((variant) => isReservedWildcardVariant(variant.value))) {
-    reportDiagnostic(program, {
-      code: "typra-emitter-delegate-wildcard-misuse",
-      messageId: "reserved",
-      format: { interface: iface.name },
-      target: iface,
-    });
-    valid = false;
-  }
-
-  for (const [slot, symbol] of entries) {
-    if (!expectedSet.has(slot) && !reservedVariantValues.has(slot)) {
-      const wildcardMisuse = slot === "wildcard" && !explicitWildcard;
-      if (wildcardMisuse) {
-        reportDiagnostic(program, {
-          code: "typra-emitter-delegate-wildcard-misuse",
-          messageId: "absent",
-          format: { interface: iface.name },
-          target: iface,
-        });
-      } else {
-        reportDiagnostic(program, {
-          code: "typra-emitter-delegate-unknown-slot",
-          format: {
-            interface: iface.name,
-            slot,
-            expected: expected.join(", "),
-          },
-          target: iface,
-        });
-      }
-      valid = false;
-    }
-    if (typeof symbol !== "string" || !SAFE_DELEGATE_SYMBOL.test(symbol)) {
-      reportDiagnostic(program, {
-        code: "typra-emitter-delegate-unsafe-symbol",
-        messageId: "unsafe",
-        format: { slot, interface: iface.name },
-        target: iface,
-      });
-      valid = false;
-    } else if (
-      PORTABLE_RESERVED_DELEGATE_SYMBOLS.has(symbol) ||
-      PORTABLE_RESERVED_DELEGATE_SYMBOLS.has(symbol.toLowerCase())
-    ) {
-      reportDiagnostic(program, {
-        code: "typra-emitter-delegate-unsafe-symbol",
-        messageId: "reserved",
-        format: { slot, interface: iface.name, symbol },
-        target: iface,
-      });
-      valid = false;
-    }
-  }
-
-  for (const slot of expected) {
-    if (!Object.prototype.hasOwnProperty.call(raw, slot)) {
-      reportDiagnostic(program, {
-        code: "typra-emitter-delegate-missing-slot",
-        format: { interface: iface.name, slot },
-        target: iface,
-      });
-      valid = false;
-    }
-  }
-
-  const symbolOwners = new Map<string, string>();
-  const generatedOrModelSymbols = collectNamespaceSymbols(
-    schemaNamespaceRoot(iface.namespace),
-  );
-  for (const generated of [
-    `TypraGenerated${iface.name}Provider`,
-    `ITypraGenerated${iface.name}Provider`,
-    `${iface.name}Provider`,
-    `${iface.name}Resolver`,
-    `Resolve${iface.name}`,
-    `resolve${iface.name}`,
-    `resolve_${pythonDispatchIdentifier(iface.name)}`,
-    `NewTypraGenerated${iface.name}Provider`,
-    `${iface.name}ConformanceTests`,
-    `${iface.name}Kind`,
-    "DelegateProvider",
-    "VectorProviders",
-  ]) {
-    generatedOrModelSymbols.add(generated);
-  }
-  for (const [slot, symbol] of entries) {
-    if (typeof symbol !== "string") continue;
-    if (generatedOrModelSymbols.has(symbol)) {
-      reportDiagnostic(program, {
-        code: "typra-emitter-delegate-symbol-collision",
-        messageId: "generated",
-        format: { slot, interface: iface.name, symbol },
-        target: iface,
-      });
-      valid = false;
-    }
-    const owner = symbolOwners.get(symbol);
-    if (owner && owner !== slot) {
-      reportDiagnostic(program, {
-        code: "typra-emitter-delegate-symbol-collision",
-        messageId: "duplicate",
-        format: { interface: iface.name, owner, slot, symbol },
-        target: iface,
-      });
-      valid = false;
-    } else {
-      symbolOwners.set(symbol, slot);
-    }
-
-  }
-
-  const slotOwners = new Map<string, string>();
-  for (const slot of expected) {
-    const identifiers = portableDelegateSlotIdentifiers(slot);
-    for (const [target, identifier] of Object.entries(identifiers)) {
-      const key = `${target}:${identifier}`;
-      const owner = slotOwners.get(key);
-      if (owner && owner !== slot) {
-        reportDiagnostic(program, {
-          code: "typra-emitter-delegate-slot-collision",
-          format: {
-            interface: iface.name,
-            owner,
-            slot,
-            identifier,
-            target,
-          },
-          target: iface,
-        });
-        valid = false;
-      } else {
-        slotOwners.set(key, slot);
-      }
-    }
-  }
-
-  if (!valid) return finish(undefined);
-  return finish(expected.map((slot) => ({
-    slot,
-    symbol: (raw as Record<string, string>)[slot],
-  })));
 }
 
 /**

@@ -68,21 +68,6 @@ export interface SampleEntry {
   description?: string;
 }
 
-const delegateStateBrand = Symbol("typra.delegate-state");
-
-export interface DelegateState {
-  readonly [delegateStateBrand]: true;
-  bindings: unknown;
-}
-
-export function isDelegateState(value: unknown): value is DelegateState {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    delegateStateBrand in value
-  );
-}
-
 /**
  * The `@encodedName("application/json", ...)` wire key declared on a property, read
  * from its decorator list so the result is independent of decorator execution order
@@ -794,36 +779,6 @@ export function $dispatch(
   discriminator: ModelProperty,
 ) {
   setStateScalar(context, StateKeys.dispatch, target, discriminator);
-}
-
-/** Records the raw mapping; callable lowering validates it against @dispatch. */
-export function $delegate(
-  context: DecoratorContext,
-  target: Interface,
-  bindings: ObjectValue | object,
-) {
-  let value: unknown = bindings;
-  if (
-    bindings &&
-    typeof bindings === "object" &&
-    "entityKind" in bindings &&
-    (bindings as ObjectValue).entityKind === "Value" &&
-    "valueKind" in bindings &&
-    (bindings as ObjectValue).valueKind === "ObjectValue" &&
-    "type" in bindings &&
-    typeof (bindings as ObjectValue).type === "object" &&
-    (bindings as ObjectValue).type !== null
-  ) {
-    value = serializeValueAsJson(
-      context.program,
-      bindings as ObjectValue,
-      (bindings as ObjectValue).type,
-    );
-  }
-  setStateScalar<DelegateState>(context, StateKeys.delegate, target, {
-    [delegateStateBrand]: true,
-    bindings: value,
-  });
 }
 
 // ============================================================================
