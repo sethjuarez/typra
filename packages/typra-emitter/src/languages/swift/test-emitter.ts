@@ -50,10 +50,19 @@ export function emitSwiftTests(
   ctx.coercions.forEach((coercion, index) => {
     lines.push(`  func testScalarCoercion${index + 1}() throws {`);
     lines.push(`    let instance = try ${typeName}.load(${coercion.value})`);
-    const expansion = ctx.node.coercions[index]?.expansion;
+    const coercionDecl = ctx.node.coercions[index];
+    const expansion = coercionDecl?.expansion;
+    const resolvedExpansion = expansion
+      ? Object.fromEntries(
+          Object.entries(expansion).map(([key, value]) => [
+            key,
+            value === "{value}" ? coercionTestValue(coercion.value) : value,
+          ]),
+        )
+      : undefined;
     const child =
-      expansion && ctx.node.discriminator
-        ? matchingPolymorphicChild(ctx.node, expansion)
+      resolvedExpansion && ctx.node.discriminator
+        ? matchingPolymorphicChild(ctx.node, resolvedExpansion)
         : undefined;
     if (child) {
       const rawPattern = isWildcardFallbackChild(ctx.node, child) ? ", _" : "";
@@ -522,6 +531,14 @@ function matchingPolymorphicChild(
       (child) => polymorphicChildValue(node, child) === discriminatorValue,
     ) ?? defaultPolymorphicChild(node)
   );
+}
+
+function coercionTestValue(rendered: string): unknown {
+  try {
+    return JSON.parse(rendered);
+  } catch {
+    return rendered.replace(/^"|"$/g, "");
+  }
 }
 
 function defaultPolymorphicChild(node: TypeNode): TypeNode | undefined {

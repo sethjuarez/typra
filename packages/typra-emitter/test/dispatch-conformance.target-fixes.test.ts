@@ -163,6 +163,15 @@ describe("language-target conformance/model regressions (2.0.0 target fixes)", (
     );
   });
 
+  it("Swift scalar-coercion tests expect the canonical known variant", () => {
+    const src = readFileSync(
+      findFile(path.join(output, "swift"), "FormatConfigTests.swift"),
+      "utf8",
+    );
+    assert.match(src, /if case \.mustacheFormat = instance/);
+    assert.doesNotMatch(src, /if case \.customFormat = instance/);
+  });
+
   it("Rust#4: coerce-union bare-string shorthand canonicalizes known variants and preserves unknown values", () => {
     const src = readFileSync(
       findFile(path.join(output, "rust"), "format_config.rs"),
