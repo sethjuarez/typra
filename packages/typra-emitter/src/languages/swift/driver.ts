@@ -1140,7 +1140,12 @@ function emitSwiftInterfaceConformanceTest(
       } else {
         // Non-model param (scalar, `Record<unknown>`, array) cast from the parsed
         // JSON object into the mapped Swift type the seam signature expects.
-        lines.push(`    let ${local} = input[${key}] as! ${swiftType(entry.params[paramName])}`);
+        const mappedType = swiftType(entry.params[paramName]);
+        lines.push(
+          mappedType === "Any"
+            ? `    let ${local} = input[${key}]!`
+            : `    let ${local} = input[${key}] as! ${mappedType}`,
+        );
       }
     }
     // The discriminator local is a fixed name rather than the field name, and the
@@ -1339,8 +1344,11 @@ function emitSwiftVectorConformanceEntrypoint(
           const baseType = swiftType(entry.params[paramName]).replace(/\?$/, "");
           lines.push(`    let ${local} = input[${key}] as? ${baseType}`);
         } else {
+          const mappedType = swiftType(entry.params[paramName]);
           lines.push(
-            `    let ${local} = input[${key}] as! ${swiftType(entry.params[paramName])}`,
+            mappedType === "Any"
+              ? `    let ${local} = input[${key}]!`
+              : `    let ${local} = input[${key}] as! ${mappedType}`,
           );
         }
       }

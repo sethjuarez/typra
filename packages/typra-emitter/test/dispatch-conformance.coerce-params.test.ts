@@ -102,7 +102,7 @@ const CASES: Array<{
   {
     target: "swift",
     file: "ProcessorConformanceTests.swift",
-    unknownDecode: 'let response = input["response"] as! Any',
+    unknownDecode: 'let response = input["response"]!',
     providerRead: '["provider"] as? String) ?? ""',
   },
 ];
