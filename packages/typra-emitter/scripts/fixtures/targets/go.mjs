@@ -27,8 +27,16 @@ import {
   propertyCorpusJsonLiteral,
 } from "../conformance.mjs";
 
-export function runGoTests() {
-  const sourceDir = path.join(generatedRoot, "go");
+export function runGoTests(
+  sourceDir = path.join(generatedRoot, "go"),
+  moduleName = "fixtures",
+  moduleReplacements = [],
+) {
+  if (typeof sourceDir !== "string") {
+    sourceDir = path.join(generatedRoot, "go");
+    moduleName = "fixtures";
+    moduleReplacements = [];
+  }
   const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".go"));
   if (sourceFiles.length === 0) {
     fail("No generated Go files found to test.");
@@ -40,9 +48,15 @@ export function runGoTests() {
   writeFileSync(
     modPath,
     [
-      "module fixtures",
+      `module ${moduleName}`,
       "",
       "go 1.22",
+      ...moduleReplacements.flatMap(({ module, relativePath }) => [
+        "",
+        `require ${module} v0.0.0`,
+        "",
+        `replace ${module} => ${relativePath}`,
+      ]),
       "",
       "require gopkg.in/yaml.v3 v3.0.1",
       "",

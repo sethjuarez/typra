@@ -48,6 +48,8 @@ import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
+  loweringCapabilitiesForTarget,
+  TypeDecl,
 } from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
@@ -323,6 +325,7 @@ export const generateCsharp = async (
           ifaceVectors,
           csharpNamespace,
           adapterNamespace,
+          new Map(allTypeDecls.map((decl) => [decl.typeName.name, decl])),
         ),
         `${dispatched.contract}ConformanceTests.cs`,
         conformanceDir,
@@ -1210,10 +1213,23 @@ function uniqueMethodName(base: string, seen: Map<string, number>): string {
  * `FromJson`); the remaining segments are the emitted models' PascalCase
  * properties (e.g. `agent.template.format.kind` -> `agent.Template.Format.Kind`).
  */
-function csharpDiscriminatorAccessor(path: string): string {
+export function csharpDiscriminatorAccessor(
+  path: string,
+  _declsByName: Map<string, TypeDecl>,
+  _rootTypeName: string | undefined,
+): string {
+  if (
+    loweringCapabilitiesForTarget("csharp").typedDiscriminatorAccess !==
+    "typed-member"
+  ) {
+    throw new Error("C# discriminator access must use a typed member.");
+  }
   const segments = path.split(".");
   const [head, ...rest] = segments;
-  return [head, ...rest.map((segment) => toPascalCase(segment))].join(".");
+  const access = [head, ...rest.map((segment) => toPascalCase(segment))].join(
+    "?.",
+  );
+  return `${access} ?? ""`;
 }
 
 /**
@@ -1238,6 +1254,7 @@ function emitCSharpInterfaceConformanceTest(
   entries: CallableVectorSnapshotEntry[],
   testNamespace: string,
   adapterNamespace: string,
+  declsByName: Map<string, TypeDecl>,
 ): string {
   const provider = `I${dispatched.contract}Provider`;
   const resolver = `${dispatched.contract}Resolver`;
@@ -1285,7 +1302,14 @@ function emitCSharpInterfaceConformanceTest(
     const method = entry.sync
       ? toPascalCase(entry.operation)
       : `${toPascalCase(entry.operation)}Async`;
-    const accessor = csharpDiscriminatorAccessor(entry.dispatch!.path);
+    const rootShape = classifyCallableParam(
+      entry.params[entry.dispatch!.path.split(".")[0]],
+    );
+    const accessor = csharpDiscriminatorAccessor(
+      entry.dispatch!.path,
+      declsByName,
+      rootShape.base,
+    );
     const paramNames = Object.keys(entry.params);
     const inputJSON = jsonAsciiEscape(
       JSON.stringify(entry.vector.input ?? {}, null, 2),
@@ -1320,6 +1344,12 @@ function emitCSharpInterfaceConformanceTest(
         lines.push(
           `        var ${local} = ${paramType}.FromJson(root.GetProperty(${key}).GetRawText());`,
         );
+      } else if (shape.isModel && shape.optional) {
+        lines.push(
+          `        var ${local} = root.TryGetProperty(${key}, out var ${local}El) && ${local}El.ValueKind != JsonValueKind.Null`,
+          `            ? ${shape.base}.FromJson(${local}El.GetRawText())`,
+          `            : null;`,
+        );
       } else if (shape.optional) {
         // Optional non-model param: tolerate an absent property, decoding into
         // the mapped (nullable) C# type when present.
@@ -1345,7 +1375,13 @@ function emitCSharpInterfaceConformanceTest(
     lines.push(
       `        Assert.NotNull(impl);`,
     );
-    const call = `impl!.${method}(${paramNames.map(csharpIdentifier).join(", ")})`;
+    const callArgs = paramNames.map((paramName) => {
+      const local = csharpIdentifier(paramName);
+      return classifyCallableParam(entry.params[paramName]).optional
+        ? local
+        : `${local}!`;
+    });
+    const call = `impl!.${method}(${callArgs.join(", ")})`;
     if (entry.vector.expectedError !== undefined) {
       // Assert.NotNull(impl) above stays OUTSIDE the try so a missing route
       // fails the [Fact] instead of counting as the expected error.

@@ -34,6 +34,10 @@ import { goFieldName } from "./identifiers.js";
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
+  discriminatorWireKey,
+  loweringCapabilitiesForTarget,
+  resolveFieldLowering,
+  TypeDecl,
 } from "../../ir/declarations.js";
 import {
   assertTypedDispatchSupported,
@@ -359,6 +363,10 @@ export const generateGo = async (
           packageName,
           importPath,
           adapterImportPath,
+          new Map(
+            declarationUniverse.map((decl) => [decl.typeName.name, decl]),
+          ),
+          polymorphicTypeNames,
         ),
         emitTarget["test-dir"],
         emitTarget["test-dir"],
@@ -849,6 +857,18 @@ function emitGoVectorBridge(
         lines.push("\t\tif err != nil {");
         lines.push("\t\t\treturn nil, err");
         lines.push("\t\t}");
+      } else if (shape.isModel && shape.optional) {
+        const paramType = goFieldName(shape.base);
+        lines.push(`\tvar ${paramName} *fixtures.${paramType}`);
+        lines.push(`\tif raw, ok := payload[${key}]; ok && raw != nil {`);
+        lines.push(
+          `\t\tloaded, loadErr := fixtures.Load${paramType}(raw, fixtures.NewLoadContext())`,
+        );
+        lines.push("\t\tif loadErr != nil {");
+        lines.push(`\t\t\tt.Fatalf("${paramName} parse: %v", loadErr)`);
+        lines.push("\t\t}");
+        lines.push(`\t\t${paramName} = &loaded`);
+        lines.push("\t}");
       } else {
         lines.push(
           `\t\tvar ${paramName} ${protocolGoType(entry.params[paramName], "fixtures")}`,
@@ -1534,6 +1554,8 @@ function emitGoInterfaceConformanceTest(
   packageName: string,
   importPath: string,
   adapterImportPath: string,
+  declsByName: Map<string, TypeDecl>,
+  polymorphicTypeNames: Set<string>,
 ): string {
   const seam = goFieldName(dispatched.contract);
   const rawField = dispatched.decl.discriminatorField;
@@ -1577,8 +1599,10 @@ function emitGoInterfaceConformanceTest(
   sorted.forEach((entry, index) => {
     assertTypedDispatchSupported(entry);
     const paramNames = Object.keys(entry.params);
+    const dispatchRoots = new Map<string, string>();
     const method = goFieldName(entry.operation);
-    const accessor = goDiscriminatorAccessor(entry.dispatch!.path);
+    const dispatchRoot = entry.dispatch!.path.split(".")[0];
+    const rootShape = classifyCallableParam(entry.params[dispatchRoot]);
     const inputJSON = JSON.stringify(entry.vector.input ?? {}, null, 2);
     const expected = entry.vector.expected;
     const label = entry.vector.name ?? entry.operation;
@@ -1598,11 +1622,50 @@ function emitGoInterfaceConformanceTest(
       const key = JSON.stringify(paramName);
       if (shape.bareModel) {
         const paramType = goFieldName(entry.params[paramName]);
+        const polymorphicRoot = polymorphicTypeNames.has(shape.base);
+        const loadedName = polymorphicRoot
+          ? `${paramName}DispatchValue`
+          : paramName;
         lines.push(
-          `\t${paramName}, err := fixtures.Load${paramType}(payload[${key}], fixtures.NewLoadContext())`,
+          `\t${loadedName}, err := fixtures.Load${paramType}(payload[${key}], fixtures.NewLoadContext())`,
         );
         lines.push("\tif err != nil {");
         lines.push(`\t\tt.Fatalf("${paramName} parse: %v", err)`);
+        lines.push("\t}");
+        if (polymorphicRoot) {
+          dispatchRoots.set(paramName, loadedName);
+          lines.push(`\t${paramName}Serializable, ok := any(${loadedName}).(interface {`);
+          lines.push("\t\tSave(*fixtures.SaveContext) map[string]interface{}");
+          lines.push("\t})");
+          lines.push("\tif !ok {");
+          lines.push(
+            `\t\tt.Fatalf("dispatch container %T does not implement generated Save", ${loadedName})`,
+          );
+          lines.push("\t}");
+          lines.push(
+            `\t${paramName}Bytes, marshalErr := json.Marshal(${paramName}Serializable.Save(fixtures.NewSaveContext()))`,
+          );
+          lines.push("\tif marshalErr != nil {");
+          lines.push(`\t\tt.Fatalf("${paramName} marshal: %v", marshalErr)`);
+          lines.push("\t}");
+          lines.push(`\tvar ${paramName} fixtures.${paramType}`);
+          lines.push(
+            `\tif unmarshalErr := json.Unmarshal(${paramName}Bytes, &${paramName}); unmarshalErr != nil {`,
+          );
+          lines.push(`\t\tt.Fatalf("${paramName} parse: %v", unmarshalErr)`);
+          lines.push("\t}");
+        }
+      } else if (shape.isModel && shape.optional) {
+        const paramType = goFieldName(shape.base);
+        lines.push(`\tvar ${paramName} *fixtures.${paramType}`);
+        lines.push(`\tif raw, ok := payload[${key}]; ok && raw != nil {`);
+        lines.push(
+          `\t\tloaded, loadErr := fixtures.Load${paramType}(raw, fixtures.NewLoadContext())`,
+        );
+        lines.push("\t\tif loadErr != nil {");
+        lines.push(`\t\t\tt.Fatalf("${paramName} parse: %v", loadErr)`);
+        lines.push("\t\t}");
+        lines.push(`\t\t${paramName} = &loaded`);
         lines.push("\t}");
       } else {
         // Non-model param (scalar, `Record<unknown>`, optional, array) decoded
@@ -1622,7 +1685,16 @@ function emitGoInterfaceConformanceTest(
         lines.push("\t}");
       }
     }
-    lines.push(`\t${goDispatchParam(rawField)} := ${accessor}`);
+    const dispatchAccessor = goDiscriminatorAccessor(
+      entry.dispatch!.path,
+      discriminatorWireKey(entry.dispatch!.decl!),
+      declsByName,
+      rootShape.base,
+      rootShape.optional,
+      polymorphicTypeNames,
+      dispatchRoots.get(dispatchRoot),
+    );
+    lines.push(`\t${goDispatchParam(rawField)} := ${dispatchAccessor}`);
     lines.push(
       `\timpl, err := fixtures.Resolve${seam}(${goDispatchParam(
         rawField,
@@ -1716,16 +1788,60 @@ function emitGoInterfaceConformanceTest(
  * local (guaranteed by assertTypedDispatchSupported); middle segments navigate
  * exported struct fields via goFieldName.
  */
-function goDiscriminatorAccessor(path: string): string {
+function goDiscriminatorAccessor(
+  path: string,
+  discriminatorKey: string,
+  declsByName: Map<string, TypeDecl>,
+  rootTypeName: string | undefined,
+  rootOptional: boolean,
+  polymorphicTypeNames: Set<string>,
+  rootExpression?: string,
+): string {
   const segments = path.split(".");
-  const rawField = segments[segments.length - 1];
-  const container = [
-    segments[0],
-    ...segments.slice(1, -1).map((segment) => goFieldName(segment)),
-  ].join(".");
-  return `${container}.(interface {\n\t\tSave(*fixtures.SaveContext) map[string]interface{}\n\t}).Save(fixtures.NewSaveContext())[${JSON.stringify(
-    rawField,
-  )}].(string)`;
+  const capabilities = loweringCapabilitiesForTarget(
+    "go",
+    polymorphicTypeNames,
+  );
+  if (capabilities.valueBackedDiscriminatorAccess !== "serialized-wire-key") {
+    throw new Error("Go value-backed discriminator access must use its wire key.");
+  }
+  const root = rootExpression ?? segments[0];
+  const parts = [root];
+  const guards: string[] = [];
+  if (rootOptional) {
+    guards.push(`\t\tif ${root} == nil {\n\t\t\treturn ""\n\t\t}`);
+  }
+  let currentType = rootTypeName ? declsByName.get(rootTypeName) : undefined;
+  for (const segment of segments.slice(1, -1)) {
+    const field = findGoFieldInHierarchy(currentType, segment, declsByName);
+    parts.push(goFieldName(segment));
+    if (
+      field?.isOptional &&
+      resolveFieldLowering(field, capabilities).optionalWrapper === "preserved"
+    ) {
+      guards.push(`\t\tif ${parts.join(".")} == nil {\n\t\t\treturn ""\n\t\t}`);
+    }
+    currentType = field ? declsByName.get(field.typeName.name) : undefined;
+  }
+  const container = parts.join(".");
+  const guardBlock = guards.length > 0 ? `${guards.join("\n")}\n` : "";
+  return `func() string {\n${guardBlock}\t\tserializable, ok := any(${container}).(interface {\n\t\t\tSave(*fixtures.SaveContext) map[string]interface{}\n\t\t})\n\t\tif !ok {\n\t\t\tt.Fatalf("dispatch container %T does not implement generated Save", ${container})\n\t\t\treturn ""\n\t\t}\n\t\tdiscriminator, _ := serializable.Save(fixtures.NewSaveContext())[${JSON.stringify(
+    discriminatorKey,
+  )}].(string)\n\t\treturn discriminator\n\t}()`;
+}
+
+function findGoFieldInHierarchy(
+  type: TypeDecl | undefined,
+  name: string,
+  declsByName: Map<string, TypeDecl>,
+): TypeDecl["fields"][number] | undefined {
+  let current = type;
+  while (current) {
+    const field = current.fields.find((candidate) => candidate.name === name);
+    if (field) return field;
+    current = current.base ? declsByName.get(current.base.name) : undefined;
+  }
+  return undefined;
 }
 
 /**

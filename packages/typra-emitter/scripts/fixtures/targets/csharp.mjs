@@ -215,8 +215,12 @@ export function runCSharpConsumerNullabilityBuild() {
   }
 }
 
-export function runCSharpGeneratedTests() {
-  const sourceDir = path.join(generatedRoot, "csharp");
+export function runCSharpGeneratedTests(
+  sourceDir = path.join(generatedRoot, "csharp"),
+) {
+  if (typeof sourceDir !== "string") {
+    sourceDir = path.join(generatedRoot, "csharp");
+  }
   const testsDir = path.join(sourceDir, "tests");
   const testFiles = existsSync(testsDir)
     ? walkFiles(testsDir, (file) => file.endsWith(".cs"))

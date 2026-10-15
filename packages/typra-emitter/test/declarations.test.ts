@@ -23,7 +23,11 @@ import {
 import { emitSwiftFile } from "../src/languages/swift/emitter.js";
 import { SwiftExprVisitor } from "../src/languages/swift/visitor.js";
 import { emitGoFileContent } from "../src/languages/go/emitter.js";
-import { isClosedPolymorphicDispatch } from "../src/ir/declarations.js";
+import {
+  isClosedPolymorphicDispatch,
+  loweringCapabilitiesForTarget,
+  resolveFieldLowering,
+} from "../src/ir/declarations.js";
 import { goFieldName } from "../src/languages/go/identifiers.js";
 import { emitGoTest } from "../src/languages/go/test-emitter.js";
 import { GoExprVisitor } from "../src/languages/go/visitor.js";
@@ -551,6 +555,176 @@ describe("classifyProperty", () => {
     const prop = makeProp("name", "string", { isScalar: true });
     const cat = classifyProperty(prop, polyNames);
     assert.deepEqual(cat, { kind: "scalar", scalarType: "string" });
+  });
+
+  describe("value-backed field lowering contract (#303)", () => {
+    const valueBackedField = {
+      name: "model",
+      typeName: { namespace: "Test", name: "Model" },
+      category: { kind: "complex", typeName: "Model" },
+      isOptional: true,
+      defaultValue: null,
+      allowedValues: [],
+      parseAliases: {},
+      enumName: null,
+      isOpenEnum: false,
+      description: "",
+      knownAs: {},
+      serializedName: "model_wire",
+    } as const;
+    const polymorphicTypes = new Set(["Model"]);
+
+    it("normalizes storage, optionality, access, expansion, and the canonical wire key", () => {
+      assert.deepEqual(
+        resolveFieldLowering(
+          valueBackedField,
+          loweringCapabilitiesForTarget("rust", polymorphicTypes),
+        ),
+        {
+          storage: "value-backed",
+          collectionElementStorage: null,
+          optionalWrapper: "absorbed",
+          discriminatorAccess: "serialized-wire-key",
+          coerceExpansion: "canonical-value-expansion",
+          wireKey: "model_wire",
+        },
+      );
+    });
+
+    it("keeps semantic target differences in capabilities rather than drivers", () => {
+      const decisions = Object.fromEntries(
+        (
+          [
+            "typescript",
+            "python",
+            "go",
+            "csharp",
+            "java",
+            "rust",
+            "swift",
+          ] as const
+        ).map((target) => [
+          target,
+          resolveFieldLowering(
+            valueBackedField,
+            loweringCapabilitiesForTarget(target, polymorphicTypes),
+          ),
+        ]),
+      );
+
+      assert.equal(decisions.go.storage, "value-backed");
+      assert.equal(decisions.go.collectionElementStorage, null);
+      assert.equal(decisions.go.optionalWrapper, "preserved");
+      assert.equal(decisions.go.discriminatorAccess, "serialized-wire-key");
+      assert.equal(decisions.go.coerceExpansion, "typed-loader");
+
+      assert.equal(decisions.rust.storage, "value-backed");
+      assert.equal(decisions.rust.optionalWrapper, "absorbed");
+      assert.equal(
+        decisions.rust.coerceExpansion,
+        "canonical-value-expansion",
+      );
+
+      for (const target of [
+        "typescript",
+        "python",
+        "csharp",
+        "java",
+      ] as const) {
+        assert.equal(decisions[target].storage, "typed-struct");
+        assert.equal(decisions[target].optionalWrapper, "preserved");
+        assert.equal(decisions[target].discriminatorAccess, "typed-member");
+        assert.equal(decisions[target].coerceExpansion, "typed-loader");
+      }
+
+      assert.equal(decisions.swift.storage, "typed-struct");
+      assert.equal(decisions.swift.optionalWrapper, "preserved");
+      assert.equal(
+        decisions.swift.discriminatorAccess,
+        "serialized-wire-key",
+      );
+    });
+
+    it("does not classify ordinary typed intermediates as value-backed", () => {
+      const typedField = {
+        ...valueBackedField,
+        name: "template",
+        typeName: { namespace: "Test", name: "Template" },
+        category: { kind: "complex", typeName: "Template" },
+        serializedName: undefined,
+      } as const;
+      assert.deepEqual(
+        resolveFieldLowering(
+          typedField,
+          loweringCapabilitiesForTarget("rust", polymorphicTypes),
+        ),
+        {
+          storage: "typed-struct",
+          collectionElementStorage: null,
+          optionalWrapper: "preserved",
+          discriminatorAccess: "typed-member",
+          coerceExpansion: "typed-loader",
+          wireKey: "template",
+        },
+      );
+    });
+
+    it("preserves an optional wrapper in enum variant payloads", () => {
+      const lowering = resolveFieldLowering(
+        valueBackedField,
+        loweringCapabilitiesForTarget("rust", polymorphicTypes),
+        { context: "variant-field" },
+      );
+      assert.equal(lowering.optionalWrapper, "preserved");
+    });
+
+    it("models a polymorphic collection as a typed container with value-backed elements", () => {
+      const field = {
+        ...valueBackedField,
+        name: "models",
+        category: { kind: "collection_complex", typeName: "Model" },
+      } as const;
+      const goLowering = resolveFieldLowering(
+        field,
+        loweringCapabilitiesForTarget("go", polymorphicTypes),
+      );
+      const rustLowering = resolveFieldLowering(
+        field,
+        loweringCapabilitiesForTarget("rust", polymorphicTypes),
+      );
+      assert.equal(goLowering.storage, "typed-struct");
+      assert.equal(goLowering.collectionElementStorage, "value-backed");
+      assert.equal(goLowering.optionalWrapper, "preserved");
+      assert.equal(rustLowering.storage, "typed-struct");
+      assert.equal(rustLowering.collectionElementStorage, "typed-struct");
+      assert.equal(rustLowering.optionalWrapper, "preserved");
+    });
+
+    it("keeps Rust collection descriptors aligned with emitted Vec<Model>", () => {
+      const owner = makeType("Owner", [
+        makeProp("models", "Model", {
+          isCollection: true,
+          isOptional: true,
+          type: modelType,
+        }),
+      ]);
+      const registry = TypeRegistry.fromTypeGraph([owner, modelType]);
+      const code = emitRustFile(
+        lowerFile(owner, registry, polymorphicTypes),
+        new RustExprVisitor(registry),
+        polymorphicTypes,
+      );
+      const lowering = resolveFieldLowering(
+        {
+          ...valueBackedField,
+          name: "models",
+          category: { kind: "collection_complex", typeName: "Model" },
+        },
+        loweringCapabilitiesForTarget("rust", polymorphicTypes),
+      );
+      assert.equal(lowering.collectionElementStorage, "typed-struct");
+      assert.match(code, /models: Option<Vec<Model>>/);
+    });
   });
 
   it("classifies optional scalar property", () => {

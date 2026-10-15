@@ -69,9 +69,12 @@ export function runGeneratedTypeScriptCompileFor(targetDir, label) {
       "declare function describe(name: string, fn: () => void): void;",
       "declare function it(name: string, fn: () => void): void;",
       "declare function expect(actual: unknown): {",
+      "  not: { toBeNull(): void };",
+      "  toBeNull(): void;",
       "  toBeDefined(): void;",
       "  toBe(expected: unknown): void;",
       "  toEqual(expected: unknown): void;",
+      "  toContain(expected: unknown): void;",
       "  toBeInstanceOf(expected: unknown): void;",
       "};",
       "",
@@ -342,8 +345,12 @@ export function runTypeScriptZodWebRuntimeSmoke() {
   runTypeScriptWebRuntimeSmokeFor("typescript-zod", "TypeScript Zod");
 }
 
-export function runTypeScriptGeneratedTests() {
-  const sourceDir = path.join(generatedRoot, "typescript");
+export function runTypeScriptGeneratedTests(
+  sourceDir = path.join(generatedRoot, "typescript"),
+) {
+  if (typeof sourceDir !== "string") {
+    sourceDir = path.join(generatedRoot, "typescript");
+  }
   const sourceFiles = walkFiles(
     sourceDir,
     (file) =>
@@ -375,9 +382,12 @@ export function runTypeScriptGeneratedTests() {
       "declare function describe(name: string, fn: () => void): void;",
       "declare function it(name: string, fn: () => void): void;",
       "declare function expect(actual: unknown): {",
+      "  not: { toBeNull(): void };",
+      "  toBeNull(): void;",
       "  toBeDefined(): void;",
       "  toBe(expected: unknown): void;",
       "  toEqual(expected: unknown): void;",
+      "  toContain(expected: unknown): void;",
       "  toBeInstanceOf(expected: unknown): void;",
       "};",
       "",
@@ -388,21 +398,27 @@ export function runTypeScriptGeneratedTests() {
     [
       "const suites: string[] = [];",
       "const failures: string[] = [];",
+      "const pending: Promise<void>[] = [];",
       "function same(left: unknown, right: unknown): boolean { return JSON.stringify(left) === JSON.stringify(right); }",
       "(globalThis as any).describe = (name: string, fn: () => void) => { suites.push(name); try { fn(); } finally { suites.pop(); } };",
-      "(globalThis as any).it = (name: string, fn: () => void) => {",
+      "(globalThis as any).it = (name: string, fn: () => void | Promise<void>) => {",
       "  const fullName = [...suites, name].join(' > ');",
-      "  try { fn(); console.log(`PASS ${fullName}`); }",
-      "  catch (error) { failures.push(fullName); console.error(`FAIL ${fullName}`); console.error(error); }",
+      "  pending.push(Promise.resolve().then(fn).then(",
+      "    () => { console.log(`PASS ${fullName}`); },",
+      "    (error) => { failures.push(fullName); console.error(`FAIL ${fullName}`); console.error(error); },",
+      "  ));",
       "};",
       "(globalThis as any).expect = (actual: unknown) => ({",
+      "  not: { toBeNull() { if (actual === null) throw new Error('Expected value not to be null'); } },",
+      "  toBeNull() { if (actual !== null) throw new Error(`Expected ${String(actual)} to be null`); },",
       "  toBeDefined() { if (actual === undefined || actual === null) throw new Error(`Expected value to be defined, got ${actual}`); },",
       "  toBe(expected: unknown) { if (actual !== expected) throw new Error(`Expected ${String(actual)} to be ${String(expected)}`); },",
       "  toEqual(expected: unknown) { if (!same(actual, expected)) throw new Error(`Expected ${JSON.stringify(actual)} to equal ${JSON.stringify(expected)}`); },",
+      "  toContain(expected: unknown) { if (!(actual as any)?.includes?.(expected)) throw new Error(`Expected ${String(actual)} to contain ${String(expected)}`); },",
       "  toBeInstanceOf(expected: { new (...args: any[]): unknown }) { if (!(actual instanceof expected)) throw new Error(`Expected value to be instance of ${expected.name}`); },",
       "});",
       ...imports,
-      "if (failures.length > 0) process.exit(1);",
+      "Promise.all(pending).then(() => { if (failures.length > 0) process.exit(1); });",
       "",
     ].join("\n"),
   );

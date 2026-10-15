@@ -38,6 +38,8 @@ import {
   assignmentWireKey,
   discriminatorWireKey,
   fieldWireKey,
+  loweringCapabilitiesForTarget,
+  resolveFieldLowering,
 } from "../../ir/declarations.js";
 import {
   isRequiredNullable,
@@ -166,12 +168,7 @@ export function emitGoFileContent(
   );
   const needsFmt =
     enums.some((enumDef) => hasParseAliases(enumDef) && !enumDef.isOpen) ||
-    types.some(
-      (type) =>
-        type.serialized &&
-        type.polymorphicDispatch &&
-        !hasDeclaredDispatchDefault(type.polymorphicDispatch),
-    ) ||
+    types.some((type) => type.serialized && type.polymorphicDispatch) ||
     needsNamedCollections ||
     needsRequiredComplexValidation;
   // math.Trunc is only referenced when a type coerces from both a whole-number and a
@@ -557,12 +554,7 @@ function emitStruct(
   lines.push(`type ${typeName} struct {`);
 
   for (const field of type.fields) {
-    const goType = getGoFieldType(
-      field.category,
-      field.isOptional,
-      polymorphicTypeNames,
-      field.enumName,
-    );
+    const goType = getGoFieldType(field, polymorphicTypeNames);
     const fieldName = fieldNames.get(field.name) ?? goFieldName(field.name);
     const tag = getStructTag(
       fieldWireKey(field),
@@ -643,7 +635,7 @@ function emitLoadFunction(
       body.push(`\tresult := ${typeName}{`);
       for (const field of explicitCollectionDefaults) {
         body.push(
-          `\t\t${goFieldName(field.name)}: ${getGoFieldType(field.category, field.isOptional, polymorphicTypeNames, field.enumName)}{},`,
+          `\t\t${goFieldName(field.name)}: ${getGoFieldType(field, polymorphicTypeNames)}{},`,
         );
       }
       body.push("\t}");
@@ -727,7 +719,15 @@ function emitLoadFunction(
       body.push("\t\t}");
     }
 
-    body.push("\t}");
+    if (isPolymorphicBase) {
+      body.push("\t} else {");
+      body.push(
+        `\t\treturn result, fmt.Errorf("invalid ${typeName} input: expected object or supported scalar shorthand, got %T", data)`,
+      );
+      body.push("\t}");
+    } else {
+      body.push("\t}");
+    }
     body.push("");
     body.push("\treturn result, nil");
   }
@@ -1317,22 +1317,13 @@ function emitLoadCollectionComplex(
   }
   lines.push(`\t\t\t\tresult.${fieldName} = make([]${goElemType}, len(arr))`);
   lines.push("\t\t\t\tfor i, v := range arr {");
-  lines.push("\t\t\t\t\tif item, ok := v.(map[string]interface{}); ok {");
   lines.push(
-    `\t\t\t\t\t\tloaded, err := Load${typeName}(item, ctx.At(${goLiteral(assign.sourceName)}).AtIndex(i))`,
+    `\t\t\t\t\tloaded, err := Load${typeName}(v, ctx.At(${goLiteral(assign.sourceName)}).AtIndex(i))`,
   );
-  lines.push("\t\t\t\t\t\tif err != nil {");
-  lines.push("\t\t\t\t\t\t\treturn result, err");
-  lines.push("\t\t\t\t\t\t}");
-
-  if (isPolymorphic) {
-    lines.push("\t\t\t\t\t\t// Polymorphic type - store as interface{}");
-    lines.push(`\t\t\t\t\t\tresult.${fieldName}[i] = loaded`);
-  } else {
-    lines.push(`\t\t\t\t\t\tresult.${fieldName}[i] = loaded`);
-  }
-
+  lines.push("\t\t\t\t\tif err != nil {");
+  lines.push("\t\t\t\t\t\treturn result, err");
   lines.push("\t\t\t\t\t}");
+  lines.push(`\t\t\t\t\tresult.${fieldName}[i] = loaded`);
   lines.push("\t\t\t\t}");
   lines.push("\t\t\t}");
   lines.push("\t\t}");
@@ -2130,11 +2121,14 @@ function emitFromYAML(
 // ============================================================================
 
 function getGoFieldType(
-  category: PropertyCategory,
-  isOptional: boolean,
+  field: FieldDecl,
   polymorphicTypeNames: Set<string>,
-  enumName?: string | null,
 ): string {
+  const { category, isOptional, enumName } = field;
+  const lowering = resolveFieldLowering(
+    field,
+    loweringCapabilitiesForTarget("go", polymorphicTypeNames),
+  );
   // Named enum — use enum type alias
   if (enumName) {
     return isOptional ? `*${enumName}` : enumName;
@@ -2148,8 +2142,7 @@ function getGoFieldType(
       return isOptional ? `*${goType}` : goType;
     }
     case "complex": {
-      const isPolymorphic = polymorphicTypeNames.has(category.typeName);
-      if (isPolymorphic) {
+      if (lowering.storage === "value-backed") {
         // Polymorphic complex: always interface{} (no pointer even for optional)
         return "interface{}";
       }
@@ -2160,8 +2153,7 @@ function getGoFieldType(
       return `[]${goType}`;
     }
     case "collection_complex": {
-      const isPolymorphic = polymorphicTypeNames.has(category.typeName);
-      if (isPolymorphic) {
+      if (lowering.collectionElementStorage === "value-backed") {
         return "[]interface{}";
       }
       return `[]${category.typeName}`;

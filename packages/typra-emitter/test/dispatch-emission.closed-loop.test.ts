@@ -82,9 +82,9 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
             // consumes the emitted resolver, not a stringly composite key
             /RendererResolver\.Resolve\(kind, Provider\(\)\)/,
             // reads the SAME typed discriminator the shape Load switch reads
-            /var kind = agent\.Template\.Format\.Kind;/,
+            /var kind = agent\?\.Template\?\.Format\?\.Kind \?\? "";/,
             // invokes the typed seam method on the resolved impl
-            /await impl!\.RenderAsync\(agent, inputs\)/,
+            /await impl!\.RenderAsync\(agent!, inputs!\)/,
             // provider VALUE is consumer-authored outside the conformance tree
             /VectorProviders\.Renderer\(\)/,
           ],
@@ -105,7 +105,7 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
             // imports the emitted resolver twin of the shape load switch
             /\._renderer_resolver import resolve_renderer/,
             // reads the SAME typed discriminator the shape load switch reads
-            /kind = agent\.template\.format\.kind/,
+            /kind = \(\s*getattr\(getattr\(getattr\(agent, "template", None\), "format", None\), "kind", None\)\s*or ""\s*\)/,
             // invokes the typed seam method on the resolved impl
             /result = impl\.render\(agent, inputs\)/,
           ],
@@ -127,7 +127,7 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
             // (import path is namespace-derived here, so match the module suffix)
             /from "[^"]*renderer-resolver"/,
             // reads the SAME typed discriminator the shape load switch reads
-            /const kind = agent\.template\.format\.kind;/,
+            /const kind = agent\?\.template\?\.format\?\.kind \?\? "";/,
             // invokes the typed seam method on the resolved impl
             /await impl!\.render\(agent, inputs\)/,
           ],
@@ -146,7 +146,7 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
             // consumes the emitted resolver, not a stringly composite key
             /Renderer impl = RendererResolver\.resolve\(kind, VectorProviders\.renderer\(\)\)/,
             // reads the SAME typed discriminator the shape load switch reads
-            /String kind = agent\.template\.format\.kind;/,
+            /String kind = \(agent == null \|\| agent\.template == null \|\| agent\.template\.format == null \? null : agent\.template\.format\.kind\);/,
             // invokes the typed seam method on the resolved impl
             /Object actual = impl\.render\(agent, inputs\)/,
             // provider VALUE is consumer-authored outside the conformance tree
@@ -168,7 +168,7 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
             /guard let impl = try RendererResolver\.resolve\(kind: dispatchKey, registry: self\.provider\(\)\)/,
             // reads the SAME discriminator off the typed union's serialized form
             // (a Swift union is an enum with no stored discriminator property)
-            /let dispatchKey = try \(agent\.template\.format\.save\(\)\)\["kind"\] as! String/,
+            /let dispatchKey = \(\(try agent\.template\.format\.save\(\)\)\["kind"\] as\? String\) \?\? ""/,
             // invokes the typed seam method on the resolved impl
             /let actual = try await impl\.render\(agent: agent, inputs: inputs\)/,
             // provider VALUE is consumer-authored outside the conformance tree
@@ -191,7 +191,7 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
             /impl, err := fixtures\.ResolveRenderer\(kind, vectoradapters\.RendererProvider\(\)\)/,
             // reads the SAME discriminator off the typed union's serialized form
             // (a Go union field is interface{} with no exported discriminator)
-            /kind := agent\.Template\.Format\.\(interface \{/,
+            /kind := func\(\) string \{[\s\S]*?serializable, ok := any\(agent\.Template\.Format\)\.\(interface \{[\s\S]*?if !ok \{\s*t\.Fatalf\("dispatch container %T does not implement generated Save"/,
             // invokes the typed seam method on the resolved impl
             /actual, err := impl\.Render\(agent, inputs\)/,
             // provider VALUE is consumer-authored outside the conformance tree
@@ -211,13 +211,13 @@ describe("@dispatch routing is emitted (rendered-code lock)", () => {
           mustInclude: [
             // consumes the emitted resolver against the consumer provider, not a
             // stringly composite key
-            /let seam_impl = renderer_resolver::resolve\(kind, &provider\)/,
+            /let seam_impl = renderer_resolver::resolve\(&kind, &provider\)/,
             // imports the emitted resolver twin of the shape discriminator match
             // (import root is import-path-derived, so match the module suffix)
             /use \S+::model::renderer_resolver::\{self, RendererProvider\};/,
             // reads the SAME discriminator off the typed union's serialized form
             // (a Rust union field is serde_json::Value with no discriminator field)
-            /let kind = agent\.template\.format\s*\n\s*\.get\("kind"\)/,
+            /let kind: String = \(\|\| -> Option<String> \{[\s\S]*?__dispatch_1\.get\("kind"\)/,
             // invokes the typed seam method on the resolved impl
             /let actual = seam_impl\.render\(&agent, &inputs\)\.await/,
             // provider VALUE is consumer-authored outside the conformance tree

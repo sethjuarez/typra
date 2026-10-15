@@ -21,6 +21,8 @@ import { projectNamespace } from "../../ir/namespace.js";
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
+  loweringCapabilitiesForTarget,
+  TypeDecl,
 } from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
@@ -342,6 +344,7 @@ export const generateJava = async (
           ifaceVectors,
           packageName,
           adapterClass,
+          new Map(allTypeDecls.map((decl) => [decl.typeName.name, decl])),
         ),
         emitTarget["test-dir"],
         emitTarget["test-dir"],
@@ -1111,7 +1114,7 @@ function emitJavaDispatchResolver(
     `  private ${resolver}() {}`,
     "",
     `  public static ${seam} resolve(String ${field}, ${provider} registry) {`,
-    `    switch (${field}) {`,
+    `    switch (${field} == null ? "" : ${field}) {`,
   ];
   for (const variant of variants) {
     lines.push(`      case ${JSON.stringify(variant.value)}:`);
@@ -1279,6 +1282,7 @@ function emitJavaInterfaceConformanceTest(
   entries: CallableVectorSnapshotEntry[],
   packageName: string,
   adapterClass: string,
+  declsByName: Map<string, TypeDecl>,
 ): string {
   const iface = dispatched.contract;
   const resolver = `${iface}Resolver`;
@@ -1335,7 +1339,15 @@ function emitJavaInterfaceConformanceTest(
       paramNames.map((paramName) => [paramName, javaPropertyName(paramName)]),
     );
     const fieldLocal = javaPropertyName(field);
-    const accessor = javaDiscriminatorAccessor(entry.dispatch!.path, locals);
+    const rootShape = classifyCallableParam(
+      entry.params[entry.dispatch!.path.split(".")[0]],
+    );
+    const accessor = javaDiscriminatorAccessor(
+      entry.dispatch!.path,
+      locals,
+      declsByName,
+      rootShape.base,
+    );
     const chunks = javaPayloadLiteralChunks(
       JSON.stringify(entry.vector.input ?? {}),
     );
@@ -1365,6 +1377,10 @@ function emitJavaInterfaceConformanceTest(
       if (shape.bareModel) {
         lines.push(
           `    ${entry.params[paramName]} ${local} = ${entry.params[paramName]}.load(input.get(${key}), null);`,
+        );
+      } else if (shape.isModel && shape.optional) {
+        lines.push(
+          `    ${shape.base} ${local} = input.get(${key}) == null ? null : ${shape.base}.load(input.get(${key}), null);`,
         );
       } else {
         // Non-model param (scalar, `Record<unknown>`, optional, array) cast from
@@ -1704,13 +1720,31 @@ function emitJavaVectorConformanceEntrypoint(
  * fields, sanitized the same way the models emit them (e.g.
  * `agent.template.format.kind`).
  */
-function javaDiscriminatorAccessor(
+export function javaDiscriminatorAccessor(
   path: string,
   locals: Map<string, string>,
+  _declsByName: Map<string, TypeDecl>,
+  _rootTypeName: string | undefined,
 ): string {
+  if (
+    loweringCapabilitiesForTarget("java").typedDiscriminatorAccess !==
+    "typed-member"
+  ) {
+    throw new Error("Java discriminator access must use a typed member.");
+  }
   const [head, ...rest] = path.split(".");
   const headLocal = locals.get(head) ?? javaPropertyName(head);
-  return [headLocal, ...rest.map(javaPropertyName)].join(".");
+  const fields = rest.map(javaPropertyName);
+  const prefixes = [
+    headLocal,
+    ...fields
+      .slice(0, -1)
+      .map((_field, index) =>
+        [headLocal, ...fields.slice(0, index + 1)].join("."),
+      ),
+  ];
+  const value = [headLocal, ...fields].join(".");
+  return `(${prefixes.map((prefix) => `${prefix} == null`).join(" || ")} ? null : ${value})`;
 }
 
 /**

@@ -204,7 +204,10 @@ describe("typed per-interface @vector conformance runs green (Python, issue #282
         conformanceSrc,
         /from fixtures\._renderer_resolver import resolve_renderer/,
       );
-      assert.match(conformanceSrc, /kind = agent\.template\.format\.kind/);
+      assert.match(
+        conformanceSrc,
+        /kind = \(\s*getattr\(getattr\(getattr\(agent, "template", None\), "format", None\), "kind", None\)\s*or ""\s*\)/,
+      );
       assert.match(
         conformanceSrc,
         /impl = resolve_renderer\(kind, renderer_provider\)/,

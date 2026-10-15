@@ -92,8 +92,8 @@ export function runPythonRuffCheck(target = "python") {
 export function runPythonGeneratedTests(
   target = "python",
   packageName = "fixtures",
+  sourceDir = path.join(generatedRoot, target),
 ) {
-  const sourceDir = path.join(generatedRoot, target);
   const testsDir = path.join(sourceDir, "tests");
   const testFiles = existsSync(testsDir)
     ? walkFiles(testsDir, (file) => file.endsWith(".py"))

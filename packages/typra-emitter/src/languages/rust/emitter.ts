@@ -57,6 +57,9 @@ import {
   assignmentWireKey,
   discriminatorWireKey,
   fieldWireKey,
+  isValueBackedTypeName,
+  loweringCapabilitiesForTarget,
+  resolveFieldLowering,
 } from "../../ir/declarations.js";
 import {
   isRequiredNullable,
@@ -1329,7 +1332,7 @@ function emitFieldInputValidation(
         );
       } else {
         lines.push(
-          `${indent}if let Some(child) = value.get(${rustStringLiteral(field)})${isRequiredNullable(assignment) ? ".filter(|candidate| !candidate.is_null())" : ""} {`,
+          `${indent}if let Some(child) = value.get(${rustStringLiteral(field)}).filter(|candidate| !candidate.is_null()) {`,
         );
         lines.push(
           `${indent}    ${category.typeName}::validate_input_at(child, &child_path)?;`,
@@ -1656,6 +1659,30 @@ function discriminatorFallbackAssignment(
   return `${discSnake}: ${enumName}::default()`;
 }
 
+function rustDispatchVariantExpr(
+  typeName: string,
+  enumName: string,
+  variant: NonNullable<TypeDecl["polymorphicDispatch"]>["variants"][number],
+  childTypes: TypeDecl[],
+  baseFieldNames: Set<string>,
+  discriminatorField: string,
+): string {
+  const variantName =
+    variant.typeName.name.replace(typeName, "") || variant.typeName.name;
+  const childType = childTypes.find(
+    (candidate) => candidate.typeName.name === variant.typeName.name,
+  );
+  const variantFields = childType
+    ?     childType.fields.filter(
+      (field) =>
+        field.name !== discriminatorField && !baseFieldNames.has(field.name),
+      )
+    : [];
+  return variantFields.length === 0
+    ? `${enumName}::${variantName}`
+    : `${enumName}::${variantName} { ..Default::default() }`;
+}
+
 /**
  * Build the `return <Type> { ... };` statement for one coercion branch.
  */
@@ -1680,16 +1707,22 @@ function coercionReturnStatement(
       // bare-string shorthand, e.g. `"jinja2"`) has no `From<String>` for the
       // `*Kind` enum, so `value.into()` fails to compile. Route it through the
       // same total fallback the object branch uses — the default variant
-      // (`CustomFormat`) stores the raw `value` as its discriminator name.
+      // (`CustomFormat`) stores the raw `value` as its discriminator name. A
+      // known runtime value canonicalizes to its typed variant.
       if (dispatch && a.fieldName === discField) {
         const discSnake = toSnakeCase(discField);
-        return discriminatorFallbackAssignment(
+        const fallback = discriminatorFallbackAssignment(
           dispatch,
           enumName,
           discSnake,
           "value",
           typeName,
+        ).replace(`${discSnake}: `, "");
+        const arms = dispatch.variants.map(
+          (variant) =>
+            `${JSON.stringify(variant.value)} => ${rustDispatchVariantExpr(typeName, enumName, variant, childTypes, baseFieldNames, discField)}`,
         );
+        return `${discSnake}: match value.as_str() { ${arms.join(", ")}, _ => ${fallback} }`;
       }
       // Check if the target field is optional or an enum
       const targetField = type.fields.find((f) => f.name === a.fieldName);
@@ -1724,24 +1757,14 @@ function coercionReturnStatement(
         (v) => v.value === a.literalValue,
       );
       if (matchingVariant) {
-        const variantName =
-          matchingVariant.typeName.name.replace(typeName, "") ||
-          matchingVariant.typeName.name;
-        // Check if variant has fields — unit variants don't get braces
-        const childType = childTypes.find(
-          (ct) => ct.typeName.name === matchingVariant.typeName.name,
-        );
-        const variantFields = childType
-          ? childType.fields.filter(
-              (f) =>
-                f.name !== dispatch!.discriminatorField &&
-                !baseFieldNames.has(f.name),
-            )
-          : [];
-        if (variantFields.length === 0) {
-          return `${discSnake}: ${enumName}::${variantName}`;
-        }
-        return `${discSnake}: ${enumName}::${variantName} { ..Default::default() }`;
+        return `${discSnake}: ${rustDispatchVariantExpr(
+          typeName,
+          enumName,
+          matchingVariant,
+          childTypes,
+          baseFieldNames,
+          discField,
+        )}`;
       }
       // Otherwise use the wildcard/custom variant (total fallback shared with
       // the input branch): default variant, else open `Unknown`, else default().
@@ -2922,7 +2945,10 @@ function isValueBackedComplex(
   typeName: string,
   polymorphicTypeNames: Set<string>,
 ): boolean {
-  return polymorphicTypeNames.has(typeName) || typeName === "unknown";
+  return isValueBackedTypeName(
+    typeName,
+    loweringCapabilitiesForTarget("rust", polymorphicTypeNames),
+  );
 }
 
 function fieldType(
@@ -3001,9 +3027,12 @@ function fieldDefault(
   field: FieldDecl,
   polymorphicTypeNames: Set<string>,
 ): string {
+  // Keep defaults aligned with the actual enum-variant representation. Most
+  // optional fields preserve Option<T>, but dictionary-like Value fields do not.
+  if (fieldType(field, polymorphicTypeNames, true).startsWith("Option<"))
+    return "None";
   // Named enum — default to field default value or first variant
   if (field.enumName && field.allowedValues.length > 0) {
-    if (field.isOptional) return "None";
     const dv =
       typeof field.defaultValue === "string" ? field.defaultValue : null;
     const defaultVal =
@@ -3015,10 +3044,8 @@ function fieldDefault(
     case "scalar": {
       if (isValueType(cat.scalarType)) {
         // dictionary is always Value (never Option); other value types may be optional
-        if (cat.scalarType !== "dictionary" && field.isOptional) return "None";
         return "serde_json::Value::Null";
       }
-      if (field.isOptional) return "None";
       const rustType = RUST_TYPE_MAP[cat.scalarType] || cat.scalarType;
       if (rustType === "String") return 'String::from("")';
       if (rustType === "bool") return "false";
@@ -3030,7 +3057,7 @@ function fieldDefault(
       // Struct fields keep Value::Null as the "absent" sentinel (see fieldType).
       if (isValueBackedComplex(cat.typeName, polymorphicTypeNames))
         return "serde_json::Value::Null";
-      return field.isOptional ? "None" : "Default::default()";
+      return "Default::default()";
     }
     case "collection_scalar":
     case "collection_complex":
@@ -3038,7 +3065,7 @@ function fieldDefault(
     case "dict":
       if (!cat.valueType || cat.valueType === "unknown")
         return "serde_json::Value::Null";
-      return field.isOptional ? "None" : "std::collections::HashMap::new()";
+      return "std::collections::HashMap::new()";
   }
 }
 
@@ -3099,14 +3126,25 @@ function loadExpr(
     case "scalar":
       return scalarLoadExpr(key, cat.scalarType, a.isOptional);
     case "complex": {
-      if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
+      const lowering = resolveFieldLowering(
+        {
+          name: a.fieldName,
+          category: a.category,
+          isOptional: a.isOptional,
+        },
+        loweringCapabilitiesForTarget("rust", polymorphicTypeNames),
+      );
+      if (lowering.storage === "value-backed") {
         // A value-backed coerce union lowers to a bare `serde_json::Value`, so a
         // bare-string shorthand (`model: "gpt-4"`, `format: "mustache"`) would be
         // stored RAW — the one runtime that skips load-time coercion, diverging
         // from Go/Python/TS/C#/Java/Swift which all hydrate a typed child on load.
         // Expand the shorthand here through the referenced type's string `@coerce`
         // template so the stored Value is always the canonical object.
-        const expansion = valueBackedCoerceExpansion(cat.typeName, declsByName);
+        const expansion =
+          lowering.coerceExpansion === "canonical-value-expansion"
+            ? valueBackedCoerceExpansion(cat.typeName, declsByName)
+            : null;
         if (expansion) {
           return `value.get(${rustStringLiteral(key)}).map(|v| if let Some(s) = v.as_str() { ${expansion} } else { v.clone() }).unwrap_or(serde_json::Value::Null)`;
         }
@@ -3126,7 +3164,7 @@ function loadExpr(
       );
     }
     case "collection_complex": {
-      const loaded = `value.get(${rustStringLiteral(key)})${isRequiredNullable(a) ? ".filter(|v| !v.is_null())" : ""}.map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx))`;
+      const loaded = `value.get(${rustStringLiteral(key)})${a.isNullable ? ".filter(|v| !v.is_null())" : ""}.map(|v| Self::load_${toSnakeCase(a.fieldName)}(v, ctx))`;
       return shouldPreserveOptionalAbsence(a)
         ? loaded
         : `${loaded}.unwrap_or_default()`;
@@ -3324,14 +3362,22 @@ function variantLoadExpr(
     case "scalar":
       return scalarLoadExpr(key, cat.scalarType, field.isOptional);
     case "complex": {
-      if (isValueBackedComplex(cat.typeName, polymorphicTypeNames)) {
+      const lowering = resolveFieldLowering(
+        field,
+        loweringCapabilitiesForTarget("rust", polymorphicTypeNames),
+        { context: "variant-field" },
+      );
+      if (lowering.storage === "value-backed") {
         // Same load-time coerce expansion as `loadExpr` (see there): a value-backed
         // coerce union inside a variant must also canonicalize its bare-string
         // shorthand rather than store the raw string.
-        const expansion = valueBackedCoerceExpansion(cat.typeName, declsByName);
+        const expansion =
+          lowering.coerceExpansion === "canonical-value-expansion"
+            ? valueBackedCoerceExpansion(cat.typeName, declsByName)
+            : null;
         const mapped = expansion
-          ? `value.get(${rustStringLiteral(key)}).map(|v| if let Some(s) = v.as_str() { ${expansion} } else { v.clone() })`
-          : `value.get(${rustStringLiteral(key)}).cloned()`;
+          ? `value.get(${rustStringLiteral(key)}).filter(|v| !v.is_null()).map(|v| if let Some(s) = v.as_str() { ${expansion} } else { v.clone() })`
+          : `value.get(${rustStringLiteral(key)}).filter(|v| !v.is_null()).cloned()`;
         return field.isOptional
           ? mapped
           : `${mapped}.unwrap_or(serde_json::Value::Null)`;

@@ -23,6 +23,7 @@ import {
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
+  loweringCapabilitiesForTarget,
 } from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
@@ -1135,8 +1136,9 @@ function emitTypeScriptInterfaceConformanceTest(
   const modelTypes: string[] = [];
   for (const entry of sorted) {
     for (const type of Object.values(entry.params)) {
-      if (classifyCallableParam(type).bareModel && !modelTypes.includes(type)) {
-        modelTypes.push(type);
+      const shape = classifyCallableParam(type);
+      if (shape.isModel && !modelTypes.includes(shape.base)) {
+        modelTypes.push(shape.base);
       }
     }
   }
@@ -1186,6 +1188,10 @@ function emitTypeScriptInterfaceConformanceTest(
         lines.push(
           `    const ${paramName} = ${entry.params[paramName]}.load(payload[${key}] as Record<string, unknown>);`,
         );
+      } else if (shape.isModel && shape.optional) {
+        lines.push(
+          `    const ${paramName} = payload[${key}] == null ? undefined : ${shape.base}.load(payload[${key}] as Record<string, unknown>);`,
+        );
       } else {
         // Non-model params (scalars, `Record<unknown>`, optionals) are cast from
         // the parsed payload to the mapped TS type the seam signature expects.
@@ -1224,13 +1230,7 @@ function emitTypeScriptInterfaceConformanceTest(
       return;
     }
     lines.push(`    const result = await ${call};`);
-    if (typeof expected === "string") {
-      lines.push(`    expect(result).toEqual(${JSON.stringify(expected)});`);
-    } else {
-      // No scalar `expected` (the eligibility guard already rejects the richer
-      // shapes); reaching here means the route resolved and the seam ran.
-      lines.push("    expect(result).toBeDefined();");
-    }
+    lines.push(`    expect(result).toEqual(${JSON.stringify(expected)});`);
     lines.push("  });");
   });
   lines.push("});", "");
@@ -1244,12 +1244,20 @@ function emitTypeScriptInterfaceConformanceTest(
  * (e.g. `agent.template.format.kind`).
  */
 function tsDiscriminatorAccessor(path: string): string {
-  const [head, ...rest] = path.split(".");
+  if (
+    loweringCapabilitiesForTarget("typescript").typedDiscriminatorAccess !==
+    "typed-member"
+  ) {
+    throw new Error("TypeScript discriminator access must use a typed member.");
+  }
+  const segments = path.split(".");
+  const [head, ...rest] = segments;
   const camel = (segment: string): string =>
     segment.replace(/[_-]+([a-zA-Z0-9])/g, (_match, char: string) =>
       char.toUpperCase(),
     );
-  return [head, ...rest.map(camel)].join(".");
+  const access = [head, ...rest.map((segment) => camel(segment))].join("?.");
+  return `${access} ?? ""`;
 }
 
 /**

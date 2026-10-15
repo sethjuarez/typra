@@ -43,6 +43,7 @@ import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 import {
   isClosedPolymorphicDispatch,
+  loweringCapabilitiesForTarget,
   dispatchDefaultSlotBase,
 } from "../../ir/declarations.js";
 import {
@@ -411,7 +412,11 @@ export const generatePython = async (
       await emitPythonFile(
         context,
         `test_${toSnakeCase(dispatched.contract)}_conformance.py`,
-        emitPythonInterfaceConformanceTest(dispatched, ifaceVectors, importPath),
+        emitPythonInterfaceConformanceTest(
+          dispatched,
+          ifaceVectors,
+          importPath,
+        ),
         conformanceDir,
         emitTarget["test-dir"],
       );
@@ -901,7 +906,7 @@ function emitPythonInterfaceConformanceTest(
   importPath: string,
 ): string {
   const iface = toSnakeCase(dispatched.contract);
-  const resolverModule = `${importPath}._${iface}_resolver`;
+  const resolverModule = `${importPath.split(".")[0]}._${iface}_resolver`;
   const resolveFn = `resolve_${iface}`;
   const fixture = `${iface}_provider`;
   // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
@@ -914,8 +919,9 @@ function emitPythonInterfaceConformanceTest(
   const modelTypes: string[] = [];
   for (const entry of sorted) {
     for (const type of Object.values(entry.params)) {
-      if (classifyCallableParam(type).bareModel && !modelTypes.includes(type)) {
-        modelTypes.push(type);
+      const shape = classifyCallableParam(type);
+      if (shape.isModel && !modelTypes.includes(shape.base)) {
+        modelTypes.push(shape.base);
       }
     }
   }
@@ -977,6 +983,10 @@ function emitPythonInterfaceConformanceTest(
       const key = JSON.stringify(paramName);
       if (shape.bareModel) {
         lines.push(`    ${paramName} = ${entry.params[paramName]}.load(payload[${key}])`);
+      } else if (shape.isModel && shape.optional) {
+        lines.push(
+          `    ${paramName} = ${shape.base}.load(payload[${key}]) if payload.get(${key}) is not None else None`,
+        );
       } else {
         // Non-model params (scalars, dict, optionals) are already the right
         // native Python type after json.loads; pass them through. An optional
@@ -1253,8 +1263,19 @@ function uniquePythonName(base: string, seen: Map<string, number>): string {
  * `agent.template.format.kind`).
  */
 function pythonDiscriminatorAccessor(path: string): string {
+  if (
+    loweringCapabilitiesForTarget("python").typedDiscriminatorAccess !==
+    "typed-member"
+  ) {
+    throw new Error("Python discriminator access must use a typed member.");
+  }
   const [head, ...rest] = path.split(".");
-  return [head, ...rest.map((segment) => toSnakeCase(segment))].join(".");
+  const access = rest.reduce(
+    (container, segment) =>
+      `getattr(${container}, ${JSON.stringify(toSnakeCase(segment))}, None)`,
+    head,
+  );
+  return `(${access} or "")`;
 }
 
 function collectLoadSaveTypeNames(nodes: TypeNode[]): Set<string> {

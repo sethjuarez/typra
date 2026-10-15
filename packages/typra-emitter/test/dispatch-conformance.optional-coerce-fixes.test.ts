@@ -94,16 +94,16 @@ describe("optional/coerce-union conformance regressions (2.0.1/2.0.2 target fixe
     );
   });
 
-  it("Rust#1: an optional intermediate along the dispatch path is unwrapped before the union read", () => {
+  it("Rust#1: an optional intermediate along the dispatch path is safely unwrapped before the union read", () => {
     const renderer = readFileSync(
       findFile(path.join(output, "rust"), "renderer_conformance_test.rs"),
       "utf8",
     );
-    // `agent.template` is `Option<Template>` (a TYPED struct): it must be unwrapped
-    // with `.as_ref().expect(...)` before `.format` (else E0609 on `Option`).
+    // `agent.template` is `Option<Template>` (a TYPED struct): the closure uses
+    // `?` so absence falls back to the wildcard instead of panicking.
     assert.ok(
       renderer.includes(
-        'agent.template.as_ref().expect("template present").format',
+        "let __dispatch_0 = __dispatch_root.template.as_ref()?;",
       ),
       "optional `template?` must be unwrapped to reach the union field",
     );
@@ -124,7 +124,7 @@ describe("optional/coerce-union conformance regressions (2.0.1/2.0.2 target fixe
     // LOWERED type being `Option<T>`, not on schema optionality.
     assert.match(
       processor,
-      /agent\.model\s*\n?\s*\.get\("provider"\)/,
+      /let __dispatch_0 = &__dispatch_root\.model;[\s\S]*?__dispatch_0\.get\("model_provider"\)/,
       "value-backed optional `model?` must read the discriminator directly off the Value",
     );
     assert.doesNotMatch(
@@ -157,8 +157,8 @@ describe("optional/coerce-union conformance regressions (2.0.1/2.0.2 target fixe
     // FormatConfig coerces the bare dialect → `{ "kind": <value> }` (IS the discriminator).
     assert.match(
       template,
-      /format:\s*value\.get\("format"\)\.map\(\|v\|\s*if let Some\(s\) = v\.as_str\(\) \{ serde_json::json!\(\{ "kind": s \}\)/,
-      "`format: \"mustache\"` must expand to `{ \"kind\": \"mustache\" }` on load",
+      /format:\s*value\.get\("format"\)\.map\(\|v\|\s*if let Some\(s\) = v\.as_str\(\) \{ serde_json::json!\(\{ "format_kind": s \}\)/,
+      "`format: \"mustache\"` must expand to `{ \"format_kind\": \"mustache\" }` on load",
     );
   });
 
@@ -175,7 +175,7 @@ describe("optional/coerce-union conformance regressions (2.0.1/2.0.2 target fixe
       "the coerce-union field must be type-asserted to the Save interface",
     );
     assert.ok(
-      src.includes('.Save(') && src.includes('["kind"].(string)'),
+      src.includes('.Save(') && src.includes('["format_kind"].(string)'),
       "the discriminator must be read off the Save map by its wire key",
     );
     assert.doesNotMatch(

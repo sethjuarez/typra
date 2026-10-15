@@ -284,8 +284,13 @@ export interface CallableParamShape {
  */
 export function classifyCallableParam(raw: string): CallableParamShape {
   let base = raw.trim();
-  const optional = base.endsWith("?");
-  if (optional) base = base.slice(0, -1);
+  const nullableUnion = /\s*\|\s*(?:null|undefined)$/.exec(base);
+  const optional = base.endsWith("?") || nullableUnion !== null;
+  if (base.endsWith("?")) {
+    base = base.slice(0, -1);
+  } else if (nullableUnion) {
+    base = base.slice(0, nullableUnion.index).trim();
+  }
   const array = base.endsWith("[]");
   if (array) base = base.slice(0, -2);
   const isPlain =

@@ -71,37 +71,39 @@ const CASES: Array<{
     target: "python",
     file: "test_processor_conformance.py",
     unknownDecode: 'response = payload["response"]',
-    providerRead: "provider = agent.model.provider",
+    providerRead:
+      'provider = (getattr(getattr(agent, "model", None), "provider", None) or "")',
   },
   {
     target: "typescript",
     file: "processor.conformance.test.ts",
     unknownDecode: 'const response = payload["response"] as unknown;',
-    providerRead: "const provider = agent.model.provider;",
+    providerRead: 'const provider = agent?.model?.provider ?? "";',
   },
   {
     target: "csharp",
     file: "ProcessorConformanceTests.cs",
     unknownDecode: "JsonSerializer.Deserialize<object>(",
-    providerRead: "agent.Model.Provider",
+    providerRead: 'agent?.Model?.Provider ?? ""',
   },
   {
     target: "java",
     file: "ProcessorConformanceTests.java",
     unknownDecode: 'Object response = (Object) input.get("response");',
-    providerRead: "String provider = agent.model.provider;",
+    providerRead:
+      "String provider = (agent == null || agent.model == null ? null : agent.model.provider);",
   },
   {
     target: "go",
     file: "processor_conformance_test.go",
     unknownDecode: "var response interface{}",
-    providerRead: "agent.Model.(interface {",
+    providerRead: "any(agent.Model).(interface {",
   },
   {
     target: "swift",
     file: "ProcessorConformanceTests.swift",
     unknownDecode: 'let response = input["response"] as! Any',
-    providerRead: '["provider"] as! String',
+    providerRead: '["provider"] as? String) ?? ""',
   },
 ];
 
@@ -273,7 +275,7 @@ describe("typed @vector conformance over a coerce-union discriminator with a bar
     );
     assert.match(
       swift,
-      /let dispatchKey = try \(agent\.model\.save\(\)\)\["provider"\] as! String\n\s*guard let impl = ProcessorResolver\.resolve\(provider: dispatchKey, registry: self\.provider\(\)\) else \{/,
+      /let dispatchKey = \(\(try agent\.model\.save\(\)\)\["provider"\] as\? String\) \?\? ""\n\s*guard let impl = ProcessorResolver\.resolve\(provider: dispatchKey, registry: self\.provider\(\)\) else \{/,
       `swift processor conformance must route the fixed dispatchKey local through provider()\n--- emitted ---\n${swift}`,
     );
   });

@@ -25,6 +25,9 @@ import { rustStringLiteral, rustStringLiteralBody } from "./identifiers.js";
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
+  discriminatorWireKey,
+  loweringCapabilitiesForTarget,
+  resolveFieldLowering,
   type TypeDecl,
 } from "../../ir/declarations.js";
 import {
@@ -2554,7 +2557,8 @@ function emitRustInterfaceConformanceTest(
   const typeNames = new Set<string>([seam]);
   for (const entry of sorted) {
     for (const typeName of Object.values(entry.params)) {
-      if (classifyCallableParam(typeName).bareModel) typeNames.add(typeName);
+      const shape = classifyCallableParam(typeName);
+      if (shape.base && declsByName.has(shape.base)) typeNames.add(shape.base);
     }
   }
   const importedTypes = [...typeNames].sort();
@@ -2591,11 +2595,16 @@ function emitRustInterfaceConformanceTest(
     assertTypedDispatchSupported(entry);
     const paramNames = Object.keys(entry.params);
     const method = toSnakeCase(entry.operation);
+    const rootShape = classifyCallableParam(
+      entry.params[entry.dispatch!.path.split(".")[0]],
+    );
     const accessor = rustDiscriminatorAccessor(
       entry.dispatch!.path,
       declsByName,
-      entry.params[entry.dispatch!.path.split(".")[0]],
+      rootShape.base,
+      rootShape.optional,
       polymorphicTypeNames,
+      discriminatorWireKey(entry.dispatch!.decl!),
     );
     const label = entry.vector.name ?? entry.operation;
     const expected = entry.vector.expected;
@@ -2616,7 +2625,19 @@ function emitRustInterfaceConformanceTest(
       const shape = classifyCallableParam(paramType);
       const local = rustFieldName(paramName);
       const paramJson = JSON.stringify(input[paramName] ?? {}, null, 2);
-      if (shape.bareModel) {
+      if (shape.optional && shape.base && declsByName.has(shape.base)) {
+        if (input[paramName] === undefined || input[paramName] === null) {
+          lines.push(`    let ${local}: Option<${shape.base}> = None;`);
+        } else {
+          lines.push(`    let ${local} = Some(${shape.base}::from_json(`);
+          lines.push(`        r####"`);
+          lines.push(paramJson);
+          lines.push(`"####,`);
+          lines.push("        &ctx,");
+          lines.push("    )");
+          lines.push(`    .expect(${JSON.stringify(`${paramName} parses`)}));`);
+        }
+      } else if (shape.bareModel) {
         lines.push(`    let ${local} = ${paramType}::from_json(`);
         lines.push(`        r####"`);
         lines.push(paramJson);
@@ -2638,10 +2659,10 @@ function emitRustInterfaceConformanceTest(
         lines.push(`    .expect(${JSON.stringify(`${paramName} parses`)});`);
       }
     }
-    lines.push(`    let kind = ${accessor};`);
+    lines.push(`    let kind: String = ${accessor};`);
     lines.push(`    let provider = vector_adapters::${providerFactory}();`);
     lines.push(
-      `    let seam_impl = ${resolverModule}::resolve(kind, &provider)`,
+      `    let seam_impl = ${resolverModule}::resolve(&kind, &provider)`,
     );
     lines.push(
       `        .unwrap_or_else(|| panic!(${JSON.stringify(
@@ -2728,38 +2749,67 @@ function rustDiscriminatorAccessor(
   path: string,
   declsByName: Map<string, TypeDecl>,
   rootTypeName: string | undefined,
+  rootOptional: boolean,
   polymorphicTypeNames: Set<string>,
+  discriminatorKey: string,
 ): string {
   const segments = path.split(".");
-  const rawField = segments[segments.length - 1];
   const containerSegments = segments.slice(1, -1);
   let currentType = rootTypeName ? declsByName.get(rootTypeName) : undefined;
-  const parts = [rustFieldName(segments[0])];
-  for (const segment of containerSegments) {
-    const field = currentType?.fields.find((f) => f.name === segment);
+  const lines = [
+    "(|| -> Option<String> {",
+    rootOptional
+      ? `        let __dispatch_root = ${rustFieldName(segments[0])}.as_ref()?;`
+      : `        let __dispatch_root = &${rustFieldName(segments[0])};`,
+  ];
+  let currentRef = "__dispatch_root";
+  let finalContainerIsValueBacked =
+    !!rootTypeName && polymorphicTypeNames.has(rootTypeName);
+  for (const [index, segment] of containerSegments.entries()) {
+    const field = findFieldInHierarchy(currentType, segment, declsByName);
     const access = rustFieldName(segment);
-    // A value-backed complex field (polymorphic/coerce union or `unknown`) lowers
-    // to a bare `serde_json::Value`, so its optionality is erased — read it
-    // directly. Only a genuinely `Option<T>`-lowered field is unwrapped.
-    const fieldTypeName =
-      field?.category.kind === "complex" ||
-      field?.category.kind === "collection_complex"
-        ? field.category.typeName
-        : undefined;
-    const isValueBacked =
-      fieldTypeName !== undefined &&
-      (polymorphicTypeNames.has(fieldTypeName) || fieldTypeName === "unknown");
-    parts.push(
-      field?.isOptional && !isValueBacked
-        ? `${access}.as_ref().expect(${JSON.stringify(`${segment} present`)})`
-        : access,
+    const lowering = field
+      ? resolveFieldLowering(
+          field,
+          loweringCapabilitiesForTarget("rust", polymorphicTypeNames),
+        )
+      : undefined;
+    const nextRef = `__dispatch_${index}`;
+    lines.push(
+      field?.isOptional && lowering?.optionalWrapper === "preserved"
+        ? `        let ${nextRef} = ${currentRef}.${access}.as_ref()?;`
+        : `        let ${nextRef} = &${currentRef}.${access};`,
     );
+    currentRef = nextRef;
+    finalContainerIsValueBacked = lowering?.storage === "value-backed";
     currentType = field ? declsByName.get(field.typeName.name) : undefined;
   }
-  const container = parts.join(".");
-  return `${container}\n        .get(${JSON.stringify(
-    rawField,
-  )})\n        .and_then(|v| v.as_str())\n        .expect("discriminator present")`;
+  if (containerSegments.length === 0 && finalContainerIsValueBacked) {
+    lines.push(
+      "        let __dispatch_value = __dispatch_root.to_value(&Default::default());",
+      `        __dispatch_value.get(${JSON.stringify(discriminatorKey)}).and_then(|value| value.as_str()).map(str::to_owned)`,
+    );
+  } else {
+    lines.push(
+      `        ${currentRef}.get(${JSON.stringify(discriminatorKey)}).and_then(|value| value.as_str()).map(str::to_owned)`,
+    );
+  }
+  lines.push("    })().unwrap_or_default()");
+  return lines.join("\n");
+}
+
+function findFieldInHierarchy(
+  type: TypeDecl | undefined,
+  name: string,
+  declsByName: Map<string, TypeDecl>,
+): TypeDecl["fields"][number] | undefined {
+  let current = type;
+  while (current) {
+    const field = current.fields.find((candidate) => candidate.name === name);
+    if (field) return field;
+    current = current.base ? declsByName.get(current.base.name) : undefined;
+  }
+  return undefined;
 }
 
 /**

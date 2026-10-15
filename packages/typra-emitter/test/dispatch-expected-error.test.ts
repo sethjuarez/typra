@@ -100,7 +100,7 @@ const CASES: Array<{
     mustInclude: [
       "var impl = RendererResolver.Resolve(kind, Provider());",
       "Assert.NotNull(impl);",
-      "await impl!.RenderAsync(agent, inputs);",
+      "await impl!.RenderAsync(agent!, inputs!);",
       "catch (Exception error)",
       "Assert.NotNull(caught);",
       `Assert.Contains(${JSON.stringify(MESSAGE)}, caught!.Message);`,
@@ -128,7 +128,7 @@ const CASES: Array<{
     start: /fn \w*mustache_unbound\w*\(\)/,
     end: /\n\}\n(\n|$)/,
     mustInclude: [
-      "let seam_impl = renderer_resolver::resolve(kind, &provider)",
+      "let seam_impl = renderer_resolver::resolve(&kind, &provider)",
       "let result = seam_impl.render(&agent, &inputs).await;",
       "assert!(result.is_err()",
       `assert!(message.contains(${JSON.stringify(MESSAGE)})`,

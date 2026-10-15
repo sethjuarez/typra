@@ -237,6 +237,151 @@ export function fieldWireKey(field: {
   return field.serializedName ?? field.name;
 }
 
+// ============================================================================
+// Field lowering descriptor — normalized target semantic decisions
+// ============================================================================
+
+export type LoweringTarget =
+  | "typescript"
+  | "python"
+  | "go"
+  | "csharp"
+  | "java"
+  | "rust"
+  | "swift";
+
+export type FieldStorageLowering = "typed-struct" | "value-backed";
+export type OptionalWrapperLowering = "preserved" | "absorbed";
+export type DiscriminatorAccessLowering =
+  | "typed-member"
+  | "serialized-wire-key";
+export type CoerceExpansionLowering =
+  | "typed-loader"
+  | "canonical-value-expansion";
+
+/**
+ * Target capabilities that affect a field's semantic lowering. Syntax stays in
+ * the target emitter; these flags are the single shared source of truth for
+ * whether a field is represented as a typed model or a generic wire value.
+ */
+export interface LoweringTargetCapabilities {
+  target: LoweringTarget;
+  valueBackedComplexTypes: ReadonlySet<string>;
+  valueBackedCollectionElementTypes: ReadonlySet<string>;
+  valueBackedUnknown: boolean;
+  valueBackingAbsorbsOptional: boolean;
+  typedDiscriminatorAccess: DiscriminatorAccessLowering;
+  valueBackedDiscriminatorAccess: DiscriminatorAccessLowering;
+  valueBackedCoerceExpansion: CoerceExpansionLowering;
+}
+
+/**
+ * Complete normalized lowering decision for one field. `wireKey` is canonical
+ * and already includes `@encodedName`; target drivers must not reinterpret it.
+ */
+export interface FieldLoweringDescriptor {
+  storage: FieldStorageLowering;
+  /**
+   * Collections remain typed containers, but complex elements may use the
+   * target's generic value representation. Null for non-complex collections.
+   */
+  collectionElementStorage: FieldStorageLowering | null;
+  optionalWrapper: OptionalWrapperLowering;
+  discriminatorAccess: DiscriminatorAccessLowering;
+  coerceExpansion: CoerceExpansionLowering;
+  wireKey: string;
+}
+
+/**
+ * Build the capability set for a supported runtime. Go and Rust use generic
+ * value representations for polymorphic/coerce-union fields; Rust additionally
+ * uses `Value::Null` as the absence sentinel and therefore absorbs the schema's
+ * optional wrapper. Swift keeps a typed enum but reads its discriminator from
+ * the enum's canonical serialized representation.
+ */
+export function loweringCapabilitiesForTarget(
+  target: LoweringTarget,
+  polymorphicTypeNames: ReadonlySet<string> = new Set(),
+): LoweringTargetCapabilities {
+  const valueBacked = target === "go" || target === "rust";
+  return {
+    target,
+    valueBackedComplexTypes: valueBacked
+      ? polymorphicTypeNames
+      : new Set<string>(),
+    // Go stores polymorphic collection elements as wire values. Rust's
+    // collection helpers hydrate generated model structs, even though scalar
+    // polymorphic fields remain value-backed.
+    valueBackedCollectionElementTypes:
+      target === "go" ? polymorphicTypeNames : new Set<string>(),
+    valueBackedUnknown: valueBacked,
+    valueBackingAbsorbsOptional: target === "rust",
+    typedDiscriminatorAccess:
+      target === "swift" ? "serialized-wire-key" : "typed-member",
+    valueBackedDiscriminatorAccess: "serialized-wire-key",
+    valueBackedCoerceExpansion:
+      target === "rust" ? "canonical-value-expansion" : "typed-loader",
+  };
+}
+
+/** Resolve a field's target lowering once from declaration IR + capabilities. */
+export function resolveFieldLowering(
+  field: Pick<
+    FieldDecl,
+    "name" | "serializedName" | "category" | "isOptional"
+  >,
+  capabilities: LoweringTargetCapabilities,
+  options: { context?: "struct-field" | "variant-field" } = {},
+): FieldLoweringDescriptor {
+  const complexType =
+    field.category.kind === "complex" ? field.category.typeName : undefined;
+  const collectionComplexType =
+    field.category.kind === "collection_complex"
+      ? field.category.typeName
+      : undefined;
+  const valueBacked =
+    complexType !== undefined &&
+    isValueBackedTypeName(complexType, capabilities);
+  return {
+    storage: valueBacked ? "value-backed" : "typed-struct",
+    collectionElementStorage:
+      collectionComplexType === undefined
+        ? null
+        : capabilities.valueBackedCollectionElementTypes.has(
+              collectionComplexType,
+            ) ||
+            (collectionComplexType === "unknown" &&
+              capabilities.valueBackedUnknown)
+          ? "value-backed"
+          : "typed-struct",
+    optionalWrapper:
+      valueBacked &&
+      field.isOptional &&
+      capabilities.valueBackingAbsorbsOptional &&
+      options.context !== "variant-field"
+        ? "absorbed"
+        : "preserved",
+    discriminatorAccess: valueBacked
+      ? capabilities.valueBackedDiscriminatorAccess
+      : capabilities.typedDiscriminatorAccess,
+    coerceExpansion: valueBacked
+      ? capabilities.valueBackedCoerceExpansion
+      : "typed-loader",
+    wireKey: fieldWireKey(field),
+  };
+}
+
+/** Shared primitive for target emitters that render storage syntax directly. */
+export function isValueBackedTypeName(
+  typeName: string,
+  capabilities: LoweringTargetCapabilities,
+): boolean {
+  return (
+    capabilities.valueBackedComplexTypes.has(typeName) ||
+    (typeName === "unknown" && capabilities.valueBackedUnknown)
+  );
+}
+
 /** Canonical dict key of a coercion assignment or `@knownAs` wire mapping. */
 export function assignmentWireKey(assignment: {
   fieldName: string;

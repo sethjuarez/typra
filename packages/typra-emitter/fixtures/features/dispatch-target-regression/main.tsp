@@ -3,7 +3,7 @@ import "@typra/emitter";
 namespace Typra.Fixtures.Features.DispatchTargetRegression;
 
 // ===========================================================================
-// Language-target regression seam for four emitter bugs that only surface in
+// Language-target regression seam for emitter bugs that only surface in
 // GENERATED conformance-test output (issue: 2.0.0 target fixes). It is the
 // `dispatch-vector-coerce` shape with the two twists that activate the last two
 // bugs — OPTIONAL `template?`/`model?` on the Agent, and a vector whose input
@@ -16,9 +16,8 @@ namespace Typra.Fixtures.Features.DispatchTargetRegression;
 //   Java#2 — a `Record<unknown>` op param maps to `Map<String, Object>`; the
 //            per-interface conformance class imports nothing, so the type must
 //            be FQN-qualified to `java.util.Map<String, Object>`.
-//   Swift#3 — `agent.template?`/`agent.model?` are OPTIONAL, so the discriminator
-//            accessor navigating to the union's `.save()` must force-unwrap:
-//            `agent.template!.format` / `agent.model!`.
+//   Swift#3 — `agent.template?`/`agent.model?` are OPTIONAL, so discriminator
+//            access must use optional chaining and fall back when absent.
 //   Rust#4 — the coerce-union bare-string shorthand lands the discriminator via a
 //            runtime `String`; the `*Kind` enum has no `From<String>`, so the
 //            coercion must route through the `CustomFormat { kind_name, raw }`
@@ -37,6 +36,7 @@ union FormatKind {
 @doc("Polymorphic base over template dialects. `kind` is the @dispatch discriminator.")
 @discriminator("kind")
 model FormatConfig {
+  @encodedName("application/json", "format_kind")
   kind: FormatKind = "*";
 }
 
@@ -72,7 +72,8 @@ union ModelProvider {
 @doc("Polymorphic base over model providers. `provider` is the @dispatch discriminator; the string coercion targets `id`, NOT provider.")
 @discriminator("provider")
 model Model {
-  provider?: ModelProvider;
+  @encodedName("application/json", "model_provider")
+  provider: ModelProvider = "*";
 
   @doc("Opaque model id (e.g. deployment or model name).")
   id: string = "";
@@ -111,7 +112,7 @@ model Agent {
   @doc("Human-facing agent name.")
   name: string;
 
-  @doc("The template; `template.format.kind` is the render dispatch key. OPTIONAL → Swift `agent.template!`.")
+  @doc("The template; `template.format.kind` is the render dispatch key. OPTIONAL → safe chained access.")
   // The @sample carries the optional `template` into the per-model conformance
   // payload (synthesis otherwise omits optionals), and pins `format` as a bare
   // string — the coerce-union shorthand. That drives the Go per-model conformance
@@ -120,8 +121,14 @@ model Agent {
   @sample(#{ template: #{ content: "Hello {{name}}", format: "mustache" } })
   template?: Template;
 
-  @doc("The model; `model.provider` is the process dispatch key. OPTIONAL → Swift `agent.model!`.")
+  @doc("The model; `model.provider` is the process dispatch key. OPTIONAL → safe chained access.")
   `model`?: Model | string;
+
+  @doc("Optional typed collection alongside value-backed fields.")
+  templates?: Template[];
+
+  @doc("Optional polymorphic collection; collection lowering must remain distinct from scalar value backing.")
+  models?: Model[];
 }
 
 // --- Seam 1: Renderer — coerce-union discriminator + generic param -----------
@@ -135,13 +142,15 @@ interface Renderer {
     input: #{
       agent: #{
         name: "greeter",
-        template: #{ content: "Hello {{name}}", format: #{ kind: "mustache" } },
-        `model`: #{ provider: "openai", id: "gpt-4" },
+        template: #{ content: "Hello {{name}}", format: #{ format_kind: "mustache" } },
+        `model`: #{ model_provider: "openai", id: "gpt-4" },
+        templates: #[#{ content: "Hello {{name}}", format: "mustache" }],
+        models: #[#{ model_provider: "openai", id: "gpt-4" }, "gpt-4-mini"],
       },
       template: "Hello {{name}}",
       inputs: #{ name: "world" },
     },
-    expected: "Hello world",
+    expected: "renderer:mustache",
   })
   @vector(#{
     name: "jinja2-bare-string-format",
@@ -155,7 +164,7 @@ interface Renderer {
       template: "Hello {{ name }}",
       inputs: #{ name: "world" },
     },
-    expected: "Hello world",
+    expected: "renderer:jinja2",
   })
   @vector(#{
     name: "assistant_with_code_block",
@@ -163,13 +172,27 @@ interface Renderer {
     input: #{
       agent: #{
         name: "greeter",
-        template: #{ content: "x", format: #{ kind: "jinja2" } },
-        `model`: #{ provider: "openai", id: "gpt-4" },
+        template: #{ content: "x", format: #{ format_kind: "jinja2" } },
+        `model`: #{ model_provider: "openai", id: "gpt-4" },
       },
       template: "assistant:\nHere is code:\n```python\nprint('hello')\n```\n\nuser:\nThanks",
       inputs: #{ name: "world" },
     },
-    expected: "ok",
+    expected: "renderer:jinja2",
+  })
+  @vector(#{
+    name: "unknown-format-fallback",
+    stage: "callable",
+    input: #{
+      agent: #{
+        name: "greeter",
+        template: #{ content: "x", format: #{ format_kind: "liquid" } },
+        `model`: #{ model_provider: "openai", id: "gpt-4" },
+      },
+      template: "x",
+      inputs: #{},
+    },
+    expected: "renderer:custom",
   })
   @doc("Render the agent's template against the supplied inputs; `inputs` is a generic map.")
   render(agent: Agent, template: string, inputs: Record<unknown>): string;
@@ -186,15 +209,65 @@ interface Processor {
     input: #{
       agent: #{
         name: "greeter",
-        template: #{ content: "x", format: #{ kind: "mustache" } },
-        `model`: #{ provider: "openai", id: "gpt-4" },
+        template: #{ content: "x", format: #{ format_kind: "mustache" } },
+        `model`: #{ model_provider: "openai", id: "gpt-4" },
       },
       response: #{ text: "hi" },
     },
-    expected: #{ text: "hi" },
+    expected: #{ route: "processor:openai" },
+  })
+  @vector(#{
+    name: "custom-bare-model",
+    stage: "callable",
+    input: #{
+      agent: #{
+        name: "greeter",
+        template: #{ content: "x", format: "mustache" },
+        `model`: "gpt-4",
+      },
+      response: #{ text: "custom" },
+    },
+    expected: #{ route: "processor:custom" },
   })
   @doc("Process a raw provider response (bare `unknown`).")
   process(agent: Agent, response: unknown): unknown;
+}
+
+// Direct polymorphic roots exercise Rust's temporary-lifetime boundary.
+@dispatch(FormatConfig.kind)
+interface DirectRenderer {
+  @vector(#{
+    name: "direct-mustache",
+    stage: "callable",
+    input: #{ format: #{ format_kind: "mustache" }, template: "hello" },
+    expected: "direct:mustache",
+  })
+  @vector(#{
+    name: "direct-unknown-fallback",
+    stage: "callable",
+    input: #{ format: #{ format_kind: "liquid" }, template: "hello" },
+    expected: "direct:custom",
+  })
+  render(format: FormatConfig, template: string): string;
+}
+
+// An optional operation head plus a nested path must safely fall back instead
+// of dereferencing Option<Agent> in Rust or null in Java.
+@dispatch(FormatConfig.kind)
+interface OptionalRenderer {
+  @vector(#{
+    name: "optional-agent",
+    stage: "callable",
+    input: #{
+      agent: #{
+        name: "greeter",
+        template: #{ content: "hello", format: #{ format_kind: "mustache" } },
+      },
+      template: "hello",
+    },
+    expected: "optional:mustache",
+  })
+  render(agent?: Agent, template: string): string;
 }
 
 @doc("Fixture root aggregating the dispatched-seam graph.")
@@ -202,4 +275,7 @@ interface Processor {
 model Root {
   @doc("The agent whose optional template + model carry the dispatch discriminators behind coerced unions.")
   agent: Agent;
+
+  @doc("Required value-backed coerce union outside the dispatched path; guards required-field lowering without making @dispatch ambiguous.")
+  requiredModel: Model | string;
 }

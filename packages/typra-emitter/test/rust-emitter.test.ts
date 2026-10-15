@@ -315,8 +315,13 @@ function emitValueBackedVariantOwner(): string {
   );
   const base = makeType(
     "Prop",
-    [makeProp("kind", "string", { isScalar: true })],
-    { discriminator: "kind", childTypes: [arrayVariant] },
+    [
+      makeProp("kind", "string", {
+        isScalar: true,
+        allowedValues: ["array"],
+      }),
+    ],
+    { discriminator: "kind", childTypes: [arrayVariant], isAbstract: true },
   );
 
   const registry = TypeRegistry.fromTypeGraph([base, arrayVariant]);
@@ -329,6 +334,13 @@ function emitValueBackedVariantOwner(): string {
 }
 
 describe("rust emitter — optional serde_json::Value fields", () => {
+  it("defaults an optional polymorphic variant field to None", () => {
+    const code = emitValueBackedVariantOwner();
+
+    assert.match(code, /fallback_items: None/);
+    assert.doesNotMatch(code, /fallback_items: serde_json::Value::Null/);
+  });
+
   it("declares an optional polymorphic variant field as Option<serde_json::Value>", () => {
     const code = emitValueBackedVariantOwner();
 
@@ -340,7 +352,9 @@ describe("rust emitter — optional serde_json::Value fields", () => {
       "an optional polymorphic variant field must be declared Option<serde_json::Value>",
     );
     assert.ok(
-      /fallback_items: value\.get\("fallbackItems"\)\.cloned\(\),/.test(code),
+      /fallback_items: value\.get\("fallbackItems"\)\.filter\(\|v\| !v\.is_null\(\)\)\.cloned\(\),/.test(
+        code,
+      ),
       "an optional polymorphic variant field must load without an unwrap_or(Null) fallback",
     );
     assert.ok(
@@ -364,7 +378,7 @@ describe("rust emitter — optional serde_json::Value fields", () => {
       "a required polymorphic variant field must not be wrapped in Option",
     );
     assert.ok(
-      /items: value\.get\("items"\)\.cloned\(\)\.unwrap_or\(serde_json::Value::Null\),/.test(
+      /items: value\.get\("items"\)\.filter\(\|v\| !v\.is_null\(\)\)\.cloned\(\)\.unwrap_or\(serde_json::Value::Null\),/.test(
         code,
       ),
       "a required polymorphic variant field must keep its Null sentinel on load",

@@ -49,6 +49,9 @@ import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
 import {
   isClosedPolymorphicDispatch,
   dispatchDefaultSlotBase,
+  discriminatorWireKey,
+  loweringCapabilitiesForTarget,
+  resolveFieldLowering,
   type TypeDecl,
 } from "../../ir/declarations.js";
 import {
@@ -1090,11 +1093,15 @@ function emitSwiftInterfaceConformanceTest(
     assertTypedDispatchSupported(entry);
     const method = swiftFunctionName(entry.operation);
     const paramNames = Object.keys(entry.params);
+    const rootShape = classifyCallableParam(
+      entry.params[entry.dispatch!.path.split(".")[0]],
+    );
     const accessor = swiftDiscriminatorAccessor(
       entry.dispatch!.path,
-      rawField,
+      discriminatorWireKey(entry.dispatch!.decl!),
       declsByName,
-      entry.params[entry.dispatch!.path.split(".")[0]],
+      rootShape.base,
+      rootShape.optional,
     );
     const inputLiteral = swiftPayloadLiteral(
       JSON.stringify(entry.vector.input ?? {}),
@@ -1118,6 +1125,10 @@ function emitSwiftInterfaceConformanceTest(
       const key = swiftStringLiteral(paramName);
       if (shape.bareModel) {
         lines.push(`    let ${local} = try ${entry.params[paramName]}.load(input[${key}]!)`);
+      } else if (shape.isModel && shape.optional) {
+        lines.push(
+          `    let ${local} = input[${key}] == nil ? nil : try ${shape.base}.load(input[${key}]!)`,
+        );
       } else if (shape.optional) {
         // Optional non-model param: tolerate an absent key, casting to the mapped
         // (non-optional) Swift element type when present.
@@ -1427,19 +1438,49 @@ function swiftDiscriminatorAccessor(
   rawField: string,
   declsByName: Map<string, TypeDecl>,
   rootTypeName: string | undefined,
+  rootOptional: boolean,
 ): string {
   const segments = path.split(".");
   const head = swiftPropertyName(segments[0]);
   const containerSegments = segments.slice(1, -1);
+  const capabilities = loweringCapabilitiesForTarget("swift");
   let currentType = rootTypeName ? declsByName.get(rootTypeName) : undefined;
-  const parts = [head];
+  const parts = [`${head}${rootOptional ? "?" : ""}`];
+  let hasOptionalContainer = rootOptional;
   for (const segment of containerSegments) {
-    const field = currentType?.fields.find((f) => f.name === segment);
-    parts.push(`${swiftPropertyName(segment)}${field?.isOptional ? "!" : ""}`);
+    const field = findSwiftFieldInHierarchy(
+      currentType,
+      segment,
+      declsByName,
+    );
+    const lowering = field
+      ? resolveFieldLowering(field, capabilities)
+      : undefined;
+    const optional =
+      field?.isOptional && lowering?.optionalWrapper === "preserved";
+    parts.push(`${swiftPropertyName(segment)}${optional ? "?" : ""}`);
+    hasOptionalContainer ||= !!optional;
     currentType = field ? declsByName.get(field.typeName.name) : undefined;
   }
   const container = parts.join(".");
-  return `try (${container}.save())[${swiftStringLiteral(rawField)}] as! String`;
+  if (capabilities.typedDiscriminatorAccess !== "serialized-wire-key") {
+    throw new Error("Swift discriminator access must use its serialized wire key.");
+  }
+  return `((try ${container}.save())${hasOptionalContainer ? "?" : ""}[${swiftStringLiteral(rawField)}] as? String) ?? ""`;
+}
+
+function findSwiftFieldInHierarchy(
+  type: TypeDecl | undefined,
+  name: string,
+  declsByName: Map<string, TypeDecl>,
+): TypeDecl["fields"][number] | undefined {
+  let current = type;
+  while (current) {
+    const field = current.fields.find((candidate) => candidate.name === name);
+    if (field) return field;
+    current = current.base ? declsByName.get(current.base.name) : undefined;
+  }
+  return undefined;
 }
 
 /**

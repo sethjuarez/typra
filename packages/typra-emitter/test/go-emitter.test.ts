@@ -398,13 +398,16 @@ function dispatchType(defaultVariant: PolymorphicDefault): TypeDecl {
 }
 
 describe("Go emitter build safety (#305)", () => {
-  it("omits fmt for a dispatch whose declared `*` carrier absorbs every discriminator", () => {
+  it("keeps fmt so a declared `*` carrier can reject non-coercible scalar inputs", () => {
     const out = emitLoader(
       dispatchType({ typeName: { namespace: "Test", name: "CustomModel" }, isSelfReference: false }),
     );
     assert.ok(out.includes("return LoadCustomModel(data, ctx)"), out);
-    assert.ok(!out.includes("fmt."), "a declared carrier never errors");
-    assert.ok(!out.includes('"fmt"'), "an unused fmt import does not compile");
+    assert.ok(
+      out.includes("expected object or supported scalar shorthand"),
+      "a non-coercible scalar must hard-error instead of producing a zero value",
+    );
+    assert.ok(out.includes('"fmt"'));
   });
 
   it("keeps fmt when the dispatch rejects absent or blank discriminators", () => {

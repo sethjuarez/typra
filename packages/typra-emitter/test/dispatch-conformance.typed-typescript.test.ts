@@ -257,7 +257,7 @@ describe("emitted typed @vector conformance is runnable (TypeScript)", () => {
       );
       assert.match(
         conformanceSrc,
-        /const kind = agent\.template\.format\.kind;/,
+        /const kind = agent\?\.template\?\.format\?\.kind \?\? "";/,
         "emitted conformance must read the SAME typed discriminator the shape reads",
       );
       assert.match(

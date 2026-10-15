@@ -27,8 +27,8 @@ import {
 export function runSwiftTests(
   targetDir = "swift",
   label = "Swift",
+  sourceDir = path.join(generatedRoot, targetDir),
 ) {
-  const sourceDir = path.join(generatedRoot, targetDir);
   const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".swift"));
   if (sourceFiles.length === 0) {
     fail(`No generated ${label} files found to test.`);

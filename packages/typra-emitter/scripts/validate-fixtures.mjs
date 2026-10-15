@@ -55,7 +55,7 @@ import {
   runGoVectorConformanceCompile,
 } from "./fixtures/targets/go.mjs";
 import {
-  runRustDispatchRegressionCompile,
+  runDispatchRegressionCrossTarget,
   runRustExecutableConformance,
   runRustSerializableClosureCompile,
   runRustSensitiveNeverLoadedCompile,
@@ -136,7 +136,7 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "go.vector-bridge-compile",
   "go.vector-conformance-compile",
   "rust.generated-tests",
-  "rust.dispatch-regression-compile",
+  "dispatch-regression.cross-target",
   "rust.vector-conformance-compile",
   "rust.serializable-closure-compile",
   "rust.sensitive-never-loaded-compile",
@@ -2839,8 +2839,8 @@ function runDeclaredValidationStages() {
       ],
       ["rust.generated-tests", () => runRustTests()],
       [
-        "rust.dispatch-regression-compile",
-        (context) => runRustDispatchRegressionCompile(context),
+        "dispatch-regression.cross-target",
+        (context) => runDispatchRegressionCrossTarget(context),
       ],
       [
         "rust.vector-conformance-compile",
@@ -2901,7 +2901,7 @@ function runDeclaredValidationStages() {
     allowedSkips: {
       ...idempotencyAllowedSkips(),
       "typescript.runtime-neutrality": "no TypeScript targets generated",
-      "rust.dispatch-regression-compile": "cargo is not available",
+      "dispatch-regression.cross-target": "cargo is not available",
       "rust.vector-conformance-compile": "cargo is not available",
       "rust.serializable-closure-compile": "cargo is not available",
       "rust.sensitive-never-loaded-compile": "cargo is not available",
