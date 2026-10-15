@@ -425,6 +425,24 @@ delegated portability, an explicit `provider`, or `$file` / `$env` / `$json`
 input references) are still rejected at emit time on the typed `@dispatch`
 rail.
 
+Open dispatched seams have one additional completeness rule. When the
+discriminator model declares a `*` subtype, every generated provider requires a
+single `wildcard` implementation. Unknown third-party discriminator values route
+to that slot without rewriting the discriminator to `custom` or discarding the
+payload. Known values still route to their named typed slots. Typra guarantees
+the deterministic selection and lossless input carrier; the consumer supplies
+the wildcard business behavior once per runtime provider.
+
+:::caution[Breaking provider API migration]
+Generated open-dispatch providers no longer expose an optional `custom` slot.
+TypeScript, Python, Go, C#, Java, Rust, and Swift consumers must rename that
+attachment to `wildcard` and make it required/non-null according to the target's
+generated provider type, constructor, interface, trait, or protocol. Closed
+providers are unchanged. Open dispatches without a schema-declared `*` child
+retain their legacy unimplemented/skip behavior and do not gain a `wildcard`
+member.
+:::
+
 ## Collaborator injection seams
 
 Some operations do not run in isolation — they select a strategy per

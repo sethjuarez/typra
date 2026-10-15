@@ -288,6 +288,48 @@ export class TypeNode {
   }
 }
 
+function normalizedDispatchProviderSlot(value: string): string {
+  return value.replace(/[-_]/g, "").toLowerCase();
+}
+
+/**
+ * Reject a known discriminator whose generated provider member would collide
+ * with the reserved `wildcard` catch-all member. The conservative normalization
+ * covers the camel/snake/Pascal spellings used by all runtime backends.
+ */
+export function validateDispatchWildcardSlotCollisions(
+  program: Program,
+  roots: readonly TypeNode[],
+): boolean {
+  let valid = true;
+  const visited = new Set<string>();
+  for (const root of roots) {
+    for (const node of enumerateTypes(root, visited)) {
+      const polymorphic = node.retrievePolymorphicTypes();
+      if (!polymorphic?.default) continue;
+      const defaultNode = polymorphic.default.instance as TypeNode;
+      if (defaultNode.typeName.name === node.typeName.name) continue;
+
+      for (const variant of polymorphic.types) {
+        if (
+          normalizedDispatchProviderSlot(String(variant.value)) !== "wildcard"
+        ) {
+          continue;
+        }
+        const variantNode = variant.instance as TypeNode;
+        program.reportDiagnostic({
+          code: "typra-emitter-dispatch-wildcard-slot-collision",
+          message: `Discriminator value "${variant.value}" on ${node.typeName.name} collides with the reserved generated provider member "wildcard". Rename the known discriminator value; case, hyphen, and underscore differences are not significant for generated runtime identifiers.`,
+          severity: "error",
+          target: variantNode.model,
+        });
+        valid = false;
+      }
+    }
+  }
+  return valid;
+}
+
 export class PropertyNode {
   public name: string;
   public typeName: TypeName = {

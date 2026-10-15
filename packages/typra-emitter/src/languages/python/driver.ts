@@ -42,9 +42,7 @@ import { PythonExprVisitor } from "./visitor.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 import {
-  isClosedPolymorphicDispatch,
   loweringCapabilitiesForTarget,
-  dispatchDefaultSlotBase,
 } from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
@@ -943,6 +941,7 @@ function emitPythonInterfaceConformanceTest(
     "import asyncio",
     "import inspect",
     "import json",
+    ...(dispatched.openness === "closed" ? ["import pytest"] : []),
     "",
     modelTypes.length > 0
       ? `from ${importPath} import ${modelTypes.join(", ")}`
@@ -1045,6 +1044,15 @@ function emitPythonInterfaceConformanceTest(
       lines.push("    assert result is not None");
     }
   });
+  if (dispatched.openness === "closed") {
+    lines.push(
+      "",
+      "",
+      `def test_${iface}_rejects_unknown_discriminator(${fixture}):`,
+      "    with pytest.raises(ValueError):",
+      `        ${resolveFn}("typra-unknown-discriminator", ${fixture})`,
+    );
+  }
   lines.push("");
   return lines.join("\n");
 }
@@ -2434,15 +2442,12 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
   const variantsVar = `${toSnakeCase(seam).toUpperCase()}_VARIANTS`;
   // Raise on an unknown discriminator exactly when the shape load switch does —
   // a closed dispatch with no default (_TemplateFormat.load_kind else arm).
-  const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
+  const rejectsUnknown = entry.openness === "closed";
   // An open dispatch with a declared wildcard child (`CustomModel { provider:
   // "*" }`) routes an unknown discriminator to a default `custom` registry slot,
   // the behavioral twin of the shape loader's `*`-tolerant fallback. Closed
   // dispatch / open self-reference has no distinct child slot — keep raise/None.
-  const defaultSlotBase = dispatchDefaultSlotBase(entry.decl);
-  const defaultSlot = defaultSlotBase
-    ? pyDispatchIdentifier(toSnakeCase(defaultSlotBase) || "custom")
-    : null;
+  const defaultSlot = entry.wildcard?.name ?? null;
   const slot = (value: string): string =>
     pyDispatchIdentifier(toSnakeCase(value) || "value");
 
@@ -2485,11 +2490,12 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
     lines.push(`    ${slot(variant.value)}: ${seam} | None`);
   }
   if (defaultSlot) {
-    // The wildcard/default slot is OPTIONAL — an unknown discriminator routes
-    // here, but a consumer that attaches no catch-all still gets a valid
-    // provider (the slot stays ``None``, so unknown -> unimplemented).
+    lines.push(`    ${defaultSlot}: ${seam}`);
+    lines.push("");
+    lines.push("    def __post_init__(self) -> None:");
+    lines.push(`        if self.${defaultSlot} is None:`);
     lines.push(
-      `    ${defaultSlot}: ${seam} | None = None`,
+      `            raise ValueError("${seam} provider requires a non-null wildcard @dispatch implementation")`,
     );
   }
   lines.push("");
@@ -2508,6 +2514,12 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
   );
   lines.push('    """');
   lines.push(`    missing = [kind for kind in ${variantsVar} if kind not in impls]`);
+  if (defaultSlot) {
+    lines.push(
+      `    if ${JSON.stringify(defaultSlot)} not in impls or impls[${JSON.stringify(defaultSlot)}] is None:`,
+    );
+    lines.push(`        missing.append(${JSON.stringify(defaultSlot)})`);
+  }
   lines.push("    if missing:");
   lines.push(
     `        raise ValueError(f"${seam} provider is missing @dispatch variant(s): {missing}")`,
@@ -2517,8 +2529,7 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
     lines.push(`        ${slot(variant.value)}=impls[${JSON.stringify(variant.value)}],`);
   }
   if (defaultSlot) {
-    // Optional: a consumer may omit the catch-all. ``.get`` keeps it ``None``.
-    lines.push(`        ${defaultSlot}=impls.get(${JSON.stringify(defaultSlot)}),`);
+    lines.push(`        ${defaultSlot}=impls[${JSON.stringify(defaultSlot)}],`);
   }
   lines.push("    )");
   lines.push("");

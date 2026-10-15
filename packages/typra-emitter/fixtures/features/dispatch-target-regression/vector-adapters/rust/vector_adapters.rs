@@ -1,12 +1,43 @@
 #![allow(dead_code, unused_variables, clippy::all)]
 
 use crate::model::direct_renderer_resolver::DirectRendererProvider;
+use crate::model::closed_router_resolver::ClosedRouterProvider;
 use crate::model::optional_renderer_resolver::OptionalRendererProvider;
 use crate::model::processor_resolver::ProcessorProvider;
 use crate::model::renderer_resolver::RendererProvider;
 use crate::model::{
-    Agent, DirectRenderer, FormatConfig, OptionalRenderer, Processor, Renderer,
+    Agent, ClosedConfig, ClosedRouter, DirectRenderer, FormatConfig, OptionalRenderer, Processor,
+    Renderer,
 };
+
+struct ClosedRouterImpl(&'static str);
+
+#[async_trait::async_trait]
+impl ClosedRouter for ClosedRouterImpl {
+    async fn route(
+        &self,
+        _config: &ClosedConfig,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.0.to_string())
+    }
+}
+
+pub struct StubClosedRouterProvider {
+    alpha: ClosedRouterImpl,
+    beta: ClosedRouterImpl,
+}
+
+impl ClosedRouterProvider for StubClosedRouterProvider {
+    fn alpha(&self) -> Option<&dyn ClosedRouter> { Some(&self.alpha) }
+    fn beta(&self) -> Option<&dyn ClosedRouter> { Some(&self.beta) }
+}
+
+pub fn closed_router_provider() -> StubClosedRouterProvider {
+    StubClosedRouterProvider {
+        alpha: ClosedRouterImpl("closed:alpha"),
+        beta: ClosedRouterImpl("closed:beta"),
+    }
+}
 
 struct RendererImpl(&'static str);
 
@@ -22,23 +53,38 @@ impl Renderer for RendererImpl {
     }
 }
 
+struct WildcardRendererImpl;
+
+#[async_trait::async_trait]
+impl Renderer for WildcardRendererImpl {
+    async fn render(
+        &self,
+        agent: &Agent,
+        _template: &String,
+        _inputs: &serde_json::Value,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let wire = agent.to_value(&Default::default());
+        Ok(wildcard_route("renderer", &wire["template"]["format"]))
+    }
+}
+
 pub struct StubRendererProvider {
     jinja2: RendererImpl,
     mustache: RendererImpl,
-    custom: RendererImpl,
+    wildcard: WildcardRendererImpl,
 }
 
 impl RendererProvider for StubRendererProvider {
     fn jinja2(&self) -> Option<&dyn Renderer> { Some(&self.jinja2) }
     fn mustache(&self) -> Option<&dyn Renderer> { Some(&self.mustache) }
-    fn custom(&self) -> Option<&dyn Renderer> { Some(&self.custom) }
+    fn wildcard(&self) -> &dyn Renderer { &self.wildcard }
 }
 
 pub fn renderer_provider() -> StubRendererProvider {
     StubRendererProvider {
         jinja2: RendererImpl("renderer:jinja2"),
         mustache: RendererImpl("renderer:mustache"),
-        custom: RendererImpl("renderer:custom"),
+        wildcard: WildcardRendererImpl,
     }
 }
 
@@ -58,20 +104,20 @@ impl Processor for ProcessorImpl {
 pub struct StubProcessorProvider {
     openai: ProcessorImpl,
     azure: ProcessorImpl,
-    custom: ProcessorImpl,
+    wildcard: ProcessorImpl,
 }
 
 impl ProcessorProvider for StubProcessorProvider {
     fn openai(&self) -> Option<&dyn Processor> { Some(&self.openai) }
     fn azure(&self) -> Option<&dyn Processor> { Some(&self.azure) }
-    fn custom(&self) -> Option<&dyn Processor> { Some(&self.custom) }
+    fn wildcard(&self) -> &dyn Processor { &self.wildcard }
 }
 
 pub fn processor_provider() -> StubProcessorProvider {
     StubProcessorProvider {
         openai: ProcessorImpl("processor:openai"),
         azure: ProcessorImpl("processor:azure"),
-        custom: ProcessorImpl("processor:custom"),
+        wildcard: ProcessorImpl("processor:wildcard"),
     }
 }
 
@@ -88,23 +134,39 @@ impl DirectRenderer for DirectRendererImpl {
     }
 }
 
+struct WildcardDirectRendererImpl;
+
+#[async_trait::async_trait]
+impl DirectRenderer for WildcardDirectRendererImpl {
+    async fn render(
+        &self,
+        format: &FormatConfig,
+        _template: &String,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(wildcard_route(
+            "direct",
+            &format.to_value(&Default::default()),
+        ))
+    }
+}
+
 pub struct StubDirectRendererProvider {
     jinja2: DirectRendererImpl,
     mustache: DirectRendererImpl,
-    custom: DirectRendererImpl,
+    wildcard: WildcardDirectRendererImpl,
 }
 
 impl DirectRendererProvider for StubDirectRendererProvider {
     fn jinja2(&self) -> Option<&dyn DirectRenderer> { Some(&self.jinja2) }
     fn mustache(&self) -> Option<&dyn DirectRenderer> { Some(&self.mustache) }
-    fn custom(&self) -> Option<&dyn DirectRenderer> { Some(&self.custom) }
+    fn wildcard(&self) -> &dyn DirectRenderer { &self.wildcard }
 }
 
 pub fn direct_renderer_provider() -> StubDirectRendererProvider {
     StubDirectRendererProvider {
         jinja2: DirectRendererImpl("direct:jinja2"),
         mustache: DirectRendererImpl("direct:mustache"),
-        custom: DirectRendererImpl("direct:custom"),
+        wildcard: WildcardDirectRendererImpl,
     }
 }
 
@@ -124,21 +186,30 @@ impl OptionalRenderer for OptionalRendererImpl {
 pub struct StubOptionalRendererProvider {
     jinja2: OptionalRendererImpl,
     mustache: OptionalRendererImpl,
-    custom: OptionalRendererImpl,
+    wildcard: OptionalRendererImpl,
 }
 
 impl OptionalRendererProvider for StubOptionalRendererProvider {
     fn jinja2(&self) -> Option<&dyn OptionalRenderer> { Some(&self.jinja2) }
     fn mustache(&self) -> Option<&dyn OptionalRenderer> { Some(&self.mustache) }
-    fn custom(&self) -> Option<&dyn OptionalRenderer> { Some(&self.custom) }
+    fn wildcard(&self) -> &dyn OptionalRenderer { &self.wildcard }
 }
 
 pub fn optional_renderer_provider() -> StubOptionalRendererProvider {
     StubOptionalRendererProvider {
         jinja2: OptionalRendererImpl("optional:jinja2"),
         mustache: OptionalRendererImpl("optional:mustache"),
-        custom: OptionalRendererImpl("optional:custom"),
+        wildcard: OptionalRendererImpl("optional:wildcard"),
     }
+}
+
+fn wildcard_route(prefix: &str, wire: &serde_json::Value) -> String {
+    format!(
+        "{}:wildcard:{}:{}",
+        prefix,
+        wire["format_kind"].as_str().unwrap(),
+        wire["plugin"]["tag"].as_str().unwrap(),
+    )
 }
 
 #[test]

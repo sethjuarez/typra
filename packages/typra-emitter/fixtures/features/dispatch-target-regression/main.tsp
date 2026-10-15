@@ -38,6 +38,10 @@ union FormatKind {
 model FormatConfig {
   @encodedName("application/json", "format_kind")
   kind: FormatKind = "*";
+
+  // Opaque third-party configuration must survive old-consumer decode/encode so
+  // the wildcard implementation can locate plugin behavior.
+  plugin?: Record<unknown>;
 }
 
 @doc("Jinja2 dialect (pin-only).")
@@ -77,6 +81,7 @@ model Model {
 
   @doc("Opaque model id (e.g. deployment or model name).")
   id: string = "";
+
 }
 
 @doc("OpenAI-hosted model (pin-only).")
@@ -181,18 +186,38 @@ interface Renderer {
     expected: "renderer:jinja2",
   })
   @vector(#{
-    name: "unknown-format-fallback",
+    name: "unknown-format-contoso",
     stage: "callable",
     input: #{
       agent: #{
         name: "greeter",
-        template: #{ content: "x", format: #{ format_kind: "liquid" } },
+        template: #{
+          content: "x",
+          format: #{ format_kind: "contoso", plugin: #{ tag: "alpha", enabled: true } }
+        },
         `model`: #{ model_provider: "openai", id: "gpt-4" },
       },
       template: "x",
       inputs: #{},
     },
-    expected: "renderer:custom",
+    expected: "renderer:wildcard:contoso:alpha",
+  })
+  @vector(#{
+    name: "unknown-format-fabrikam",
+    stage: "callable",
+    input: #{
+      agent: #{
+        name: "greeter",
+        template: #{
+          content: "x",
+          format: #{ format_kind: "fabrikam", plugin: #{ tag: "beta", enabled: false } }
+        },
+        `model`: #{ model_provider: "openai", id: "gpt-4" },
+      },
+      template: "x",
+      inputs: #{},
+    },
+    expected: "renderer:wildcard:fabrikam:beta",
   })
   @doc("Render the agent's template against the supplied inputs; `inputs` is a generic map.")
   render(agent: Agent, template: string, inputs: Record<unknown>): string;
@@ -227,7 +252,7 @@ interface Processor {
       },
       response: #{ text: "custom" },
     },
-    expected: #{ route: "processor:custom" },
+    expected: #{ route: "processor:wildcard" },
   })
   @doc("Process a raw provider response (bare `unknown`).")
   process(agent: Agent, response: unknown): unknown;
@@ -245,8 +270,11 @@ interface DirectRenderer {
   @vector(#{
     name: "direct-unknown-fallback",
     stage: "callable",
-    input: #{ format: #{ format_kind: "liquid" }, template: "hello" },
-    expected: "direct:custom",
+    input: #{
+      format: #{ format_kind: "liquid", plugin: #{ tag: "gamma" } },
+      template: "hello"
+    },
+    expected: "direct:wildcard:liquid:gamma",
   })
   render(format: FormatConfig, template: string): string;
 }
@@ -269,6 +297,42 @@ interface OptionalRenderer {
   })
   render(agent?: Agent, template: string): string;
 }
+
+// --- Closed control: unknown values must reject, never use a wildcard --------
+
+union ClosedKind {
+  alpha: "alpha",
+  beta: "beta",
+}
+
+@discriminator("kind")
+model ClosedConfig {
+  kind: ClosedKind;
+}
+
+model AlphaClosedConfig extends ClosedConfig {
+  kind: "alpha";
+}
+
+model BetaClosedConfig extends ClosedConfig {
+  kind: "beta";
+}
+
+@dispatch(ClosedConfig.kind)
+interface ClosedRouter {
+  @vector(#{
+    name: "closed-known-alpha",
+    stage: "callable",
+    input: #{ config: #{ kind: "alpha" } },
+    expected: "closed:alpha",
+  })
+  route(config: ClosedConfig): string;
+}
+
+// The rendered-code contract test invokes every emitted ClosedRouter resolver
+// with the control input discriminator "contoso" and proves it rejects. Keeping
+// the invalid closed value out of @vector avoids asking the typed harness to
+// construct an input that the generated shape loader correctly refuses.
 
 @doc("Fixture root aggregating the dispatched-seam graph.")
 @serializable

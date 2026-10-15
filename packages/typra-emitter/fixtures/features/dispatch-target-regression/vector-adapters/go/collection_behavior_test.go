@@ -24,3 +24,29 @@ func TestPolymorphicCollectionRejectsNonCoercibleScalar(t *testing.T) {
 		t.Fatal("non-coercible scalar collection element must return an error")
 	}
 }
+
+func TestOpenDispatchProviderRequiresWildcard(t *testing.T) {
+	_, err := NewRendererProvider(map[string]Renderer{
+		"jinja2":   nil,
+		"mustache": nil,
+	})
+	if err == nil {
+		t.Fatal("open provider without wildcard must fail collection")
+	}
+
+	_, err = NewRendererProvider(map[string]Renderer{
+		"jinja2":   nil,
+		"mustache": nil,
+		"wildcard": nil,
+	})
+	if err == nil {
+		t.Fatal("open provider with nil wildcard must fail collection")
+	}
+}
+
+func TestOpenDispatchZeroProviderRejectsUnknown(t *testing.T) {
+	_, err := ResolveRenderer("third-party", RendererProvider{})
+	if err == nil {
+		t.Fatal("zero-value open provider must reject unknown discriminator when wildcard is nil")
+	}
+}

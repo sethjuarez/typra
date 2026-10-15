@@ -19,8 +19,6 @@ import {
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import { projectNamespace } from "../../ir/namespace.js";
 import {
-  isClosedPolymorphicDispatch,
-  dispatchDefaultSlotBase,
   loweringCapabilitiesForTarget,
   TypeDecl,
 } from "../../ir/declarations.js";
@@ -1047,15 +1045,12 @@ function emitJavaDispatchProvider(
   for (const variant of entry.decl.variants) {
     lines.push(`  ${seam} ${javaMethodName(variant.value)}();`);
   }
-  const providerDefaultBase = dispatchDefaultSlotBase(entry.decl);
-  if (providerDefaultBase) {
+  if (entry.wildcard) {
     lines.push(
       "  /** Catch-all for an unknown discriminator (the declared `*` child). */",
     );
     lines.push(
-      `  ${seam} ${javaMethodName(
-        `${providerDefaultBase[0].toLowerCase()}${providerDefaultBase.slice(1)}`,
-      )}();`,
+      `  ${seam} ${javaMethodName(entry.wildcard.name)}();`,
     );
   }
   lines.push("}");
@@ -1084,16 +1079,13 @@ function emitJavaDispatchResolver(
   // (harness explicit-skip); an abstract-open base routes unknowns to a carrier
   // in the shape loader, never throwing, so a bare `isClosedPolymorphicDispatch`
   // is the faithful twin of that throw arm.
-  const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
+  const rejectsUnknown = entry.openness === "closed";
   // An open dispatch with a declared wildcard child (`CustomModel { provider:
   // "*" }`) gains a default accessor; an unknown discriminator routes to it
   // instead of returning null — the behavioral twin of the shape loader's
   // `*`-tolerant fallback. Closed / open-self-reference keeps its throw/null arm.
-  const defaultSlotBase = dispatchDefaultSlotBase(entry.decl);
-  const defaultSlot = defaultSlotBase
-    ? javaMethodName(
-        `${defaultSlotBase[0].toLowerCase()}${defaultSlotBase.slice(1)}`,
-      )
+  const defaultSlot = entry.wildcard
+    ? javaMethodName(entry.wildcard.name)
     : null;
 
   const lines: string[] = [
@@ -1126,7 +1118,9 @@ function emitJavaDispatchResolver(
       `        throw new IllegalArgumentException("Unknown ${seam} discriminator field '${field}' value: " + ${field});`,
     );
   } else if (defaultSlot) {
-    lines.push(`        return registry.${defaultSlot}();`);
+    lines.push(
+      `        return java.util.Objects.requireNonNull(registry.${defaultSlot}(), "${seam} provider returned null for required wildcard @dispatch implementation");`,
+    );
   } else {
     lines.push("        return null;");
   }
@@ -1445,6 +1439,22 @@ function emitJavaInterfaceConformanceTest(
     lines.push("  }", "");
   });
 
+  if (dispatched.openness === "closed") {
+    lines.push(
+      "  private static void resolverRejectsUnknownDiscriminator() {",
+      `    ${iface}Provider provider = ${providersRef}.${camelSeam}();`,
+      "    boolean rejected = false;",
+      "    try {",
+      `      ${resolver}.resolve("typra-unknown-discriminator", provider);`,
+      "    } catch (IllegalArgumentException expected) {",
+      "      rejected = true;",
+      "    }",
+      '    if (!rejected) throw new AssertionError("closed resolver accepted an unknown discriminator");',
+      "  }",
+      "",
+    );
+  }
+
   lines.push("  public static void run() {");
   lines.push("    int failed = 0;");
   sorted.forEach((entry, index) => {
@@ -1456,6 +1466,11 @@ function emitJavaInterfaceConformanceTest(
       )}, ${iface}ConformanceTests::${javaVectorSlug(index, entry)});`,
     );
   });
+  if (dispatched.openness === "closed") {
+    lines.push(
+      `    failed += runCase("${iface}.resolver:unknown-discriminator", ${iface}ConformanceTests::resolverRejectsUnknownDiscriminator);`,
+    );
+  }
   lines.push(
     "    if (failed > 0) {",
     `      throw new AssertionError(failed + " @vector conformance failure(s)");`,

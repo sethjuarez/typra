@@ -8,7 +8,12 @@ import {
 import { getStateValue } from "../decorators.js";
 import { EmitTarget, StateKeys, TypraEmitterOptions } from "../lib.js";
 import type { CallableContract, CallableDispatch } from "./callable.js";
-import type { PolymorphicDispatchDecl } from "./declarations.js";
+import {
+  explicitDefaultVariant,
+  isClosedPolymorphicDispatch,
+  type PolymorphicDefault,
+  type PolymorphicDispatchDecl,
+} from "./declarations.js";
 import { scalarRuntimeKind } from "./scalar-kinds.js";
 
 export interface VectorEntry {
@@ -190,8 +195,40 @@ export function conformanceRailAvailability(
 export interface DispatchedContract {
   contract: string;
   decl: PolymorphicDispatchDecl;
+  /**
+   * Normalized behavioral openness. Drivers consume this value rather than
+   * independently re-interpreting shape-level default/closed flags.
+   */
+  openness: "closed" | "open";
+  /**
+   * The single consumer-owned catch-all behavior slot for a schema-declared
+   * `*` child. Its API name is deliberately semantic, not derived from a child
+   * type such as `CustomModel`.
+   */
+  wildcard: DispatchWildcardSlot | null;
   namespace: string;
   group: string;
+}
+
+export interface DispatchWildcardSlot {
+  name: "wildcard";
+  variant: PolymorphicDefault;
+}
+
+/**
+ * Normalize the shape dispatch declaration into the behavioral provider
+ * contract shared by all runtime drivers.
+ */
+export function dispatchBehavior(
+  decl: PolymorphicDispatchDecl,
+): Pick<DispatchedContract, "openness" | "wildcard"> {
+  const wildcardVariant = explicitDefaultVariant(decl);
+  return {
+    openness: isClosedPolymorphicDispatch(decl) ? "closed" : "open",
+    wildcard: wildcardVariant
+      ? { name: "wildcard", variant: wildcardVariant }
+      : null,
+  };
 }
 
 /**
@@ -215,6 +252,7 @@ export function collectDispatchedContracts(
       byContract.set(key, {
         contract: entry.contract,
         decl,
+        ...dispatchBehavior(decl),
         namespace: entry.namespace,
         group: entry.group,
       });

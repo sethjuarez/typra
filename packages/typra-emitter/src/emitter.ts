@@ -6,7 +6,12 @@ import {
   NoTarget,
   getNamespaceFullName,
 } from "@typespec/compiler";
-import { resolveModel, TypeNode, enumerateTypes } from "./ir/ast.js";
+import {
+  resolveModel,
+  TypeNode,
+  enumerateTypes,
+  validateDispatchWildcardSlotCollisions,
+} from "./ir/ast.js";
 import { TypraEmitterOptions, EmitTarget } from "./lib.js";
 import { generateMarkdown } from "./languages/markdown/driver.js";
 import { generatePython } from "./languages/python/driver.js";
@@ -340,6 +345,15 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     );
     additionalModels.push(additionalNode);
     visited.add(rootName);
+  }
+
+  if (
+    !validateDispatchWildcardSlotCollisions(context.program, [
+      model,
+      ...additionalModels,
+    ])
+  ) {
+    return;
   }
 
   const targets = options["emit-targets"] || [];

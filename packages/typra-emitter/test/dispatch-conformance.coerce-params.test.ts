@@ -283,29 +283,29 @@ describe("typed @vector conformance over a coerce-union discriminator with a bar
   // Issue #2 (open-union `*` defaultVariant lowering): Model is an OPEN union
   // (`openai`, `azure`, string) with a declared wildcard child
   // `CustomModel { provider: "*" }`. The resolver must lower that default into a
-  // dedicated `custom` registry slot and route an UNKNOWN discriminator to it
+  // dedicated required `wildcard` registry slot and route an UNKNOWN discriminator to it
   // (the behavioral twin of the shape loader's `*`-tolerant fallback), instead
   // of dropping it with `return None` / `_ => None`. Prompty's
   // `provider: "anthropic"` (unknown) vectors depend on this catch-all.
-  it("open-union resolver lowers the `*` defaultVariant into a `custom` fallback slot", () => {
+  it("open-union resolver lowers the `*` defaultVariant into a required `wildcard` slot", () => {
     const py = readFileSync(
       path.join(output, "python", "_processor_resolver.py"),
       "utf8",
     );
     assert.match(
       py,
-      /custom: Processor \| None = None/,
-      `python open-union resolver must expose an optional \`custom\` default slot\n--- emitted ---\n${py}`,
+      /wildcard: Processor/,
+      `python open-union resolver must expose a required non-null \`wildcard\` slot\n--- emitted ---\n${py}`,
     );
     assert.match(
       py,
-      /custom=impls\.get\("custom"\),/,
-      "python provider builder must populate the `custom` slot optionally",
+      /wildcard=impls\["wildcard"\],/,
+      "python provider builder must require and populate the `wildcard` slot",
     );
     assert.match(
       py,
-      /return registry\.custom\s*$/m,
-      "python resolver fallback must route an unknown discriminator to the `custom` slot",
+      /return registry\.wildcard\s*$/m,
+      "python resolver fallback must route an unknown discriminator to the `wildcard` slot",
     );
     assert.doesNotMatch(
       py,
@@ -319,13 +319,13 @@ describe("typed @vector conformance over a coerce-union discriminator with a bar
     );
     assert.match(
       rs,
-      /fn custom\(&self\) -> Option<&dyn Processor>;/,
-      `rust open-union provider trait must declare a \`custom\` catch-all method\n--- emitted ---\n${rs}`,
+      /fn wildcard\(&self\) -> &dyn Processor;/,
+      `rust open-union provider trait must declare a required \`wildcard\` catch-all method\n--- emitted ---\n${rs}`,
     );
     assert.match(
       rs,
-      /_ => registry\.custom\(\),/,
-      "rust resolver fallback must route an unknown discriminator to the `custom` slot",
+      /_ => Some\(registry\.wildcard\(\)\),/,
+      "rust resolver fallback must route an unknown discriminator to the `wildcard` slot",
     );
     assert.doesNotMatch(
       rs,

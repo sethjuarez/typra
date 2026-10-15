@@ -581,49 +581,6 @@ export function explicitDefaultVariant(
 }
 
 /**
- * PascalCase base name for the resolver registry's default slot — the slot an
- * unknown discriminator routes to for an open dispatch with a declared wildcard
- * child (`CustomModel` -> `Custom`, so Python `custom`, Go/C# `Custom`). Returns
- * null when there is no explicit default child (closed dispatch, or open
- * self-reference), in which case the resolver keeps its reject/return-null arm.
- * The standard `Custom*` naming maps to `Custom`; any other child name is
- * reduced by stripping the discriminated base suffix shared across the variant
- * subtypes (the same convention the shape loader uses), falling back to `Custom`.
- */
-export function dispatchDefaultSlotBase(
-  dispatch: PolymorphicDispatchDecl,
-): string | null {
-  const def = explicitDefaultVariant(dispatch);
-  if (!def) return null;
-  const name = def.typeName.name;
-  if (name.startsWith("Custom")) return "Custom";
-  const suffix = longestCommonSuffix([
-    ...dispatch.variants.map((variant) => variant.typeName.name),
-    name,
-  ]);
-  const stripped = suffix ? name.slice(0, name.length - suffix.length) : name;
-  return stripped || "Custom";
-}
-
-function longestCommonSuffix(names: string[]): string {
-  if (names.length < 2) return "";
-  let suffix = names[0];
-  for (const name of names.slice(1)) {
-    let matched = 0;
-    while (
-      matched < suffix.length &&
-      matched < name.length &&
-      suffix[suffix.length - 1 - matched] === name[name.length - 1 - matched]
-    ) {
-      matched++;
-    }
-    suffix = suffix.slice(suffix.length - matched);
-    if (suffix === "") break;
-  }
-  return suffix;
-}
-
-/**
  * A concrete polymorphic variant (a child type with a known discriminator value).
  */
 export interface PolymorphicVariant {

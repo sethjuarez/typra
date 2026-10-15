@@ -86,6 +86,21 @@ be explicit in diagnostics, the conformance matrix, or a tracked known failure.
   value outside the closed union is a load error.
 - Saving a known subtype emits its canonical discriminator value. Saving an
   unknown carrier replays the original discriminator and preserved payload.
+- Behavioral `@dispatch` has three explicit states, carried in shared IR as
+  openness plus an optional wildcard declaration:
+  - **Closed:** rejects every unclaimed discriminator at the generated resolver
+    boundary.
+  - **Open with a schema-declared `*` child:** exposes exactly one required,
+    non-null provider member named `wildcard`; every unclaimed value routes
+    there, while known values continue to use their strongly named slots.
+  - **Open without a declared `*` child:** preserves the legacy behavior:
+    unknown behavior is unimplemented and the generated resolver returns its
+    runtime's empty/skip result rather than inventing a wildcard implementation.
+- The wildcard provider is consumer-owned behavior, not an emitted identity,
+  pass-through, or no-op. Provider construction/conformance must fail when it is
+  absent. The selected implementation receives the ordinary operation inputs,
+  including the lossless unknown carrier, so it can inspect the original
+  discriminator and plugin payload.
 
 ## Enums and parse aliases
 

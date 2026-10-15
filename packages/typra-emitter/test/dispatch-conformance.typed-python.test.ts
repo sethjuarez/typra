@@ -241,7 +241,7 @@ describe("typed per-interface @vector conformance runs green (Python, issue #282
         0,
         `emitted typed conformance should pass:\n${green.output}`,
       );
-      assert.match(green.output, /3 passed/);
+      assert.match(green.output, /4 passed/);
       assert.doesNotMatch(green.output, /failed/);
 
       // -- negative (control 2) -------------------------------------------------

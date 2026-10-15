@@ -382,7 +382,7 @@ describe("language-target conformance/model regressions (2.0.0 target fixes)", (
       "routing must read the discriminator from the loaded polymorphic value",
     );
     assert.match(direct, /actual != "direct:mustache"/);
-    assert.match(direct, /actual != "direct:custom"/);
+    assert.match(direct, /actual != "direct:wildcard:liquid:gamma"/);
   });
 
   it("Java null-checks optional dispatch heads", () => {
