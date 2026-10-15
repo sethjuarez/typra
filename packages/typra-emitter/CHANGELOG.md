@@ -6,6 +6,35 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [3.0.0](https://github.com/sethjuarez/typra/compare/v2.1.8...v3.0.0) (2026-10-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* **emitter:** Open @dispatch unions with a schema wildcard now require one non-null wildcard provider slot. The previous optional custom slot is removed; unknown discriminator values preserve their original discriminator and payload and route to wildcard.
+
+### Features
+
+* **emitter:** add Swift main-target resources option ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** centralize value-backed coerce lowering across targets ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** give Rust [@sync](https://github.com/sync) operations a Result error channel ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** honor [@encoded](https://github.com/encoded)Name as the canonical JSON wire key ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** preserve unknown fields for Record&lt;unknown&gt; models in every runtime ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** require wildcard providers for open dispatch unions ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** resolve open emitter issues across all runtimes ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** support explicit nullable fields ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+
+
+### Bug Fixes
+
+* **emitter:** assert expectedError in typed dispatch conformance ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** derive stable Rust enum variant names ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** emit compilable Go dispatch carriers, enum aliases, and union returns ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** emit native sized and unsigned integer types in every runtime ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** load typed elements for non-string scalar arrays in Rust and Go ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **emitter:** serialize string-union fields correctly in Swift and Java ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+* **verify:** correctly credit typed dispatch conformance coverage ([c1053b4](https://github.com/sethjuarez/typra/commit/c1053b423c4f64e58d7fd9daedbe9acde059b1a7))
+
 ## [2.1.8](https://github.com/sethjuarez/typra/compare/v2.1.7...v2.1.8) (2026-09-08)
 
 
