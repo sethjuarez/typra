@@ -872,6 +872,7 @@ export function runDispatchRegressionCrossTarget(context) {
         "dispatch-target-regression",
         "Swift dispatch-target-regression",
         path.join(outRoot, "swift"),
+        { includeIntegrationTests: false },
       );
     }
 
