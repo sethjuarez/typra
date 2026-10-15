@@ -1,0 +1,119 @@
+---
+title: Emitter boundary
+description: Decide which behavior Typra projects from TypeSpec and which behavior consumers must author.
+---
+
+Typra is a **contract projector**, not a general-purpose source translator. It emits runtime surfaces whose
+shape and behavior can be derived deterministically from TypeSpec, Typra decorators, and emitter configuration.
+Consumers own algorithms and runtime policy that the contract does not define.
+
+This boundary keeps generated output reviewable, makes parity across targets measurable, and prevents seven
+generated implementations from becoming seven hidden sources of product behavior.
+
+## The decision rule
+
+Apply the rule to the **generated surface under evaluation**, not necessarily to the whole feature request. A
+mixed request can contain a schema-derived seam and a consumer-owned implementation.
+
+Ask one question first:
+
+> Can the requested behavior be derived completely and deterministically from the contract?
+
+| Classification | Typra's responsibility | Consumer's responsibility |
+|---|---|---|
+| **Schema projection** | Generate it and prove equivalent behavior across targets. | Supply runtime dependencies or implementations only where the contract declares a seam. |
+| **Mixed** | Generate types, protocols, dispatch, adapters, and conformance evidence. | Implement the algorithm or policy behind the generated seam. |
+| **Algorithm or runtime policy** | Do not generate the implementation. Define an interoperable seam only when the contract needs one. | Author, vendor, or transpile the implementation. |
+
+A capability belongs in the emitter when all of these are true:
+
+1. Its inputs and semantics are present in TypeSpec, a Typra decorator, explicit emitter configuration, or a
+   documented deterministic emitter convention.
+2. A domain-neutral fixture and, when observable, an `@vector` can pin behavior that every target must satisfy.
+3. The behavior can be expressed as a domain-neutral fixture and, when observable, an executable vector.
+4. Every supported target can implement it without importing product policy.
+
+If any answer is no, keep the implementation consumer-owned. Typra may still project the contract around it.
+
+## Emitted today
+
+- Models, fields, optionality, nullability, wire names, and serialization helpers.
+- Closed and open polymorphic shapes and scalar coercion.
+- Interfaces and operation signatures.
+- `@dispatch` provider and resolver contracts.
+- Samples, vectors, compile gates, and conformance evidence derived from those declarations.
+
+These are projections: changing the TypeSpec changes the generated surface predictably.
+
+## In scope, not yet implemented
+
+Some planned capabilities satisfy the boundary but are not shipped:
+
+- Generated provider doubles derived from a documented convention or an explicit delegate declaration (#297).
+- Declarative seam argument and return mapping (#298).
+- Schema-evolution decorators and loader migration such as `@renamedFrom` (#302).
+
+Being in scope does not imply current support. Each capability still needs explicit semantics, domain-neutral fixtures,
+and cross-target conformance evidence.
+
+## What consumers own
+
+- Parsers, evaluators, renderers, planners, tokenizers, and other general algorithms.
+- Authentication token acquisition and refresh policy.
+- Retry, timeout, caching, persistence, logging, tracing, and deployment policy.
+- Product-specific provider selection or plugin discovery behind a generated wildcard seam.
+- Runtime integrations whose behavior cannot be inferred from the contract.
+
+These choices can vary without changing the wire contract. Generating them would hide product policy in the
+emitter and make Typra responsible for maintaining the same algorithm in every target.
+
+## Worked negative example: a Jinja-subset engine
+
+A Jinja-subset tokenizer, parser, AST, and evaluator is an algorithm. One consumer measured the engine alone
+(excluding tests) as:
+
+| Runtime | Lines |
+|---|---:|
+| Go | 1,320 |
+| Rust | 1,211 |
+| C# | 1,040 |
+
+That is roughly 1,000–1,350 lines per runtime, but duplication alone does not make it schema projection.
+TypeSpec can describe a renderer seam, its inputs, its output, dispatch variants, and conformance vectors; it
+does not determine tokenization rules, expression evaluation, escaping policy, or error recovery.
+
+Typra should therefore emit the renderer contract and tests, while the consumer should **author, vendor, or
+transpile** the engine. Moving the algorithm into Typra would merely relocate seven implementations into the
+generator and couple every consumer to one product-policy choice.
+
+## Companion assets
+
+Keep authored or transpiled algorithms outside every configured target `output-dir`:
+
+```text
+generated/typescript/ # emitter-owned target output
+generated/python/     # emitter-owned target output
+src/algorithms/       # authored, vendored, or transpiled companion assets
+src/adapters/         # consumer implementations of generated seams
+```
+
+Generated provider interfaces and conformance vectors are the integration boundary. The companion asset can
+change implementation strategy without changing generated code. When authored files must be colocated with target
+output, use [`protected-paths` or `hydration-zones`](/reference/configuration/) rather than relying on a directory
+name to prevent cleanup. See [Generated output](/concepts/generated-output/) for the output lifecycle.
+
+## Triage examples
+
+| Request | Classification | Decision |
+|---|---|---|
+| Preserve `@encodedName` during load/save | Schema projection | Emit it. |
+| Route unknown open-union values to a wildcard provider | Schema projection | Emit routing; require a consumer implementation. |
+| Generate a template parser/evaluator | Algorithm | Keep consumer-owned. |
+| Add `@renamedFrom` loader migration | Schema projection, once semantics are specified | Emit it with cross-target vectors. |
+| Retry failed operations three times | Runtime policy | Keep consumer-owned. |
+| Generate a seam that accepts a retry policy | Mixed | Emit the seam; consumer owns policy behavior. |
+
+When classification is unclear, open a design discussion before an implementation issue. The burden for a new
+emitter capability is to show the schema-derived rule and a target-independent
+[conformance case](/reference/vector-conformance/). See [Typra contracts](/concepts/contracts/) for the source
+model that projection begins from.
