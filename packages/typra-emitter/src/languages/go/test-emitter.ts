@@ -22,6 +22,9 @@ import {
   postSaveExample,
   wireTestMappings as sharedWireTestMappings,
   wireTestProviders,
+  propertyWireKey,
+  samplePropertyFor,
+  wireKeyForName,
 } from "../../testing/test-context.js";
 
 // ============================================================================
@@ -90,7 +93,10 @@ function findSampleChildType(
   sample: Record<string, any>,
 ): TypeNode | undefined {
   const discriminator = prop.type?.discriminator;
-  const discriminatorValue = discriminator ? sample[discriminator] : undefined;
+  const discriminatorValue =
+    discriminator && prop.type
+      ? sample[wireKeyForName(prop.type, discriminator)]
+      : undefined;
   if (discriminator && discriminatorValue !== undefined) {
     return prop.type?.childTypes.find((child) =>
       child.properties.some(
@@ -105,7 +111,7 @@ function findSampleChildType(
     child.properties.some(
       (childProp) =>
         childProp.defaultValue !== null &&
-        sample[childProp.name] === childProp.defaultValue,
+        sample[propertyWireKey(childProp)] === childProp.defaultValue,
     ),
   );
 }
@@ -121,7 +127,7 @@ function emitExampleValidations(
   const fieldNames =
     goFieldNames ?? buildGoFieldNames(node.properties.map((prop) => prop.name));
   const validationKeys = Object.keys(sample.sample).filter((key) => {
-    const prop = node.properties.find((candidate) => candidate.name === key);
+    const prop = samplePropertyFor(node, key);
     return (
       typeof sample.sample[key] !== "object" &&
       (prop?.isScalar || prop?.enumName)
@@ -162,8 +168,8 @@ function emitStructuredValidations(
   const fieldNames =
     goFieldNames ?? buildGoFieldNames(node.properties.map((prop) => prop.name));
   for (const prop of node.properties) {
-    if (!(prop.name in sample)) continue;
-    const value = sample[prop.name];
+    if (!(propertyWireKey(prop) in sample)) continue;
+    const value = sample[propertyWireKey(prop)];
     const fieldName = fieldNames.get(prop.name) ?? goFieldName(prop.name);
     const expr = `${varName}.${fieldName}`;
 
@@ -173,13 +179,20 @@ function emitStructuredValidations(
         expr,
         fieldName,
         value,
-        prop.isOptional,
+        prop.isOptional || prop.isNullable === true,
       );
       continue;
     }
 
     if (!prop.isScalar && prop.type && typeof value === "string") {
-      emitShorthandObjectValidation(lines, expr, fieldName, value, prop.type, pkg);
+      emitShorthandObjectValidation(
+        lines,
+        expr,
+        fieldName,
+        value,
+        prop.type,
+        pkg,
+      );
       continue;
     }
 
@@ -261,7 +274,7 @@ function emitShorthandObjectValidation(
   if ((node.childTypes.length ?? 0) > 0) {
     emitScalarSampleValidation(
       lines,
-      goSaveDiscriminatorRead(expr, shorthandField, pkg),
+      goSaveDiscriminatorRead(expr, wireKeyForName(node, shorthandField), pkg),
       `${fieldName}.${targetField}`,
       expected,
       false,
@@ -273,7 +286,7 @@ function emitShorthandObjectValidation(
     `${expr}.${targetField}`,
     `${fieldName}.${targetField}`,
     expected,
-    targetProp?.isOptional ?? false,
+    (targetProp?.isOptional || targetProp?.isNullable) === true,
   );
 }
 
@@ -361,6 +374,7 @@ function emitCollectionValidation(
           `${fieldName}[${index}]`,
           item,
           reflectiveHelper,
+          prop.type,
         );
       }
     });
@@ -373,11 +387,13 @@ function emitReflectiveObjectValidation(
   displayName: string,
   sample: Record<string, any>,
   reflectiveHelper: string,
+  node?: TypeNode,
 ): void {
   for (const [key, expected] of Object.entries(sample)) {
+    const field = node ? (samplePropertyFor(node, key)?.name ?? key) : key;
     if (typeof expected === "string") {
       lines.push(
-        `${reflectiveHelper}(t, ${expr}, ${goStringLiteral(goFieldName(key))}, ${goStringLiteral(expected)}, ${goStringLiteral(`${displayName}.${goFieldName(key)}`)})`,
+        `${reflectiveHelper}(t, ${expr}, ${goStringLiteral(goFieldName(field))}, ${goStringLiteral(expected)}, ${goStringLiteral(`${displayName}.${goFieldName(field)}`)})`,
       );
     }
   }
@@ -474,8 +490,8 @@ function emitNestedObjectValidation(
     node.properties.map((prop) => prop.name),
   );
   for (const prop of node.properties) {
-    if (!(prop.name in value)) continue;
-    const expected = value[prop.name];
+    if (!(propertyWireKey(prop) in value)) continue;
+    const expected = value[propertyWireKey(prop)];
     const nestedField = fieldNames.get(prop.name) ?? goFieldName(prop.name);
     const nestedExpr = `${expr}.${nestedField}`;
 
@@ -494,7 +510,11 @@ function emitNestedObjectValidation(
           if ((prop.type.childTypes.length ?? 0) > 0) {
             emitScalarSampleValidation(
               lines,
-              goSaveDiscriminatorRead(nestedExpr, shorthandField, pkg),
+              goSaveDiscriminatorRead(
+                nestedExpr,
+                wireKeyForName(prop.type, shorthandField),
+                pkg,
+              ),
               `${fieldName}.${nestedField}.${targetField}`,
               expected,
               false,
@@ -509,13 +529,13 @@ function emitNestedObjectValidation(
             `${nestedExpr}.${targetField}`,
             `${fieldName}.${nestedField}.${targetField}`,
             expected,
-            targetProp?.isOptional ?? false,
+            (targetProp?.isOptional || targetProp?.isNullable) === true,
           );
         }
         continue;
       }
 
-      if (prop.isOptional) {
+      if (prop.isOptional || prop.isNullable) {
         lines.push(
           `if ${nestedExpr} == nil || *${nestedExpr} != ${goStringLiteral(expected)} {`,
         );
@@ -585,7 +605,7 @@ function emitWireValidationTest(
         `if _, ok := ${provider}Wire[${goStringLiteral(mapping.wireName)}]; !ok {`,
       );
       lines.push(
-        `t.Errorf("Expected ${provider} wire output to include ${mapping.wireName}")`,
+        `t.Errorf("Expected %s wire output to include %s", ${goStringLiteral(provider)}, ${goStringLiteral(mapping.wireName)})`,
       );
       lines.push("}");
       if (mapping.fieldName !== mapping.wireName) {
@@ -593,7 +613,7 @@ function emitWireValidationTest(
           `if _, ok := ${provider}Wire[${goStringLiteral(mapping.fieldName)}]; ok {`,
         );
         lines.push(
-          `t.Errorf("Expected ${provider} wire output to omit source field ${mapping.fieldName}")`,
+          `t.Errorf("Expected %s wire output to omit source field %s", ${goStringLiteral(provider)}, ${goStringLiteral(mapping.fieldName)})`,
         );
         lines.push("}");
       }
@@ -627,7 +647,7 @@ function needsReflectiveCollectionValidation(
 ): boolean {
   return examples.some((example) =>
     node.properties.some((prop) => {
-      const value = example.sample[prop.name];
+      const value = example.sample[propertyWireKey(prop)];
       if (
         !prop.isCollection ||
         prop.isScalar ||
@@ -1154,6 +1174,15 @@ function emitRoundtripTest(
     lines.push(`if err != nil {`);
     lines.push(`t.Fatalf("Failed to reload ${typeName}: %v", err)`);
     lines.push(`}`);
+    for (const key of sample.nullKeys ?? []) {
+      lines.push(
+        `if value, exists := savedData[${goStringLiteral(key)}]; !exists || value != nil {`,
+      );
+      lines.push(
+        `t.Errorf("Expected saved key %q to be present as null, got %v (present=%v)", ${goStringLiteral(key)}, value, exists)`,
+      );
+      lines.push(`}`);
+    }
     emitExampleValidations(
       lines,
       "reloaded",

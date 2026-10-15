@@ -44,7 +44,7 @@ describe("typra verifier", () => {
         "hydration zone touches: 0",
         "stale cleanup dry-run candidates: 0",
         "schema: types +0 / -0, required fields +0, optional fields +0, requiredness changed 0, property types changed 0, wire names changed 0, discriminators changed 0, enum values changed 0",
-        "vector coverage: 0/0 covered, 0 typed, 0 waived, 0 missing",
+        "vector coverage: 0/0 covered, 0 typed, 0 dispatched, 0 waived, 0 missing",
         "breaking change classification: patch",
         "next action: no baseline update needed.",
         "",
@@ -517,6 +517,35 @@ describe("typra verifier vector coverage", () => {
     );
     assert.ok(failure, "expected a vector-adapter-coverage failure");
     assert.match(failure!.message, /Wildcard waivers are not allowed/);
+  });
+
+  it("credits a typed seam only when the snapshot does not record typedConformance: false", () => {
+    const typedSnapshot = (): CallableVectorSnapshot => ({
+      ...makeVectorSnapshot(),
+      serializedTypes: ["ProcessRequest", "ProcessResult"],
+    });
+    const credited = makeMetadata();
+    credited.vectors = typedSnapshot();
+    const creditedResult = compareTypraMetadata(makeMetadata(), credited, {
+      vectorAdapters: ["Renderer.render"],
+    });
+    assert.equal(creditedResult.ok, true);
+    assert.equal(creditedResult.summary.vectorCoverage.typed, 1);
+
+    const withheld = makeMetadata();
+    withheld.vectors = { ...typedSnapshot(), typedConformance: false };
+    const withheldResult = compareTypraMetadata(makeMetadata(), withheld, {
+      vectorAdapters: ["Renderer.render"],
+    });
+    assert.equal(withheldResult.ok, false);
+    assert.equal(withheldResult.summary.vectorCoverage.typed, 0);
+    assert.equal(withheldResult.summary.vectorCoverage.missing, 1);
+    const failure = withheldResult.failures.find(
+      (f) => f.code === "vector-adapter-coverage",
+    );
+    assert.ok(failure, "expected a vector-adapter-coverage failure");
+    assert.match(failure!.message, /Processor\.process/);
+    assert.match(failure!.message, /test-dir/);
   });
 
   it("no-ops when the current snapshot has no vectors", () => {

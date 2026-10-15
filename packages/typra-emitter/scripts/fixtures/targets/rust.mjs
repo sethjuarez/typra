@@ -2,15 +2,18 @@ import {
   KNOWN_TEST_FAILURES,
   assertKnownTestFailures,
   commandExists,
+  cpSync,
   execFileSync,
   existsSync,
   fail,
   failures,
   generatedRoot,
+  mkdirSync,
   mkdtempSync,
   packageRoot,
   path,
   readFileSync,
+  readdirSync,
   rmSync,
   tmpdir,
   unlinkSync,
@@ -23,6 +26,12 @@ import {
   fixtureRootSampleJsonLiteral,
   propertyCorpusJsonLiteral,
 } from "../conformance.mjs";
+import { runTypeScriptGeneratedTests } from "./typescript.mjs";
+import { runPythonGeneratedTests } from "./python.mjs";
+import { runGoTests } from "./go.mjs";
+import { runCSharpGeneratedTests } from "./csharp.mjs";
+import { runJavaBuild, runJavaGeneratedTests } from "./java.mjs";
+import { runSwiftTests } from "./swift.mjs";
 
 export function runRustTests(target = "rust", packageName = "fixtures") {
   const sourceDir = path.join(generatedRoot, target);
@@ -600,8 +609,8 @@ export function runRustUnknownAbstractConformance() {
   }
 }
 
-export function runRustDispatchRegressionCompile(context) {
-  // Regression compile gate: the coerce-union + optional-field target bugs
+export function runDispatchRegressionCrossTarget(context) {
+  // Cross-target regression gate: the coerce-union + optional-field target bugs
   // (BUG1/BUG2/BUG3 and the 2.0.0 raw-string/import/unwrap defects) all surface
   // ONLY as compile errors in the generated SEAM conformance tests for a fixture
   // that couples an optional intermediate with a discriminated coerce union. The
@@ -609,44 +618,272 @@ export function runRustDispatchRegressionCompile(context) {
   // typra CI — only downstream. This gate closes that gap by generating the
   // dispatch-target-regression fixture with tests, attaching compile-only
   // provider doubles, and `cargo build --tests` (compile, do not run).
-  if (!commandExists("cargo")) {
-    context.skip("cargo is not available");
-    return;
-  }
   const fixtureDir = path.join(
     packageRoot,
     "fixtures",
     "features",
     "dispatch-target-regression",
   );
-  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-rust-regression-"));
-  const targetDir = mkdtempSync(
-    path.join(tmpdir(), "typra-rust-regression-target-"),
+  const outRoot = path.join(validationRoot, "seam-target-regression");
+  const targetDir = path.join(
+    validationRoot,
+    "seam-target-regression-rust-target",
   );
+  rmSync(outRoot, { recursive: true, force: true });
+  rmSync(targetDir, { recursive: true, force: true });
+  mkdirSync(outRoot, { recursive: true });
+  mkdirSync(targetDir, { recursive: true });
   try {
-    execFileSync(
-      process.execPath,
-      [
-        path.join(packageRoot, "dist", "src", "cli.js"),
-        "--output",
-        outRoot,
-        "--targets",
-        "rust",
-        "--spec",
-        path.join(fixtureDir, "main.tsp"),
-        "--root-object",
-        "Typra.Fixtures.Features.DispatchTargetRegression.Root",
-        "--deterministic",
-        "--no-format",
-      ],
-      { cwd: packageRoot, stdio: "pipe" },
-    );
+    for (const target of [
+      "typescript",
+      "python",
+      "go",
+      "csharp",
+      "java",
+      "rust",
+      "swift",
+    ]) {
+      execFileSync(
+        process.execPath,
+        [
+          path.join(packageRoot, "dist", "src", "cli.js"),
+          "--output",
+          outRoot,
+          "--targets",
+          target,
+          "--spec",
+          path.join(fixtureDir, "main.tsp"),
+          "--root-object",
+          "Typra.Fixtures.Features.DispatchTargetRegression.Root",
+          "--deterministic",
+          "--no-format",
+        ],
+        { cwd: packageRoot, stdio: "pipe" },
+      );
+    }
     const sourceDir = path.join(outRoot, "rust");
     if (!existsSync(sourceDir)) {
       fail("Rust dispatch-target-regression gate: no rust output generated.");
       return;
     }
-    // Attach the committed compile-only provider doubles next to the emitted
+    const generatedText = (target, basename) => {
+      const file = walkFiles(path.join(outRoot, target)).find(
+        (candidate) => path.basename(candidate) === basename,
+      );
+      if (!file) {
+        fail(
+          `Dispatch target regression gate: ${target}/${basename} was not generated.`,
+        );
+        return "";
+      }
+      return readFileSync(file, "utf8");
+    };
+    const targetAssertions = [
+      [
+        "typescript",
+        "renderer.conformance.test.ts",
+        'agent?.template?.format?.kind ?? ""',
+      ],
+      [
+        "python",
+        "test_renderer_conformance.py",
+        'getattr(getattr(getattr(agent, "template", None), "format", None), "kind", None)',
+      ],
+      ["go", "renderer_conformance_test.go", '["format_kind"].(string)'],
+      [
+        "csharp",
+        "RendererConformanceTests.cs",
+        'agent?.Template?.Format?.Kind ?? ""',
+      ],
+      ["java", "RendererConformanceTests.java", "agent.template == null"],
+      [
+        "rust",
+        "renderer_conformance_test.rs",
+        '.get("format_kind")',
+      ],
+      [
+        "swift",
+        "RendererConformanceTests.swift",
+        '["format_kind"] as? String) ?? ""',
+      ],
+      [
+        "typescript",
+        "processor.conformance.test.ts",
+        'agent?.model?.provider ?? ""',
+      ],
+      [
+        "python",
+        "test_processor_conformance.py",
+        'getattr(getattr(agent, "model", None), "provider", None)',
+      ],
+      ["go", "processor_conformance_test.go", '["model_provider"].(string)'],
+      [
+        "csharp",
+        "ProcessorConformanceTests.cs",
+        'agent?.Model?.Provider ?? ""',
+      ],
+      ["java", "ProcessorConformanceTests.java", "agent.model == null"],
+      ["rust", "processor_conformance_test.rs", '.get("model_provider")'],
+      [
+        "swift",
+        "ProcessorConformanceTests.swift",
+        '["model_provider"] as? String) ?? ""',
+      ],
+      ["typescript", "root.ts", "requiredModel"],
+      ["python", "_Root.py", "required_model"],
+      ["go", "root.go", "RequiredModel"],
+      ["csharp", "Root.cs", "RequiredModel"],
+      ["java", "Root.java", "requiredModel"],
+      ["rust", "root.rs", "required_model"],
+      ["swift", "root.swift", "requiredModel"],
+      ["typescript", "agent.ts", "templates"],
+      ["python", "_Agent.py", "templates"],
+      ["go", "agent.go", "Templates"],
+      ["csharp", "Agent.cs", "Templates"],
+      ["java", "Agent.java", "templates"],
+      ["rust", "agent.rs", "pub models: Option<Vec<Model>>"],
+      ["swift", "agent.swift", "templates"],
+    ];
+    for (const [target, basename, marker] of targetAssertions) {
+      const text = generatedText(target, basename);
+      if (text && !text.includes(marker)) {
+        fail(
+          `Dispatch target regression gate: ${target}/${basename} does not contain canonical lowering marker ${JSON.stringify(marker)}.`,
+        );
+      }
+    }
+    for (const target of [
+      "typescript",
+      "python",
+      "go",
+      "csharp",
+      "java",
+      "rust",
+      "swift",
+    ]) {
+      const generatedTests = walkFiles(
+        path.join(outRoot, target),
+        (candidate) =>
+          /(^|[\\/])(tests?|Tests)([\\/]|$)/.test(candidate) &&
+          /\.(?:ts|py|go|cs|java|rs|swift)$/.test(candidate),
+      );
+      if (generatedTests.length === 0) {
+        fail(
+          `Dispatch target regression gate: ${target} did not generate tests.`,
+        );
+      }
+    }
+    // Attach fixture-scoped providers, then compile and execute the generated
+    // per-interface conformance tests on every locally available runtime.
+    const typescriptRoot = path.join(outRoot, "typescript");
+    const typescriptSource = path.join(typescriptRoot, "src");
+    mkdirSync(typescriptSource, { recursive: true });
+    for (const entry of readdirSync(typescriptRoot)) {
+      if (entry === "tests" || entry === "src") continue;
+      const source = path.join(typescriptRoot, entry);
+      const destination = path.join(typescriptSource, entry);
+      cpSync(source, destination, { recursive: true });
+    }
+    cpSync(
+      path.join(
+        fixtureDir,
+        "vector-adapters",
+        "typescript",
+        "vector-adapters.ts",
+      ),
+      path.join(typescriptRoot, "tests", "vector-adapters.ts"),
+    );
+    cpSync(
+      path.join(fixtureDir, "vector-adapters", "python", "conftest.py"),
+      path.join(outRoot, "python", "tests", "conftest.py"),
+    );
+    for (const file of walkFiles(
+      path.join(outRoot, "python", "tests"),
+      (candidate) => path.basename(candidate) === "test_context.py",
+    )) {
+      unlinkSync(file);
+    }
+    runTypeScriptGeneratedTests(path.join(outRoot, "typescript"));
+    runPythonGeneratedTests(
+      "python",
+      "typra",
+      path.join(outRoot, "python"),
+    );
+    if (commandExists("go")) {
+      const goAdapterDir = path.join(outRoot, "go", "vectoradapters");
+      mkdirSync(goAdapterDir, { recursive: true });
+      for (const file of ["adapters.go", "go.mod"]) {
+        cpSync(
+          path.join(fixtureDir, "vector-adapters", "go", file),
+          path.join(goAdapterDir, file),
+        );
+      }
+      cpSync(
+        path.join(
+          fixtureDir,
+          "vector-adapters",
+          "go",
+          "collection_behavior_test.go",
+        ),
+        path.join(outRoot, "go", "collection_behavior_test.go"),
+      );
+      runGoTests(
+        path.join(outRoot, "go"),
+        "typrafixturesfeaturesdispatchtargetregression",
+        [{ module: "vectoradapters", relativePath: "./vectoradapters" }],
+      );
+    }
+    if (commandExists("dotnet")) {
+      cpSync(
+        path.join(
+          fixtureDir,
+          "vector-adapters",
+          "csharp",
+          "VectorProviders.cs",
+        ),
+        path.join(outRoot, "csharp", "tests", "VectorProviders.cs"),
+      );
+      runCSharpGeneratedTests(path.join(outRoot, "csharp"));
+    }
+    if (commandExists("javac") && commandExists("java")) {
+      cpSync(
+        path.join(
+          fixtureDir,
+          "vector-adapters",
+          "java",
+          "VectorProviders.java",
+        ),
+        path.join(outRoot, "java", "tests", "VectorProviders.java"),
+      );
+      runJavaBuild(path.join(outRoot, "java"));
+      runJavaGeneratedTests(
+        path.join(outRoot, "java"),
+        "typra.fixtures.features.dispatchtargetregression",
+      );
+    }
+    if (commandExists("swift")) {
+      cpSync(
+        path.join(
+          fixtureDir,
+          "vector-adapters",
+          "swift",
+          "VectorProviders.swift",
+        ),
+        path.join(outRoot, "swift", "tests", "VectorProviders.swift"),
+      );
+      runSwiftTests(
+        "dispatch-target-regression",
+        "Swift dispatch-target-regression",
+        path.join(outRoot, "swift"),
+        { includeIntegrationTests: false },
+      );
+    }
+
+    if (!commandExists("cargo")) {
+      context.skip("cargo is not available");
+      return;
+    }
+    // Attach the committed behavioral provider doubles next to the emitted
     // seam conformance tests (they include it via #[path = "vector_adapters.rs"]).
     writeFileSync(
       path.join(sourceDir, "tests", "vector_adapters.rs"),
@@ -659,7 +896,7 @@ export function runRustDispatchRegressionCompile(context) {
       path.join(sourceDir, "Cargo.toml"),
       [
         "[package]",
-        'name = "dispatch_target_regression"',
+        'name = "seam_target_regression"',
         'version = "0.0.0"',
         'edition = "2021"',
         "autotests = false",
@@ -698,7 +935,7 @@ export function runRustDispatchRegressionCompile(context) {
       ].join("\n"),
     );
     try {
-      execFileSync("cargo", ["build", "--tests"], {
+      execFileSync("cargo", ["test", "--tests"], {
         cwd: sourceDir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
@@ -727,7 +964,7 @@ export function runRustVectorConformanceCompile(context) {
   // migrates a plain seam off the stringly adapter registry by authoring only a
   // real `impl <Seam>` and one typed call. This gate proves that path stays
   // compilable end-to-end: generate the typed-seam-conformance fixture, attach
-  // the committed typed double as a test module, and `cargo build --tests`.
+  // the committed typed double as a test module, and `cargo test --lib`.
   //
   // Red-first: if the entrypoint is not emitted, `crate::model::vector_conformance`
   // is unresolved and the double fails to compile — so this gate fails on `main`.
@@ -826,7 +1063,10 @@ export function runRustVectorConformanceCompile(context) {
       ].join("\n"),
     );
     try {
-      execFileSync("cargo", ["build", "--tests"], {
+      // `cargo test --lib` (not just `build --tests`) so the typed vectors
+      // EXECUTE: `expectedError` vectors must observe `Err` and success vectors
+      // `Ok` through the typed rail (typra#338), not merely type-check.
+      execFileSync("cargo", ["test", "--lib"], {
         cwd: sourceDir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
@@ -836,7 +1076,7 @@ export function runRustVectorConformanceCompile(context) {
       const output =
         `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
       fail(
-        `Rust typed-seam-conformance compile gate failed:\n${output || error.message}`,
+        `Rust typed-seam-conformance compile/run gate failed:\n${output || error.message}`,
       );
     }
   } finally {

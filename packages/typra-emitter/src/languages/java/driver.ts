@@ -19,8 +19,8 @@ import {
 import { EmitTarget, TypraEmitterOptions } from "../../lib.js";
 import { projectNamespace } from "../../ir/namespace.js";
 import {
-  isClosedPolymorphicDispatch,
-  dispatchDefaultSlotBase,
+  loweringCapabilitiesForTarget,
+  TypeDecl,
 } from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
@@ -77,6 +77,13 @@ export const javaTestOptions: TestContextOptions = {
     number: "3.14",
     int32: "3",
     int64: "3",
+    int8: "3",
+    int16: "3",
+    safeint: "3",
+    uint8: "3",
+    uint16: "3",
+    uint32: "3",
+    uint64: "3",
     integer: "3",
     string: '"example"',
   },
@@ -85,6 +92,13 @@ export const javaTestOptions: TestContextOptions = {
     boolean: "Boolean",
     int32: "Integer",
     int64: "Long",
+    int8: "Integer",
+    int16: "Integer",
+    safeint: "Long",
+    uint8: "Integer",
+    uint16: "Integer",
+    uint32: "Long",
+    uint64: "Long",
     float32: "Float",
     float64: "Double",
     number: "Double",
@@ -328,6 +342,7 @@ export const generateJava = async (
           ifaceVectors,
           packageName,
           adapterClass,
+          new Map(allTypeDecls.map((decl) => [decl.typeName.name, decl])),
         ),
         emitTarget["test-dir"],
         emitTarget["test-dir"],
@@ -1030,15 +1045,12 @@ function emitJavaDispatchProvider(
   for (const variant of entry.decl.variants) {
     lines.push(`  ${seam} ${javaMethodName(variant.value)}();`);
   }
-  const providerDefaultBase = dispatchDefaultSlotBase(entry.decl);
-  if (providerDefaultBase) {
+  if (entry.wildcard) {
     lines.push(
       "  /** Catch-all for an unknown discriminator (the declared `*` child). */",
     );
     lines.push(
-      `  ${seam} ${javaMethodName(
-        `${providerDefaultBase[0].toLowerCase()}${providerDefaultBase.slice(1)}`,
-      )}();`,
+      `  ${seam} ${javaMethodName(entry.wildcard.name)}();`,
     );
   }
   lines.push("}");
@@ -1067,16 +1079,13 @@ function emitJavaDispatchResolver(
   // (harness explicit-skip); an abstract-open base routes unknowns to a carrier
   // in the shape loader, never throwing, so a bare `isClosedPolymorphicDispatch`
   // is the faithful twin of that throw arm.
-  const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
+  const rejectsUnknown = entry.openness === "closed";
   // An open dispatch with a declared wildcard child (`CustomModel { provider:
   // "*" }`) gains a default accessor; an unknown discriminator routes to it
   // instead of returning null — the behavioral twin of the shape loader's
   // `*`-tolerant fallback. Closed / open-self-reference keeps its throw/null arm.
-  const defaultSlotBase = dispatchDefaultSlotBase(entry.decl);
-  const defaultSlot = defaultSlotBase
-    ? javaMethodName(
-        `${defaultSlotBase[0].toLowerCase()}${defaultSlotBase.slice(1)}`,
-      )
+  const defaultSlot = entry.wildcard
+    ? javaMethodName(entry.wildcard.name)
     : null;
 
   const lines: string[] = [
@@ -1097,7 +1106,7 @@ function emitJavaDispatchResolver(
     `  private ${resolver}() {}`,
     "",
     `  public static ${seam} resolve(String ${field}, ${provider} registry) {`,
-    `    switch (${field}) {`,
+    `    switch (${field} == null ? "" : ${field}) {`,
   ];
   for (const variant of variants) {
     lines.push(`      case ${JSON.stringify(variant.value)}:`);
@@ -1109,7 +1118,9 @@ function emitJavaDispatchResolver(
       `        throw new IllegalArgumentException("Unknown ${seam} discriminator field '${field}' value: " + ${field});`,
     );
   } else if (defaultSlot) {
-    lines.push(`        return registry.${defaultSlot}();`);
+    lines.push(
+      `        return java.util.Objects.requireNonNull(registry.${defaultSlot}(), "${seam} provider returned null for required wildcard @dispatch implementation");`,
+    );
   } else {
     lines.push("        return null;");
   }
@@ -1265,6 +1276,7 @@ function emitJavaInterfaceConformanceTest(
   entries: CallableVectorSnapshotEntry[],
   packageName: string,
   adapterClass: string,
+  declsByName: Map<string, TypeDecl>,
 ): string {
   const iface = dispatched.contract;
   const resolver = `${iface}Resolver`;
@@ -1286,7 +1298,9 @@ function emitJavaInterfaceConformanceTest(
     (left.vector.name ?? "").localeCompare(right.vector.name ?? ""),
   );
   const needsNotNull = sorted.some(
-    (entry) => typeof entry.vector.expected !== "string",
+    (entry) =>
+      entry.vector.expectedError === undefined &&
+      typeof entry.vector.expected !== "string",
   );
 
   const lines: string[] = [
@@ -1319,7 +1333,15 @@ function emitJavaInterfaceConformanceTest(
       paramNames.map((paramName) => [paramName, javaPropertyName(paramName)]),
     );
     const fieldLocal = javaPropertyName(field);
-    const accessor = javaDiscriminatorAccessor(entry.dispatch!.path, locals);
+    const rootShape = classifyCallableParam(
+      entry.params[entry.dispatch!.path.split(".")[0]],
+    );
+    const accessor = javaDiscriminatorAccessor(
+      entry.dispatch!.path,
+      locals,
+      declsByName,
+      rootShape.base,
+    );
     const chunks = javaPayloadLiteralChunks(
       JSON.stringify(entry.vector.input ?? {}),
     );
@@ -1350,6 +1372,10 @@ function emitJavaInterfaceConformanceTest(
         lines.push(
           `    ${entry.params[paramName]} ${local} = ${entry.params[paramName]}.load(input.get(${key}), null);`,
         );
+      } else if (shape.isModel && shape.optional) {
+        lines.push(
+          `    ${shape.base} ${local} = input.get(${key}) == null ? null : ${shape.base}.load(input.get(${key}), null);`,
+        );
       } else {
         // Non-model param (scalar, `Record<unknown>`, optional, array) cast from
         // the parsed map into the mapped Java type the seam signature expects.
@@ -1367,10 +1393,37 @@ function emitJavaInterfaceConformanceTest(
       `    if (impl == null) throw new AssertionError(${JSON.stringify(
         `${vectorName}: no ${iface} attached for `,
       )} + ${fieldLocal});`,
-      `    Object actual = impl.${method}(${paramNames
-        .map((paramName) => locals.get(paramName))
-        .join(", ")});`,
     );
+    const javaCall = `impl.${method}(${paramNames
+      .map((paramName) => locals.get(paramName))
+      .join(", ")})`;
+    if (entry.vector.expectedError !== undefined) {
+      // The null-impl guard above stays OUTSIDE the try so a missing route fails
+      // the case instead of counting as the expected error.
+      lines.push(
+        "    Throwable caught = null;",
+        "    try {",
+        `      ${javaCall};`,
+        "    } catch (Throwable error) {",
+        "      caught = error;",
+        "    }",
+        `    if (caught == null) throw new AssertionError(${JSON.stringify(
+          `${vectorName}: expected an error`,
+        )});`,
+      );
+      if (typeof entry.vector.expectedError === "string") {
+        lines.push(
+          `    if (!String.valueOf(caught.getMessage()).contains(${JSON.stringify(
+            entry.vector.expectedError,
+          )})) throw new AssertionError(${JSON.stringify(
+            `${vectorName}: error message mismatch`,
+          )});`,
+        );
+      }
+      lines.push("  }", "");
+      return;
+    }
+    lines.push(`    Object actual = ${javaCall};`);
     if (typeof expected === "string") {
       lines.push(
         `    assertEquals(${JSON.stringify(expected)}, actual, ${JSON.stringify(
@@ -1386,6 +1439,22 @@ function emitJavaInterfaceConformanceTest(
     lines.push("  }", "");
   });
 
+  if (dispatched.openness === "closed") {
+    lines.push(
+      "  private static void resolverRejectsUnknownDiscriminator() {",
+      `    ${iface}Provider provider = ${providersRef}.${camelSeam}();`,
+      "    boolean rejected = false;",
+      "    try {",
+      `      ${resolver}.resolve("typra-unknown-discriminator", provider);`,
+      "    } catch (IllegalArgumentException expected) {",
+      "      rejected = true;",
+      "    }",
+      '    if (!rejected) throw new AssertionError("closed resolver accepted an unknown discriminator");',
+      "  }",
+      "",
+    );
+  }
+
   lines.push("  public static void run() {");
   lines.push("    int failed = 0;");
   sorted.forEach((entry, index) => {
@@ -1397,6 +1466,11 @@ function emitJavaInterfaceConformanceTest(
       )}, ${iface}ConformanceTests::${javaVectorSlug(index, entry)});`,
     );
   });
+  if (dispatched.openness === "closed") {
+    lines.push(
+      `    failed += runCase("${iface}.resolver:unknown-discriminator", ${iface}ConformanceTests::resolverRejectsUnknownDiscriminator);`,
+    );
+  }
   lines.push(
     "    if (failed > 0) {",
     `      throw new AssertionError(failed + " @vector conformance failure(s)");`,
@@ -1661,13 +1735,31 @@ function emitJavaVectorConformanceEntrypoint(
  * fields, sanitized the same way the models emit them (e.g.
  * `agent.template.format.kind`).
  */
-function javaDiscriminatorAccessor(
+export function javaDiscriminatorAccessor(
   path: string,
   locals: Map<string, string>,
+  _declsByName: Map<string, TypeDecl>,
+  _rootTypeName: string | undefined,
 ): string {
+  if (
+    loweringCapabilitiesForTarget("java").typedDiscriminatorAccess !==
+    "typed-member"
+  ) {
+    throw new Error("Java discriminator access must use a typed member.");
+  }
   const [head, ...rest] = path.split(".");
   const headLocal = locals.get(head) ?? javaPropertyName(head);
-  return [headLocal, ...rest.map(javaPropertyName)].join(".");
+  const fields = rest.map(javaPropertyName);
+  const prefixes = [
+    headLocal,
+    ...fields
+      .slice(0, -1)
+      .map((_field, index) =>
+        [headLocal, ...fields.slice(0, index + 1)].join("."),
+      ),
+  ];
+  const value = [headLocal, ...fields].join(".");
+  return `(${prefixes.map((prefix) => `${prefix} == null`).join(" || ")} ? null : ${value})`;
 }
 
 /**

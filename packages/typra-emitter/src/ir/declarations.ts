@@ -131,7 +131,7 @@ export interface TypeDecl {
   description: string;
   /** All fields defined on this type */
   fields: FieldDecl[];
-  /** The property name that receives scalar coercion value, if any */
+  /** Dict key (the `@encodedName` JSON key when declared, else the property name) that receives scalar coercion value, if any */
   coercionProperty: string | null;
   /** Load method specification */
   load: LoadDecl;
@@ -155,6 +155,24 @@ export interface TypeDecl {
   methods: MethodStubDecl[];
   /** Wire conversion specification (generated when any field has knownAs mappings) */
   wire: WireDecl | null;
+  /**
+   * Unknown-field passthrough (`...Record<unknown>` / `is Record<unknown>`, #336),
+   * present only when this model or an ancestor declares it.
+   */
+  additionalProperties?: AdditionalPropertiesDecl;
+}
+
+/**
+ * Unknown-field passthrough for a model whose string indexer is `unknown`. Load
+ * captures every input key not in `knownWireKeys` into the runtime's
+ * `additionalProperties` map; save writes the captured entries back after the
+ * declared fields, skipping any key in `knownWireKeys` (declared fields win).
+ */
+export interface AdditionalPropertiesDecl {
+  /** Every declared wire key of the model, including inherited fields and the discriminator. */
+  knownWireKeys: string[];
+  /** True when an ancestor already declares the passthrough (inherited member). */
+  inherited: boolean;
 }
 
 // ============================================================================
@@ -174,6 +192,20 @@ export interface FieldDecl {
   category: PropertyCategory;
   /** Whether this field is optional (None/null/nil default) */
   isOptional: boolean;
+  /**
+   * Required-but-nullable field (`x: T | null`, issue #339). Present (always `true`)
+   * only for that shape: the value is typed like an optional field (`isOptional` is
+   * also `true`), but load REQUIRES the key (an explicit `null` is accepted and leaves
+   * the value unset) and save ALWAYS writes the key, as `null` when unset. Optional
+   * nullable fields (`x?: T | null`) lower exactly like `x?: T` and do not carry it.
+   */
+  isNullable?: boolean;
+  /**
+   * Optional nullable field (`x?: T | null`, issue #339). Present (always `true`) only
+   * for that shape. It behaves like `x?: T` (omitted on save when unset); the flag only
+   * lets runtimes that would otherwise reject an explicit `null` (Swift) treat it as unset.
+   */
+  isOptionalNullable?: boolean;
   /** Default value for the field (primitives only) */
   defaultValue: string | number | boolean | null;
   /** Whether TypeSpec explicitly declared a default, including collection defaults such as `#[]` */
@@ -190,6 +222,175 @@ export interface FieldDecl {
   description: string;
   /** Wire name mappings per provider (e.g., { openai: "max_completion_tokens" }) */
   knownAs: Record<string, string>;
+  /**
+   * Canonical dict/JSON/YAML key from `@encodedName("application/json", ...)`.
+   * Present only when it differs from `name`; use {@link fieldWireKey} to read it.
+   */
+  serializedName?: string;
+}
+
+/** The canonical serialized dict key of a field (its encoded name, else its name). */
+export function fieldWireKey(field: {
+  name: string;
+  serializedName?: string;
+}): string {
+  return field.serializedName ?? field.name;
+}
+
+// ============================================================================
+// Field lowering descriptor — normalized target semantic decisions
+// ============================================================================
+
+export type LoweringTarget =
+  | "typescript"
+  | "python"
+  | "go"
+  | "csharp"
+  | "java"
+  | "rust"
+  | "swift";
+
+export type FieldStorageLowering = "typed-struct" | "value-backed";
+export type OptionalWrapperLowering = "preserved" | "absorbed";
+export type DiscriminatorAccessLowering =
+  | "typed-member"
+  | "serialized-wire-key";
+export type CoerceExpansionLowering =
+  | "typed-loader"
+  | "canonical-value-expansion";
+
+/**
+ * Target capabilities that affect a field's semantic lowering. Syntax stays in
+ * the target emitter; these flags are the single shared source of truth for
+ * whether a field is represented as a typed model or a generic wire value.
+ */
+export interface LoweringTargetCapabilities {
+  target: LoweringTarget;
+  valueBackedComplexTypes: ReadonlySet<string>;
+  valueBackedCollectionElementTypes: ReadonlySet<string>;
+  valueBackedUnknown: boolean;
+  valueBackingAbsorbsOptional: boolean;
+  typedDiscriminatorAccess: DiscriminatorAccessLowering;
+  valueBackedDiscriminatorAccess: DiscriminatorAccessLowering;
+  valueBackedCoerceExpansion: CoerceExpansionLowering;
+}
+
+/**
+ * Complete normalized lowering decision for one field. `wireKey` is canonical
+ * and already includes `@encodedName`; target drivers must not reinterpret it.
+ */
+export interface FieldLoweringDescriptor {
+  storage: FieldStorageLowering;
+  /**
+   * Collections remain typed containers, but complex elements may use the
+   * target's generic value representation. Null for non-complex collections.
+   */
+  collectionElementStorage: FieldStorageLowering | null;
+  optionalWrapper: OptionalWrapperLowering;
+  discriminatorAccess: DiscriminatorAccessLowering;
+  coerceExpansion: CoerceExpansionLowering;
+  wireKey: string;
+}
+
+/**
+ * Build the capability set for a supported runtime. Go and Rust use generic
+ * value representations for polymorphic/coerce-union fields; Rust additionally
+ * uses `Value::Null` as the absence sentinel and therefore absorbs the schema's
+ * optional wrapper. Swift keeps a typed enum but reads its discriminator from
+ * the enum's canonical serialized representation.
+ */
+export function loweringCapabilitiesForTarget(
+  target: LoweringTarget,
+  polymorphicTypeNames: ReadonlySet<string> = new Set(),
+): LoweringTargetCapabilities {
+  const valueBacked = target === "go" || target === "rust";
+  return {
+    target,
+    valueBackedComplexTypes: valueBacked
+      ? polymorphicTypeNames
+      : new Set<string>(),
+    // Go stores polymorphic collection elements as wire values. Rust's
+    // collection helpers hydrate generated model structs, even though scalar
+    // polymorphic fields remain value-backed.
+    valueBackedCollectionElementTypes:
+      target === "go" ? polymorphicTypeNames : new Set<string>(),
+    valueBackedUnknown: valueBacked,
+    valueBackingAbsorbsOptional: target === "rust",
+    typedDiscriminatorAccess:
+      target === "swift" ? "serialized-wire-key" : "typed-member",
+    valueBackedDiscriminatorAccess: "serialized-wire-key",
+    valueBackedCoerceExpansion:
+      target === "rust" ? "canonical-value-expansion" : "typed-loader",
+  };
+}
+
+/** Resolve a field's target lowering once from declaration IR + capabilities. */
+export function resolveFieldLowering(
+  field: Pick<
+    FieldDecl,
+    "name" | "serializedName" | "category" | "isOptional"
+  >,
+  capabilities: LoweringTargetCapabilities,
+  options: { context?: "struct-field" | "variant-field" } = {},
+): FieldLoweringDescriptor {
+  const complexType =
+    field.category.kind === "complex" ? field.category.typeName : undefined;
+  const collectionComplexType =
+    field.category.kind === "collection_complex"
+      ? field.category.typeName
+      : undefined;
+  const valueBacked =
+    complexType !== undefined &&
+    isValueBackedTypeName(complexType, capabilities);
+  return {
+    storage: valueBacked ? "value-backed" : "typed-struct",
+    collectionElementStorage:
+      collectionComplexType === undefined
+        ? null
+        : capabilities.valueBackedCollectionElementTypes.has(
+              collectionComplexType,
+            ) ||
+            (collectionComplexType === "unknown" &&
+              capabilities.valueBackedUnknown)
+          ? "value-backed"
+          : "typed-struct",
+    optionalWrapper:
+      valueBacked &&
+      field.isOptional &&
+      capabilities.valueBackingAbsorbsOptional &&
+      options.context !== "variant-field"
+        ? "absorbed"
+        : "preserved",
+    discriminatorAccess: valueBacked
+      ? capabilities.valueBackedDiscriminatorAccess
+      : capabilities.typedDiscriminatorAccess,
+    coerceExpansion: valueBacked
+      ? capabilities.valueBackedCoerceExpansion
+      : "typed-loader",
+    wireKey: fieldWireKey(field),
+  };
+}
+
+/** Shared primitive for target emitters that render storage syntax directly. */
+export function isValueBackedTypeName(
+  typeName: string,
+  capabilities: LoweringTargetCapabilities,
+): boolean {
+  return (
+    capabilities.valueBackedComplexTypes.has(typeName) ||
+    (typeName === "unknown" && capabilities.valueBackedUnknown)
+  );
+}
+
+/** Canonical dict key of a coercion assignment or `@knownAs` wire mapping. */
+export function assignmentWireKey(assignment: {
+  fieldName: string;
+  sourceName?: string;
+  serializedName?: string;
+}): string {
+  return (
+    assignment.sourceName ?? assignment.serializedName ?? assignment.fieldName
+  );
 }
 
 // ============================================================================
@@ -235,6 +436,8 @@ export interface CoercionDecl {
 export interface CoercionAssignment {
   /** Property name (camelCase, as declared in TypeSpec) */
   fieldName: string;
+  /** Dict key for the property when its `@encodedName` JSON key differs from `fieldName`. */
+  sourceName?: string;
   /** True when the value comes from the scalar input data */
   isInput: boolean;
   /** Literal string value when `isInput` is false */
@@ -246,14 +449,18 @@ export interface CoercionAssignment {
  * The category determines the deserialization pattern used by each language emitter.
  */
 export interface LoadAssignment {
-  /** Original property name (dict key, camelCase) */
+  /** Dict key to read (the `@encodedName` JSON key when declared, else the property name) */
   sourceName: string;
-  /** Field to assign to (same as sourceName — emitters apply their own casing) */
+  /** Property name to assign to (camelCase — emitters apply their own casing) */
   fieldName: string;
   /** Category determines the load pattern */
   category: PropertyCategory;
   /** Whether the field is optional */
   isOptional: boolean;
+  /** Required nullable field (see {@link FieldDecl.isNullable}). */
+  isNullable?: boolean;
+  /** Optional nullable field (see {@link FieldDecl.isOptionalNullable}). */
+  isOptionalNullable?: boolean;
   /** Parent type name (needed for calling collection helpers like Parent.load_items) */
   parentTypeName: string;
   /** Enum type name (if this field references a named enum) */
@@ -290,14 +497,16 @@ export interface SaveDecl {
  * A single property save assignment.
  */
 export interface SaveAssignment {
-  /** Property name (dict key to write to, camelCase) */
+  /** Dict key to write (the `@encodedName` JSON key when declared, else the property name) */
   targetName: string;
-  /** Field name to read from (same as targetName — emitters apply their own casing) */
+  /** Property name to read from (camelCase — emitters apply their own casing) */
   fieldName: string;
   /** Category determines the serialization pattern */
   category: PropertyCategory;
   /** Whether the field is optional (skip if null/None/nil) */
   isOptional: boolean;
+  /** Required nullable field (see {@link FieldDecl.isNullable}). */
+  isNullable?: boolean;
   /** Whether TypeSpec explicitly declared a default */
   hasExplicitDefault?: boolean;
   /** Parent type name (for collection save helpers) */
@@ -319,6 +528,11 @@ export interface SaveAssignment {
 export interface PolymorphicDispatchDecl {
   /** Discriminator field name (e.g., "kind") */
   discriminatorField: string;
+  /**
+   * Dict key the discriminator is read from/written to, when `@encodedName` renames
+   * it; absent otherwise. Use {@link discriminatorWireKey} to read it.
+   */
+  discriminatorSerializedName?: string;
   /** Concrete variant types with their discriminator values */
   variants: PolymorphicVariant[];
   /** Default/fallback type (wildcard or self-reference for non-abstract bases) */
@@ -337,6 +551,13 @@ export interface PolymorphicDispatchDecl {
  * absorbs values no concrete variant claims. Treating such a dispatch as closed emits
  * validation that rejects those values before dispatch, leaving the fallback arm unreachable.
  */
+/** The dict key the discriminator is serialized under. */
+export function discriminatorWireKey(
+  dispatch: PolymorphicDispatchDecl,
+): string {
+  return dispatch.discriminatorSerializedName ?? dispatch.discriminatorField;
+}
+
 export function isClosedPolymorphicDispatch(
   dispatch: PolymorphicDispatchDecl,
 ): boolean {
@@ -357,49 +578,6 @@ export function explicitDefaultVariant(
   return dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference
     ? dispatch.defaultVariant
     : null;
-}
-
-/**
- * PascalCase base name for the resolver registry's default slot — the slot an
- * unknown discriminator routes to for an open dispatch with a declared wildcard
- * child (`CustomModel` -> `Custom`, so Python `custom`, Go/C# `Custom`). Returns
- * null when there is no explicit default child (closed dispatch, or open
- * self-reference), in which case the resolver keeps its reject/return-null arm.
- * The standard `Custom*` naming maps to `Custom`; any other child name is
- * reduced by stripping the discriminated base suffix shared across the variant
- * subtypes (the same convention the shape loader uses), falling back to `Custom`.
- */
-export function dispatchDefaultSlotBase(
-  dispatch: PolymorphicDispatchDecl,
-): string | null {
-  const def = explicitDefaultVariant(dispatch);
-  if (!def) return null;
-  const name = def.typeName.name;
-  if (name.startsWith("Custom")) return "Custom";
-  const suffix = longestCommonSuffix([
-    ...dispatch.variants.map((variant) => variant.typeName.name),
-    name,
-  ]);
-  const stripped = suffix ? name.slice(0, name.length - suffix.length) : name;
-  return stripped || "Custom";
-}
-
-function longestCommonSuffix(names: string[]): string {
-  if (names.length < 2) return "";
-  let suffix = names[0];
-  for (const name of names.slice(1)) {
-    let matched = 0;
-    while (
-      matched < suffix.length &&
-      matched < name.length &&
-      suffix[suffix.length - 1 - matched] === name[name.length - 1 - matched]
-    ) {
-      matched++;
-    }
-    suffix = suffix.slice(suffix.length - matched);
-    if (suffix === "") break;
-  }
-  return suffix;
 }
 
 /**
@@ -444,7 +622,7 @@ export interface PolymorphicDefault {
  * contexts and may populate different fields.
  */
 export interface EntryShorthandDecl {
-  /** Element field that receives the raw scalar value. */
+  /** Element dict key (the `@encodedName` JSON key, else the field name) that receives the raw scalar value. */
   valueField: string;
   /**
    * Per-scalar-type constant assignments inferred from the element's `@coerce`
@@ -471,7 +649,7 @@ export interface EntryShorthandCase {
  * quoted string would silently retype such a field.
  */
 export interface EntryShorthandAssignment {
-  /** Property name (camelCase, as declared in TypeSpec) */
+  /** Element dict key (the `@encodedName` JSON key, else the property name) */
   fieldName: string;
   /** Constant value, preserving its declared JSON type. */
   literalValue: string | number | boolean | null;
@@ -482,9 +660,9 @@ export interface CollectionHelperDecl {
   propertyName: string;
   /** Element type name (the type being loaded/saved) */
   elementTypeName: TypeName;
-  /** Field names on the element type (excluding "name" — used for shorthand detection) */
+  /** Element dict keys (excluding "name" — used for shorthand detection); `@encodedName` JSON keys when declared */
   innerFields: string[];
-  /** Element field populated by scalar @coerce shorthand, when declared. */
+  /** Element dict key populated by scalar @coerce shorthand, when declared. */
   coercionProperty?: string | null;
   /** Immediate-scalar entry expansion declared via `@entryShorthand`, when present. */
   entryShorthand?: EntryShorthandDecl | null;
@@ -562,6 +740,11 @@ export interface WireDecl {
 export interface WireFieldMapping {
   /** Original field name (camelCase) */
   fieldName: string;
+  /**
+   * Canonical dict key the field is saved under when `@encodedName` renames it;
+   * `@knownAs` maps this canonical key to the provider key. Absent otherwise.
+   */
+  serializedName?: string;
   /** Category of the field (for serialization) */
   category: PropertyCategory;
   /** Whether the field is optional */

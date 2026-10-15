@@ -16,6 +16,7 @@ import {
   runCommand,
   runGoFormatCheck,
   tmpdir,
+  toPascalCase,
   unlinkSync,
   walkFiles,
   writeFileSync,
@@ -26,8 +27,16 @@ import {
   propertyCorpusJsonLiteral,
 } from "../conformance.mjs";
 
-export function runGoTests() {
-  const sourceDir = path.join(generatedRoot, "go");
+export function runGoTests(
+  sourceDir = path.join(generatedRoot, "go"),
+  moduleName = "fixtures",
+  moduleReplacements = [],
+) {
+  if (typeof sourceDir !== "string") {
+    sourceDir = path.join(generatedRoot, "go");
+    moduleName = "fixtures";
+    moduleReplacements = [];
+  }
   const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".go"));
   if (sourceFiles.length === 0) {
     fail("No generated Go files found to test.");
@@ -39,9 +48,15 @@ export function runGoTests() {
   writeFileSync(
     modPath,
     [
-      "module fixtures",
+      `module ${moduleName}`,
       "",
       "go 1.22",
+      ...moduleReplacements.flatMap(({ module, relativePath }) => [
+        "",
+        `require ${module} v0.0.0`,
+        "",
+        `replace ${module} => ${relativePath}`,
+      ]),
       "",
       "require gopkg.in/yaml.v3 v3.0.1",
       "",
@@ -545,6 +560,73 @@ export function runGoExecutableConformance() {
       }
     }
     rmSync(path.join(sourceDir, "cmd"), { recursive: true, force: true });
+  }
+}
+
+export function runGoFocusedFixturesBuild(context, fixtures) {
+  // Focused feature fixtures are otherwise only compiled to markdown, so Go compile errors in
+  // shapes the integration fixture lacks escape CI (typra#305: an unused `fmt` import for a
+  // dispatch whose `*` carrier never errors). Emit each fixture's Go library into its own module
+  // and `go build` it; `go vet` is skipped because it is not what consumers' builds enforce.
+  if (!commandExists("go")) {
+    context.skip("go is not available");
+    return;
+  }
+  const outRoot = mkdtempSync(path.join(tmpdir(), "typra-go-focused-"));
+  try {
+    for (const fixture of fixtures) {
+      const featureName = path
+        .relative(path.join(packageRoot, "fixtures", "features"), fixture)
+        .split(path.sep)[0];
+      const output = path.join(outRoot, featureName);
+      try {
+        execFileSync(
+          process.execPath,
+          [
+            path.join(packageRoot, "dist", "src", "cli.js"),
+            "--output",
+            output,
+            "--targets",
+            "go",
+            "--spec",
+            fixture,
+            "--root-object",
+            `Typra.Fixtures.Features.${toPascalCase(featureName)}.Root`,
+            "--no-tests",
+            "--no-format",
+            "--deterministic",
+            "--import-path",
+            "fixtures",
+          ],
+          { cwd: packageRoot, stdio: "pipe" },
+        );
+        const sourceDir = path.join(output, "go");
+        if (!existsSync(sourceDir)) {
+          fail(`Go focused fixture ${featureName}: no go output generated.`);
+          continue;
+        }
+        writeFileSync(
+          path.join(sourceDir, "go.mod"),
+          ["module fixtures", "", "go 1.22", ""].join("\n"),
+        );
+        execFileSync("go", ["mod", "tidy"], {
+          cwd: sourceDir,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        execFileSync("go", ["build", "./..."], {
+          cwd: sourceDir,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch (error) {
+        const detail =
+          `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
+        fail(
+          `Go focused fixture ${featureName} failed to build:\n${detail || error.message}`,
+        );
+      }
+    }
+  } finally {
+    rmSync(outRoot, { recursive: true, force: true });
   }
 }
 

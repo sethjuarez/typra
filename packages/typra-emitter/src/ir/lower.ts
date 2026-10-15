@@ -46,6 +46,7 @@ import {
   ImportRef,
   WireDecl,
   WireFieldMapping,
+  fieldWireKey,
 } from "./declarations.js";
 
 // ============================================================================
@@ -317,6 +318,14 @@ export function lowerType(
     polymorphicDispatch,
     methods: lowerMethods(node),
     wire: lowerWire(node, fields),
+    ...(node.additionalProperties
+      ? {
+          additionalProperties: {
+            knownWireKeys: [...node.knownWireKeys],
+            inherited: node.additionalPropertiesInherited,
+          },
+        }
+      : {}),
   };
 }
 
@@ -378,7 +387,11 @@ function lowerField(
     name: prop.name,
     typeName: prop.typeName,
     category: classifyProperty(prop, polymorphicTypeNames),
-    isOptional: prop.isOptional,
+    // A required `T | null` is value-typed like an optional field but keeps a required
+    // key; `x?: T | null` lowers exactly like `x?: T` (#339).
+    isOptional: prop.isOptional || prop.isNullable,
+    ...(prop.isNullable && !prop.isOptional ? { isNullable: true } : {}),
+    ...(prop.isNullable && prop.isOptional ? { isOptionalNullable: true } : {}),
     defaultValue: prop.defaultValue,
     hasExplicitDefault: prop.hasExplicitDefault,
     allowedValues: prop.allowedValues,
@@ -387,6 +400,9 @@ function lowerField(
     isOpenEnum: prop.isOpenEnum,
     description: prop.description,
     knownAs,
+    ...(prop.serializedName !== undefined
+      ? { serializedName: prop.serializedName }
+      : {}),
   };
 }
 
@@ -414,6 +430,9 @@ function lowerLoad(
     const assignments: CoercionAssignment[] = Object.entries(c.expansion).map(
       ([key, value]) => ({
         fieldName: key,
+        ...(propertyWireKey(node, key) !== key
+          ? { sourceName: propertyWireKey(node, key) }
+          : {}),
         isInput: value === "{value}",
         literalValue: value === "{value}" ? undefined : String(value),
       }),
@@ -440,10 +459,12 @@ function lowerLoad(
   const assignments: LoadAssignment[] = fields
     .filter((_f, i) => !node.properties[i]?.sensitive.includes("load"))
     .map((f) => ({
-      sourceName: f.name,
+      sourceName: fieldWireKey(f),
       fieldName: f.name,
       category: f.category,
       isOptional: f.isOptional,
+      ...(f.isNullable ? { isNullable: true } : {}),
+      ...(f.isOptionalNullable ? { isOptionalNullable: true } : {}),
       hasExplicitDefault: f.hasExplicitDefault,
       parentTypeName: node.typeName.name,
       enumName: f.enumName,
@@ -475,10 +496,11 @@ function lowerSave(node: TypeNode, fields: FieldDecl[]): SaveDecl {
   const assignments: SaveAssignment[] = fields
     .filter((_f, i) => !node.properties[i]?.sensitive.includes("save"))
     .map((f) => ({
-      targetName: f.name,
+      targetName: fieldWireKey(f),
       fieldName: f.name,
       category: f.category,
       isOptional: f.isOptional,
+      ...(f.isNullable ? { isNullable: true } : {}),
       hasExplicitDefault: f.hasExplicitDefault,
       parentTypeName: node.typeName.name,
       enumName: f.enumName,
@@ -563,6 +585,9 @@ export function lowerPolymorphicDispatch(
 
   const baseDispatch: PolymorphicDispatchDecl = {
     discriminatorField: node.discriminator!,
+    ...(discriminatorProperty?.serializedName !== undefined
+      ? { discriminatorSerializedName: discriminatorProperty.serializedName }
+      : {}),
     variants,
     defaultVariant,
     isAbstract: node.isAbstract,
@@ -603,7 +628,7 @@ function lowerCollectionHelpers(
         innerFields:
           elementType?.properties
             .filter((t) => t.name !== "name")
-            .map((t) => t.name) || [],
+            .map((t) => t.serializedName ?? t.name) || [],
         coercionProperty: elementType
           ? findCoercionProperty(elementType)
           : null,
@@ -622,8 +647,8 @@ function lowerCollectionHelpers(
  * declared field instead.
  */
 function lowerEntryShorthand(node: TypeNode): EntryShorthandDecl | null {
-  const valueField = node.entryShorthand;
-  if (!valueField) return null;
+  if (!node.entryShorthand) return null;
+  const valueField = propertyWireKey(node, node.entryShorthand);
 
   const cases: EntryShorthandCase[] = (node.coercions || []).map(
     (coercion) => ({
@@ -631,7 +656,7 @@ function lowerEntryShorthand(node: TypeNode): EntryShorthandDecl | null {
       assignments: Object.entries(coercion.expansion)
         .filter(([, value]) => value !== "{value}")
         .map(([fieldName, value]) => ({
-          fieldName,
+          fieldName: propertyWireKey(node, fieldName),
           literalValue: value as string | number | boolean | null,
         })),
     }),
@@ -700,6 +725,9 @@ function lowerWire(node: TypeNode, fields: FieldDecl[]): WireDecl | null {
       }
       mappings.push({
         fieldName: field.name,
+        ...(field.serializedName !== undefined
+          ? { serializedName: field.serializedName }
+          : {}),
         category: field.category,
         isOptional: field.isOptional,
         parentTypeName: node.typeName.name,
@@ -788,11 +816,25 @@ function findCoercionProperty(node: TypeNode): string | null {
   for (const alt of node.coercions) {
     for (const [key, value] of Object.entries(alt.expansion)) {
       if (value === "{value}") {
-        return key;
+        return propertyWireKey(node, key);
       }
     }
   }
   return null;
+}
+
+/**
+ * Canonical dict key of a named property on `node` (its `@encodedName`, else the name).
+ * Falls back to an inherited base property's encoded key when `node` does not
+ * redeclare the property.
+ */
+function propertyWireKey(node: TypeNode, propertyName: string): string {
+  const property = node.properties.find((p) => p.name === propertyName);
+  if (property) return property.serializedName ?? propertyName;
+  const inherited = node.inheritedSerializedNames;
+  return inherited && Object.hasOwn(inherited, propertyName)
+    ? inherited[propertyName]
+    : propertyName;
 }
 
 // ============================================================================
@@ -918,6 +960,13 @@ function extractMethodTypeRefs(method: MethodStubDecl): string[] {
     "integer",
     "int32",
     "int64",
+    "int8",
+    "int16",
+    "safeint",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
     "float",
     "float32",
     "float64",

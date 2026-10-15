@@ -166,6 +166,12 @@ Common decorators:
 `@parseAlias` is parse-only: loading accepts aliases, but saving emits the
 canonical TypeSpec value.
 
+The standard TypeSpec `@encodedName("application/json", "wire_name")` sets a
+property's canonical dict/JSON/YAML key in every runtime's load and save paths;
+generated member names stay idiomatic and derive from the property name. Other
+mime types are ignored. `@@knownAs` maps that canonical key to a provider key, so
+`toWire`/`fromWire` translate between the encoded name and the provider name.
+
 ## Emitter options
 
 The root emitter options are:

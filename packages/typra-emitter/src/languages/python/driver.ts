@@ -42,8 +42,7 @@ import { PythonExprVisitor } from "./visitor.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 import {
-  isClosedPolymorphicDispatch,
-  dispatchDefaultSlotBase,
+  loweringCapabilitiesForTarget,
 } from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
@@ -95,6 +94,13 @@ export const pythonTypeMapper: Record<string, string> = {
   object: "dict",
   boolean: "bool",
   int64: "int",
+  int8: "int",
+  int16: "int",
+  safeint: "int",
+  uint8: "int",
+  uint16: "int",
+  uint32: "int",
+  uint64: "int",
   int32: "int",
   float64: "float",
   float32: "float",
@@ -404,7 +410,11 @@ export const generatePython = async (
       await emitPythonFile(
         context,
         `test_${toSnakeCase(dispatched.contract)}_conformance.py`,
-        emitPythonInterfaceConformanceTest(dispatched, ifaceVectors, importPath),
+        emitPythonInterfaceConformanceTest(
+          dispatched,
+          ifaceVectors,
+          importPath,
+        ),
         conformanceDir,
         emitTarget["test-dir"],
       );
@@ -894,7 +904,7 @@ function emitPythonInterfaceConformanceTest(
   importPath: string,
 ): string {
   const iface = toSnakeCase(dispatched.contract);
-  const resolverModule = `${importPath}._${iface}_resolver`;
+  const resolverModule = `${importPath.split(".")[0]}._${iface}_resolver`;
   const resolveFn = `resolve_${iface}`;
   const fixture = `${iface}_provider`;
   // §8.5: sort by vector name so regen is byte-stable regardless of snapshot order.
@@ -907,8 +917,9 @@ function emitPythonInterfaceConformanceTest(
   const modelTypes: string[] = [];
   for (const entry of sorted) {
     for (const type of Object.values(entry.params)) {
-      if (classifyCallableParam(type).bareModel && !modelTypes.includes(type)) {
-        modelTypes.push(type);
+      const shape = classifyCallableParam(type);
+      if (shape.isModel && !modelTypes.includes(shape.base)) {
+        modelTypes.push(shape.base);
       }
     }
   }
@@ -930,6 +941,7 @@ function emitPythonInterfaceConformanceTest(
     "import asyncio",
     "import inspect",
     "import json",
+    ...(dispatched.openness === "closed" ? ["import pytest"] : []),
     "",
     modelTypes.length > 0
       ? `from ${importPath} import ${modelTypes.join(", ")}`
@@ -970,6 +982,10 @@ function emitPythonInterfaceConformanceTest(
       const key = JSON.stringify(paramName);
       if (shape.bareModel) {
         lines.push(`    ${paramName} = ${entry.params[paramName]}.load(payload[${key}])`);
+      } else if (shape.isModel && shape.optional) {
+        lines.push(
+          `    ${paramName} = ${shape.base}.load(payload[${key}]) if payload.get(${key}) is not None else None`,
+        );
       } else {
         // Non-model params (scalars, dict, optionals) are already the right
         // native Python type after json.loads; pass them through. An optional
@@ -987,7 +1003,35 @@ function emitPythonInterfaceConformanceTest(
       `    assert impl is not None, f${JSON.stringify(
         `${entry.vector.name ?? fn}: no ${dispatched.contract} attached for {${field}}`,
       )}`,
-      `    result = impl.${method}(${paramNames.join(", ")})`,
+    );
+    const call = `impl.${method}(${paramNames.join(", ")})`;
+    if (entry.vector.expectedError !== undefined) {
+      // The resolver assert above stays OUTSIDE the try so a missing route fails
+      // the test instead of counting as the expected error.
+      const label = entry.vector.name ?? fn;
+      lines.push(
+        "    caught = None",
+        "    try:",
+        `        result = ${call}`,
+        "        if inspect.isawaitable(result):",
+        "            asyncio.run(result)",
+        "    except Exception as error:  # noqa: BLE001",
+        "        caught = error",
+        `    assert caught is not None, ${JSON.stringify(
+          `${label}: expected an error`,
+        )}`,
+      );
+      if (typeof entry.vector.expectedError === "string") {
+        lines.push(
+          `    assert ${JSON.stringify(
+            entry.vector.expectedError,
+          )} in str(caught), ${JSON.stringify(`${label}: error message mismatch`)}`,
+        );
+      }
+      return;
+    }
+    lines.push(
+      `    result = ${call}`,
       "    if inspect.isawaitable(result):",
       "        result = asyncio.run(result)",
     );
@@ -1000,6 +1044,15 @@ function emitPythonInterfaceConformanceTest(
       lines.push("    assert result is not None");
     }
   });
+  if (dispatched.openness === "closed") {
+    lines.push(
+      "",
+      "",
+      `def test_${iface}_rejects_unknown_discriminator(${fixture}):`,
+      "    with pytest.raises(ValueError):",
+      `        ${resolveFn}("typra-unknown-discriminator", ${fixture})`,
+    );
+  }
   lines.push("");
   return lines.join("\n");
 }
@@ -1218,8 +1271,19 @@ function uniquePythonName(base: string, seen: Map<string, number>): string {
  * `agent.template.format.kind`).
  */
 function pythonDiscriminatorAccessor(path: string): string {
+  if (
+    loweringCapabilitiesForTarget("python").typedDiscriminatorAccess !==
+    "typed-member"
+  ) {
+    throw new Error("Python discriminator access must use a typed member.");
+  }
   const [head, ...rest] = path.split(".");
-  return [head, ...rest.map((segment) => toSnakeCase(segment))].join(".");
+  const access = rest.reduce(
+    (container, segment) =>
+      `getattr(${container}, ${JSON.stringify(toSnakeCase(segment))}, None)`,
+    head,
+  );
+  return `(${access} or "")`;
 }
 
 function collectLoadSaveTypeNames(nodes: TypeNode[]): Set<string> {
@@ -1439,7 +1503,7 @@ function emitStarletteRoutes(
     "        return None",
     "    if type_name == \"boolean\":",
     "        return str(value).lower() in {\"1\", \"true\", \"yes\", \"on\"}",
-    "    if type_name in {\"int32\", \"int64\", \"integer\"}:",
+    "    if type_name in {\"int8\", \"int16\", \"int32\", \"int64\", \"integer\", \"safeint\", \"uint8\", \"uint16\", \"uint32\", \"uint64\"}:",
     "        return int(value)",
     "    if type_name in {\"float32\", \"float64\", \"numeric\", \"number\"}:",
     "        return float(value)",
@@ -2378,15 +2442,12 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
   const variantsVar = `${toSnakeCase(seam).toUpperCase()}_VARIANTS`;
   // Raise on an unknown discriminator exactly when the shape load switch does —
   // a closed dispatch with no default (_TemplateFormat.load_kind else arm).
-  const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
+  const rejectsUnknown = entry.openness === "closed";
   // An open dispatch with a declared wildcard child (`CustomModel { provider:
   // "*" }`) routes an unknown discriminator to a default `custom` registry slot,
   // the behavioral twin of the shape loader's `*`-tolerant fallback. Closed
   // dispatch / open self-reference has no distinct child slot — keep raise/None.
-  const defaultSlotBase = dispatchDefaultSlotBase(entry.decl);
-  const defaultSlot = defaultSlotBase
-    ? pyDispatchIdentifier(toSnakeCase(defaultSlotBase) || "custom")
-    : null;
+  const defaultSlot = entry.wildcard?.name ?? null;
   const slot = (value: string): string =>
     pyDispatchIdentifier(toSnakeCase(value) || "value");
 
@@ -2429,11 +2490,12 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
     lines.push(`    ${slot(variant.value)}: ${seam} | None`);
   }
   if (defaultSlot) {
-    // The wildcard/default slot is OPTIONAL — an unknown discriminator routes
-    // here, but a consumer that attaches no catch-all still gets a valid
-    // provider (the slot stays ``None``, so unknown -> unimplemented).
+    lines.push(`    ${defaultSlot}: ${seam}`);
+    lines.push("");
+    lines.push("    def __post_init__(self) -> None:");
+    lines.push(`        if self.${defaultSlot} is None:`);
     lines.push(
-      `    ${defaultSlot}: ${seam} | None = None`,
+      `            raise ValueError("${seam} provider requires a non-null wildcard @dispatch implementation")`,
     );
   }
   lines.push("");
@@ -2452,6 +2514,12 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
   );
   lines.push('    """');
   lines.push(`    missing = [kind for kind in ${variantsVar} if kind not in impls]`);
+  if (defaultSlot) {
+    lines.push(
+      `    if ${JSON.stringify(defaultSlot)} not in impls or impls[${JSON.stringify(defaultSlot)}] is None:`,
+    );
+    lines.push(`        missing.append(${JSON.stringify(defaultSlot)})`);
+  }
   lines.push("    if missing:");
   lines.push(
     `        raise ValueError(f"${seam} provider is missing @dispatch variant(s): {missing}")`,
@@ -2461,8 +2529,7 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
     lines.push(`        ${slot(variant.value)}=impls[${JSON.stringify(variant.value)}],`);
   }
   if (defaultSlot) {
-    // Optional: a consumer may omit the catch-all. ``.get`` keeps it ``None``.
-    lines.push(`        ${defaultSlot}=impls.get(${JSON.stringify(defaultSlot)}),`);
+    lines.push(`        ${defaultSlot}=impls[${JSON.stringify(defaultSlot)}],`);
   }
   lines.push("    )");
   lines.push("");

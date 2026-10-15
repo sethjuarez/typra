@@ -116,6 +116,40 @@ describe("property corpus generator", () => {
     assert.ok(kinds.includes("text"));
     assert.ok(kinds.some((kind) => kind.startsWith("vendor-")));
   });
+
+  it("keys renamed properties by their @encodedName wire key", () => {
+    const root = type("Root", [
+      {
+        ...prop("fadeInMs", "int32", { isScalar: true }),
+        serializedName: "fade_in_ms",
+      },
+    ]);
+    const [entry] = buildPropertyCorpus(root, {
+      rootType: "Root",
+      seed: 0x117,
+      caseCount: 1,
+    });
+    assert.ok("fade_in_ms" in entry.input);
+    assert.equal("fadeInMs" in entry.input, false);
+  });
+  it("keeps required nullable keys present, sometimes as an explicit null", () => {
+    const root = type("Root", [
+      { ...prop("caption", "string", { isScalar: true }), isNullable: true },
+    ]);
+    const values = buildPropertyCorpus(root, {
+      rootType: "Root",
+      seed: 0x117,
+      caseCount: 8,
+    }).map((entry) => {
+      assert.ok("caption" in entry.input, "required nullable key is always present");
+      return entry.input.caption;
+    });
+    assert.ok(values.includes(null), "some case carries an explicit null");
+    assert.ok(
+      values.some((value) => typeof value === "string"),
+      "some case carries a non-null value",
+    );
+  });
 });
 
 describe("property corpus shrink output", () => {
@@ -153,5 +187,22 @@ describe("property corpus shrink output", () => {
       shrinkPropertyDifference(expected, actual),
       shrinkPropertyDifference(expected, actual),
     );
+  });
+
+  it("reports a dropped required nullable key instead of treating it as null", () => {
+    const entry = { id: "root-0x117-case-007", seed: "0x117", caseId: "case-007" };
+    const expected = {
+      propertyCases: [
+        { ...entry, root: { content: { kind: "audio", transcript: null } } },
+      ],
+    };
+    const actual = {
+      propertyCases: [{ ...entry, root: { content: { kind: "audio" } } }],
+    };
+    // The conformance gate compares JSON text, where a missing key and `"key": null` differ.
+    assert.notEqual(JSON.stringify(expected), JSON.stringify(actual));
+    const difference = shrinkPropertyDifference(expected, actual);
+    assert.equal(difference.path, "$.content.transcript");
+    assert.equal(difference.expected, null);
   });
 });

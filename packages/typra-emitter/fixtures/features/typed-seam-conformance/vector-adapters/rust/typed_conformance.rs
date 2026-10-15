@@ -12,7 +12,7 @@
 //
 // The gate attaches this file as a test module of the generated crate.
 
-use crate::model::{Assembler, Collator, Note, Reviser, Transformer};
+use crate::model::{Assembler, Checker, Collator, Note, Reviser, Transformer};
 
 /// A minimal real seam implementation: trims, and rejects the literal "boom".
 struct TransformerImpl;
@@ -113,4 +113,28 @@ impl Assembler for AssemblerImpl {
 #[tokio::test]
 async fn assembler_typed_vectors_pass() {
     crate::model::vector_conformance::run_assembler_conformance(&AssemblerImpl).await;
+}
+
+/// A minimal real SYNC seam with an error channel (typra#338): a `@sync` op
+/// returns `Result<T, Box<dyn Error + Send + Sync>>` exactly like an async op,
+/// so the typed entrypoint asserts the `expectedError` vector (`Err` whose
+/// message contains "empty input rejected") and the success vector (`Ok`).
+struct CheckerImpl;
+
+#[async_trait::async_trait]
+impl Checker for CheckerImpl {
+    fn check(
+        &self,
+        text: &String,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        if text.is_empty() {
+            return Err("empty input rejected".into());
+        }
+        Ok(text.clone())
+    }
+}
+
+#[test]
+fn checker_typed_vectors_pass() {
+    crate::model::vector_conformance::run_checker_conformance(&CheckerImpl);
 }

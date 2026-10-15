@@ -10,7 +10,7 @@ import type { EmitTarget } from "./lib.js";
 // Narrowing (rather than `keyof EmitTarget`) keeps `isPresent` total over the
 // real value types and guards against a future boolean/object option being
 // mis-judged "present" by a catch-all fallback.
-type SwiftOnlyOptionKey = "test-resources" | "harness-test-dir";
+type SwiftOnlyOptionKey = "test-resources" | "resources" | "harness-test-dir";
 
 interface ScopedOption {
   key: SwiftOnlyOptionKey;
@@ -20,6 +20,7 @@ interface ScopedOption {
 
 const SWIFT_ONLY_OPTIONS: readonly ScopedOption[] = [
   { key: "test-resources", scope: "swift", issue: "#260" },
+  { key: "resources", scope: "swift", issue: "#332" },
   { key: "harness-test-dir", scope: "swift", issue: "#261" },
 ];
 

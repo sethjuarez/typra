@@ -77,6 +77,46 @@ model FixtureRoot {
 
   @doc("Ordered complex collection with non-unique names")
   checkpoint?: FixtureCheckpoint;
+
+  @sample(#{ passthrough: #{ label: "declared label" } })
+  @doc("A model that preserves undeclared fields through load and save (#336)")
+  passthrough: FixturePassthrough;
+
+  @sample(#{ passthroughEvents: #[#{ kind: "click", event_id: "event-1", x: 3 }] })
+  @doc("Polymorphic models whose base preserves undeclared fields (#336)")
+  passthroughEvents: FixturePassthroughEvent[];
+}
+
+@doc("""
+Unknown-field passthrough (#336): every key the model does not declare is kept on load and
+written back on save. Known keys are matched by wire name, so `started_at` is declared.
+""")
+@serializable
+model FixturePassthrough {
+  @sample(#{ label: "declared label" })
+  label: string;
+
+  @encodedName("application/json", "started_at")
+  startedAt?: string;
+
+  ...Record<unknown>;
+}
+
+@doc("A polymorphic base that preserves undeclared fields; variants inherit the passthrough.")
+@discriminator("kind")
+@serializable
+model FixturePassthroughEvent {
+  kind: string;
+
+  @encodedName("application/json", "event_id")
+  eventId: string;
+
+  ...Record<unknown>;
+}
+
+model FixturePassthroughClick extends FixturePassthroughEvent {
+  kind: "click";
+  x: int32;
 }
 
 @doc("Typed record values must preserve their declared value type.")
@@ -531,6 +571,62 @@ model FileContent extends FixtureContent {
 model AudioContent extends FixtureContent {
   kind: "audio";
   value: string;
+
+  // A non-string scalar array on a variant must load as typed elements (#341).
+  @sample(#{ channelLevels: #[3, 7] })
+  channelLevels: int32[];
+
+  // Multi-word enum values must yield one Rust variant name across model, defaults, and tests (#340).
+  @sample(#{ mix: "wide_hold_then_push" })
+  mix: FixtureAudioMix = FixtureAudioMix.subtlePush;
+
+  // Sized and unsigned integers must emit native runtime types and round-trip (#342).
+  @sample(#{ gain: -128 })
+  gain?: int8;
+
+  @sample(#{ pan: -32768 })
+  pan?: int16;
+
+  @sample(#{ peak: 255 })
+  peak?: uint8;
+
+  @sample(#{ sampleRateHz: 65535 })
+  sampleRateHz?: uint16;
+
+  @sample(#{ durationMs: 4294967295 })
+  durationMs?: uint32;
+
+  @sample(#{ byteSize: 4294967296000 })
+  byteSize?: uint64;
+
+  @sample(#{ frameCount: 9007199254740991 })
+  frameCount?: safeint;
+
+  // `@encodedName` sets the canonical JSON/YAML key on load and save (#337).
+  @encodedName("application/json", "fade_in_ms")
+  @sample(#{ fade_in_ms: 250 })
+  fadeInMs?: int32;
+
+  // A wire key that is not a valid identifier in any target and holds format-string
+  // metacharacters, so every runtime must escape it as a string literal (#337).
+  @encodedName("application/json", "fade-out {ms}")
+  @sample(#{ `fade-out {ms}`: 120 })
+  fadeOutMs?: int32;
+
+  // Required nullable: the key must be present on load (null allowed) and is always
+  // written on save, as null when unset — distinct from `?` optional (#339).
+  @sample(#{ transcript: null })
+  @sample(#{ transcript: "hello" })
+  transcript: string | null;
+
+  @sample(#{ loudness: null })
+  @sample(#{ loudness: 3 })
+  loudness: int32 | null;
+}
+
+union FixtureAudioMix {
+  subtlePush: "subtle_push";
+  wideHoldThenPush: "wide_hold_then_push";
 }
 
 @abstract
@@ -1083,4 +1179,16 @@ model WireOptions {
 
   @sample(#{ repetitionPenalty: 1.5 })
   repetitionPenalty?: numeric;
+
+  // A named string-union field mapped to a provider wire name. Swift renders it as a
+  // RawRepresentable struct, so `toWire` must unwrap `.rawValue` exactly as `save()` does,
+  // or the `toWire` -> `fromWire` round trip fails to reload it (#331).
+  @knownAs("openai", "reasoning_effort")
+  @sample(#{ reasoningEffort: "high" })
+  reasoningEffort?: WireReasoningEffort;
+}
+
+union WireReasoningEffort {
+  low: "low",
+  high: "high",
 }

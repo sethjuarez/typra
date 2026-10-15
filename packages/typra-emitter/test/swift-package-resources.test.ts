@@ -5,7 +5,8 @@
 // downstream project's bundled test resources survive `tsp compile`. The unit
 // tests in swift-emitter.test.ts lock emitSwiftPackage directly; this test
 // locks the option-to-driver wiring end to end (a regression that dropped the
-// forwarding would leave those unit tests green but this one red).
+// forwarding would leave those unit tests green but this one red). Issue #332
+// adds the same guarantee for the main library target's `resources` option.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -31,7 +32,7 @@ const SPEC = [
   "",
 ].join("\n");
 
-function compile(testResources?: string[]): string {
+function compile(testResources?: string[], resources?: string[]): string {
   const root = mkdtempSync(path.join(process.cwd(), "tmp-swift-resources-"));
   const source = path.join(root, "main.tsp");
   const config = path.join(root, "tspconfig.yaml");
@@ -64,6 +65,12 @@ function compile(testResources?: string[]): string {
               ...testResources.map((r) => `          - ${yamlString(r)}`),
             ]
           : []),
+        ...(resources
+          ? [
+              "        resources:",
+              ...resources.map((r) => `          - ${yamlString(r)}`),
+            ]
+          : []),
         "        format: false",
         "",
       ].join("\n"),
@@ -92,5 +99,22 @@ describe("Swift Package.swift test resources flow through the driver (#260)", ()
     const pkg = compile();
     assert.match(pkg, /\.testTarget\(/);
     assert.doesNotMatch(pkg, /resources:/);
+  });
+});
+
+describe("Swift Package.swift main-target resources flow through the driver (#332)", () => {
+  it("emits resources: on the main target so Bundle.module exists for production code", () => {
+    const pkg = compile(undefined, ["Resources"]);
+    assert.match(
+      pkg,
+      /\.target\(name: "Repro"[^\n]*path: "Sources\/Repro", resources: \[\.process\("Resources"\)\]\)/,
+    );
+    assert.doesNotMatch(pkg, /\.testTarget\([^\n]*resources:/);
+  });
+
+  it("keeps main and test resources independent", () => {
+    const pkg = compile(["Fixtures"], ["Resources"]);
+    assert.match(pkg, /\.target\([^\n]*resources: \[\.process\("Resources"\)\]/);
+    assert.match(pkg, /\.testTarget\([^\n]*resources: \[\.process\("Fixtures"\)\]/);
   });
 });

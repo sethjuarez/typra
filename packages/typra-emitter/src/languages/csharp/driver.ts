@@ -21,6 +21,7 @@ import {
   emitCSharpClass,
   emitCSharpEnum,
   isCSharpSinglePrecision,
+  csharpNarrowIntegerType,
   protocolCSharpType,
 } from "./emitter.js";
 import { emitCSharpContext, emitCSharpUtils } from "./scaffolding.js";
@@ -45,8 +46,8 @@ import {
 } from "../../testing/test-context.js";
 import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
 import {
-  isClosedPolymorphicDispatch,
-  dispatchDefaultSlotBase,
+  loweringCapabilitiesForTarget,
+  TypeDecl,
 } from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
@@ -322,6 +323,7 @@ export const generateCsharp = async (
           ifaceVectors,
           csharpNamespace,
           adapterNamespace,
+          new Map(allTypeDecls.map((decl) => [decl.typeName.name, decl])),
         ),
         `${dispatched.contract}ConformanceTests.cs`,
         conformanceDir,
@@ -440,6 +442,7 @@ export const renderTests = (
     json: example.json,
     yaml: example.yaml,
     sample: example.sample as Record<string, unknown>,
+    ...(example.nullKeys ? { nullKeys: example.nullKeys } : {}),
     validations: example.validations.map((v) => {
       const sourceKey = v.sourceKey;
       if (sourceKey === undefined) {
@@ -447,7 +450,7 @@ export const renderTests = (
           `C# test adapter: shared validation for ${node.typeName.name}.${v.key} has no sourceKey`,
         );
       }
-      const raw = example.sample[sourceKey];
+      const raw = example.sample[v.wireKey ?? sourceKey];
       const prop = node.properties.find((p) => p.name === sourceKey);
       // Closed enums render as `EnumName.Member` (a C# expression); open enums and every
       // other field render from the raw value. Mirrors the shared enum branch and the C#
@@ -530,6 +533,15 @@ export const renderTests = (
         )
         .map((p) => renderName(p.name)),
     ),
+    narrowIntegerKeys: new Map(
+      node.properties
+        .filter((p) => p.isScalar && !p.isCollection)
+        .map((p): [string, string | null] => [
+          renderName(p.name),
+          csharpNarrowIntegerType(p.typeName.name),
+        ])
+        .filter((entry): entry is [string, string] => entry[1] !== null),
+    ),
     renderName,
     renderCsharpFactoryMethodName: (factoryName: string) =>
       renderCsharpFactoryMethodName(factoryName, node),
@@ -554,7 +566,20 @@ const renderCsharpFactoryParamType = (typeStr: string): string => {
     case "int32":
       return "int";
     case "int64":
+    case "safeint":
       return "long";
+    case "int8":
+      return "sbyte";
+    case "int16":
+      return "short";
+    case "uint8":
+      return "byte";
+    case "uint16":
+      return "ushort";
+    case "uint32":
+      return "uint";
+    case "uint64":
+      return "ulong";
     case "float":
     case "float32":
       return "float";
@@ -598,8 +623,15 @@ const renderCsharpFactoryTestValue = (typeStr: string): string => {
       return "true";
     case "integer":
     case "int32":
+    case "int8":
+    case "int16":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
       return "42";
     case "int64":
+    case "safeint":
       return "42L";
     case "float":
     case "float32":
@@ -1179,10 +1211,23 @@ function uniqueMethodName(base: string, seen: Map<string, number>): string {
  * `FromJson`); the remaining segments are the emitted models' PascalCase
  * properties (e.g. `agent.template.format.kind` -> `agent.Template.Format.Kind`).
  */
-function csharpDiscriminatorAccessor(path: string): string {
+export function csharpDiscriminatorAccessor(
+  path: string,
+  _declsByName: Map<string, TypeDecl>,
+  _rootTypeName: string | undefined,
+): string {
+  if (
+    loweringCapabilitiesForTarget("csharp").typedDiscriminatorAccess !==
+    "typed-member"
+  ) {
+    throw new Error("C# discriminator access must use a typed member.");
+  }
   const segments = path.split(".");
   const [head, ...rest] = segments;
-  return [head, ...rest.map((segment) => toPascalCase(segment))].join(".");
+  const access = [head, ...rest.map((segment) => toPascalCase(segment))].join(
+    "?.",
+  );
+  return `${access} ?? ""`;
 }
 
 /**
@@ -1207,6 +1252,7 @@ function emitCSharpInterfaceConformanceTest(
   entries: CallableVectorSnapshotEntry[],
   testNamespace: string,
   adapterNamespace: string,
+  declsByName: Map<string, TypeDecl>,
 ): string {
   const provider = `I${dispatched.contract}Provider`;
   const resolver = `${dispatched.contract}Resolver`;
@@ -1254,7 +1300,14 @@ function emitCSharpInterfaceConformanceTest(
     const method = entry.sync
       ? toPascalCase(entry.operation)
       : `${toPascalCase(entry.operation)}Async`;
-    const accessor = csharpDiscriminatorAccessor(entry.dispatch!.path);
+    const rootShape = classifyCallableParam(
+      entry.params[entry.dispatch!.path.split(".")[0]],
+    );
+    const accessor = csharpDiscriminatorAccessor(
+      entry.dispatch!.path,
+      declsByName,
+      rootShape.base,
+    );
     const paramNames = Object.keys(entry.params);
     const inputJSON = jsonAsciiEscape(
       JSON.stringify(entry.vector.input ?? {}, null, 2),
@@ -1289,6 +1342,12 @@ function emitCSharpInterfaceConformanceTest(
         lines.push(
           `        var ${local} = ${paramType}.FromJson(root.GetProperty(${key}).GetRawText());`,
         );
+      } else if (shape.isModel && shape.optional) {
+        lines.push(
+          `        var ${local} = root.TryGetProperty(${key}, out var ${local}El) && ${local}El.ValueKind != JsonValueKind.Null`,
+          `            ? ${shape.base}.FromJson(${local}El.GetRawText())`,
+          `            : null;`,
+        );
       } else if (shape.optional) {
         // Optional non-model param: tolerate an absent property, decoding into
         // the mapped (nullable) C# type when present.
@@ -1314,7 +1373,37 @@ function emitCSharpInterfaceConformanceTest(
     lines.push(
       `        Assert.NotNull(impl);`,
     );
-    const call = `impl!.${method}(${paramNames.map(csharpIdentifier).join(", ")})`;
+    const callArgs = paramNames.map((paramName) => {
+      const local = csharpIdentifier(paramName);
+      return classifyCallableParam(entry.params[paramName]).optional
+        ? local
+        : `${local}!`;
+    });
+    const call = `impl!.${method}(${callArgs.join(", ")})`;
+    if (entry.vector.expectedError !== undefined) {
+      // Assert.NotNull(impl) above stays OUTSIDE the try so a missing route
+      // fails the [Fact] instead of counting as the expected error.
+      lines.push("        Exception? caught = null;");
+      lines.push("        try");
+      lines.push("        {");
+      lines.push(`            ${entry.sync ? "" : "await "}${call};`);
+      lines.push("        }");
+      lines.push("        catch (Exception error)");
+      lines.push("        {");
+      lines.push("            caught = error;");
+      lines.push("        }");
+      lines.push("        Assert.NotNull(caught);");
+      if (typeof entry.vector.expectedError === "string") {
+        lines.push(
+          `        Assert.Contains(${JSON.stringify(
+            entry.vector.expectedError,
+          )}, caught!.Message);`,
+        );
+      }
+      lines.push("    }");
+      lines.push("");
+      return;
+    }
     if (entry.sync) {
       lines.push(`        var actual = ${call};`);
     } else {
@@ -1332,6 +1421,18 @@ function emitCSharpInterfaceConformanceTest(
     lines.push("    }");
     lines.push("");
   });
+
+  if (dispatched.openness === "closed") {
+    lines.push(
+      "    [Fact]",
+      "    public void ResolverRejectsUnknownDiscriminator()",
+      "    {",
+      "        var provider = Provider();",
+      `        Assert.Throws<ArgumentException>(() => ${resolver}.Resolve("typra-unknown-discriminator", provider));`,
+      "    }",
+      "",
+    );
+  }
 
   lines.push("}");
   return lines.join("\n");
@@ -1611,13 +1712,14 @@ function emitCSharpDispatchResolver(
   // yields null (harness explicit-skip) — and an abstract-open base routes
   // unknowns to a carrier in the shape loader, never throwing, so a bare
   // `isClosedPolymorphicDispatch` is the faithful twin of that throw arm.
-  const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
+  const rejectsUnknown = entry.openness === "closed";
   // An open dispatch with a declared wildcard child (`CustomModel { provider:
   // "*" }`) gains a default provider slot; an unknown discriminator routes to it
   // instead of yielding null — the behavioral twin of the shape loader's
   // `*`-tolerant fallback. Closed / open-self-reference keeps its throw/null arm.
-  const defaultSlotBase = dispatchDefaultSlotBase(entry.decl);
-  const defaultSlot = defaultSlotBase ? toPascalCase(defaultSlotBase) : null;
+  const defaultSlot = entry.wildcard
+    ? toPascalCase(entry.wildcard.name)
+    : null;
 
   const lines: string[] = [
     "// <auto-generated by typra-emitter>",
@@ -1655,7 +1757,7 @@ function emitCSharpDispatchResolver(
     lines.push(
       `    /// <summary>Catch-all for an unknown discriminator (the declared '*' child).</summary>`,
     );
-    lines.push(`    ${seam}? ${defaultSlot} { get; }`);
+    lines.push(`    ${seam} ${defaultSlot} { get; }`);
   }
   lines.push("}");
   lines.push("");
@@ -1684,7 +1786,9 @@ function emitCSharpDispatchResolver(
       `            _ => throw new ArgumentException($"Unknown ${entry.contract} discriminator '${field}' value: {${field}}"),`,
     );
   } else if (defaultSlot) {
-    lines.push(`            _ => registry.${defaultSlot},`);
+    lines.push(
+      `            _ => registry.${defaultSlot} ?? throw new InvalidOperationException("${entry.contract} provider returned null for required wildcard @dispatch implementation"),`,
+    );
   } else {
     lines.push("            _ => null,");
   }

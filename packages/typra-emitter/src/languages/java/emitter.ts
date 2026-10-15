@@ -11,8 +11,12 @@ import {
   TypeDecl,
   WireDecl,
   isClosedPolymorphicDispatch,
+  assignmentWireKey,
+  discriminatorWireKey,
+  fieldWireKey,
 } from "../../ir/declarations.js";
 import {
+  isRequiredNullable,
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
@@ -33,6 +37,7 @@ import {
 import {
   javaEnumMemberName,
   javaEnumTypeName,
+  javaIntegralScalar,
   javaMethodName,
   javaPropertyName,
   javaTypeName,
@@ -43,8 +48,15 @@ type JavaNativeSerialization = "none" | "jackson";
 const JAVA_TYPE_MAP: Record<string, string> = {
   string: "String",
   boolean: "Boolean",
+  int8: "Integer",
+  int16: "Integer",
   int32: "Integer",
   int64: "Long",
+  safeint: "Long",
+  uint8: "Integer",
+  uint16: "Integer",
+  uint32: "Long",
+  uint64: "Long",
   integer: "Integer",
   number: "Double",
   float: "Double",
@@ -231,7 +243,7 @@ function emitType(
   }
   lines.push(`${modifiers} class ${typeName}${extendsClause} {`);
   lines.push(
-    `  public static final String SHORTHAND_PROPERTY = ${type.coercionProperty ? `"${type.coercionProperty}"` : "null"};`,
+    `  public static final String SHORTHAND_PROPERTY = ${type.coercionProperty ? `"${escapeJava(type.coercionProperty)}"` : "null"};`,
   );
   lines.push("");
 
@@ -240,8 +252,12 @@ function emitType(
     (field) => !inheritedFields.has(field.name),
   )) {
     if (nativeSerialization === "jackson") {
-      lines.push(`  @JsonProperty("${escapeJava(field.name)}")`);
-      lines.push("  @JsonInclude(JsonInclude.Include.NON_NULL)");
+      lines.push(`  @JsonProperty("${escapeJava(fieldWireKey(field))}")`);
+      lines.push(
+        isRequiredNullable(field)
+          ? "  @JsonInclude(JsonInclude.Include.ALWAYS)"
+          : "  @JsonInclude(JsonInclude.Include.NON_NULL)",
+      );
     }
     lines.push(
       `  public ${javaFieldType(field, polymorphicTypeNames)} ${javaPropertyName(field.name)}${javaDefault(field, polymorphicTypeNames)};`,
@@ -251,7 +267,28 @@ function emitType(
     if (nativeSerialization === "jackson") lines.push("  @JsonIgnore");
     lines.push("  protected Map<String, Object> rawPayload;");
   }
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    lines.push(
+      "  /** Undeclared fields captured on load and written back on save (unknown-field passthrough). */",
+    );
+    if (nativeSerialization === "jackson") lines.push("  @JsonIgnore");
+    lines.push(
+      "  public Map<String, Object> additionalProperties = new LinkedHashMap<>();",
+    );
+  }
   lines.push("");
+  if (type.additionalProperties) {
+    const keys = [...new Set(type.additionalProperties.knownWireKeys)];
+    if (type.additionalProperties.inherited) lines.push("  @Override");
+    lines.push("  protected boolean isKnownWireKey(String key) {");
+    lines.push(
+      keys.length === 0
+        ? "    return false;"
+        : `    return switch (key) { case ${keys.map((key) => `"${escapeJava(key)}"`).join(", ")} -> true; default -> false; };`,
+    );
+    lines.push("  }");
+    lines.push("");
+  }
   const inheritedDefaults = type.fields.filter(
     (field) =>
       inheritedFields.has(field.name) &&
@@ -441,8 +478,39 @@ function emitJacksonHelpers(typeName: string, lines: string[]): void {
     `    public void serialize(${typeName} value, com.fasterxml.jackson.core.JsonGenerator generator, com.fasterxml.jackson.databind.SerializerProvider serializers) throws java.io.IOException {`,
   );
   lines.push(
-    "      generator.writeObject(value == null ? null : value.save(new SaveContext()));",
+    "      writeTypraValue(generator, serializers, value == null ? null : value.save(new SaveContext()));",
   );
+  lines.push("    }");
+  lines.push("");
+  // Write the save() tree node by node instead of handing the Map to Jackson's
+  // MapSerializer: a mapper configured with `setSerializationInclusion(NON_NULL)`
+  // (or a NON_NULL content inclusion) would otherwise drop the explicit `null`
+  // that a required nullable key (#339) must keep on the wire.
+  lines.push(
+    "    private static void writeTypraValue(com.fasterxml.jackson.core.JsonGenerator generator, com.fasterxml.jackson.databind.SerializerProvider serializers, Object value) throws java.io.IOException {",
+  );
+  lines.push("      if (value == null) {");
+  lines.push("        generator.writeNull();");
+  lines.push("      } else if (value instanceof java.util.Map<?, ?> map) {");
+  lines.push("        generator.writeStartObject();");
+  lines.push("        for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {");
+  lines.push(
+    "          generator.writeFieldName(String.valueOf(entry.getKey()));",
+  );
+  lines.push(
+    "          writeTypraValue(generator, serializers, entry.getValue());",
+  );
+  lines.push("        }");
+  lines.push("        generator.writeEndObject();");
+  lines.push("      } else if (value instanceof Iterable<?> items) {");
+  lines.push("        generator.writeStartArray();");
+  lines.push("        for (Object item : items) {");
+  lines.push("          writeTypraValue(generator, serializers, item);");
+  lines.push("        }");
+  lines.push("        generator.writeEndArray();");
+  lines.push("      } else {");
+  lines.push("        serializers.defaultSerializeValue(value, generator);");
+  lines.push("      }");
   lines.push("    }");
   lines.push("  }");
   lines.push("");
@@ -528,7 +596,7 @@ function emitLoad(
   lines.push(`    ${typeName} result = new ${typeName}();`);
   if (type.polymorphicDispatch?.defaultVariant?.isSelfReference) {
     lines.push(
-      `    if (map.get("${escapeJava(type.polymorphicDispatch.discriminatorField)}") instanceof String) {`,
+      `    if (map.get("${escapeJava(discriminatorWireKey(type.polymorphicDispatch))}") instanceof String) {`,
     );
     lines.push("      result.rawPayload = cloneRawMap(map);");
     for (const assignment of type.load.assignments) {
@@ -569,7 +637,15 @@ function emitLoadBaseInto(
       (helper) =>
         helper.propertyName === assignment.fieldName && helper.hasNameProperty,
     );
-    if (shouldGuardMissingRequiredField(field)) {
+    if (isRequiredNullable(assignment)) {
+      // Required nullable (#339): the key must be present; an explicit null is accepted.
+      const wireName = escapeJava(assignment.sourceName);
+      lines.push(`    if (!map.containsKey("${wireName}")) {`);
+      lines.push(
+        `      throw new IllegalArgumentException(ctx.at("${wireName}").path + ": missing required field");`,
+      );
+      lines.push("    }");
+    } else if (shouldGuardMissingRequiredField(field)) {
       const wireName = escapeJava(assignment.sourceName);
       lines.push(
         `    if (!map.containsKey("${wireName}") || map.get("${wireName}") == null) {`,
@@ -581,6 +657,16 @@ function emitLoadBaseInto(
     }
     if (field)
       emitLoadField(field, collectionHelper, lines, polymorphicTypeNames);
+  }
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    // isKnownWireKey is virtual, so a derived instance applies its own key set.
+    lines.push("    result.additionalProperties = new LinkedHashMap<>();");
+    lines.push("    for (Map.Entry<?, ?> entry : map.entrySet()) {");
+    lines.push("      String key = String.valueOf(entry.getKey());");
+    lines.push("      if (!result.isKnownWireKey(key)) {");
+    lines.push("        result.additionalProperties.put(key, entry.getValue());");
+    lines.push("      }");
+    lines.push("    }");
   }
   lines.push("  }");
   lines.push("");
@@ -615,7 +701,7 @@ function emitCoercions(
           (candidate) => candidate.name === assignment.fieldName,
         );
         lines.push(
-          `      coerced.put("${escapeJava(assignment.fieldName)}", ${coercionValue(assignment, coercion.scalarType, field)});`,
+          `      coerced.put("${escapeJava(assignmentWireKey(assignment))}", ${coercionValue(assignment, coercion.scalarType, field)});`,
         );
       }
       lines.push(`      return ${typeName}.load(coerced, ctx);`);
@@ -667,9 +753,7 @@ function numericCoercionRank(scalarType: string): number {
 }
 
 function isIntegralCoercion(scalarType: string): boolean {
-  return (
-    scalarType === "int32" || scalarType === "int64" || scalarType === "integer"
-  );
+  return isIntegralScalar(scalarType);
 }
 
 function isBroadNumberCoercion(scalarType: string): boolean {
@@ -690,7 +774,7 @@ function emitPolymorphicDispatch(
   const isClosed = isClosedPolymorphicDispatch(dispatch);
   lines.push("    if (data instanceof Map<?, ?> dispatchMap) {");
   lines.push(
-    `      Object discriminator = dispatchMap.get("${escapeJava(dispatch.discriminatorField)}");`,
+    `      Object discriminator = dispatchMap.get("${escapeJava(discriminatorWireKey(dispatch))}");`,
   );
   if (!dispatch.defaultVariant || dispatch.defaultVariant.isSelfReference) {
     // Closed union, an abstract open union whose only fallback is an unknown
@@ -711,7 +795,7 @@ function emitPolymorphicDispatch(
     // same catch-all the @dispatch rail selects — so the coerce shorthand (map
     // with no discriminator) hydrates instead of throwing.
     lines.push(
-      "      String discriminatorString = discriminator instanceof String discriminatorRaw ? discriminatorRaw : \"\";",
+      '      String discriminatorString = discriminator instanceof String discriminatorRaw ? discriminatorRaw : "";',
     );
   }
   lines.push("      switch (discriminatorString) {");
@@ -744,7 +828,7 @@ function emitLoadField(
   lines: string[],
   polymorphicTypeNames: Set<string>,
 ): void {
-  const wireName = escapeJava(field.name);
+  const wireName = escapeJava(fieldWireKey(field));
   const name = javaPropertyName(field.name);
   lines.push(
     `    if (map.containsKey("${wireName}") && map.get("${wireName}") != null) {`,
@@ -861,7 +945,9 @@ function emitJavaEntryShorthandArms(
   const cases = shorthand ? orderedEntryShorthandCases(shorthand.cases) : [];
 
   if (!shorthand || cases.length === 0) {
-    return [`${indent}itemData.put("${target}", entry.getValue());`];
+    return [
+      `${indent}itemData.put("${escapeJava(target)}", entry.getValue());`,
+    ];
   }
 
   const lines: string[] = [
@@ -875,13 +961,13 @@ function emitJavaEntryShorthandArms(
     first = false;
     for (const a of entryCase.assignments) {
       lines.push(
-        `${indent}  itemData.put("${a.fieldName}", ${javaShorthandLiteral(a.literalValue)});`,
+        `${indent}  itemData.put("${escapeJava(a.fieldName)}", ${javaShorthandLiteral(a.literalValue)});`,
       );
     }
   }
   if (!first) lines.push(`${indent}}`);
   lines.push(
-    `${indent}itemData.put("${shorthand.valueField}", shorthandValue);`,
+    `${indent}itemData.put("${escapeJava(shorthand.valueField)}", shorthandValue);`,
   );
   return lines;
 }
@@ -935,6 +1021,18 @@ function emitSave(
     lines.push("    Map<String, Object> result = new LinkedHashMap<>();");
   }
   lines.push("    obj.saveFields(result, ctx);");
+  if (type.additionalProperties) {
+    // Undeclared fields follow the declared ones; a declared wire key always wins.
+    lines.push("    if (obj.additionalProperties != null) {");
+    lines.push(
+      "      for (Map.Entry<String, Object> entry : obj.additionalProperties.entrySet()) {",
+    );
+    lines.push(
+      "        if (!obj.isKnownWireKey(entry.getKey())) result.put(entry.getKey(), entry.getValue());",
+    );
+    lines.push("      }");
+    lines.push("    }");
+  }
   lines.push("    return ctx.processDict(result);");
   lines.push("  }");
   lines.push("");
@@ -964,8 +1062,14 @@ function emitSaveField(
   const name = field.fieldName;
   const category = field.category;
   const enumName = field.isOpenEnum ? null : field.enumName;
-  const wireName = escapeJava(name);
+  const wireName = escapeJava(field.targetName);
   const propertyName = javaPropertyName(name);
+  if (isRequiredNullable(field)) {
+    // Required nullable (#339): the key is always written, as null when unset.
+    lines.push(
+      `    if (obj.${propertyName} == null) result.put("${wireName}", null);`,
+    );
+  }
   switch (category.kind) {
     case "scalar":
       if (shouldOmitAbsentOnSave(field, "always-check")) {
@@ -1170,6 +1274,9 @@ function emitRawPayloadHelpers(lines: string[]): void {
  */
 function emitToWire(wire: WireDecl, lines: string[]): void {
   lines.push("  public Map<String, Object> toWire(String provider) {");
+  // Rename keys on the canonical save() output (as Go/Rust/C# do) so enums, models, and
+  // collections serialize exactly as save() writes them (#331).
+  lines.push("    Map<String, Object> data = save(new SaveContext());");
   lines.push("    Map<String, Object> result = new LinkedHashMap<>();");
   lines.push('    String target = provider == null ? "" : provider;');
   for (const field of wire.mappings) {
@@ -1181,7 +1288,7 @@ function emitToWire(wire: WireDecl, lines: string[]): void {
       );
     }
     lines.push(
-      `      if (wireName != null && this.${javaPropertyName(field.fieldName)} != null) result.put(wireName, serializeScalar(this.${javaPropertyName(field.fieldName)}));`,
+      `      if (wireName != null && data.get("${escapeJava(assignmentWireKey(field))}") != null) result.put(wireName, data.get("${escapeJava(assignmentWireKey(field))}"));`,
     );
     lines.push("    }");
   }
@@ -1211,7 +1318,9 @@ function emitFromWire(typeName: string, wire: WireDecl, lines: string[]): void {
         `      m.put("${escapeJava(provider)}", "${escapeJava(name)}");`,
       );
     }
-    lines.push(`      wireMap.put("${escapeJava(field.fieldName)}", m);`);
+    lines.push(
+      `      wireMap.put("${escapeJava(assignmentWireKey(field))}", m);`,
+    );
     lines.push("    }");
   }
   lines.push("    Map<String, String> inverse = new LinkedHashMap<>();");
@@ -1462,6 +1571,27 @@ function javaDictValueLoad(
   return `${javaTypeName(valueType)}.load(${valueExpr}, ${contextExpr})`;
 }
 
+const JAVA_SIZED_INTEGER_BOUNDS: Record<string, [string, string]> = {
+  int8: ["-128L", "127L"],
+  int16: ["-32768L", "32767L"],
+  uint8: ["0L", "255L"],
+  uint16: ["0L", "65535L"],
+  uint32: ["0L", "4294967295L"],
+  uint64: ["0L", "Long.MAX_VALUE"],
+  safeint: ["-9007199254740991L", "9007199254740991L"],
+};
+
+/** Exact, bounds-checked load for sized/unsigned integers; int32/int64 keep their loaders. */
+function javaSizedIntegerLoad(
+  valueExpr: string,
+  scalarType: string,
+): string | null {
+  const bounds = JAVA_SIZED_INTEGER_BOUNDS[scalarType];
+  if (!bounds) return null;
+  const call = `LoadContext.exactInteger(${valueExpr}, ${bounds[0]}, ${bounds[1]}, "${scalarType}")`;
+  return javaIntegralScalar(scalarType) === "int32" ? `(int) ${call}` : call;
+}
+
 function loadScalar(
   valueExpr: string,
   scalarType: string,
@@ -1474,7 +1604,9 @@ function loadScalar(
   if (parseAliasFunction) {
     return `${parseAliasFunction}(String.valueOf(${valueExpr}))`;
   }
-  switch (scalarType) {
+  const sized = javaSizedIntegerLoad(valueExpr, scalarType);
+  if (sized) return sized;
+  switch (javaIntegralScalar(scalarType)) {
     case "string":
       return `String.valueOf(${valueExpr})`;
     case "boolean":
@@ -1497,7 +1629,7 @@ function loadScalar(
 }
 
 function coercionCheck(valueExpr: string, scalarType: string): string | null {
-  switch (scalarType) {
+  switch (javaIntegralScalar(scalarType)) {
     case "string":
       return `${valueExpr} instanceof String`;
     case "boolean":
@@ -1557,7 +1689,7 @@ function scalarTypeOf(field: FieldDecl): string | null {
 }
 
 function javaNumericLiteral(value: number, scalarType: string): string {
-  switch (scalarType) {
+  switch (javaIntegralScalar(scalarType)) {
     case "int64":
       return `${value}L`;
     case "float32":

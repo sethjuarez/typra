@@ -37,10 +37,14 @@ behavior is genuinely runtime-specific.
 | Protocols | `features/protocols/main.tsp` | TypeSpec-native interfaces/operations plus runtime cancellation, sync, optional, and effect metadata. |
 | Dispatch | `features/dispatch/main.tsp` | Behavioral polymorphic dispatch via `@dispatch`, resolving a discriminator field to a deterministic parameter access path. |
 | Provider wire | `features/wire/main.tsp` | Provider-specific names with `@@knownAs` and provider defaults with `@@defaultFor`. |
+| Encoded names | `features/encoded-name/main.tsp` | `@encodedName("application/json", ...)` as the canonical dict/JSON/YAML key on load and save (scalar, nested model, collection, discriminator, inherited `@coerce` target, and `@@knownAs` interplay); non-JSON mimes are ignored. |
+| Nullable fields | `features/nullable/main.tsp` | `x: T \| null` (required key, value may be null: load rejects an absent key and accepts `null`; save always writes the key, as `null` when unset) versus `x?: T` and `x?: T \| null` (both omitted when unset) across scalars, enums, models, arrays, and records. |
+| Additional properties | `features/additional-properties/main.tsp` | Unknown-field passthrough (#336): `...Record<unknown>` and `is Record<unknown>` models keep every undeclared key in a generated `additionalProperties` member on load and write it back on save; known keys are matched by wire name (`@encodedName`), and a polymorphic base passes its passthrough to derived variants. A plain model stays closed. |
 | Transport | `features/transport/main.tsp` | Path, query, header, cookie, body, status, success/error body envelopes, and wildcard status bodies. |
 | Namespaces | `features/namespaces/main.tsp` | Nested namespaces and cross-namespace references. |
 | Documentation | `features/docs/main.tsp` | `@doc` metadata and multiline sample text. |
-| Typed seam conformance | `features/typed-seam-conformance/main.tsp` | Plain (undispatched) scalar seam whose `@vector`s ride the emitted typed conformance entrypoint (Rust `run_<seam>_conformance<S: <Seam>>`, Go `Run<Seam>Conformance(t, seam)`, TypeScript `run<Seam>Conformance(seam)`, Python `run_<seam>_conformance(seam)`, Swift `run<Seam>Conformance(seam)`, C# `VectorConformance.Run<Seam>ConformanceAsync(seam)`, Java `VectorConformance.run<Seam>Conformance(seam)`), covering `expected` (structural compare) and `expectedError`. Rust gate `rust.vector-conformance-compile` attaches the committed double under `vector-adapters/rust/`; Go gate `go.vector-conformance-compile` attaches `vector-adapters/go/`; TypeScript gate `typescript.vector-conformance-compile` compiles + runs `vector-adapters/typescript/`; Python gate `python.vector-conformance-compile` runs `vector-adapters/python/` under pytest; Swift gate `swift.vector-conformance-compile` compiles + runs `vector-adapters/swift/` under `swift test`; C# gate `csharp.vector-conformance-compile` compiles + runs `vector-adapters/csharp/` under `dotnet test`; Java gate `java.vector-conformance-compile` compiles + runs `vector-adapters/java/` under javac/java. |
+| Typed seam conformance | `features/typed-seam-conformance/main.tsp` | Plain (undispatched) scalar seam whose `@vector`s ride the emitted typed conformance entrypoint (Rust `run_<seam>_conformance<S: <Seam>>`, Go `Run<Seam>Conformance(t, seam)`, TypeScript `run<Seam>Conformance(seam)`, Python `run_<seam>_conformance(seam)`, Swift `run<Seam>Conformance(seam)`, C# `VectorConformance.Run<Seam>ConformanceAsync(seam)`, Java `VectorConformance.run<Seam>Conformance(seam)`), covering `expected` (structural compare) and `expectedError`. This includes a `@sync` seam (`Checker`) whose error vector checks that a sync op has an error channel (typra#338: Rust sync ops return `Result`). Rust gate `rust.vector-conformance-compile` compiles and runs the committed double under `vector-adapters/rust/` with `cargo test --lib`; Go gate `go.vector-conformance-compile` attaches `vector-adapters/go/`; TypeScript gate `typescript.vector-conformance-compile` compiles + runs `vector-adapters/typescript/`; Python gate `python.vector-conformance-compile` runs `vector-adapters/python/` under pytest; Swift gate `swift.vector-conformance-compile` compiles + runs `vector-adapters/swift/` under `swift test`; C# gate `csharp.vector-conformance-compile` compiles + runs `vector-adapters/csharp/` under `dotnet test`; Java gate `java.vector-conformance-compile` compiles + runs `vector-adapters/java/` under javac/java. |
+| Value-backed and open-world dispatch | `features/dispatch-target-regression/main.tsp` | Shared lowering contract for required/optional value-backed coerce unions, optional operation roots, direct and nested dispatch paths, encoded discriminator wire keys, closed discriminators, polymorphic arrays, scalar shorthand expansion, and the required open-union `wildcard` provider slot. Two distinct third-party discriminator values plus arbitrary plugin payload prove lossless unknown-carrier routing; known values prove they do not fall through. The gate generates tests for all seven targets, compiles and executes generated behavioral tests for TypeScript, Python, and Go, includes C# when `dotnet` is available, and automatically compiles/runs Java and Swift when their toolchains are available. Rust additionally compiles and runs the consumer-attached dispatch seams; unavailable Java/Swift toolchains retain emitted-text assertions. |
 
 ## Dispatch-seam integration fixture
 
@@ -52,7 +56,9 @@ It stands up the full shape that motivated behavioral dispatch, end to end:
 - container models (`Template`, `Agent`, `Inputs`) carrying `@sample` payloads,
 - a `@dispatch(TemplateFormat.kind)` seam interface `Renderer` whose discriminator
   resolves to the deterministic access path `agent.template.format.kind`, and
-- `@vector`s exercising the seam.
+- `@vector`s exercising the seam — two success vectors plus an `expectedError`
+  vector (`mustache-unbound`) whose unbound template key must surface as an
+  error through the typed @dispatch conformance rail in every runtime.
 
 Regenerate it into `generated/dispatch-seam/<target>` (git-ignored, like all
 generated output) with:
@@ -87,7 +93,9 @@ spec is the durable artifact, the tests are the guard):
 - `test/dispatch-seam.conformance.test.ts` checks the emitted **behavior**: it
   walks the resolved `agent.template.format.kind` path over each committed
   `@vector` input, dispatches to a per-dialect renderer, and asserts the vector's
-  `expected` output — with a negative control proving a non-discriminator path
+  `expected` output (or, for an `expectedError` vector, that the renderer raises
+  an error containing the expected string) — with a negative control proving a
+  non-discriminator path
   misroutes. This is the in-process stand-in for the dispatch routing the emitted
   harness does not do yet, so the resolved path is proven correct now.
 

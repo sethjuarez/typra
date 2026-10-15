@@ -15,14 +15,17 @@ import { TypeRegistry } from "../../ir/expansion.js";
 import { RustExprVisitor } from "./visitor.js";
 import {
   buildBaseTestContext,
+  propertyWireKey,
   rustTestOptions,
   wireTestMappings,
   wireTestProviders,
 } from "../../testing/test-context.js";
 import { toSnakeCase } from "../../ir/utilities.js";
+import { rustStringLiteral, rustStringLiteralBody } from "./identifiers.js";
 import {
-  isClosedPolymorphicDispatch,
-  dispatchDefaultSlotBase,
+  discriminatorWireKey,
+  loweringCapabilitiesForTarget,
+  resolveFieldLowering,
   type TypeDecl,
 } from "../../ir/declarations.js";
 import {
@@ -73,6 +76,13 @@ export const rustTypeMapper: Record<string, string> = {
   boolean: "bool",
   int64: "i64",
   int32: "i32",
+  int16: "i16",
+  int8: "i8",
+  safeint: "i64",
+  uint64: "u64",
+  uint32: "u32",
+  uint16: "u16",
+  uint8: "u8",
   float64: "f64",
   float32: "f32",
   integer: "i64",
@@ -913,7 +923,10 @@ function collectRustGroupPaths(groups: Iterable<string>): string[] {
   return Array.from(paths).sort();
 }
 
-function immediateChildModules(group: string, groups: Iterable<string>): string[] {
+function immediateChildModules(
+  group: string,
+  groups: Iterable<string>,
+): string[] {
   const children = new Set<string>();
   const prefix = group ? `${group}/` : "";
   const depth = group ? group.split("/").filter(Boolean).length : 0;
@@ -984,8 +997,15 @@ function factoryParamTestValue(typeStr: string): string {
       return "true";
     case "integer":
     case "int32":
+    case "int8":
+    case "int16":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
       return "42";
     case "int64":
+    case "safeint":
       return "42i64";
     case "float":
     case "float64":
@@ -1176,6 +1196,10 @@ export function emitRustTest(ctx: RustTestContext): string {
       out += "    let json_output = instance.to_json(&save_ctx);\n";
       out +=
         '    assert!(json_output.is_ok(), "Failed to serialize to JSON: {:?}", json_output.err());\n';
+      for (const key of sample.nullKeys ?? []) {
+        const literal = JSON.stringify(key);
+        out += `    assert!(instance.to_value(&save_ctx).get(${literal}).map_or(false, |value| value.is_null()), "Expected ${typeName} to save ${key} as null");\n`;
+      }
     }
     out += "}\n";
     out += "\n";
@@ -1248,9 +1272,12 @@ export function emitRustTest(ctx: RustTestContext): string {
             // default (materialized on load, so present on save even when the `@sample`
             // omits it, e.g. prompty's `status`/`contextState`) — must be present in the
             // sample for whole-object byte-identity vs that sample to be valid.
-            if ((!p.isOptional || p.hasExplicitDefault) && !(p.name in obj))
+            if (
+              (!p.isOptional || p.hasExplicitDefault) &&
+              !(propertyWireKey(p) in obj)
+            )
               return false;
-            const pv = obj[p.name];
+            const pv = obj[propertyWireKey(p)];
             // Cause D (mirror image of the above): a REQUIRED field authored in the sample
             // at its zero/empty value is OMITTED by to_value — required string == "", int
             // == 0, float == 0.0, and empty collections are all dropped (see emitScalarSave /
@@ -1258,7 +1285,7 @@ export function emitRustTest(ctx: RustTestContext): string {
             // whole-object byte-identity vs it is invalid (e.g. prompty's validation_result
             // `errors:[]`, turn_model_request `iteration:0`). Optional fields authored at zero
             // ARE emitted (`Some(0)`), so this only applies to required (non-`?`) fields.
-            if (!p.isOptional && p.name in obj) {
+            if (!p.isOptional && !p.isNullable && propertyWireKey(p) in obj) {
               if (p.isCollection && Array.isArray(pv) && pv.length === 0)
                 return false;
               if (
@@ -1339,7 +1366,9 @@ export function emitRustTest(ctx: RustTestContext): string {
       // (`[{"name":"alpha",...}]`).
       for (const prop of node.properties) {
         if (!isKeyedCollection(prop)) continue;
-        const sampleVal = sample.sample ? sample.sample[prop.name] : undefined;
+        const sampleVal = sample.sample
+          ? sample.sample[propertyWireKey(prop)]
+          : undefined;
         let keys: string[] = [];
         if (Array.isArray(sampleVal)) {
           keys = sampleVal
@@ -1355,8 +1384,8 @@ export function emitRustTest(ctx: RustTestContext): string {
           continue;
         }
         if (keys.length === 0) continue;
-        out += `    assert!(value.get(${JSON.stringify(prop.name)}).map(|v| v.is_object()).unwrap_or(false), "keyed collection must serialize to canonical name-keyed map, not an array");\n`;
-        out += `    assert!(value.get(${JSON.stringify(prop.name)}).and_then(|v| v.get(${JSON.stringify(keys[0])})).is_some(), "keyed collection map must be keyed by the element name");\n`;
+        out += `    assert!(value.get(${JSON.stringify(propertyWireKey(prop))}).map(|v| v.is_object()).unwrap_or(false), "keyed collection must serialize to canonical name-keyed map, not an array");\n`;
+        out += `    assert!(value.get(${JSON.stringify(propertyWireKey(prop))}).and_then(|v| v.get(${JSON.stringify(keys[0])})).is_some(), "keyed collection map must be keyed by the element name");\n`;
       }
       // Whole-object byte-identity: for byte-stable types the serde re-serialization
       // must equal the canonical wire EXACTLY. This proves flat structs honor the
@@ -1371,7 +1400,9 @@ export function emitRustTest(ctx: RustTestContext): string {
         let byteStable = coercions.length === 0;
         if (byteStable) {
           for (const prop of node.properties) {
-            const sv = sample.sample ? sample.sample[prop.name] : undefined;
+            const sv = sample.sample
+              ? sample.sample[propertyWireKey(prop)]
+              : undefined;
             // A keyed collection sampled in ARRAY shorthand (`[{"name":..}]`) has a
             // canonical wire (name-keyed MAP) that legitimately differs from the sample
             // text, so whole-object byte-identity is invalid — the keyed-map assertion
@@ -1416,7 +1447,9 @@ export function emitRustTest(ctx: RustTestContext): string {
         const mapSample: Record<string, unknown> = { ...(sample.sample ?? {}) };
         for (const prop of node.properties) {
           if (!isKeyedCollection(prop)) continue;
-          const sv = sample.sample ? sample.sample[prop.name] : undefined;
+          const sv = sample.sample
+            ? sample.sample[propertyWireKey(prop)]
+            : undefined;
           if (!Array.isArray(sv) || sv.length === 0) continue;
           const asMap: Record<string, unknown> = {};
           let ok = true;
@@ -1436,8 +1469,8 @@ export function emitRustTest(ctx: RustTestContext): string {
             asMap[nm] = rest;
           }
           if (!ok) continue;
-          mapSample[prop.name] = asMap;
-          keyedMapProps.push(prop.name);
+          mapSample[propertyWireKey(prop)] = asMap;
+          keyedMapProps.push(propertyWireKey(prop));
         }
         if (keyedMapProps.length > 0) {
           const mapJson = JSON.stringify(mapSample, null, 2);
@@ -1483,9 +1516,9 @@ export function emitRustTest(ctx: RustTestContext): string {
         for (const mapping of wireMappings.filter(
           (m) => m.provider === provider,
         )) {
-          out += `    assert!(${provider}_obj.contains_key("${mapping.wireName}"), "Expected ${provider} wire output to include ${mapping.wireName}");\n`;
+          out += `    assert!(${provider}_obj.contains_key(${rustStringLiteral(mapping.wireName)}), "Expected {} wire output to include {}", ${rustStringLiteral(provider)}, ${rustStringLiteral(mapping.wireName)});\n`;
           if (mapping.fieldName !== mapping.wireName) {
-            out += `    assert!(!${provider}_obj.contains_key("${mapping.fieldName}"), "Expected ${provider} wire output to omit ${mapping.fieldName}");\n`;
+            out += `    assert!(!${provider}_obj.contains_key(${rustStringLiteral(mapping.fieldName)}), "Expected {} wire output to omit {}", ${rustStringLiteral(provider)}, ${rustStringLiteral(mapping.fieldName)});\n`;
           }
         }
         out += `    let ${provider}_restored = ${typeName}::from_wire("${provider}", &${provider}_wire, &ctx);\n`;
@@ -1566,7 +1599,7 @@ export function emitRustTest(ctx: RustTestContext): string {
 
     for (const [pName] of paramEntries) {
       const prop = node.properties.find((p) => p.name === pName);
-      if (prop && prop.isOptional) {
+      if (prop && (prop.isOptional || prop.isNullable)) {
         out += `    assert!(instance.${toSnakeCase(pName)}.is_some());\n`;
       }
     }
@@ -1575,37 +1608,6 @@ export function emitRustTest(ctx: RustTestContext): string {
     out += "\n";
   }
 
-  return out;
-}
-
-/**
- * Escape arbitrary text into the body of a double-quoted Rust string literal.
- * Every non-ASCII code point is emitted as `\u{..}` so the generated source is
- * pure ASCII — this sidesteps both the Rust raw-string `#`-fence ceiling and the
- * `text_direction_codepoint_in_literal` deny-lint (bidi controls such as U+202E
- * are rejected even inside raw strings). The unescaped &str still carries the
- * exact original characters, so `serde_json::from_str` sees faithful JSON.
- */
-function rustStringLiteralBody(text: string): string {
-  let out = "";
-  for (const ch of text) {
-    const cp = ch.codePointAt(0)!;
-    if (ch === '"') {
-      out += '\\"';
-    } else if (ch === "\\") {
-      out += "\\\\";
-    } else if (cp === 0x0a) {
-      out += "\\n";
-    } else if (cp === 0x0d) {
-      out += "\\r";
-    } else if (cp === 0x09) {
-      out += "\\t";
-    } else if (cp >= 0x20 && cp <= 0x7e) {
-      out += ch;
-    } else {
-      out += `\\u{${cp.toString(16)}}`;
-    }
-  }
   return out;
 }
 
@@ -1664,14 +1666,11 @@ function emitRustDispatchResolver(entry: DispatchedContract): string {
   // None (harness explicit-skip); an abstract-open base routes unknowns to a
   // carrier in the shape loader, never panicking, so a bare
   // `isClosedPolymorphicDispatch` is the faithful twin of that throw arm.
-  const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
-  // An open dispatch with a declared wildcard child (`CustomModel { provider:
-  // "*" }`) gains a default trait method; an unknown discriminator routes to it
-  // instead of yielding None — the behavioral twin of the shape loader's
-  // `*`-tolerant fallback. Closed / open-self-reference dispatch keeps its
-  // panic/None arm (no distinct child method).
-  const defaultSlotBase = dispatchDefaultSlotBase(entry.decl);
-  const defaultSlot = defaultSlotBase ? toSnakeCase(defaultSlotBase) : null;
+  const rejectsUnknown = entry.openness === "closed";
+  // The shared IR normalizes a schema-declared `*` child to one required,
+  // consumer-owned `wildcard` trait method. Closed / open-self-reference keeps
+  // its panic/None arm (no distinct child method).
+  const defaultSlot = entry.wildcard ? toSnakeCase(entry.wildcard.name) : null;
 
   const lines: string[] = [
     "// Code generated by Typra emitter; DO NOT EDIT.",
@@ -1703,7 +1702,7 @@ function emitRustDispatchResolver(entry: DispatchedContract): string {
     lines.push(
       `    /// Catch-all for an unknown discriminator (the declared \`*\` child).`,
     );
-    lines.push(`    fn ${defaultSlot}(&self) -> Option<&dyn ${seam}>;`);
+    lines.push(`    fn ${defaultSlot}(&self) -> &dyn ${seam};`);
   }
   lines.push("}");
   lines.push("");
@@ -1727,7 +1726,7 @@ function emitRustDispatchResolver(entry: DispatchedContract): string {
       `        other => panic!("Unknown ${seam} discriminator '${field}' value: {}", other),`,
     );
   } else if (defaultSlot) {
-    lines.push(`        _ => registry.${defaultSlot}(),`);
+    lines.push(`        _ => Some(registry.${defaultSlot}()),`);
   } else {
     lines.push("        _ => None,");
   }
@@ -1915,7 +1914,7 @@ function emitRustVectorRunner(): string {
     "                Some(key) => key,",
     "                None => panic!(",
     `                    "{}: @dispatch path '{}' did not resolve to a string discriminator \\`,
-    "on the vector input.\",",
+    'on the vector input.",',
     "                    vector_id, dispatch_path",
     "                ),",
     "            };",
@@ -1963,7 +1962,7 @@ function emitRustVectorRunner(): string {
     "    // synchronously, so reject it before running the vector.",
     "    if sync {",
     "        if let vector_adapters::Invoke::Async(_) = adapter.invoke {",
-    '            panic!(',
+    "            panic!(",
     '                "{}: operation is @sync but its adapter is registered Invoke::Async. \\',
     "A @sync operation must resolve synchronously — register it Invoke::Sync (drop \\",
     '@sync to keep it async-capable).",',
@@ -1985,7 +1984,7 @@ function emitRustVectorRunner(): string {
     "",
     "    // Requirement guard (emitted unconditionally; inert when a vector declares",
     "    // no `requires`): a vector may declare abstract capability tokens in",
-    "    // \"requires\". Each is resolved against the seam-injected capability table",
+    '    // "requires". Each is resolved against the seam-injected capability table',
     "    // (populated by the harness only when some vector declares `requires`)",
     "    // BEFORE the adapter runs. An unregistered token is a hard failure (never",
     "    // skip silently). Rust has no runtime-conditional skip (#[ignore] is",
@@ -2001,7 +2000,7 @@ function emitRustVectorRunner(): string {
     "        for token in &requires {",
     "            if let Some(token) = token.as_str() {",
     "                if !capabilities.map_or(false, |c| c.contains_key(token)) {",
-    '                    panic!(',
+    "                    panic!(",
     '                        "No capability predicate registered for requirement token \\"{}\\". \\',
     "Register it in the module referenced by 'vector-adapter-path'. @vector \\",
     'conformance never skips silently.",',
@@ -2032,7 +2031,7 @@ function emitRustVectorRunner(): string {
     "",
     "",
     "    // Per-vector waiver, consulted even when an adapter IS registered. Keyed by",
-    "    // the vector id (\"Contract.operation:name\") or \"operation:name\" so it never",
+    '    // the vector id ("Contract.operation:name") or "operation:name" so it never',
     "    // collides with an operation-level waiver. xfail: a waived vector that fails",
     "    // is an expected failure (green); xpass: a waived vector that passes panics",
     "    // so stale waivers get removed.",
@@ -2180,7 +2179,9 @@ function emitRustVectorConformanceTest(
     const vectorLiteral = `"${rustStringLiteralBody(JSON.stringify(entry.vector))}"`;
     lines.push("#[tokio::test]");
     lines.push(`async fn ${rustVectorSlug(index, entry)}() {`);
-    lines.push(`    let vector: Value = serde_json::from_str(${vectorLiteral})`);
+    lines.push(
+      `    let vector: Value = serde_json::from_str(${vectorLiteral})`,
+    );
     lines.push('        .expect("failed to decode vector");');
     lines.push(
       entry.dispatch
@@ -2222,8 +2223,10 @@ function emitRustVectorConformanceTest(
  * `pub async fn` until a typed test calls it.
  *
  * Scope of this slice: `expected` (structural compare) and `expectedError` on
- * ASYNC ops. A `@sync` op has no error channel (its trait method returns a bare
- * value), so an `expectedError` vector on a sync op is skipped with a note;
+ * every op. Every seam method — sync or async — returns `Result<T, Box<dyn
+ * std::error::Error + Send + Sync>>` (typra#338), so an `expectedError` vector
+ * asserts `Err` whose message contains the expected substring (the same match
+ * the other runtimes apply to a thrown error) and a success vector asserts `Ok`;
  * `requires`/capability gating, `normalization`, and provider/targetApi routing
  * are deferred follow-ups (not exercised by the typed-seam fixture).
  */
@@ -2286,7 +2289,9 @@ function emitRustVectorConformanceEntrypoint(
     // `Deserialize` on the plain target), so both need a `LoadContext`.
     const needsModelDecode = (typeRef: string): boolean => {
       const shape = classifyCallableParam(typeRef);
-      return shape.bareModel || (shape.array && shape.isModel && !shape.optional);
+      return (
+        shape.bareModel || (shape.array && shape.isModel && !shape.optional)
+      );
     };
     // A `LoadContext` is needed whenever a vector must decode a model through its
     // `from_json` loader — a bare-model or array-of-model PARAM, or an expected
@@ -2294,7 +2299,8 @@ function emitRustVectorConformanceEntrypoint(
     const needsCtx = entries.some(
       (entry) =>
         Object.values(entry.params).some(needsModelDecode) ||
-        (entry.vector.expected !== undefined && needsModelDecode(entry.returns)),
+        (entry.vector.expected !== undefined &&
+          needsModelDecode(entry.returns)),
     );
 
     lines.push(
@@ -2321,15 +2327,6 @@ function emitRustVectorConformanceEntrypoint(
       const hasExpectedError = entry.vector.expectedError !== undefined;
       const isAsyncOp = !entry.sync;
 
-      // A sync op has no error channel (bare-value return), so it cannot express
-      // expectedError in the typed path — skip that vector with a breadcrumb.
-      if (hasExpectedError && !isAsyncOp) {
-        lines.push(
-          `    // skipped: ${label} — expectedError on a @sync op has no typed error channel`,
-        );
-        return;
-      }
-
       lines.push(`    // vector: ${label}`);
       lines.push("    {");
       for (const paramName of paramNames) {
@@ -2338,13 +2335,17 @@ function emitRustVectorConformanceEntrypoint(
         const local = rustFieldName(paramName);
         const paramJson = JSON.stringify(input[paramName] ?? {}, null, 2);
         if (shape.bareModel) {
-          lines.push(`        let ${local} = ${inCrate}::${paramType}::from_json(`);
+          lines.push(
+            `        let ${local} = ${inCrate}::${paramType}::from_json(`,
+          );
           lines.push(`            r####"`);
           lines.push(paramJson);
           lines.push(`"####,`);
           lines.push("            &ctx,");
           lines.push("        )");
-          lines.push(`        .expect(${JSON.stringify(`${paramName} parses`)});`);
+          lines.push(
+            `        .expect(${JSON.stringify(`${paramName} parses`)});`,
+          );
         } else if (shape.array && shape.isModel && !shape.optional) {
           // Array-of-model param: parse the outer JSON array to values, then decode
           // each element through the model's serde-free `from_json` loader (the
@@ -2352,12 +2353,16 @@ function emitRustVectorConformanceEntrypoint(
           // `Vec<Model>`. Symmetric with the array-of-model RETURN compare below.
           const elem = `${inCrate}::${shape.base}`;
           lines.push(`        let ${local}: Vec<${elem}> = {`);
-          lines.push("            let items: Vec<Value> = serde_json::from_str(");
+          lines.push(
+            "            let items: Vec<Value> = serde_json::from_str(",
+          );
           lines.push(`                r####"`);
           lines.push(paramJson);
           lines.push(`"####,`);
           lines.push("            )");
-          lines.push(`            .expect(${JSON.stringify(`${paramName} parses`)});`);
+          lines.push(
+            `            .expect(${JSON.stringify(`${paramName} parses`)});`,
+          );
           lines.push("            items");
           lines.push("                .iter()");
           lines.push(
@@ -2376,7 +2381,9 @@ function emitRustVectorConformanceEntrypoint(
           lines.push(paramJson);
           lines.push(`"####,`);
           lines.push("        )");
-          lines.push(`        .expect(${JSON.stringify(`${paramName} parses`)});`);
+          lines.push(
+            `        .expect(${JSON.stringify(`${paramName} parses`)});`,
+          );
         }
       }
       const callArgs = paramNames
@@ -2385,27 +2392,35 @@ function emitRustVectorConformanceEntrypoint(
       const invocation = `seam.${method}(${callArgs})${isAsyncOp ? ".await" : ""}`;
 
       if (hasExpectedError) {
-        // Async op only reaches here. Assert the awaited Result erred; when
-        // expectedError is a string, also require the message to contain it.
+        // Every op (sync or async) returns `Result<T, Box<dyn Error + Send +
+        // Sync>>` (typra#338). Assert it erred — an `Ok` fails the vector — and,
+        // when expectedError is a string, that the error message contains it:
+        // the same substring match the other runtimes apply to a thrown error.
         lines.push(`        let result = ${invocation};`);
         lines.push(
-          `        assert!(result.is_err(), ${JSON.stringify(`${label}: expected an error`)});`,
+          `        assert!(result.is_err(), "{}: expected an error, got Ok", ${JSON.stringify(label)});`,
         );
         if (typeof entry.vector.expectedError === "string") {
-          lines.push("        let message = result.unwrap_err().to_string();");
+          lines.push(
+            "        let message = result.err().map(|error| error.to_string()).unwrap_or_default();",
+          );
           lines.push(
             `        assert!(message.contains(${JSON.stringify(
               entry.vector.expectedError,
-            )}), ${JSON.stringify(`${label}: error message mismatch`)});`,
+            )}), "{}: error {:?} does not contain {:?}", ${JSON.stringify(
+              label,
+            )}, message, ${JSON.stringify(entry.vector.expectedError)});`,
           );
         }
       } else {
-        // `expected` present (or absent). Async op unwraps the awaited Result; a
-        // sync op returns the value directly.
-        const bind = isAsyncOp
-          ? `${invocation}.expect(${JSON.stringify(`${label}: seam ok`)})`
-          : invocation;
-        lines.push(`        let actual = ${bind};`);
+        // `expected` present (or absent): the op must return `Ok` — an `Err`
+        // fails the vector with its message.
+        lines.push(`        let actual = ${invocation}`);
+        lines.push(
+          `            .unwrap_or_else(|error| panic!("{}: expected Ok, got Err: {}", ${JSON.stringify(
+            label,
+          )}, error));`,
+        );
         if (entry.vector.expected !== undefined) {
           const returnShape = classifyCallableParam(entry.returns);
           const expectedJson = JSON.stringify(entry.vector.expected, null, 2);
@@ -2430,14 +2445,20 @@ function emitRustVectorConformanceEntrypoint(
                 `${label} misrouted`,
               )});`,
             );
-          } else if (returnShape.array && returnShape.isModel && !returnShape.optional) {
+          } else if (
+            returnShape.array &&
+            returnShape.isModel &&
+            !returnShape.optional
+          ) {
             // Array-of-model return: build the expected `Vec<Model>` element-wise
             // through the model's serde-free loader and compare with the plain
             // `PartialEq` lifted over `Vec` — `actual` has no `Serialize`, so the
             // scalar `serde_json::to_value(actual)` path would not compile.
             const elem = `${inCrate}::${returnShape.base}`;
             lines.push(`        let expected: Vec<${elem}> = {`);
-            lines.push("            let items: Vec<Value> = serde_json::from_str(");
+            lines.push(
+              "            let items: Vec<Value> = serde_json::from_str(",
+            );
             lines.push(`                r####"`);
             lines.push(expectedJson);
             lines.push(`"####,`);
@@ -2531,7 +2552,8 @@ function emitRustInterfaceConformanceTest(
   const typeNames = new Set<string>([seam]);
   for (const entry of sorted) {
     for (const typeName of Object.values(entry.params)) {
-      if (classifyCallableParam(typeName).bareModel) typeNames.add(typeName);
+      const shape = classifyCallableParam(typeName);
+      if (shape.base && declsByName.has(shape.base)) typeNames.add(shape.base);
     }
   }
   const importedTypes = [...typeNames].sort();
@@ -2568,11 +2590,16 @@ function emitRustInterfaceConformanceTest(
     assertTypedDispatchSupported(entry);
     const paramNames = Object.keys(entry.params);
     const method = toSnakeCase(entry.operation);
+    const rootShape = classifyCallableParam(
+      entry.params[entry.dispatch!.path.split(".")[0]],
+    );
     const accessor = rustDiscriminatorAccessor(
       entry.dispatch!.path,
       declsByName,
-      entry.params[entry.dispatch!.path.split(".")[0]],
+      rootShape.base,
+      rootShape.optional,
       polymorphicTypeNames,
+      discriminatorWireKey(entry.dispatch!.decl!),
     );
     const label = entry.vector.name ?? entry.operation;
     const expected = entry.vector.expected;
@@ -2593,7 +2620,19 @@ function emitRustInterfaceConformanceTest(
       const shape = classifyCallableParam(paramType);
       const local = rustFieldName(paramName);
       const paramJson = JSON.stringify(input[paramName] ?? {}, null, 2);
-      if (shape.bareModel) {
+      if (shape.optional && shape.base && declsByName.has(shape.base)) {
+        if (input[paramName] === undefined || input[paramName] === null) {
+          lines.push(`    let ${local}: Option<${shape.base}> = None;`);
+        } else {
+          lines.push(`    let ${local} = Some(${shape.base}::from_json(`);
+          lines.push(`        r####"`);
+          lines.push(paramJson);
+          lines.push(`"####,`);
+          lines.push("        &ctx,");
+          lines.push("    )");
+          lines.push(`    .expect(${JSON.stringify(`${paramName} parses`)}));`);
+        }
+      } else if (shape.bareModel) {
         lines.push(`    let ${local} = ${paramType}::from_json(`);
         lines.push(`        r####"`);
         lines.push(paramJson);
@@ -2615,9 +2654,11 @@ function emitRustInterfaceConformanceTest(
         lines.push(`    .expect(${JSON.stringify(`${paramName} parses`)});`);
       }
     }
-    lines.push(`    let kind = ${accessor};`);
+    lines.push(`    let kind: String = ${accessor};`);
     lines.push(`    let provider = vector_adapters::${providerFactory}();`);
-    lines.push(`    let seam_impl = ${resolverModule}::resolve(kind, &provider)`);
+    lines.push(
+      `    let seam_impl = ${resolverModule}::resolve(&kind, &provider)`,
+    );
     lines.push(
       `        .unwrap_or_else(|| panic!(${JSON.stringify(
         `${label}: no ${seam} attached for {kind}`,
@@ -2626,12 +2667,35 @@ function emitRustInterfaceConformanceTest(
     const callArgs = paramNames
       .map((name) => `&${rustFieldName(name)}`)
       .join(", ");
-    // A seam method is async => `-> Result<T, _>` (unwrap the awaited Result); a
-    // sync seam method returns the value directly (rust/emitter.ts:2568), so it
-    // has neither `.await` nor a Result to `.expect`.
-    const invocationTail = entry.sync
-      ? ""
-      : `.await.expect(${JSON.stringify("seam invocation")})`;
+    if (entry.vector.expectedError !== undefined) {
+      // Every op (sync or async) returns `Result<T, Box<dyn Error + Send +
+      // Sync>>` (typra#338). The resolve panic above fires on a missing route,
+      // so only an `Err` RETURNED by the seam counts as the expected error.
+      lines.push(
+        `    let result = seam_impl.${method}(${callArgs})${entry.sync ? "" : ".await"};`,
+      );
+      lines.push(
+        `    assert!(result.is_err(), "{}: expected an error, got Ok", ${JSON.stringify(label)});`,
+      );
+      if (typeof entry.vector.expectedError === "string") {
+        lines.push(
+          "    let message = result.err().map(|error| error.to_string()).unwrap_or_default();",
+        );
+        lines.push(
+          `    assert!(message.contains(${JSON.stringify(
+            entry.vector.expectedError,
+          )}), "{}: error {:?} does not contain {:?}", ${JSON.stringify(
+            label,
+          )}, message, ${JSON.stringify(entry.vector.expectedError)});`,
+        );
+      }
+      lines.push("}");
+      lines.push("");
+      return;
+    }
+    // Every seam method returns `Result<T, _>` (sync ops too, typra#338): unwrap
+    // the (awaited, when async) Result.
+    const invocationTail = `${entry.sync ? "" : ".await"}.expect(${JSON.stringify("seam invocation")})`;
     lines.push(
       `    let actual = seam_impl.${method}(${callArgs})${invocationTail};`,
     );
@@ -2651,6 +2715,20 @@ function emitRustInterfaceConformanceTest(
     lines.push("}");
     lines.push("");
   });
+
+  if (dispatched.openness === "closed") {
+    lines.push(
+      "#[test]",
+      `fn ${toSnakeCase(seam)}_resolver_rejects_unknown_discriminator() {`,
+      `    let provider = vector_adapters::${providerFactory}();`,
+      "    let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {",
+      `        ${resolverModule}::resolve("typra-unknown-discriminator", &provider);`,
+      "    }));",
+      '    assert!(rejected.is_err(), "closed resolver accepted an unknown discriminator");',
+      "}",
+      "",
+    );
+  }
 
   return lines.join("\n");
 }
@@ -2680,38 +2758,67 @@ function rustDiscriminatorAccessor(
   path: string,
   declsByName: Map<string, TypeDecl>,
   rootTypeName: string | undefined,
+  rootOptional: boolean,
   polymorphicTypeNames: Set<string>,
+  discriminatorKey: string,
 ): string {
   const segments = path.split(".");
-  const rawField = segments[segments.length - 1];
   const containerSegments = segments.slice(1, -1);
   let currentType = rootTypeName ? declsByName.get(rootTypeName) : undefined;
-  const parts = [rustFieldName(segments[0])];
-  for (const segment of containerSegments) {
-    const field = currentType?.fields.find((f) => f.name === segment);
+  const lines = [
+    "(|| -> Option<String> {",
+    rootOptional
+      ? `        let __dispatch_root = ${rustFieldName(segments[0])}.as_ref()?;`
+      : `        let __dispatch_root = &${rustFieldName(segments[0])};`,
+  ];
+  let currentRef = "__dispatch_root";
+  let finalContainerIsValueBacked =
+    !!rootTypeName && polymorphicTypeNames.has(rootTypeName);
+  for (const [index, segment] of containerSegments.entries()) {
+    const field = findFieldInHierarchy(currentType, segment, declsByName);
     const access = rustFieldName(segment);
-    // A value-backed complex field (polymorphic/coerce union or `unknown`) lowers
-    // to a bare `serde_json::Value`, so its optionality is erased — read it
-    // directly. Only a genuinely `Option<T>`-lowered field is unwrapped.
-    const fieldTypeName =
-      field?.category.kind === "complex" ||
-      field?.category.kind === "collection_complex"
-        ? field.category.typeName
-        : undefined;
-    const isValueBacked =
-      fieldTypeName !== undefined &&
-      (polymorphicTypeNames.has(fieldTypeName) || fieldTypeName === "unknown");
-    parts.push(
-      field?.isOptional && !isValueBacked
-        ? `${access}.as_ref().expect(${JSON.stringify(`${segment} present`)})`
-        : access,
+    const lowering = field
+      ? resolveFieldLowering(
+          field,
+          loweringCapabilitiesForTarget("rust", polymorphicTypeNames),
+        )
+      : undefined;
+    const nextRef = `__dispatch_${index}`;
+    lines.push(
+      field?.isOptional && lowering?.optionalWrapper === "preserved"
+        ? `        let ${nextRef} = ${currentRef}.${access}.as_ref()?;`
+        : `        let ${nextRef} = &${currentRef}.${access};`,
     );
+    currentRef = nextRef;
+    finalContainerIsValueBacked = lowering?.storage === "value-backed";
     currentType = field ? declsByName.get(field.typeName.name) : undefined;
   }
-  const container = parts.join(".");
-  return `${container}\n        .get(${JSON.stringify(
-    rawField,
-  )})\n        .and_then(|v| v.as_str())\n        .expect("discriminator present")`;
+  if (containerSegments.length === 0 && finalContainerIsValueBacked) {
+    lines.push(
+      "        let __dispatch_value = __dispatch_root.to_value(&Default::default());",
+      `        __dispatch_value.get(${JSON.stringify(discriminatorKey)}).and_then(|value| value.as_str()).map(str::to_owned)`,
+    );
+  } else {
+    lines.push(
+      `        ${currentRef}.get(${JSON.stringify(discriminatorKey)}).and_then(|value| value.as_str()).map(str::to_owned)`,
+    );
+  }
+  lines.push("    })().unwrap_or_default()");
+  return lines.join("\n");
+}
+
+function findFieldInHierarchy(
+  type: TypeDecl | undefined,
+  name: string,
+  declsByName: Map<string, TypeDecl>,
+): TypeDecl["fields"][number] | undefined {
+  let current = type;
+  while (current) {
+    const field = current.fields.find((candidate) => candidate.name === name);
+    if (field) return field;
+    current = current.base ? declsByName.get(current.base.name) : undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -2727,7 +2834,8 @@ function uniqueRustTestName(
 ): string {
   const raw = `${seam} ${entry.operation} ${entry.vector.name ?? "unnamed"}`;
   const base =
-    `test_${toSnakeCase(raw.replace(/[^A-Za-z0-9]+/g, "_"))}` || `test_${index}`;
+    `test_${toSnakeCase(raw.replace(/[^A-Za-z0-9]+/g, "_"))}` ||
+    `test_${index}`;
   const prior = seen.get(base);
   if (prior === undefined) {
     seen.set(base, 0);

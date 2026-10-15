@@ -65,6 +65,17 @@ export function shouldGuardMissingRequiredField(
   return loadFieldPresencePolicy(field) === "guard-then-fail";
 }
 
+/**
+ * Required nullable field (`x: T | null`, #339): the value is typed and stored like an
+ * optional field, but load must reject an ABSENT key (an explicit `null` is accepted and
+ * leaves the value unset) and save must ALWAYS write the key, as `null` when unset.
+ */
+export function isRequiredNullable(
+  field: { isNullable?: boolean } | undefined,
+): boolean {
+  return field?.isNullable === true;
+}
+
 export function saveFieldEmissionPolicy(
   field: FieldDecl | SaveAssignment | undefined,
   profile: SaveFieldEmissionProfile = "optional-only",

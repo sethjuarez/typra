@@ -626,7 +626,7 @@ describe("export surface scaffolding", () => {
     assert.match(rust, /impl EventSink for CompileOnlyEventSink/);
     assert.match(
       rust,
-      /panic!\("EventSink\.emit is a compile-only protocol scaffold\."\)/,
+      /fn emit\(&self, event: &serde_json::Value\) -> Result<\(\), Box<dyn std::error::Error \+ Send \+ Sync>> \{\s*Err\("EventSink\.emit is a compile-only protocol scaffold\."\.into\(\)\)/,
     );
     assert.match(
       rust,

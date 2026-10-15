@@ -38,6 +38,13 @@ function factoryParamTestValue(typeStr: string): string {
     case "integer":
     case "int32":
     case "int64":
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
       return "42";
     case "float":
     case "float64":
@@ -133,6 +140,16 @@ export function emitTypeScriptTest(
           `      expect(reloaded.${val.key}).toEqual(instance.${val.key});`,
         );
       }
+      if (example.nullKeys && example.nullKeys.length > 0) {
+        lines.push(`      const saved = instance.save();`);
+        for (const key of example.nullKeys) {
+          const literal = JSON.stringify(key);
+          lines.push(
+            `      expect(Object.prototype.hasOwnProperty.call(saved, ${literal})).toBe(true);`,
+          );
+          lines.push(`      expect(saved[${literal}]).toBe(null);`);
+        }
+      }
       lines.push(`    });`);
     }
     lines.push("");
@@ -203,11 +220,11 @@ export function emitTypeScriptTest(
           (entry) => entry.provider === provider,
         )) {
           lines.push(
-            `      expect(Object.keys(${provider}Wire).includes("${mapping.wireName}")).toBe(true);`,
+            `      expect(Object.keys(${provider}Wire).includes(${JSON.stringify(mapping.wireName)})).toBe(true);`,
           );
           if (mapping.fieldName !== mapping.wireName) {
             lines.push(
-              `      expect(Object.keys(${provider}Wire).includes("${mapping.fieldName}")).toBe(false);`,
+              `      expect(Object.keys(${provider}Wire).includes(${JSON.stringify(mapping.fieldName)})).toBe(false);`,
             );
           }
         }

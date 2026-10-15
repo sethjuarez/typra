@@ -1,0 +1,89 @@
+name: Emitter capability
+description: Propose schema-derived behavior or a generated contract surface for @typra/emitter.
+title: "feat(emitter): <schema-derived capability>"
+labels: ["enhancement", "emitter"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Typra projects contracts; it does not generate product algorithms or runtime policy. Read the
+        [emitter boundary](https://typra.dev/concepts/emitter-boundary/) before proposing a
+        capability. If the behavior is not completely derivable from the contract, propose a generated seam
+        and keep its implementation consumer-owned.
+  - type: dropdown
+    id: classification
+    attributes:
+      label: Boundary classification
+      description: Which side of the emitter boundary does this request occupy?
+      options:
+        - Schema projection — Typra can derive all observable behavior from the contract
+        - Mixed — Typra should generate a seam or adapter contract; consumers own the implementation
+        - Consumer algorithm or runtime policy — discuss rather than implement in the emitter
+        - Internal emitter infrastructure — improves projection without a new contract surface
+    validations:
+      required: true
+  - type: textarea
+    id: contract-rule
+    attributes:
+      label: Contract-derived rule
+      description: >
+        Identify the TypeSpec shape, Typra decorator, configuration, or documented convention that completely
+        determines the generated behavior. If this is mixed, identify only the surface Typra can derive. For
+        internal infrastructure, write "N/A — no new contract surface" and explain the invariant it protects.
+      render: tsp
+      placeholder: |
+        @decorator(...)
+        model Example { ... }
+    validations:
+      required: true
+  - type: textarea
+    id: conformance
+    attributes:
+      label: Target-independent conformance case
+      description: >
+        Describe the domain-neutral input and expected output/error that every target must satisfy. Explain
+        why two independent emitter implementations would produce equivalent observable behavior.
+      placeholder: |
+        Input: ...
+        Expected: ...
+    validations:
+      required: true
+  - type: textarea
+    id: consumer-owned
+    attributes:
+      label: Consumer-owned behavior
+      description: >
+        List any algorithm, product policy, runtime dependency, or plugin implementation that remains outside
+        generated output. Write "None" only when the contract determines all behavior.
+    validations:
+      required: true
+  - type: dropdown
+    id: targets
+    attributes:
+      label: Required target coverage
+      description: How broadly must the generated contract behave consistently?
+      multiple: true
+      options:
+        - TypeScript
+        - Python
+        - Go
+        - C#
+        - Java
+        - Rust
+        - Swift
+        - Python (Pydantic)
+        - TypeScript (Zod)
+        - JSON Schema / JSON AST
+        - Markdown
+        - Other / not target-specific
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundary-confirmation
+    attributes:
+      label: Boundary confirmation
+      options:
+        - label: I have separated schema projection from consumer-owned algorithm and runtime policy.
+          required: true
+        - label: I can encode the generated behavior as a domain-neutral fixture or conformance test.
+          required: true

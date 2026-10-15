@@ -101,7 +101,11 @@ monolithic runner files.
 Each per-interface conformance file **imports the consumer-attached provider**, **calls the
 emitted `resolve_<seam>`** (the twin of the shape `Load` switch), and **invokes the typed seam**
 with typed input built from the emitted models' `FromJson`, reading the SAME discriminator the
-shape `Load` switch reads through the typed accessor chain. The consumer authors typed seam
+shape `Load` switch reads through the typed accessor chain. An `expectedError` vector keeps the
+same resolve-then-null-check prologue (a missing route still fails, never counting as the
+expected error) and then asserts the seam invocation fails through the native error channel
+(thrown exception / `error` return / Rust `Err` / Swift `throws`), with a substring match on the
+message when `expectedError` is a string. The consumer authors typed seam
 impls + a provider **value** outside the emitted tree (`VectorProviders.renderer()` /
 `renderer_provider` fixture / `vector_adapters::renderer_provider()` / `rendererProvider`).
 

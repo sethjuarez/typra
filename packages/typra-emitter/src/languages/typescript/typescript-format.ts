@@ -1020,8 +1020,11 @@ function tryAssignmentBreak(
   const call = findCallGroup(content, mask);
   if (call) {
     const args = splitTopCommas(content.slice(call.open + 1, call.close));
+    // Prettier treats `call(x) as T` as an `as` expression, not a poorly-breakable call, so it
+    // explodes the call instead of breaking after `=`.
+    const asCast = /^\s*as\s/.test(content.slice(call.close + 1));
     const singleNonArrow =
-      args.length === 1 && args[0].trim() !== "" && !matchArrow(args[0]);
+      !asCast && args.length === 1 && args[0].trim() !== "" && !matchArrow(args[0]);
     const rhsLine = `${inner}${rhs}`;
     // A single (non-arrow) argument call is kept whole after `=` rather than exploded, provided it
     // fits one indent deeper.

@@ -1,81 +1,245 @@
-// Consumer-authored provider doubles for the dispatch-target-regression seams.
-//
-// COMPILE-ONLY: these satisfy the emitted provider traits so the regression
-// compile gate (`cargo build --tests`) compiles the generated seam conformance
-// tests. The class of target bug this fixture guards — accessor drift on
-// coerce-union + optional fields lowering to `serde_json::Value` (E0599/E0609),
-// missing imports, invalid raw-string literals — is always a COMPILE error, so a
-// build gate catches it. Behavioral correctness is covered by the emitter unit
-// tests and downstream runtime conformance, so the double bodies are inert.
 #![allow(dead_code, unused_variables, clippy::all)]
 
+use crate::model::direct_renderer_resolver::DirectRendererProvider;
+use crate::model::closed_router_resolver::ClosedRouterProvider;
+use crate::model::optional_renderer_resolver::OptionalRendererProvider;
 use crate::model::processor_resolver::ProcessorProvider;
 use crate::model::renderer_resolver::RendererProvider;
-use crate::model::{Agent, Processor, Renderer};
+use crate::model::{
+    Agent, ClosedConfig, ClosedRouter, DirectRenderer, FormatConfig, OptionalRenderer, Processor,
+    Renderer,
+};
 
-struct StubRenderer;
+struct ClosedRouterImpl(&'static str);
 
 #[async_trait::async_trait]
-impl Renderer for StubRenderer {
+impl ClosedRouter for ClosedRouterImpl {
+    async fn route(
+        &self,
+        _config: &ClosedConfig,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.0.to_string())
+    }
+}
+
+pub struct StubClosedRouterProvider {
+    alpha: ClosedRouterImpl,
+    beta: ClosedRouterImpl,
+}
+
+impl ClosedRouterProvider for StubClosedRouterProvider {
+    fn alpha(&self) -> Option<&dyn ClosedRouter> { Some(&self.alpha) }
+    fn beta(&self) -> Option<&dyn ClosedRouter> { Some(&self.beta) }
+}
+
+pub fn closed_router_provider() -> StubClosedRouterProvider {
+    StubClosedRouterProvider {
+        alpha: ClosedRouterImpl("closed:alpha"),
+        beta: ClosedRouterImpl("closed:beta"),
+    }
+}
+
+struct RendererImpl(&'static str);
+
+#[async_trait::async_trait]
+impl Renderer for RendererImpl {
+    async fn render(
+        &self,
+        _agent: &Agent,
+        _template: &String,
+        _inputs: &serde_json::Value,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.0.to_string())
+    }
+}
+
+struct WildcardRendererImpl;
+
+#[async_trait::async_trait]
+impl Renderer for WildcardRendererImpl {
     async fn render(
         &self,
         agent: &Agent,
-        template: &String,
-        inputs: &serde_json::Value,
+        _template: &String,
+        _inputs: &serde_json::Value,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(String::new())
+        let wire = agent.to_value(&Default::default());
+        Ok(wildcard_route("renderer", &wire["template"]["format"]))
     }
 }
 
 pub struct StubRendererProvider {
-    inner: StubRenderer,
+    jinja2: RendererImpl,
+    mustache: RendererImpl,
+    wildcard: WildcardRendererImpl,
 }
 
 impl RendererProvider for StubRendererProvider {
-    fn jinja2(&self) -> Option<&dyn Renderer> {
-        Some(&self.inner)
-    }
-    fn mustache(&self) -> Option<&dyn Renderer> {
-        Some(&self.inner)
-    }
-    fn custom(&self) -> Option<&dyn Renderer> {
-        Some(&self.inner)
-    }
+    fn jinja2(&self) -> Option<&dyn Renderer> { Some(&self.jinja2) }
+    fn mustache(&self) -> Option<&dyn Renderer> { Some(&self.mustache) }
+    fn wildcard(&self) -> &dyn Renderer { &self.wildcard }
 }
 
 pub fn renderer_provider() -> StubRendererProvider {
-    StubRendererProvider { inner: StubRenderer }
+    StubRendererProvider {
+        jinja2: RendererImpl("renderer:jinja2"),
+        mustache: RendererImpl("renderer:mustache"),
+        wildcard: WildcardRendererImpl,
+    }
 }
 
-struct StubProcessor;
+struct ProcessorImpl(&'static str);
 
 #[async_trait::async_trait]
-impl Processor for StubProcessor {
+impl Processor for ProcessorImpl {
     async fn process(
         &self,
-        agent: &Agent,
-        response: &serde_json::Value,
+        _agent: &Agent,
+        _response: &serde_json::Value,
     ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(serde_json::Value::Null)
+        Ok(serde_json::json!({ "route": self.0 }))
     }
 }
 
 pub struct StubProcessorProvider {
-    inner: StubProcessor,
+    openai: ProcessorImpl,
+    azure: ProcessorImpl,
+    wildcard: ProcessorImpl,
 }
 
 impl ProcessorProvider for StubProcessorProvider {
-    fn openai(&self) -> Option<&dyn Processor> {
-        Some(&self.inner)
-    }
-    fn azure(&self) -> Option<&dyn Processor> {
-        Some(&self.inner)
-    }
-    fn custom(&self) -> Option<&dyn Processor> {
-        Some(&self.inner)
-    }
+    fn openai(&self) -> Option<&dyn Processor> { Some(&self.openai) }
+    fn azure(&self) -> Option<&dyn Processor> { Some(&self.azure) }
+    fn wildcard(&self) -> &dyn Processor { &self.wildcard }
 }
 
 pub fn processor_provider() -> StubProcessorProvider {
-    StubProcessorProvider { inner: StubProcessor }
+    StubProcessorProvider {
+        openai: ProcessorImpl("processor:openai"),
+        azure: ProcessorImpl("processor:azure"),
+        wildcard: ProcessorImpl("processor:wildcard"),
+    }
+}
+
+struct DirectRendererImpl(&'static str);
+
+#[async_trait::async_trait]
+impl DirectRenderer for DirectRendererImpl {
+    async fn render(
+        &self,
+        _format: &FormatConfig,
+        _template: &String,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.0.to_string())
+    }
+}
+
+struct WildcardDirectRendererImpl;
+
+#[async_trait::async_trait]
+impl DirectRenderer for WildcardDirectRendererImpl {
+    async fn render(
+        &self,
+        format: &FormatConfig,
+        _template: &String,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(wildcard_route(
+            "direct",
+            &format.to_value(&Default::default()),
+        ))
+    }
+}
+
+pub struct StubDirectRendererProvider {
+    jinja2: DirectRendererImpl,
+    mustache: DirectRendererImpl,
+    wildcard: WildcardDirectRendererImpl,
+}
+
+impl DirectRendererProvider for StubDirectRendererProvider {
+    fn jinja2(&self) -> Option<&dyn DirectRenderer> { Some(&self.jinja2) }
+    fn mustache(&self) -> Option<&dyn DirectRenderer> { Some(&self.mustache) }
+    fn wildcard(&self) -> &dyn DirectRenderer { &self.wildcard }
+}
+
+pub fn direct_renderer_provider() -> StubDirectRendererProvider {
+    StubDirectRendererProvider {
+        jinja2: DirectRendererImpl("direct:jinja2"),
+        mustache: DirectRendererImpl("direct:mustache"),
+        wildcard: WildcardDirectRendererImpl,
+    }
+}
+
+struct OptionalRendererImpl(&'static str);
+
+#[async_trait::async_trait]
+impl OptionalRenderer for OptionalRendererImpl {
+    async fn render(
+        &self,
+        _agent: &Option<Agent>,
+        _template: &String,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.0.to_string())
+    }
+}
+
+pub struct StubOptionalRendererProvider {
+    jinja2: OptionalRendererImpl,
+    mustache: OptionalRendererImpl,
+    wildcard: OptionalRendererImpl,
+}
+
+impl OptionalRendererProvider for StubOptionalRendererProvider {
+    fn jinja2(&self) -> Option<&dyn OptionalRenderer> { Some(&self.jinja2) }
+    fn mustache(&self) -> Option<&dyn OptionalRenderer> { Some(&self.mustache) }
+    fn wildcard(&self) -> &dyn OptionalRenderer { &self.wildcard }
+}
+
+pub fn optional_renderer_provider() -> StubOptionalRendererProvider {
+    StubOptionalRendererProvider {
+        jinja2: OptionalRendererImpl("optional:jinja2"),
+        mustache: OptionalRendererImpl("optional:mustache"),
+        wildcard: OptionalRendererImpl("optional:wildcard"),
+    }
+}
+
+fn wildcard_route(prefix: &str, wire: &serde_json::Value) -> String {
+    format!(
+        "{}:wildcard:{}:{}",
+        prefix,
+        wire["format_kind"].as_str().unwrap(),
+        wire["plugin"]["tag"].as_str().unwrap(),
+    )
+}
+
+#[test]
+fn bare_discriminator_coercion_is_canonical() {
+    let known = FormatConfig::load_from_value(
+        &serde_json::json!("mustache"),
+        &Default::default(),
+    );
+    let known_roundtrip = FormatConfig::load_from_value(
+        &known.to_value(&Default::default()),
+        &Default::default(),
+    );
+    assert_eq!(known, known_roundtrip);
+    assert!(matches!(
+        known.kind,
+        crate::model::format_config::FormatConfigKind::MustacheFormat
+    ));
+
+    let unknown = FormatConfig::load_from_value(
+        &serde_json::json!("liquid"),
+        &Default::default(),
+    );
+    let unknown_roundtrip = FormatConfig::load_from_value(
+        &unknown.to_value(&Default::default()),
+        &Default::default(),
+    );
+    assert_eq!(unknown, unknown_roundtrip);
+    assert!(matches!(
+        unknown.kind,
+        crate::model::format_config::FormatConfigKind::CustomFormat { ref kind_name, .. }
+            if kind_name == "liquid"
+    ));
 }

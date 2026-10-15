@@ -14,6 +14,7 @@ import {
   postSaveExample,
   wireTestMappings,
   wireTestProviders,
+  propertyWireKey,
 } from "../../testing/test-context.js";
 
 type SwiftNativeSerialization = "none" | "codable";
@@ -49,10 +50,19 @@ export function emitSwiftTests(
   ctx.coercions.forEach((coercion, index) => {
     lines.push(`  func testScalarCoercion${index + 1}() throws {`);
     lines.push(`    let instance = try ${typeName}.load(${coercion.value})`);
-    const expansion = ctx.node.coercions[index]?.expansion;
+    const coercionDecl = ctx.node.coercions[index];
+    const expansion = coercionDecl?.expansion;
+    const resolvedExpansion = expansion
+      ? Object.fromEntries(
+          Object.entries(expansion).map(([key, value]) => [
+            key,
+            value === "{value}" ? coercionTestValue(coercion.value) : value,
+          ]),
+        )
+      : undefined;
     const child =
-      expansion && ctx.node.discriminator
-        ? matchingPolymorphicChild(ctx.node, expansion)
+      resolvedExpansion && ctx.node.discriminator
+        ? matchingPolymorphicChild(ctx.node, resolvedExpansion)
         : undefined;
     if (child) {
       const rawPattern = isWildcardFallbackChild(ctx.node, child) ? ", _" : "";
@@ -159,6 +169,23 @@ export function emitSwiftConformanceTest(moduleName: string): string {
     '    XCTAssertThrowsError(try TypraRuntime.double(parsed["boolTrue"]!, field: "boolTrue"))',
     '    XCTAssertThrowsError(try TypraRuntime.double(parsed["boolFalse"]!, field: "boolFalse"))',
     "  }",
+    "",
+    "  func testSizedIntegersAreNotBooleans() throws {",
+    '    XCTAssertEqual(try TypraRuntime.int8(Int8(1) as Any, field: "value"), 1)',
+    '    XCTAssertEqual(try TypraRuntime.int8(Int8(-128) as Any, field: "value"), -128)',
+    '    XCTAssertEqual(try TypraRuntime.int64(Int8(0) as Any, field: "value"), 0)',
+    '    XCTAssertEqual(try TypraRuntime.uint8(UInt8(255) as Any, field: "value"), 255)',
+    '    XCTAssertEqual(try TypraRuntime.uint64(UInt64.max as Any, field: "value"), UInt64.max)',
+    '    XCTAssertEqual(try TypraRuntime.double(Int8(1) as Any, field: "value"), 1)',
+    '    XCTAssertThrowsError(try TypraRuntime.int8(true as Any, field: "value"))',
+    '    XCTAssertThrowsError(try TypraRuntime.uint64(false as Any, field: "value"))',
+    '    XCTAssertThrowsError(try TypraRuntime.int8(Int16(300) as Any, field: "value"))',
+    '    XCTAssertThrowsError(try TypraRuntime.uint8(Int8(-1) as Any, field: "value"))',
+    '    let json = try TypraRuntime.jsonString(from: ["tiny": Int8(1), "octet": UInt8(0)])',
+    '    let reloaded = try TypraRuntime.jsonObject(from: json, typeName: "SizedProbe") as! [String: Any]',
+    '    XCTAssertEqual(try TypraRuntime.int8(reloaded["tiny"]!, field: "tiny"), 1)',
+    '    XCTAssertEqual(try TypraRuntime.uint8(reloaded["octet"]!, field: "octet"), 0)',
+    "  }",
     "}",
     "",
   ].join("\n");
@@ -184,20 +211,24 @@ function emitWireTest(
   lines.push(`    let json = ${swiftMultilineString(example.json.join("\n"))}`);
   lines.push(`    let instance = try ${typeName}.fromJSON(json)`);
   for (const provider of providers) {
-    lines.push(`    let ${provider}Wire = try instance.toWire("${provider}")`);
+    lines.push(
+      `    let ${provider}Wire = try instance.toWire(${swiftStringLiteral(provider)})`,
+    );
     for (const mapping of mappings.filter((m) => m.provider === provider)) {
       lines.push(
-        `    XCTAssertNotNil(${provider}Wire["${mapping.wireName}"])`,
+        `    XCTAssertNotNil(${provider}Wire[${swiftStringLiteral(mapping.wireName)}])`,
       );
       if (mapping.fieldName !== mapping.wireName) {
-        lines.push(`    XCTAssertNil(${provider}Wire["${mapping.fieldName}"])`);
+        lines.push(
+          `    XCTAssertNil(${provider}Wire[${swiftStringLiteral(mapping.fieldName)}])`,
+        );
       }
     }
     lines.push(
-      `    let ${provider}Restored = try ${typeName}.fromWire("${provider}", ${provider}Wire)`,
+      `    let ${provider}Restored = try ${typeName}.fromWire(${swiftStringLiteral(provider)}, ${provider}Wire)`,
     );
     lines.push(
-      `    XCTAssertEqual(Set(try ${provider}Restored.toWire("${provider}").keys), Set(${provider}Wire.keys))`,
+      `    XCTAssertEqual(Set(try ${provider}Restored.toWire(${swiftStringLiteral(provider)}).keys), Set(${provider}Wire.keys))`,
     );
   }
   lines.push("  }");
@@ -222,6 +253,16 @@ function emitExampleTest(
   emitValidations(lines, "reloaded", postSaveExample(example, node), node);
   if (lines.length === jsonReloadValidationStart) {
     lines.push("    _ = reloaded");
+  }
+  const nullKeys = example.nullKeys ?? [];
+  if (nullKeys.length > 0) {
+    lines.push("    let savedNull = try instance.save()");
+  }
+  for (const key of nullKeys) {
+    const literal = JSON.stringify(key);
+    lines.push(
+      `    XCTAssertTrue(savedNull.keys.contains(${literal}) && savedNull[${literal}] is NSNull, "Expected ${typeName} to save ${key} as null")`,
+    );
   }
   if (nativeSerialization === "codable") {
     lines.push(
@@ -303,8 +344,8 @@ function emitStructuredValidations(
   node: TypeNode,
 ): void {
   for (const prop of node.properties) {
-    if (!(prop.name in sample)) continue;
-    const value = sample[prop.name];
+    if (!(propertyWireKey(prop) in sample)) continue;
+    const value = sample[propertyWireKey(prop)];
     const accessor = `${varName}.${swiftPropertyName(prop.name)}`;
     if (prop.isCollection) {
       const count = Array.isArray(value)
@@ -314,7 +355,7 @@ function emitStructuredValidations(
           : undefined;
       if (count !== undefined) {
         lines.push(
-          `    XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional)}.count, ${count})`,
+          `    XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional || prop.isNullable === true)}.count, ${count})`,
         );
       }
       continue;
@@ -337,7 +378,7 @@ function emitStructuredValidations(
     ) {
       emitNestedValidation(
         lines,
-        requiredAccessor(accessor, prop.isOptional),
+        requiredAccessor(accessor, prop.isOptional || prop.isNullable === true),
         value,
         prop,
       );
@@ -452,7 +493,7 @@ function emitChildPatternValidation(
   const rawPattern = isWildcardFallbackChild(node, child) ? ", _" : "";
   const body: string[] = [];
   for (const [key, expected] of Object.entries(sample)) {
-    if (key === node.discriminator) continue;
+    if (key === swiftSampleKey(node, node.discriminator ?? "")) continue;
     const literal = swiftExpectedLiteral(expected);
     if (literal === null) continue;
     const prop = findProperty(child, key) ?? findProperty(node, key);
@@ -482,13 +523,22 @@ function matchingPolymorphicChild(
   sample: Record<string, any>,
 ): TypeNode | undefined {
   const discriminatorValue = node.discriminator
-    ? sample[node.discriminator]
+    ? (sample[swiftSampleKey(node, node.discriminator)] ??
+      sample[node.discriminator])
     : undefined;
   return (
     node.childTypes.find(
       (child) => polymorphicChildValue(node, child) === discriminatorValue,
     ) ?? defaultPolymorphicChild(node)
   );
+}
+
+function coercionTestValue(rendered: string): unknown {
+  try {
+    return JSON.parse(rendered);
+  } catch {
+    return rendered.replace(/^"|"$/g, "");
+  }
 }
 
 function defaultPolymorphicChild(node: TypeNode): TypeNode | undefined {
@@ -517,7 +567,10 @@ function emitPropertyAssertion(
   unknownCast = "String",
 ): void {
   if (prop?.enumName) {
-    const valueAccessor = requiredAccessor(accessor, prop.isOptional);
+    const valueAccessor = requiredAccessor(
+      accessor,
+      prop.isOptional || prop.isNullable === true,
+    );
     if (expected.startsWith('"')) {
       lines.push(
         `${indent}XCTAssertEqual(${valueAccessor}.rawValue, ${expected})`,
@@ -539,7 +592,7 @@ function emitPropertyAssertion(
     lines.push(
       `${
         indent
-      }XCTAssertEqual(${prop.isOptional ? `try XCTUnwrap(${castAccessor})` : castAccessor}, ${expected})`,
+      }XCTAssertEqual(${prop.isOptional || prop.isNullable ? `try XCTUnwrap(${castAccessor})` : castAccessor}, ${expected})`,
     );
     return;
   }
@@ -549,7 +602,7 @@ function emitPropertyAssertion(
       ? `(try! ${swiftTypeName(prop.enumName)}.parse(${expected}))`
       : expected;
     lines.push(
-      `${indent}XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional)}, ${enumExpected})`,
+      `${indent}XCTAssertEqual(${requiredAccessor(accessor, prop.isOptional || prop.isNullable === true)}, ${enumExpected})`,
     );
     return;
   }
@@ -557,10 +610,13 @@ function emitPropertyAssertion(
   if (prop && !prop.isScalar && prop.type) {
     const nestedKey = coercionProperty(prop.type) ?? prop.type.discriminator;
     if (nestedKey) {
-      const valueAccessor = requiredAccessor(accessor, prop.isOptional);
+      const valueAccessor = requiredAccessor(
+        accessor,
+        prop.isOptional || prop.isNullable === true,
+      );
       if (prop.type.childTypes.length > 0) {
         lines.push(
-          `${indent}XCTAssertEqual(try ${valueAccessor}.save()[${swiftStringLiteral(nestedKey)}] as? String, ${expected})`,
+          `${indent}XCTAssertEqual(try ${valueAccessor}.save()[${swiftStringLiteral(swiftSampleKey(prop.type, nestedKey))}] as? String, ${expected})`,
         );
       } else {
         const nestedProp = prop.type.properties.find(
@@ -568,7 +624,7 @@ function emitPropertyAssertion(
         );
         const nestedAccessor = `${valueAccessor}.${swiftPropertyName(nestedKey)}`;
         lines.push(
-          `${indent}XCTAssertEqual(${requiredAccessor(nestedAccessor, nestedProp?.isOptional ?? false)}, ${expected})`,
+          `${indent}XCTAssertEqual(${requiredAccessor(nestedAccessor, (nestedProp?.isOptional || nestedProp?.isNullable) === true)}, ${expected})`,
         );
       }
 
@@ -577,7 +633,7 @@ function emitPropertyAssertion(
   }
 
   lines.push(
-    `${indent}XCTAssertEqual(${requiredAccessor(accessor, prop?.isOptional ?? false)}, ${expected})`,
+    `${indent}XCTAssertEqual(${requiredAccessor(accessor, (prop?.isOptional || prop?.isNullable) === true)}, ${expected})`,
   );
 }
 
@@ -610,7 +666,16 @@ function requiredAccessor(accessor: string, isOptional: boolean): string {
   return isOptional ? `(try XCTUnwrap(${accessor}))` : accessor;
 }
 
+function swiftSampleKey(node: TypeNode, name: string): string {
+  const prop = node.properties.find((candidate) => candidate.name === name);
+  return prop ? propertyWireKey(prop) : name;
+}
+
 function findProperty(node: TypeNode, key: string): PropertyNode | undefined {
+  const byWireKey = node.properties.find(
+    (candidate) => candidate.serializedName === key,
+  );
+  if (byWireKey) return byWireKey;
   return node.properties.find(
     (candidate) =>
       swiftPropertyName(candidate.name) === swiftPropertyName(key) ||
@@ -667,8 +732,15 @@ function swiftCoercionCast(scalarType: string | undefined): string {
     case "float64":
     case "number":
       return "Double";
+    case "int8":
+    case "int16":
     case "int32":
     case "int64":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "integer":
       return "Int";
     default:

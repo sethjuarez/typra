@@ -1,5 +1,27 @@
 import { toPascalCase } from "../../ir/visitor.js";
 
+/**
+ * Java has no unsigned primitives, so sized/unsigned TypeSpec integers widen to the
+ * smallest boxed type holding their full range: up to 16 bits -> `Integer` (handled as
+ * `int32`), `uint32`/`safeint`/`uint64` -> `Long` (handled as `int64`). `uint64` values
+ * above `Long.MAX_VALUE` are out of range. Returns the scalar whose Java handling applies.
+ */
+export function javaIntegralScalar(scalarType: string): string {
+  switch (scalarType) {
+    case "int8":
+    case "int16":
+    case "uint8":
+    case "uint16":
+      return "int32";
+    case "uint32":
+    case "uint64":
+    case "safeint":
+      return "int64";
+    default:
+      return scalarType;
+  }
+}
+
 const JAVA_KEYWORDS = new Set([
   "abstract",
   "assert",

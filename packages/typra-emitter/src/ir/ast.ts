@@ -11,6 +11,7 @@ import {
   getNamespaceFullName,
   getDiscriminator,
   isErrorModel,
+  resolveEncodedName,
 } from "@typespec/compiler";
 import { isStatusCode } from "@typespec/http";
 import {
@@ -23,11 +24,18 @@ import {
   DefaultForEntry,
   ParseAliasEntry,
   SerializationDirection,
+  jsonEncodedNameFromDecorators,
+  overriddenBaseProperty,
 } from "../decorators.js";
 import { StateKeys } from "../lib.js";
 import { scalarRuntimeKind } from "./scalar-kinds.js";
 import { detectWireCollisions } from "./lower.js";
 import type { CallableDispatch } from "./callable.js";
+
+/** True for the `null` intrinsic variant of a `T | null` union. */
+function isNullType(type: Type): boolean {
+  return type.kind === "Intrinsic" && type.name === "null";
+}
 
 /**
  * Models whose `@knownAs` wire mappings have already been checked for
@@ -37,6 +45,10 @@ import type { CallableDispatch } from "./callable.js";
  * Keyed by the compiler `Model` object, which is unique per compilation.
  */
 const checkedWireCollisions = new WeakSet<Model>();
+const checkedAdditionalProperties = new WeakSet<Model>();
+const checkedAdditionalPropertiesCollisions = new WeakSet<Model>();
+const checkedEncodedNameCollisions = new WeakSet<Model>();
+const checkedEncodedNames = new WeakSet<ModelProperty>();
 
 /**
  * Warn when `@entryShorthand` cannot produce any runtime arm.
@@ -178,8 +190,24 @@ export class TypeNode {
   public childTypes: TypeNode[] = [];
   public coercions: Coercion[] = [];
   public properties: PropertyNode[] = [];
+  /**
+   * Canonical wire keys of renamed (`@encodedName`) properties inherited from base
+   * models and not redeclared here, keyed by property name. Lets property-name
+   * references such as `@coerce` expansion keys resolve to the base's wire key.
+   */
+  public inheritedSerializedNames: Record<string, string> = {};
   public isAbstract: boolean = false;
   public isProtocol: boolean = false;
+  /**
+   * True when this model passes unknown fields through (#336): its string
+   * indexer, or an ancestor's, is `unknown` (`...Record<unknown>`,
+   * `is Record<unknown>`, `extends Record<unknown>`).
+   */
+  public additionalProperties: boolean = false;
+  /** True when the passthrough is inherited from a base model that declares it. */
+  public additionalPropertiesInherited: boolean = false;
+  /** Every declared wire key including inherited ones; populated for passthrough models. */
+  public knownWireKeys: string[] = [];
   /**
    * True when this model is a `@serializable` root: the emitter emits load/save
    * over its serialization closure (transitive property reach + discriminated
@@ -248,6 +276,7 @@ export class TypeNode {
       base: this.base || {},
       isAbstract: this.isAbstract,
       isProtocol: this.isProtocol,
+      ...(this.additionalProperties ? { additionalProperties: true } : {}),
       entryShorthand: this.entryShorthand,
       discriminator: this.discriminator,
       coercions: this.coercions,
@@ -257,6 +286,48 @@ export class TypeNode {
       properties: this.properties.map((prop) => prop.getSanitizedObject()),
     };
   }
+}
+
+function normalizedDispatchProviderSlot(value: string): string {
+  return value.replace(/[-_]/g, "").toLowerCase();
+}
+
+/**
+ * Reject a known discriminator whose generated provider member would collide
+ * with the reserved `wildcard` catch-all member. The conservative normalization
+ * covers the camel/snake/Pascal spellings used by all runtime backends.
+ */
+export function validateDispatchWildcardSlotCollisions(
+  program: Program,
+  roots: readonly TypeNode[],
+): boolean {
+  let valid = true;
+  const visited = new Set<string>();
+  for (const root of roots) {
+    for (const node of enumerateTypes(root, visited)) {
+      const polymorphic = node.retrievePolymorphicTypes();
+      if (!polymorphic?.default) continue;
+      const defaultNode = polymorphic.default.instance as TypeNode;
+      if (defaultNode.typeName.name === node.typeName.name) continue;
+
+      for (const variant of polymorphic.types) {
+        if (
+          normalizedDispatchProviderSlot(String(variant.value)) !== "wildcard"
+        ) {
+          continue;
+        }
+        const variantNode = variant.instance as TypeNode;
+        program.reportDiagnostic({
+          code: "typra-emitter-dispatch-wildcard-slot-collision",
+          message: `Discriminator value "${variant.value}" on ${node.typeName.name} collides with the reserved generated provider member "wildcard". Rename the known discriminator value; case, hyphen, and underscore differences are not significant for generated runtime identifiers.`,
+          severity: "error",
+          target: variantNode.model,
+        });
+        valid = false;
+      }
+    }
+  }
+  return valid;
 }
 
 export class PropertyNode {
@@ -280,6 +351,11 @@ export class PropertyNode {
 
   public isScalar: boolean = false;
   public isOptional: boolean = false;
+  /**
+   * True when the property type is `T | null` (issue #339). The `null` variant is
+   * stripped and `T` resolved as usual; `isOptional` keeps the TypeSpec `?`.
+   */
+  public isNullable: boolean = false;
   public isCollection: boolean = false;
   public isAny: boolean = false;
   public isDict: boolean = false;
@@ -304,6 +380,13 @@ export class PropertyNode {
    */
   public isNamedCollection: boolean = false;
 
+  /**
+   * Canonical wire key from `@encodedName("application/json", ...)`. Set only when
+   * it differs from `name`; `name` stays the TypeSpec property name that backends
+   * case into idiomatic member names.
+   */
+  public serializedName: string | undefined = undefined;
+
   public property: ModelProperty;
   public type: TypeNode | undefined = undefined;
 
@@ -325,6 +408,7 @@ export class PropertyNode {
 
       isScalar: this.isScalar,
       isOptional: this.isOptional,
+      ...(this.isNullable ? { isNullable: true } : {}),
       isCollection: this.isCollection,
       isAny: this.isAny,
       isDict: this.isDict,
@@ -337,6 +421,9 @@ export class PropertyNode {
       enumName: this.enumName,
       isOpenEnum: this.isOpenEnum,
       isNamedCollection: this.isNamedCollection,
+      ...(this.serializedName !== undefined
+        ? { serializedName: this.serializedName }
+        : {}),
       type: this.type ? this.type.getSanitizedObject() : undefined,
     };
   }
@@ -476,7 +563,7 @@ export const resolveModel = (
     visited.add(model.name);
   }
 
-  if (model.baseModel) {
+  if (model.baseModel && !isIntrinsicRecord(model.baseModel)) {
     node.base = getModelType(model.baseModel, rootNamespace, rootAlias);
   }
 
@@ -516,16 +603,217 @@ export const resolveModel = (
         StateKeys.defaultFor,
         value,
       );
+      const encodedName = jsonWireName(program, value);
+      if (encodedName !== value.name) {
+        prop.serializedName = encodedName;
+        reportInvalidEncodedName(program, value, encodedName);
+      }
 
       properties.push(prop);
     }
     node.properties = properties;
+    node.inheritedSerializedNames = inheritedSerializedNames(program, model);
 
     reportWireCollisions(program, model, properties);
+    reportEncodedNameCollisions(program, model);
+    reportUnsupportedAdditionalProperties(program, model);
+    const ownModel =
+      model.name === "Named" ? (getTemplateModel(model) ?? model) : model;
+    const passthrough = additionalPropertiesSource(ownModel);
+    if (passthrough) {
+      node.additionalProperties = true;
+      node.additionalPropertiesInherited = passthrough !== ownModel;
+      node.knownWireKeys = [
+        ...new Set([
+          ...knownWireKeys(program, model),
+          ...knownWireKeys(program, ownModel),
+        ]),
+      ];
+      reportAdditionalPropertiesCollision(program, model);
+    }
   }
 
   return node;
 };
+
+/**
+ * The model in `model`'s inheritance chain (itself first) that declares an
+ * unknown-field passthrough — a string indexer whose value is `unknown` — or
+ * `undefined` when none does. `extends Record<unknown>` resolves to `model`.
+ */
+function additionalPropertiesSource(model: Model): Model | undefined {
+  const seen = new Set<Model>();
+  let previous: Model | undefined;
+  for (
+    let current: Model | undefined = model;
+    current && !seen.has(current);
+    current = current.baseModel
+  ) {
+    seen.add(current);
+    if (isIntrinsicRecord(current)) {
+      return isUnknownStringIndexer(current) ? previous : undefined;
+    }
+    if (isUnknownStringIndexer(current)) return current;
+    previous = current;
+  }
+  return undefined;
+}
+
+function isUnknownStringIndexer(model: Model): boolean {
+  const indexer = model.indexer;
+  return (
+    indexer !== undefined &&
+    indexer.key.name === "string" &&
+    indexer.value.kind === "Intrinsic" &&
+    indexer.value.name === "unknown"
+  );
+}
+
+/** Declared wire keys of `model` and every ancestor (the nearest redeclaration wins). */
+function knownWireKeys(program: Program, model: Model): string[] {
+  const keys: string[] = [];
+  const names = new Set<string>();
+  const seen = new Set<Model>();
+  for (
+    let current: Model | undefined = model;
+    current && !seen.has(current) && !isIntrinsicRecord(current);
+    current = current.baseModel
+  ) {
+    seen.add(current);
+    for (const [name, property] of current.properties) {
+      if (names.has(name)) continue;
+      if (isHttpStatusCodeMetadataProperty(program, property)) continue;
+      names.add(name);
+      const wireName = jsonWireName(program, property);
+      if (!keys.includes(wireName)) keys.push(wireName);
+    }
+  }
+  return keys;
+}
+
+/**
+ * Member names a passthrough model's generated code adds next to its declared
+ * properties, as casing-insensitive keys (non-alphanumerics and case dropped):
+ * the extras member `additionalProperties` (`additional_properties`,
+ * `AdditionalProperties`), the TS/Java/C# known-key method `isKnownWireKey` /
+ * `IsKnownWireKey`, and the Swift `additionalPropertiesKnownKeys` set. Each
+ * target maps a property name through camel/Pascal/snake casing, which only
+ * changes case and underscores, so a property with the same key would collide
+ * in at least one target.
+ */
+const RESERVED_PASSTHROUGH_MEMBERS = new Set([
+  "additionalproperties",
+  "isknownwirekey",
+  "additionalpropertiesknownkeys",
+]);
+
+/** The generated member a property named `name` would collide with, if any. */
+function reservedPassthroughMember(name: string): string | undefined {
+  const key = name.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+  if (RESERVED_PASSTHROUGH_MEMBERS.has(key)) {
+    return key === "isknownwirekey"
+      ? "isKnownWireKey"
+      : key === "additionalpropertiesknownkeys"
+        ? "additionalPropertiesKnownKeys"
+        : "additionalProperties";
+  }
+  // Python's `_known_wire_keys` class attribute: snake_case keeps a leading
+  // underscore, so only `_`-prefixed spellings can reach it.
+  if (name.startsWith("_") && key === "knownwirekeys") return "_known_wire_keys";
+  return undefined;
+}
+
+/**
+ * A passthrough model's generated members (see `RESERVED_PASSTHROUGH_MEMBERS`)
+ * share a namespace with its declared and inherited properties, so a property
+ * that any target would spell the same way must be renamed.
+ */
+function reportAdditionalPropertiesCollision(
+  program: Program,
+  model: Model,
+): void {
+  if (checkedAdditionalPropertiesCollisions.has(model)) return;
+  checkedAdditionalPropertiesCollisions.add(model);
+  const seen = new Set<Model>();
+  for (
+    let current: Model | undefined = model;
+    current && !seen.has(current) && !isIntrinsicRecord(current);
+    current = current.baseModel
+  ) {
+    seen.add(current);
+    for (const [name, property] of current.properties) {
+      const member = reservedPassthroughMember(name);
+      if (!member) continue;
+      program.reportDiagnostic({
+        code: "typra-emitter-additional-properties-collision",
+        message: `Model '${model.name}' passes unknown fields through (Record<unknown>), which generates a '${member}' member that collides with its property '${name}'. Rename the property.`,
+        severity: "error",
+        target: current === model ? property : model,
+      });
+    }
+  }
+}
+
+/** Wire keys of renamed base-model properties that `model` does not redeclare. */
+function inheritedSerializedNames(
+  program: Program,
+  model: Model,
+): Record<string, string> {
+  const names: Record<string, string> = Object.create(null);
+  const visited = new Set<string>();
+  const seen = new Set<Model>([model]);
+  for (
+    let base = model.baseModel;
+    base && !seen.has(base);
+    base = base.baseModel
+  ) {
+    seen.add(base);
+    for (const [name, property] of base.properties) {
+      if (model.properties.has(name) || visited.has(name)) continue;
+      visited.add(name);
+      const wireName = jsonWireName(program, property);
+      if (wireName !== name) names[name] = wireName;
+    }
+  }
+  return names;
+}
+
+/**
+ * Only a string indexer whose value is `unknown` (`...Record<unknown>`) lowers to
+ * an unknown-field passthrough (#336). A typed indexer (`...Record<string>`,
+ * `is Record<int32>`) is not modeled, so its extra keys are dropped on load and
+ * save; warn rather than discard the spread silently.
+ */
+function reportUnsupportedAdditionalProperties(
+  program: Program,
+  model: Model,
+): void {
+  if (checkedAdditionalProperties.has(model)) return;
+  checkedAdditionalProperties.add(model);
+  const recordBase =
+    model.baseModel && isIntrinsicRecord(model.baseModel)
+      ? model.baseModel
+      : undefined;
+  const indexer = model.indexer ?? recordBase?.indexer;
+  if (!indexer || isIntrinsicRecord(model)) return;
+  if (indexer.key.name !== "string") return;
+  if (isUnknownStringIndexer(model) || (recordBase && isUnknownStringIndexer(recordBase))) return;
+  program.reportDiagnostic({
+    code: "typra-emitter-unsupported-additional-properties",
+    message: `Model '${model.name}' declares typed additional properties (a string-keyed Record spread or 'is Record<T>' whose value is not 'unknown'). Only 'Record<unknown>' is supported as an unknown-field passthrough; keys not declared as properties are dropped on load and save.`,
+    severity: "warning",
+    target: model,
+  });
+}
+
+function isIntrinsicRecord(model: Model): boolean {
+  const ns = model.namespace;
+  return (
+    model.name === "Record" &&
+    ns?.name === "TypeSpec" &&
+    (ns.namespace === undefined || ns.namespace.name === "")
+  );
+}
 
 /**
  * Report `typra-emitter-wire-collision` when two canonical fields on the same
@@ -561,6 +849,108 @@ function reportWireCollisions(
       severity: "error",
       target: model,
     });
+  }
+}
+
+/**
+ * The canonical JSON/YAML dict key of a property (`@encodedName` for JSON, else its name).
+ * A derived property that overrides a base property without declaring its own JSON
+ * encoded name inherits the base's key, so e.g. a variant's discriminator override stays
+ * on the wire key the base's polymorphic dispatch reads.
+ */
+export function jsonWireName(
+  program: Program,
+  property: ModelProperty,
+  visited: Set<ModelProperty> = new Set(),
+): string {
+  const resolved = resolveEncodedName(program, property, "application/json");
+  if (
+    resolved !== property.name ||
+    jsonEncodedNameFromDecorators(property) !== undefined
+  ) {
+    return resolved;
+  }
+  visited.add(property);
+  const inherited = overriddenBaseProperty(property);
+  return inherited && !visited.has(inherited)
+    ? jsonWireName(program, inherited, visited)
+    : resolved;
+}
+
+/**
+ * Why a JSON encoded name cannot be emitted faithfully, or undefined when it can.
+ * Every backend escapes wire keys as string literals, but a Go struct tag cannot
+ * carry these characters (or the bare `-` / empty name) without changing meaning.
+ */
+export function invalidEncodedNameReason(name: string): string | undefined {
+  if (name === "") return "it is empty";
+  if (name === "-")
+    return 'the name "-" means "skip this field" in Go struct tags';
+  if (/[\p{Cc}]/u.test(name)) return "it contains a control character";
+  // Mirrors Go encoding/json `isValidTag`: any other rune makes Go silently
+  // fall back to the field name, desynchronizing native and custom codecs.
+  const bad = /[^\p{L}\p{N}!#$%&()*+\-./:;<=>?@[\]^_{|}~ ]/u.exec(name);
+  if (bad) return `it contains '${bad[0]}'`;
+  return undefined;
+}
+
+/**
+ * Report `typra-emitter-invalid-encoded-name` for an `@encodedName("application/json", ...)`
+ * value that some backend cannot represent faithfully (see `invalidEncodedNameReason`).
+ */
+function reportInvalidEncodedName(
+  program: Program,
+  property: ModelProperty,
+  encodedName: string,
+): void {
+  if (checkedEncodedNames.has(property)) return;
+  checkedEncodedNames.add(property);
+  const reason = invalidEncodedNameReason(encodedName);
+  if (!reason) return;
+  program.reportDiagnostic({
+    code: "typra-emitter-invalid-encoded-name",
+    message: `Encoded name ${JSON.stringify(encodedName)} on '${property.model?.name}.${property.name}' cannot be used as a wire key because ${reason}. Use only letters, digits, spaces, and !#$%&()*+-./:;<=>?@[]^_{|}~ (the characters Go struct tags accept).`,
+    severity: "error",
+    target: property,
+  });
+}
+
+/**
+ * Report `typra-emitter-encoded-name-collision` when two distinct properties of a
+ * model's effective (inherited) property set resolve to the same canonical wire key.
+ * The compiler's `encoded-name-conflict` already covers members declared on one
+ * model, so only collisions that span the inheritance chain are reported here.
+ */
+function reportEncodedNameCollisions(program: Program, model: Model): void {
+  if (checkedEncodedNameCollisions.has(model)) return;
+  checkedEncodedNameCollisions.add(model);
+  if (!model.baseModel) return;
+
+  const seenNames = new Set<string>();
+  const byWireKey = new Map<string, ModelProperty>();
+  for (
+    let current: Model | undefined = model;
+    current;
+    current = current.baseModel
+  ) {
+    for (const property of current.properties.values()) {
+      if (seenNames.has(property.name)) continue;
+      seenNames.add(property.name);
+      if (isHttpStatusCodeMetadataProperty(program, property)) continue;
+      const wireKey = jsonWireName(program, property);
+      const existing = byWireKey.get(wireKey);
+      if (!existing) {
+        byWireKey.set(wireKey, property);
+        continue;
+      }
+      if (existing.model === property.model) continue;
+      program.reportDiagnostic({
+        code: "typra-emitter-encoded-name-collision",
+        message: `Wire key "${wireKey}" is claimed by both '${existing.model?.name}.${existing.name}' and '${property.model?.name}.${property.name}' on ${model.name}. Each property must serialize to a distinct key — adjust the @encodedName("application/json", ...) value.`,
+        severity: "error",
+        target: existing,
+      });
+    }
   }
 }
 
@@ -619,16 +1009,29 @@ export const resolveProperty = (
   rootNamespace: string,
   rootAlias: string,
 ): PropertyNode => {
+  // `T | null` (issue #339): strip the `null` variant and resolve `T` as usual, then
+  // record nullability. A union of several non-null variants keeps flowing through
+  // resolveUnionProperty, which ignores the `null` variant itself.
+  let type: Type = property.type;
+  let isNullable = false;
+  if (type.kind === "Union") {
+    const variants = Array.from(type.variants.values()).map((v) => v.type);
+    const nonNull = variants.filter((v) => !isNullType(v));
+    if (nonNull.length > 0 && nonNull.length < variants.length) {
+      isNullable = true;
+      if (nonNull.length === 1) type = nonNull[0];
+    }
+  }
   let prop: PropertyNode;
-  switch (property.type.kind) {
+  switch (type.kind) {
     case "Scalar":
-      prop = resolveScalarProperty(program, property, property.type);
+      prop = resolveScalarProperty(program, property, type);
       break;
     case "Model":
       prop = resolveModelProperty(
         program,
         property,
-        property.type,
+        type,
         visited,
         rootNamespace,
         rootAlias,
@@ -638,25 +1041,20 @@ export const resolveProperty = (
       prop = resolveUnionProperty(
         program,
         property,
-        property.type,
+        type,
         visited,
         rootNamespace,
         rootAlias,
       );
       break;
     case "Intrinsic":
-      prop = resolveIntrinsicProperty(
-        program,
-        property,
-        property.type,
-        visited,
-      );
+      prop = resolveIntrinsicProperty(program, property, type, visited);
       break;
     case "String":
       // this is for default values in discriminated types
       prop = new PropertyNode(property, getDoc(program, property) || "");
 
-      prop.defaultValue = property.type.value;
+      prop.defaultValue = type.value;
       prop.typeName = {
         namespace: "",
         name: "string",
@@ -672,12 +1070,21 @@ export const resolveProperty = (
     default:
       program.reportDiagnostic({
         code: "typra-emitter-unsupported-property-type",
-        message: `Unsupported property type: ${property.type.kind}`,
+        message: `Unsupported property type: ${type.kind}`,
         severity: "error",
         target: property,
       });
       prop = new PropertyNode(property, getDoc(program, property) || "");
       break;
+  }
+  prop.isNullable = isNullable;
+  if (property.defaultValue?.valueKind === "NullValue") {
+    reportUnsupportedDefault(
+      program,
+      property,
+      prop,
+      "A `null` default is not supported; a nullable field is already null when unset, so remove the default.",
+    );
   }
   if (property.defaultValue?.valueKind === "ObjectValue") {
     reportUnsupportedDefault(
@@ -912,7 +1319,9 @@ export const resolveUnionProperty = (
   prop.isOptional = property.optional;
   prop.isCollection = false;
 
-  const variants = Array.from(union.variants).map(([, v]) => v.type);
+  const variants = Array.from(union.variants)
+    .map(([, v]) => v.type)
+    .filter((v) => !isNullType(v));
   const models = variants.filter((v) => v.kind === "Model");
 
   if (models.length === 1) {
@@ -1164,8 +1573,7 @@ export interface PythonClassContext {
   coercions: Array<{ scalar: string; alternate: string }>;
   /** Polymorphic type information if this is a discriminated type */
   polymorphicTypes:
-    | ReturnType<TypeNode["retrievePolymorphicTypes"]>
-    | undefined;
+    ReturnType<TypeNode["retrievePolymorphicTypes"]> | undefined;
   /** Import types needed from other modules */
   imports: string[];
   /** Collection properties with their nested type info for load_* methods */
@@ -1265,6 +1673,8 @@ export interface BaseRenderContext {
 export interface PropertyValidation {
   /** Original schema property name before target-language identifier normalization. */
   sourceKey?: string;
+  /** Sample dict key when the property's `@encodedName` JSON key differs from `sourceKey`. */
+  wireKey?: string;
   /** Property name in target language casing (PascalCase, snake_case, camelCase) */
   key: string;
   /** Expected value after loading */
@@ -1294,6 +1704,11 @@ export interface TestExample {
   yaml: string[];
   /** Property assertions to validate after loading */
   validations: PropertyValidation[];
+  /**
+   * Wire keys of required nullable (`T | null`) properties the sample sets to an explicit
+   * `null` (#339). `save()` must still write each of these keys, as null.
+   */
+  nullKeys?: string[];
 }
 
 /**

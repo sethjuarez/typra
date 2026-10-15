@@ -71,37 +71,39 @@ const CASES: Array<{
     target: "python",
     file: "test_processor_conformance.py",
     unknownDecode: 'response = payload["response"]',
-    providerRead: "provider = agent.model.provider",
+    providerRead:
+      'provider = (getattr(getattr(agent, "model", None), "provider", None) or "")',
   },
   {
     target: "typescript",
     file: "processor.conformance.test.ts",
     unknownDecode: 'const response = payload["response"] as unknown;',
-    providerRead: "const provider = agent.model.provider;",
+    providerRead: 'const provider = agent?.model?.provider ?? "";',
   },
   {
     target: "csharp",
     file: "ProcessorConformanceTests.cs",
     unknownDecode: "JsonSerializer.Deserialize<object>(",
-    providerRead: "agent.Model.Provider",
+    providerRead: 'agent?.Model?.Provider ?? ""',
   },
   {
     target: "java",
     file: "ProcessorConformanceTests.java",
     unknownDecode: 'Object response = (Object) input.get("response");',
-    providerRead: "String provider = agent.model.provider;",
+    providerRead:
+      "String provider = (agent == null || agent.model == null ? null : agent.model.provider);",
   },
   {
     target: "go",
     file: "processor_conformance_test.go",
     unknownDecode: "var response interface{}",
-    providerRead: "agent.Model.(interface {",
+    providerRead: "any(agent.Model).(interface {",
   },
   {
     target: "swift",
     file: "ProcessorConformanceTests.swift",
-    unknownDecode: 'let response = input["response"] as! Any',
-    providerRead: '["provider"] as! String',
+    unknownDecode: 'let response = input["response"]!',
+    providerRead: '["provider"] as? String) ?? ""',
   },
 ];
 
@@ -257,32 +259,53 @@ describe("typed @vector conformance over a coerce-union discriminator with a bar
     );
   });
 
+  // #304: Swift read the discriminator into a local named after the field. For
+  // `provider` that `String` shadowed the `provider()` registry accessor, so
+  // `registry: provider()` failed to compile ("cannot call value of non-function
+  // type 'String'").
+  it("swift: the discriminator local never shadows the provider() accessor", () => {
+    const swift = readFileSync(
+      path.join(output, "swift", "tests", "ProcessorConformanceTests.swift"),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      swift,
+      /let provider =/,
+      `swift processor conformance must not bind a local named \`provider\`\n--- emitted ---\n${swift}`,
+    );
+    assert.match(
+      swift,
+      /let dispatchKey = \(\(try agent\.model\.save\(\)\)\["provider"\] as\? String\) \?\? ""\n\s*guard let impl = ProcessorResolver\.resolve\(provider: dispatchKey, registry: self\.provider\(\)\) else \{/,
+      `swift processor conformance must route the fixed dispatchKey local through provider()\n--- emitted ---\n${swift}`,
+    );
+  });
+
   // Issue #2 (open-union `*` defaultVariant lowering): Model is an OPEN union
   // (`openai`, `azure`, string) with a declared wildcard child
   // `CustomModel { provider: "*" }`. The resolver must lower that default into a
-  // dedicated `custom` registry slot and route an UNKNOWN discriminator to it
+  // dedicated required `wildcard` registry slot and route an UNKNOWN discriminator to it
   // (the behavioral twin of the shape loader's `*`-tolerant fallback), instead
   // of dropping it with `return None` / `_ => None`. Prompty's
   // `provider: "anthropic"` (unknown) vectors depend on this catch-all.
-  it("open-union resolver lowers the `*` defaultVariant into a `custom` fallback slot", () => {
+  it("open-union resolver lowers the `*` defaultVariant into a required `wildcard` slot", () => {
     const py = readFileSync(
       path.join(output, "python", "_processor_resolver.py"),
       "utf8",
     );
     assert.match(
       py,
-      /custom: Processor \| None = None/,
-      `python open-union resolver must expose an optional \`custom\` default slot\n--- emitted ---\n${py}`,
+      /wildcard: Processor/,
+      `python open-union resolver must expose a required non-null \`wildcard\` slot\n--- emitted ---\n${py}`,
     );
     assert.match(
       py,
-      /custom=impls\.get\("custom"\),/,
-      "python provider builder must populate the `custom` slot optionally",
+      /wildcard=impls\["wildcard"\],/,
+      "python provider builder must require and populate the `wildcard` slot",
     );
     assert.match(
       py,
-      /return registry\.custom\s*$/m,
-      "python resolver fallback must route an unknown discriminator to the `custom` slot",
+      /return registry\.wildcard\s*$/m,
+      "python resolver fallback must route an unknown discriminator to the `wildcard` slot",
     );
     assert.doesNotMatch(
       py,
@@ -296,13 +319,13 @@ describe("typed @vector conformance over a coerce-union discriminator with a bar
     );
     assert.match(
       rs,
-      /fn custom\(&self\) -> Option<&dyn Processor>;/,
-      `rust open-union provider trait must declare a \`custom\` catch-all method\n--- emitted ---\n${rs}`,
+      /fn wildcard\(&self\) -> &dyn Processor;/,
+      `rust open-union provider trait must declare a required \`wildcard\` catch-all method\n--- emitted ---\n${rs}`,
     );
     assert.match(
       rs,
-      /_ => registry\.custom\(\),/,
-      "rust resolver fallback must route an unknown discriminator to the `custom` slot",
+      /_ => Some\(registry\.wildcard\(\)\),/,
+      "rust resolver fallback must route an unknown discriminator to the `wildcard` slot",
     );
     assert.doesNotMatch(
       rs,

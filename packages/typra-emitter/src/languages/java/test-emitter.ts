@@ -8,13 +8,17 @@ import {
 } from "../../ir/ast.js";
 import {
   javaEnumTypeName,
+  javaIntegralScalar,
   javaPropertyName,
   javaTypeName,
 } from "./identifiers.js";
+import { isIntegralScalar } from "../../ir/scalar-kinds.js";
 import {
   postSaveExample,
   wireTestMappings,
   wireTestProviders,
+  propertyWireKey,
+  wireKeyForName,
 } from "../../testing/test-context.js";
 
 function javaString(value: string): string {
@@ -152,6 +156,17 @@ function emitExampleTest(
     node,
     postSaveExample(example, node),
   );
+  const nullKeys = example.nullKeys ?? [];
+  if (nullKeys.length > 0) {
+    lines.push(
+      `    java.util.Map<String, Object> savedNull${index} = instance${index}.save(new SaveContext());`,
+    );
+  }
+  for (const key of nullKeys) {
+    lines.push(
+      `    assertTrue(savedNull${index}.containsKey(${javaString(key)}) && savedNull${index}.get(${javaString(key)}) == null, ${javaString(`Expected ${typeName} to save ${key} as null`)});`,
+    );
+  }
   if (nativeSerialization === "jackson") {
     lines.push(
       `    assertJacksonMatches(instance${index}, ${jsonData}, ${typeName}.class, "Expected Jackson to match Typra load/save for ${typeName} example ${index}");`,
@@ -252,14 +267,12 @@ function emitCoercionTest(
     emitValidation(lines, coercedYaml, validation);
 }
 
-function javaDirectCoercionCases(
-  coercion: CoercionTest,
-): Array<{
+function javaDirectCoercionCases(coercion: CoercionTest): Array<{
   literal: string;
   expected: string | number | boolean;
   overrideExpected: boolean;
 }> {
-  switch (coercion.scalarType.toLowerCase()) {
+  switch (javaIntegralScalar(coercion.scalarType.toLowerCase())) {
     case "int32":
     case "int64":
     case "integer":
@@ -316,11 +329,11 @@ function emitWireTest(
       (entry) => entry.provider === provider,
     )) {
       lines.push(
-        `    assertTrue(${provider}Wire.containsKey(${javaString(mapping.wireName)}), "Expected ${provider} wire output to include ${mapping.wireName}");`,
+        `    assertTrue(${provider}Wire.containsKey(${javaString(mapping.wireName)}), ${javaString(`Expected ${provider} wire output to include ${mapping.wireName}`)});`,
       );
       if (mapping.sourceName !== mapping.wireName) {
         lines.push(
-          `    assertTrue(!${provider}Wire.containsKey(${javaString(mapping.sourceName)}), "Expected ${provider} wire output to omit ${mapping.sourceName}");`,
+          `    assertTrue(!${provider}Wire.containsKey(${javaString(mapping.sourceName)}), ${javaString(`Expected ${provider} wire output to omit ${mapping.sourceName}`)});`,
         );
       }
     }
@@ -359,7 +372,7 @@ function emitValidation(
 
   const numeric = Number(validation.value);
   const expected = Number.isFinite(numeric)
-    ? String(numeric)
+    ? javaNumberLiteral(numeric)
     : validation.value;
   lines.push(
     `    assertEquals(${expected}, ${varName}.${javaPropertyName(validation.key)}, "Expected ${validation.key}");`,
@@ -375,8 +388,8 @@ function emitStructuredValidations(
   inheritedNode?: TypeNode,
 ): void {
   for (const prop of node.properties) {
-    if (!(prop.name in sample)) continue;
-    const value = sample[prop.name];
+    if (!(propertyWireKey(prop) in sample)) continue;
+    const value = sample[propertyWireKey(prop)];
     const expr = `${varName}.${javaPropertyName(prop.name)}`;
 
     if (includeScalars && prop.isScalar && !prop.isCollection && !prop.isDict) {
@@ -464,8 +477,8 @@ function emitNestedValidations(
   sample: Record<string, any>,
 ): void {
   for (const prop of node.properties) {
-    if (!(prop.name in sample)) continue;
-    const expected = sample[prop.name];
+    if (!(propertyWireKey(prop) in sample)) continue;
+    const expected = sample[propertyWireKey(prop)];
     if (
       !prop.isScalar &&
       prop.type &&
@@ -681,7 +694,10 @@ function findSampleChildType(
   type = prop.type,
 ): TypeNode | undefined {
   const discriminator = type?.discriminator;
-  const discriminatorValue = discriminator ? sample[discriminator] : undefined;
+  const discriminatorValue =
+    discriminator && type
+      ? sample[wireKeyForName(type, discriminator)]
+      : undefined;
   if (discriminator && discriminatorValue !== undefined) {
     return type?.childTypes.find((child) =>
       child.properties.some(
@@ -696,7 +712,7 @@ function findSampleChildType(
     child.properties.some(
       (childProp) =>
         childProp.defaultValue !== null &&
-        sample[childProp.name] === childProp.defaultValue,
+        sample[propertyWireKey(childProp)] === childProp.defaultValue,
     ),
   );
 }
@@ -738,16 +754,10 @@ function findScalarCoercionField(
 ): string | undefined {
   const coercion = node.coercions.find((entry) =>
     scalarType === "number"
-      ? [
-          "int32",
-          "int64",
-          "integer",
-          "number",
-          "float",
-          "numeric",
-          "float32",
-          "float64",
-        ].includes(entry.scalar)
+      ? isIntegralScalar(entry.scalar) ||
+        ["number", "float", "numeric", "float32", "float64"].includes(
+          entry.scalar,
+        )
       : entry.scalar === scalarType,
   );
   if (!coercion) return undefined;
@@ -770,7 +780,15 @@ function isPolymorphicProperty(prop: PropertyNode): boolean {
 
 function javaLiteral(value: string | number | boolean): string {
   if (typeof value === "string") return javaString(value);
+  if (typeof value === "number") return javaNumberLiteral(value);
   return String(value);
+}
+
+/** Java int literals overflow above 2^31; widen whole numbers outside that range to long. */
+function javaNumberLiteral(value: number): string {
+  return Number.isInteger(value) && (value > 2147483647 || value < -2147483648)
+    ? `${value}L`
+    : String(value);
 }
 
 function javaExpectedLiteral(
@@ -854,6 +872,13 @@ function emitAssertions(
     );
     lines.push(
       '      assertEquals(mapper.readValue(typraJson, Object.class), mapper.readValue(jacksonJson, Object.class), message + " serialization");',
+    );
+    // A host mapper that drops nulls globally must still keep required nullable keys (#339).
+    lines.push(
+      "      com.fasterxml.jackson.databind.ObjectMapper nonNullMapper = new com.fasterxml.jackson.databind.ObjectMapper().setSerializationInclusion(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL);",
+    );
+    lines.push(
+      '      assertEquals(mapper.readValue(typraJson, Object.class), mapper.readValue(nonNullMapper.writeValueAsString(instance), Object.class), message + " NON_NULL mapper serialization");',
     );
     lines.push("      T jacksonLoaded = mapper.readValue(sourceJson, type);");
     lines.push(

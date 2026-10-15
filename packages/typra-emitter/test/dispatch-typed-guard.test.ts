@@ -78,9 +78,14 @@ describe("typed @dispatch rail eligibility (issue #282 §8)", () => {
     assert.doesNotThrow(() => assertTypedDispatchSupported(entry()));
   });
 
+  it("accepts an expectedError dispatched vector (string or structured)", () => {
+    for (const expectedError of ["unbound variable: missing", { code: "boom" }]) {
+      assert.doesNotThrow(() => assertTypedDispatchSupported(entry({}, { expectedError })));
+    }
+  });
+
   it("rejects vector semantics the typed rail cannot faithfully reproduce", () => {
     const cases: Array<[string, Partial<CallableVectorSnapshotEntry["vector"]>]> = [
-      ["expectedError", { expectedError: { code: "boom" } }],
       ["requires", { requires: ["provider:openai"] }],
       ["normalization", { normalization: { trim: true } }],
       ["delegated portability", { portability: "delegated" }],

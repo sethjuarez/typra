@@ -1,5 +1,10 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Emitter capability boundary
+    url: https://typra.dev/concepts/emitter-boundary/
+    about: >
+      Decide whether a request is schema projection, a mixed generated seam, internal emitter infrastructure,
+      or a consumer-owned algorithm before filing an implementation issue.
   - name: Design ruling / usage question
     url: https://github.com/sethjuarez/typra/discussions
     about: >

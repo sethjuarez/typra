@@ -21,8 +21,7 @@ import {
   computeSerializationClosure,
 } from "../../ir/lower.js";
 import {
-  isClosedPolymorphicDispatch,
-  dispatchDefaultSlotBase,
+  loweringCapabilitiesForTarget,
 } from "../../ir/declarations.js";
 import {
   collectDispatchedContracts,
@@ -1135,8 +1134,9 @@ function emitTypeScriptInterfaceConformanceTest(
   const modelTypes: string[] = [];
   for (const entry of sorted) {
     for (const type of Object.values(entry.params)) {
-      if (classifyCallableParam(type).bareModel && !modelTypes.includes(type)) {
-        modelTypes.push(type);
+      const shape = classifyCallableParam(type);
+      if (shape.isModel && !modelTypes.includes(shape.base)) {
+        modelTypes.push(shape.base);
       }
     }
   }
@@ -1186,6 +1186,10 @@ function emitTypeScriptInterfaceConformanceTest(
         lines.push(
           `    const ${paramName} = ${entry.params[paramName]}.load(payload[${key}] as Record<string, unknown>);`,
         );
+      } else if (shape.isModel && shape.optional) {
+        lines.push(
+          `    const ${paramName} = payload[${key}] == null ? undefined : ${shape.base}.load(payload[${key}] as Record<string, unknown>);`,
+        );
       } else {
         // Non-model params (scalars, `Record<unknown>`, optionals) are cast from
         // the parsed payload to the mapped TS type the seam signature expects.
@@ -1200,17 +1204,47 @@ function emitTypeScriptInterfaceConformanceTest(
       `    const ${field} = ${accessor};`,
       `    const impl = ${resolveFn}(${field}, ${providerVar});`,
       "    expect(impl).not.toBeNull();",
-      `    const result = await impl!.${method}(${paramNames.join(", ")});`,
     );
-    if (typeof expected === "string") {
-      lines.push(`    expect(result).toEqual(${JSON.stringify(expected)});`);
-    } else {
-      // No scalar `expected` (the eligibility guard already rejects the richer
-      // shapes); reaching here means the route resolved and the seam ran.
-      lines.push("    expect(result).toBeDefined();");
+    const call = `impl!.${method}(${paramNames.join(", ")})`;
+    if (entry.vector.expectedError !== undefined) {
+      // The resolver null-check above stays OUTSIDE the try so a missing route
+      // fails the test instead of counting as the expected error.
+      lines.push(
+        "    let caught: unknown;",
+        "    try {",
+        `      await ${call};`,
+        "    } catch (error) {",
+        "      caught = error;",
+        "    }",
+        "    expect(caught).toBeDefined();",
+      );
+      if (typeof entry.vector.expectedError === "string") {
+        lines.push(
+          "    const message = String((caught as { message?: unknown })?.message ?? caught);",
+          `    expect(message).toContain(${JSON.stringify(entry.vector.expectedError)});`,
+        );
+      }
+      lines.push("  });");
+      return;
     }
+    lines.push(`    const result = await ${call};`);
+    lines.push(`    expect(result).toEqual(${JSON.stringify(expected)});`);
     lines.push("  });");
   });
+  if (dispatched.openness === "closed") {
+    lines.push(
+      `  it("rejects an unknown discriminator at the resolver boundary", () => {`,
+      `    const provider = ${providerVar};`,
+      "    let caught: unknown;",
+      "    try {",
+      `      ${resolveFn}("typra-unknown-discriminator", provider);`,
+      "    } catch (error) {",
+      "      caught = error;",
+      "    }",
+      "    expect(caught).toBeDefined();",
+      "  });",
+    );
+  }
   lines.push("});", "");
   return lines.join("\n");
 }
@@ -1222,12 +1256,20 @@ function emitTypeScriptInterfaceConformanceTest(
  * (e.g. `agent.template.format.kind`).
  */
 function tsDiscriminatorAccessor(path: string): string {
-  const [head, ...rest] = path.split(".");
+  if (
+    loweringCapabilitiesForTarget("typescript").typedDiscriminatorAccess !==
+    "typed-member"
+  ) {
+    throw new Error("TypeScript discriminator access must use a typed member.");
+  }
+  const segments = path.split(".");
+  const [head, ...rest] = segments;
   const camel = (segment: string): string =>
     segment.replace(/[_-]+([a-zA-Z0-9])/g, (_match, char: string) =>
       char.toUpperCase(),
     );
-  return [head, ...rest.map(camel)].join(".");
+  const access = [head, ...rest.map((segment) => camel(segment))].join("?.");
+  return `${access} ?? ""`;
 }
 
 /**
@@ -1379,17 +1421,12 @@ function emitTypeScriptDispatchResolver(entry: DispatchedContract): string {
   // (harness explicit-skip); an abstract-open base routes unknowns to a carrier
   // in the shape loader, never throwing, so a bare `isClosedPolymorphicDispatch`
   // is the faithful twin of that throw arm.
-  const rejectsUnknown = isClosedPolymorphicDispatch(entry.decl);
-  // An open dispatch with a declared wildcard child (`CustomModel { provider:
-  // "*" }`) gains an optional default slot; an unknown discriminator routes to
-  // it instead of yielding null — the behavioral twin of the shape loader's
-  // `*`-tolerant fallback. Closed / open-self-reference keeps its throw/null arm.
-  const defaultSlotBase = dispatchDefaultSlotBase(entry.decl);
-  const defaultSlot = defaultSlotBase
-    ? `${defaultSlotBase[0].toLowerCase()}${defaultSlotBase.slice(1)}`
-    : null;
+  const rejectsUnknown = entry.openness === "closed";
+  // The shared IR normalizes a schema-declared `*` child to one required,
+  // consumer-owned `wildcard` slot.
+  const defaultSlot = entry.wildcard?.name ?? null;
   const providerType = defaultSlot
-    ? `Record<${kindType}, ${seam} | null> & { ${defaultSlot}?: ${seam} | null }`
+    ? `Record<${kindType}, ${seam} | null> & { ${defaultSlot}: ${seam} }`
     : `Record<${kindType}, ${seam} | null>`;
   const kindUnion = variants
     .map((variant) => JSON.stringify(variant.value))
@@ -1442,7 +1479,7 @@ function emitTypeScriptDispatchResolver(entry: DispatchedContract): string {
     lines.push("      );");
   } else if (defaultSlot) {
     lines.push("    default:");
-    lines.push(`      return registry.${defaultSlot} ?? null;`);
+    lines.push(`      return registry.${defaultSlot};`);
   } else {
     lines.push("    default:");
     lines.push("      return null;");

@@ -24,6 +24,54 @@ model FixtureRoot {
 
 Generated tests exercise scalar arrays, nested object arrays, dictionaries, and polymorphic collections from fixture samples.
 
+## Unknown-field passthrough
+
+A model whose string indexer is `unknown` round-trips fields that it does not declare, so a document
+contract can carry keys that older clients do not model. Spread `...Record<unknown>` into the model, or
+declare it with `is Record<unknown>` or `extends Record<unknown>`:
+
+```typespec
+model PlanningRow {
+  time: string;
+
+  @encodedName("application/json", "started_at")
+  startedAt?: string;
+
+  ...Record<unknown>;
+}
+```
+
+Every generated model gets a public extras member typed as the runtime's dynamic JSON map, defaulting to
+empty:
+
+| Target | Member |
+| --- | --- |
+| TypeScript | `additionalProperties: Record<string, unknown>` (zod schemas add `.passthrough()`) |
+| Python | `additional_properties: dict[str, Any]` |
+| Go | `AdditionalProperties map[string]interface{}` (tagged `json:"-" yaml:"-"`) |
+| C# | `Dictionary<string, object?> AdditionalProperties` |
+| Java | `Map<String, Object> additionalProperties` (`@JsonIgnore` under Jackson) |
+| Rust | `additional_properties: serde_json::Map<String, serde_json::Value>` |
+| Swift | `additionalProperties: [String: Any]` |
+
+Load puts every input key that is not a declared wire key into the member. Known keys are matched by wire
+name, so `started_at` above is a declared field, and they include inherited fields and the discriminator.
+Save writes the declared fields first, then each extras entry whose key is not a declared wire key, so a
+declared field always wins and no key is written twice. A model derived from a passthrough base passes
+through as well, using its own known keys.
+
+Only `Record<unknown>` is supported. A typed indexer such as `...Record<string>` reports the
+`typra-emitter-unsupported-additional-properties` warning and its extra keys are dropped. Passthrough models
+also get a generated known-key helper (`isKnownWireKey` in TypeScript and Java, `IsKnownWireKey` in C#,
+`_known_wire_keys` in Python, `additionalPropertiesKnownKeys` in Swift). A passthrough model that declares, or
+inherits, a property that any target would spell like the extras member or one of these helpers (for example
+`additionalProperties`, `additional_properties`, or `isKnownWireKey`) reports the
+`typra-emitter-additional-properties-collision` error; rename the property.
+
+In TypeScript the extras member is a null-prototype object (`Object.create(null)`) and save writes each entry
+with `Object.defineProperty`, so an unknown `__proto__` key round-trips as ordinary data and never changes an
+object's prototype.
+
 ## Generated shape
 
 <Tabs syncKey="typra-target">

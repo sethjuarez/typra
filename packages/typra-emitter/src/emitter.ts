@@ -6,7 +6,12 @@ import {
   NoTarget,
   getNamespaceFullName,
 } from "@typespec/compiler";
-import { resolveModel, TypeNode, enumerateTypes } from "./ir/ast.js";
+import {
+  resolveModel,
+  TypeNode,
+  enumerateTypes,
+  validateDispatchWildcardSlotCollisions,
+} from "./ir/ast.js";
 import { TypraEmitterOptions, EmitTarget } from "./lib.js";
 import { generateMarkdown } from "./languages/markdown/driver.js";
 import { generatePython } from "./languages/python/driver.js";
@@ -43,6 +48,7 @@ import {
 import type { CallableContract } from "./ir/callable.js";
 import {
   buildCallableVectorSnapshot,
+  conformanceRailAvailability,
   emitCallableVectorSnapshot,
 } from "./ir/vector.js";
 import type { CallableVectorSnapshot } from "./ir/vector.js";
@@ -341,6 +347,15 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     visited.add(rootName);
   }
 
+  if (
+    !validateDispatchWildcardSlotCollisions(context.program, [
+      model,
+      ...additionalModels,
+    ])
+  ) {
+    return;
+  }
+
   const targets = options["emit-targets"] || [];
   // Serialization is opt-in via `@serializable`: compute the closure the drivers
   // use for load/save emission (same nodes/registry, target-independent) so the
@@ -359,6 +374,9 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
   const callableVectorSnapshot = buildCallableVectorSnapshot(
     typeSpecCallableContracts,
     serializationClosure,
+    // The snapshot is target-independent, but the typed conformance rails it
+    // lets verify credit are only emitted by targets with a test tree.
+    conformanceRailAvailability(targets),
   );
   const generatorOptions: GeneratorOptions = {
     rootNamespace,

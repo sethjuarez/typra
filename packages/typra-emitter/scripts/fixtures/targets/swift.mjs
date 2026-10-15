@@ -27,8 +27,9 @@ import {
 export function runSwiftTests(
   targetDir = "swift",
   label = "Swift",
+  sourceDir = path.join(generatedRoot, targetDir),
+  { includeIntegrationTests = true } = {},
 ) {
-  const sourceDir = path.join(generatedRoot, targetDir);
   const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".swift"));
   if (sourceFiles.length === 0) {
     fail(`No generated ${label} files found to test.`);
@@ -50,9 +51,10 @@ export function runSwiftTests(
     "InheritedPropertyRoundTripTests.swift",
   );
   const env = swiftToolchainEnv();
-  writeFileSync(
-    inheritedPropertyTest,
-    `import XCTest
+  if (includeIntegrationTests) {
+    writeFileSync(
+      inheritedPropertyTest,
+      `import XCTest
 @testable import TypraFixtures
 
 final class InheritedPropertyRoundTripTests: XCTestCase {
@@ -336,7 +338,8 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
   }
 }
 `,
-  );
+    );
+  }
   try {
     let output = "";
     let crashed = null;
@@ -371,11 +374,16 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
         (match) => match[1],
       ),
     ]);
-    assertKnownTestFailures(targetDir, failed, KNOWN_TEST_FAILURES[targetDir], {
-      crashed,
-      output,
-      crashMessage: `Generated ${label} package tests failed to build or run`,
-    });
+    assertKnownTestFailures(
+      targetDir,
+      failed,
+      KNOWN_TEST_FAILURES[targetDir] ?? new Map(),
+      {
+        crashed,
+        output,
+        crashMessage: `Generated ${label} package tests failed to build or run`,
+      },
+    );
   } finally {
     if (existsSync(inheritedPropertyTest)) {
       unlinkSync(inheritedPropertyTest);

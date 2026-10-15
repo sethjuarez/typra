@@ -15,6 +15,7 @@ import {
 } from "../ir/ast.js";
 import { getCombinations, scalarValue, toSnakeCase } from "../ir/utilities.js";
 import { toPascalCase } from "../ir/visitor.js";
+import { rustEnumVariantName } from "../languages/rust/identifiers.js";
 import {
   swiftPropertyName,
   swiftTypeName,
@@ -175,6 +176,33 @@ const WIRE_SCALAR_DEFAULTS: Record<string, unknown> = {
  * Returns `undefined` when nothing can be derived, leaving the property absent rather than
  * emitting a payload that is confidently wrong.
  */
+/** The canonical sample dict key for a property: its JSON `@encodedName`, or its name. */
+export function propertyWireKey(prop: PropertyNode): string {
+  return prop.serializedName ?? prop.name;
+}
+
+/** Resolve a sample dict key back to the property that owns it. */
+export function samplePropertyFor(
+  node: TypeNode,
+  key: string,
+): PropertyNode | undefined {
+  return (
+    node.properties.find((p) => propertyWireKey(p) === key) ??
+    node.properties.find((p) => p.name === key && !p.serializedName)
+  );
+}
+
+/** The sample dict key for the property of `node` named `name` (the name when unknown). */
+export function wireKeyForName(node: TypeNode, name: string): string {
+  const prop = node.properties.find((p) => p.name === name);
+  return prop ? propertyWireKey(prop) : name;
+}
+
+/** The sample dict key carrying a polymorphic base's discriminator. */
+function discriminatorSampleKey(node: TypeNode): string {
+  return wireKeyForName(node, node.discriminator ?? "");
+}
+
 /** The literal a concrete variant pins for its base's discriminator, if it pins one. */
 function discriminatorLiteral(
   child: TypeNode,
@@ -226,9 +254,10 @@ function synthesizeComplexSample(
 
     const value = synthesizeRequiredValue(prop, resolveType, nested);
     if (value !== undefined) {
-      payload[prop.name] = value;
+      payload[propertyWireKey(prop)] = value;
     }
   }
+  fillInheritedRequiredNullables(payload, concrete, resolveType);
   return payload;
 }
 
@@ -267,9 +296,42 @@ function synthesizeCompleteComplexSample(
     if (value === undefined) {
       return undefined;
     }
-    payload[prop.name] = value;
+    payload[propertyWireKey(prop)] = value;
   }
+  fillInheritedRequiredNullables(payload, concrete, resolveType);
   return payload;
+}
+
+/** A required `T | null` property (#339): its key must be present, but `null` is valid. */
+function isRequiredNullableProperty(prop: PropertyNode): boolean {
+  return prop.isNullable === true && !prop.isOptional;
+}
+
+/**
+ * Derived loaders require their inherited required nullable keys too (#339), but a variant's
+ * own properties never mention them; fill each missing one with null, its cheapest valid value.
+ */
+function fillInheritedRequiredNullables(
+  payload: Record<string, any>,
+  type: TypeNode,
+  resolveType: TypeResolver,
+): void {
+  const visited = new Set<string>();
+  let ancestor = type.base ? resolveType(type.base.name) : undefined;
+  while (ancestor) {
+    const key = `${ancestor.typeName.namespace}.${ancestor.typeName.name}`;
+    if (visited.has(key)) break;
+    visited.add(key);
+    for (const prop of ancestor.properties) {
+      if (
+        isRequiredNullableProperty(prop) &&
+        !(propertyWireKey(prop) in payload)
+      ) {
+        payload[propertyWireKey(prop)] = null;
+      }
+    }
+    ancestor = ancestor.base ? resolveType(ancestor.base.name) : undefined;
+  }
 }
 
 /** Derive a wire value for a single required property that carries no `@sample`. */
@@ -282,6 +344,7 @@ function synthesizeRequiredValue(
   // synthesized payload dispatches back to the type it was built from.
   if (prop.defaultValue !== null && prop.defaultValue !== undefined)
     return prop.defaultValue;
+  if (isRequiredNullableProperty(prop)) return null;
   if ((prop.allowedValues ?? []).length > 0) return prop.allowedValues[0];
   if (prop.isCollection) return [];
   if (prop.isDict || prop.isAny) return {};
@@ -300,6 +363,7 @@ function synthesizeCompleteRequiredValue(
 ): any {
   if (prop.defaultValue !== null && prop.defaultValue !== undefined)
     return prop.defaultValue;
+  if (isRequiredNullableProperty(prop)) return null;
   if ((prop.allowedValues ?? []).length > 0) return prop.allowedValues[0];
   if (prop.isCollection) return [];
   if (prop.isDict || prop.isAny) return {};
@@ -341,7 +405,7 @@ export function withRequiredComplexSamples(
   // combination already supplied win, so this only fills genuine gaps.
   if (
     node.discriminator &&
-    !(node.discriminator in completed) &&
+    !(discriminatorSampleKey(node) in completed) &&
     node.childTypes.length > 0
   ) {
     const variant = synthesizeComplexSample(node, resolveType, new Set());
@@ -351,8 +415,13 @@ export function withRequiredComplexSamples(
   }
 
   for (const prop of node.properties) {
-    if (prop.name in completed) continue;
+    if (propertyWireKey(prop) in completed) continue;
     if (prop.isOptional || prop.hasExplicitDefault) continue;
+    if (isRequiredNullableProperty(prop)) {
+      // A required nullable key (#339) must be present; null is its cheapest valid value.
+      completed[propertyWireKey(prop)] = null;
+      continue;
+    }
     if (prop.isScalar || prop.isAny || prop.isDict || prop.enumName) continue;
 
     const target = prop.type ?? resolveType(prop.typeName.name);
@@ -361,9 +430,10 @@ export function withRequiredComplexSamples(
     const payload = synthesizeComplexSample(target, resolveType, seed);
     if (payload === undefined) continue;
 
-    completed[prop.name] = prop.isCollection ? [payload] : payload;
+    completed[propertyWireKey(prop)] = prop.isCollection ? [payload] : payload;
   }
 
+  fillInheritedRequiredNullables(completed, node, resolveType);
   return completed;
 }
 
@@ -479,11 +549,21 @@ function buildExamples(
       yamlStr = options.escapeYamlForTemplate(yamlStr);
     }
 
+    const nullKeys = node.properties
+      .filter(
+        (prop) =>
+          isRequiredNullableProperty(prop) &&
+          !(prop.sensitive ?? []).includes("save") &&
+          sample[propertyWireKey(prop)] === null,
+      )
+      .map((prop) => propertyWireKey(prop));
+
     return {
       sample,
       json: jsonStr.split("\n"),
       yaml: yamlStr.split("\n"),
       validations: buildValidations(sample, node, options),
+      ...(nullKeys.length > 0 ? { nullKeys } : {}),
     };
   });
 }
@@ -498,7 +578,7 @@ function buildValidations(
 ): PropertyValidation[] {
   return Object.keys(sample)
     .filter((key) => {
-      const prop = node.properties.find((p) => p.name === key);
+      const prop = samplePropertyFor(node, key);
       const supportsScalarCoercion =
         options.includeCoercedComplexValues &&
         (prop?.type?.coercions.length ?? 0) > 0;
@@ -507,9 +587,11 @@ function buildValidations(
         (prop?.isScalar || prop?.enumName || supportsScalarCoercion)
       );
     })
-    .map((key) => {
-      const prop = node.properties.find((p) => p.name === key);
-      const rawValue = sample[key];
+    .map((wireKey) => {
+      const prop = samplePropertyFor(node, wireKey);
+      const rawValue = sample[wireKey];
+      const key = prop?.name ?? wireKey;
+      const wireKeyField = wireKey !== key ? { wireKey } : {};
 
       // Check for enum field (skip discriminator fields)
       const isDiscriminator = node.discriminator === key;
@@ -532,8 +614,9 @@ function buildValidations(
             key: options.renderKey(key),
             value: enumResult.value,
             delimiter: enumResult.delimiter,
-            isOptional: prop?.isOptional || false,
+            isOptional: prop?.isOptional || prop?.isNullable || false,
             withheldOnSave: (prop?.sensitive ?? []).includes("save"),
+            ...wireKeyField,
           };
         }
       }
@@ -555,8 +638,9 @@ function buildValidations(
         key: options.renderKey(key),
         value,
         delimiter,
-        isOptional: prop?.isOptional || false,
+        isOptional: prop?.isOptional || prop?.isNullable || false,
         withheldOnSave: (prop?.sensitive ?? []).includes("save"),
+        ...wireKeyField,
       };
     });
 }
@@ -569,7 +653,7 @@ function withheldOnSaveKeys(node: TypeNode): Set<string> {
   return new Set(
     node.properties
       .filter((prop) => (prop.sensitive ?? []).includes("save"))
-      .map((prop) => prop.name),
+      .map((prop) => propertyWireKey(prop)),
   );
 }
 
@@ -607,7 +691,8 @@ export function postSaveExample(
 
 /**
  * A single provider wire-name assertion the generated conversion test should make:
- * source field `fieldName` is renamed to `wireName` for `provider`.
+ * canonical key `fieldName` (the `@encodedName` JSON key, else the property name) is renamed to
+ * `wireName` for `provider`.
  */
 export interface WireTestMapping {
   fieldName: string;
@@ -632,10 +717,10 @@ export function wireTestMappings(
 ): WireTestMapping[] {
   const present = sample ?? {};
   return node.properties
-    .filter((prop) => prop.name in present)
+    .filter((prop) => propertyWireKey(prop) in present)
     .flatMap((prop) =>
       (prop.knownAs ?? []).map((mapping) => ({
-        fieldName: prop.name,
+        fieldName: propertyWireKey(prop),
         provider: mapping.provider,
         wireName: mapping.name,
       })),
@@ -700,7 +785,7 @@ function buildCoercions(
               key: options.renderKey(key),
               value: enumResult.value,
               delimiter: enumResult.delimiter,
-              isOptional: prop?.isOptional || false,
+              isOptional: prop?.isOptional || prop?.isNullable || false,
             };
           }
         }
@@ -716,7 +801,7 @@ function buildCoercions(
           key: options.renderKey(key),
           value: needsQuotes ? options.escapeString(value) : value,
           delimiter: needsQuotes ? '"' : "",
-          isOptional: prop?.isOptional || false,
+          isOptional: prop?.isOptional || prop?.isNullable || false,
         };
       });
 
@@ -769,6 +854,13 @@ export const csharpTestOptions: TestContextOptions = {
     number: "3.14f",
     int32: "3",
     int64: "3L",
+    int8: "3",
+    int16: "3",
+    safeint: "3L",
+    uint8: "3",
+    uint16: "3",
+    uint32: "3",
+    uint64: "3",
     integer: "3",
     string: '"example"',
   },
@@ -777,6 +869,13 @@ export const csharpTestOptions: TestContextOptions = {
     boolean: "bool",
     int32: "int",
     int64: "long",
+    int8: "sbyte",
+    int16: "short",
+    safeint: "long",
+    uint8: "byte",
+    uint16: "ushort",
+    uint32: "uint",
+    uint64: "ulong",
     float32: "float",
     float64: "double",
     number: "float",
@@ -801,6 +900,13 @@ export const pythonTestOptions: TestContextOptions = {
     number: "3.14",
     int32: "3",
     int64: "3",
+    int8: "3",
+    int16: "3",
+    safeint: "3",
+    uint8: "3",
+    uint16: "3",
+    uint32: "3",
+    uint64: "3",
     integer: "3",
     string: '"example"',
   },
@@ -809,6 +915,13 @@ export const pythonTestOptions: TestContextOptions = {
     boolean: "bool",
     int32: "int",
     int64: "int",
+    int8: "int",
+    int16: "int",
+    safeint: "int",
+    uint8: "int",
+    uint16: "int",
+    uint32: "int",
+    uint64: "int",
     float32: "float",
     float64: "float",
     number: "float",
@@ -818,6 +931,13 @@ export const pythonTestOptions: TestContextOptions = {
 /**
  * TypeScript test context options.
  */
+function escapeTemplateLiteralBody(text: string): string {
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\$\{/g, "\\${");
+}
+
 export const typescriptTestOptions: TestContextOptions = {
   renderKey: (key: string) => key, // camelCase - already correct from TypeSpec
   renderBoolean: (val: boolean) => (val ? "true" : "false"),
@@ -829,10 +949,10 @@ export const typescriptTestOptions: TestContextOptions = {
       .replace(/\t/g, "\\t")
       .replace(/"/g, '\\"'),
   getDelimiter: (str: string) => '"',
-  // Escape backslashes in JSON so escape sequences like \n remain as literals in template strings
-  escapeJsonForTemplate: (json: string) => json.replace(/\\/g, "\\\\"),
-  // Escape backslashes in YAML so escape sequences remain as literals in template strings
-  escapeYamlForTemplate: (yaml: string) => yaml.replace(/\\/g, "\\\\"),
+  // Escape JSON/YAML into a template-literal body: backslashes keep escape sequences
+  // like \n literal, and backticks / `${` (e.g. in a wire key) stay inert text.
+  escapeJsonForTemplate: escapeTemplateLiteralBody,
+  escapeYamlForTemplate: escapeTemplateLiteralBody,
   scalarValues: {
     boolean: "false",
     float: "3.14",
@@ -841,6 +961,13 @@ export const typescriptTestOptions: TestContextOptions = {
     number: "3.14",
     int32: "3",
     int64: "3",
+    int8: "3",
+    int16: "3",
+    safeint: "3",
+    uint8: "3",
+    uint16: "3",
+    uint32: "3",
+    uint64: "3",
     integer: "3",
     string: '"example"',
   },
@@ -849,6 +976,13 @@ export const typescriptTestOptions: TestContextOptions = {
     boolean: "boolean",
     int32: "number",
     int64: "number",
+    int8: "number",
+    int16: "number",
+    safeint: "number",
+    uint8: "number",
+    uint16: "number",
+    uint32: "number",
+    uint64: "number",
     float32: "number",
     float64: "number",
     number: "number",
@@ -873,7 +1007,7 @@ export const rustTestOptions: TestContextOptions = {
   getDelimiter: (str: string) => '"',
   yamlDoubleQuotedMinMultiLineLength: Number.MAX_SAFE_INTEGER,
   renderEnumValue: (enumName: string, rawValue: string) => ({
-    value: `${enumName}::${toPascalCase(rawValue)}`,
+    value: `${enumName}::${rustEnumVariantName(rawValue)}`,
     delimiter: "",
   }),
   escapeJsonForTemplate: undefined,
@@ -886,6 +1020,13 @@ export const rustTestOptions: TestContextOptions = {
     number: "3.14",
     int32: "3",
     int64: "3",
+    int8: "3",
+    int16: "3",
+    safeint: "3",
+    uint8: "3",
+    uint16: "3",
+    uint32: "3",
+    uint64: "3",
     integer: "3",
     string: '"example"',
   },
@@ -894,6 +1035,13 @@ export const rustTestOptions: TestContextOptions = {
     boolean: "bool",
     int32: "i32",
     int64: "i64",
+    int8: "i8",
+    int16: "i16",
+    safeint: "i64",
+    uint8: "u8",
+    uint16: "u16",
+    uint32: "u32",
+    uint64: "u64",
     float32: "f32",
     float64: "f64",
     number: "f64",
@@ -942,6 +1090,13 @@ export const swiftTestOptions: TestContextOptions = {
     number: "3.14",
     int32: "3",
     int64: "3",
+    int8: "3",
+    int16: "3",
+    safeint: "3",
+    uint8: "3",
+    uint16: "3",
+    uint32: "3",
+    uint64: "3",
     integer: "3",
     string: '"example"',
   },
@@ -950,6 +1105,13 @@ export const swiftTestOptions: TestContextOptions = {
     boolean: "Bool",
     int32: "Int32",
     int64: "Int64",
+    int8: "Int8",
+    int16: "Int16",
+    safeint: "Int64",
+    uint8: "UInt8",
+    uint16: "UInt16",
+    uint32: "UInt32",
+    uint64: "UInt64",
     float32: "Float",
     float64: "Double",
     number: "Double",
@@ -980,6 +1142,13 @@ export const goTestOptions: TestContextOptions = {
     number: "3.14",
     int32: "3",
     int64: "3",
+    int8: "3",
+    int16: "3",
+    safeint: "3",
+    uint8: "3",
+    uint16: "3",
+    uint32: "3",
+    uint64: "3",
     integer: "3",
     string: '"example"',
   },
@@ -988,6 +1157,13 @@ export const goTestOptions: TestContextOptions = {
     boolean: "bool",
     int32: "int32",
     int64: "int64",
+    int8: "int8",
+    int16: "int16",
+    safeint: "int64",
+    uint8: "uint8",
+    uint16: "uint16",
+    uint32: "uint32",
+    uint64: "uint64",
     float32: "float32",
     float64: "float64",
     number: "float64",

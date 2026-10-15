@@ -63,6 +63,18 @@ describe("formatTypeScriptSource", () => {
     assert.equal(formatTypeScriptSource(input), expected);
   });
 
+  it("explodes a cast call (`call(x) as T`) instead of breaking after `=`", () => {
+    // Expected output taken verbatim from prettier 3 (printWidth 80).
+    const body = (line: string) => `function f() {\n  if (x) {\n    if (y) {\n${line}    }\n  }\n}\n`;
+    const input = body(
+      '      instance.reasoningEffort = String(data["reasoningEffort"]) as WireReasoningEffort;\n',
+    );
+    const expected = body(
+      '      instance.reasoningEffort = String(\n        data["reasoningEffort"],\n      ) as WireReasoningEffort;\n',
+    );
+    assert.equal(formatTypeScriptSource(input), expected);
+  });
+
   it("is idempotent: formatting already-formatted source is a no-op", () => {
     const formatted =
       'import {\n  alphaSymbol,\n  betaSymbol,\n  gammaSymbol,\n  deltaSymbol,\n  epsilonSymbol,\n} from "./mod";\n';

@@ -590,11 +590,11 @@ describe("Swift inherited model fields", () => {
       );
       assert.match(
         runtime,
-        /public static func double\(_ data: Any, field: String\) throws -> Double \{\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/,
+        /public static func double\(_ data: Any, field: String\) throws -> Double \{\s+if isNativeBool\(data\) \{ throw TypraRuntimeError\.invalidField[^\n]*\n\s+if let value = nativeSigned\(data\)[^\n]*\n\s+if let value = nativeUnsigned\(data\)[^\n]*\n\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/,
       );
       assert.match(
         runtime,
-        /public static func int64\(_ data: Any, field: String\) throws -> Int64 \{\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/,
+        /public static func int64\(_ data: Any, field: String\) throws -> Int64 \{\s+if isNativeBool\(data\) \{ throw TypraRuntimeError\.invalidField[^\n]*\n\s+if let value = nativeSigned\(data\) \{ return value \}[\s\S]*?\n\s+if let number = data as\? NSNumber \{\s+if isBoolNumber\(number\) \{ throw TypraRuntimeError\.invalidField/,
       );
     });
   });
@@ -1492,6 +1492,23 @@ describe("Swift provider wire mapping", () => {
       /case "anthropic": wireNameMaxOutputTokens = "max_tokens"/,
     );
     assert.match(source, /case "openai": wireNameTemperature = "temperature"/);
+  });
+
+  it("writes a named string-union field as its rawValue (#331)", () => {
+    // toWire stored the enum itself, so fromWire -> load threw "Expected string". It must
+    // unwrap exactly as save() does.
+    const type = wireType();
+    type.fields.find((f) => f.name === "temperature")!.enumName = "WireReasoningEffort";
+    const source = emitSwiftFile(fileDecl(type), new SwiftExprVisitor(), new Set());
+
+    assert.match(
+      source,
+      /if let wireKey = wireNameTemperature, let value = self\.temperature \{ result\[wireKey\] = value\.rawValue \}/,
+    );
+    assert.match(
+      source,
+      /if let wireKey = wireNameMaxOutputTokens, let value = self\.maxOutputTokens \{ result\[wireKey\] = value \}/,
+    );
   });
 });
 

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft. All rights reserved.
 
 import type { CallableVectorSnapshot } from "./vector.js";
-import { isTypedSeamEntry } from "./vector.js";
+import { isTypedDispatchEntry, isTypedSeamEntry } from "./vector.js";
 
 /**
  * Static coverage gate for the enforced @vector conformance tier.
@@ -26,6 +26,18 @@ import { isTypedSeamEntry } from "./vector.js";
  * (adapters stay authoritative), and the typed rail only ever rescues operations
  * that would otherwise be `missing` (or made a waiver redundant). Each operation
  * lands in exactly one bucket.
+ *
+ * A third code-verified rail (#315) covers the typed `@dispatch` resolver: an
+ * operation whose every vector is `isTypedDispatchEntry` is exercised by the
+ * emitted per-interface typed conformance file (routed through the emitted
+ * resolver + consumer provider), and the stringly runner is not emitted for it,
+ * so it lands in `dispatched` rather than `missing` when no adapter exists.
+ *
+ * Both rails are emitted per target (into `test-dir`, mostly), while the
+ * snapshot is target-independent: when it records `typedConformance: false`
+ * (no rail emitted) or `dispatchedConformance: false` (no dispatched rail),
+ * the matching credit is withheld and those operations fall through to waiver
+ * or missing.
  */
 export interface VectorAdapterCoverageInput {
   snapshot: CallableVectorSnapshot;
@@ -48,8 +60,19 @@ export interface VectorAdapterCoverageResult {
    * for gate purposes.
    */
   typed: string[];
+  /**
+   * Seams covered by the emitted typed `@dispatch` per-interface conformance
+   * (every vector carries a lowered `dispatch.decl`), no hand adapter required.
+   */
+  dispatched: string[];
   waived: string[];
   missing: string[];
+  /**
+   * Missing operations that WOULD have earned typed or dispatched credit, but
+   * the snapshot records that no emit target emits that rail
+   * (`typedConformance` / `dispatchedConformance` is `false`).
+   */
+  railWithheld: string[];
   /** Waiver keys that use a wildcard; these are never allowed. */
   wildcardWaivers: string[];
 }
@@ -92,6 +115,25 @@ function typedOperationKeys(snapshot: CallableVectorSnapshot): Set<string> {
   return typed;
 }
 
+/** Operations whose every vector rides the typed `@dispatch` resolver rail. */
+function dispatchedOperationKeys(
+  snapshot: CallableVectorSnapshot,
+): Set<string> {
+  const byOperation = new Map<string, boolean>();
+  for (const entry of snapshot.vectors) {
+    const key = `${entry.contract}.${entry.operation}`;
+    byOperation.set(
+      key,
+      (byOperation.get(key) ?? true) && isTypedDispatchEntry(entry),
+    );
+  }
+  const dispatched = new Set<string>();
+  for (const [key, eligible] of byOperation) {
+    if (eligible) dispatched.add(key);
+  }
+  return dispatched;
+}
+
 function bareOperation(operationKey: string): string {
   const index = operationKey.indexOf(".");
   return index === -1 ? operationKey : operationKey.slice(index + 1);
@@ -106,24 +148,39 @@ export function evaluateVectorAdapterCoverage(
   const waivers = new Set(rawWaivers.filter((key) => !key.includes("*")));
 
   const operations = operationKeys(input.snapshot);
+  // The rails are emitted per target (mostly under `test-dir`); a snapshot that
+  // records their absence earns no credit from them. Absent fields (older
+  // snapshots) keep crediting both rails.
+  const typedRail = input.snapshot.typedConformance !== false;
+  const dispatchedRail =
+    typedRail && input.snapshot.dispatchedConformance !== false;
   const typedOperations = typedOperationKeys(input.snapshot);
+  const dispatchedOperations = dispatchedOperationKeys(input.snapshot);
   const covered: string[] = [];
   const typed: string[] = [];
+  const dispatched: string[] = [];
   const waived: string[] = [];
   const missing: string[] = [];
+  const railWithheld: string[] = [];
 
   for (const operationKey of operations) {
     const bare = bareOperation(operationKey);
+    const typedEligible = typedOperations.has(operationKey);
+    const dispatchedEligible = dispatchedOperations.has(operationKey);
     // Precedence — adapter (authoritative, preserves today) → typed rail (the
-    // emitted entrypoint, honest code coverage) → enumerated waiver → missing.
+    // emitted entrypoint, honest code coverage) → typed @dispatch rail →
+    // enumerated waiver → missing.
     if (adapters.has(operationKey) || adapters.has(bare)) {
       covered.push(operationKey);
-    } else if (typedOperations.has(operationKey)) {
+    } else if (typedRail && typedEligible) {
       typed.push(operationKey);
+    } else if (dispatchedRail && dispatchedEligible) {
+      dispatched.push(operationKey);
     } else if (waivers.has(operationKey) || waivers.has(bare)) {
       waived.push(operationKey);
     } else {
       missing.push(operationKey);
+      if (typedEligible || dispatchedEligible) railWithheld.push(operationKey);
     }
   }
 
@@ -132,8 +189,10 @@ export function evaluateVectorAdapterCoverage(
     operations,
     covered,
     typed,
+    dispatched,
     waived,
     missing,
+    railWithheld,
     wildcardWaivers,
   };
 }
@@ -150,6 +209,16 @@ export function formatVectorAdapterCoverageFailure(
     );
     for (const operationKey of result.missing) {
       lines.push(`  - ${operationKey}`);
+    }
+    if (result.railWithheld.length > 0) {
+      lines.push(
+        "Typed/dispatched conformance credit was withheld for " +
+          `${result.railWithheld.join(", ")}: no configured emit target emits ` +
+          "that conformance rail. Typed `@dispatch` conformance needs an emit " +
+          "target with `test-dir` (or Swift `harness-test-dir`); typed seam " +
+          "conformance needs `test-dir` for TypeScript/Go/Rust. Set one (or " +
+          "register an adapter / add a waiver).",
+      );
     }
   }
   if (result.wildcardWaivers.length > 0) {

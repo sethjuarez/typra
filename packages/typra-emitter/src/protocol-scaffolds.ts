@@ -15,6 +15,13 @@ const SCALAR_TYPES = new Set([
   "float64",
   "int32",
   "int64",
+  "int8",
+  "int16",
+  "safeint",
+  "uint8",
+  "uint16",
+  "uint32",
+  "uint64",
   "integer",
   "number",
   "numeric",
@@ -417,12 +424,20 @@ export function emitRustProtocolScaffolds(
       }
       const paramPrefix = params.length > 0 ? `, ${params.join(", ")}` : "";
       const ret = rustType(method.returns);
-      if (method.sync) {
+      if (method.sync && method.optional) {
         lines.push(
           `    fn ${toSnakeCase(method.name)}(&self${paramPrefix}) -> ${ret} {`,
         );
         lines.push(
           `        panic!("${protocolName}.${method.name} is a compile-only protocol scaffold.")`,
+        );
+        lines.push("    }");
+      } else if (method.sync) {
+        lines.push(
+          `    fn ${toSnakeCase(method.name)}(&self${paramPrefix}) -> Result<${ret}, Box<dyn std::error::Error + Send + Sync>> {`,
+        );
+        lines.push(
+          `        Err("${protocolName}.${method.name} is a compile-only protocol scaffold.".into())`,
         );
         lines.push("    }");
       } else {
@@ -490,6 +505,13 @@ function typescriptType(typeName: string): string {
     float64: "number",
     int32: "number",
     int64: "number",
+    int8: "number",
+    int16: "number",
+    safeint: "number",
+    uint8: "number",
+    uint16: "number",
+    uint32: "number",
+    uint64: "number",
     integer: "number",
     number: "number",
     numeric: "number",
@@ -519,6 +541,13 @@ function pythonType(typeName: string): string {
     float64: "float",
     int32: "int",
     int64: "int",
+    int8: "int",
+    int16: "int",
+    safeint: "int",
+    uint8: "int",
+    uint16: "int",
+    uint32: "int",
+    uint64: "int",
     integer: "int",
     number: "float",
     numeric: "float",
@@ -553,6 +582,13 @@ function goType(typeName: string, importAlias: string): string {
     float64: "float64",
     int32: "int32",
     int64: "int64",
+    int8: "int8",
+    int16: "int16",
+    safeint: "int64",
+    uint8: "uint8",
+    uint16: "uint16",
+    uint32: "uint32",
+    uint64: "uint64",
     integer: "int",
     number: "float64",
     numeric: "float64",
@@ -606,6 +642,13 @@ function javaType(typeName: string): string {
     float64: "Double",
     int32: "Integer",
     int64: "Long",
+    int8: "Integer",
+    int16: "Integer",
+    safeint: "Long",
+    uint8: "Integer",
+    uint16: "Integer",
+    uint32: "Long",
+    uint64: "Long",
     integer: "Integer",
     number: "Double",
     numeric: "Double",
@@ -630,6 +673,13 @@ function csharpType(typeName: string): string {
     float64: "double",
     int32: "int",
     int64: "long",
+    int8: "sbyte",
+    int16: "short",
+    safeint: "long",
+    uint8: "byte",
+    uint16: "ushort",
+    uint32: "uint",
+    uint64: "ulong",
     integer: "int",
     number: "float",
     object: "object",
@@ -670,6 +720,13 @@ function rustType(typeName: string): string {
     float64: "f64",
     int32: "i32",
     int64: "i64",
+    int8: "i8",
+    int16: "i16",
+    safeint: "i64",
+    uint8: "u8",
+    uint16: "u16",
+    uint32: "u32",
+    uint64: "u64",
     integer: "i64",
     number: "f64",
     numeric: "f64",

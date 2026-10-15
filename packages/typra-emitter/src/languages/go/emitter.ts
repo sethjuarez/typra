@@ -35,8 +35,14 @@ import {
   CollectionHelperDecl,
   EntryShorthandAssignment,
   isClosedPolymorphicDispatch,
+  assignmentWireKey,
+  discriminatorWireKey,
+  fieldWireKey,
+  loweringCapabilitiesForTarget,
+  resolveFieldLowering,
 } from "../../ir/declarations.js";
 import {
+  isRequiredNullable,
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
@@ -66,6 +72,13 @@ const GO_TYPE_MAP: Record<string, string> = {
   boolean: "bool",
   int64: "int64",
   int32: "int32",
+  int16: "int16",
+  int8: "int8",
+  safeint: "int64",
+  uint64: "uint64",
+  uint32: "uint32",
+  uint16: "uint16",
+  uint8: "uint8",
   float64: "float64",
   float32: "float32",
   integer: "int",
@@ -79,8 +92,14 @@ const GO_TYPE_MAP: Record<string, string> = {
 /** Go types that need numeric type-switch coercion in Load. */
 const NUMERIC_GO_TYPES = new Set([
   "int",
+  "int8",
+  "int16",
   "int32",
   "int64",
+  "uint8",
+  "uint16",
+  "uint32",
+  "uint64",
   "float32",
   "float64",
 ]);
@@ -142,7 +161,10 @@ export function emitGoFileContent(
   const needsRequiredComplexValidation = types.some(
     (type) =>
       type.serialized &&
-      type.fields.some((field) => shouldGuardMissingRequiredField(field)),
+      type.fields.some(
+        (field) =>
+          shouldGuardMissingRequiredField(field) || isRequiredNullable(field),
+      ),
   );
   const needsFmt =
     enums.some((enumDef) => hasParseAliases(enumDef) && !enumDef.isOpen) ||
@@ -171,10 +193,12 @@ export function emitGoFileContent(
           (c) => (GO_TYPE_MAP[c.scalarType] || c.scalarType) === "float64",
         ),
     ) ||
-    types.some((type) =>
-      type.collectionHelpers.some(
-        (helper) => helper.hasNameProperty && entryShorthandNeedsMath(helper),
-      ),
+    types.some(
+      (type) =>
+        type.serialized &&
+        type.collectionHelpers.some(
+          (helper) => helper.hasNameProperty && entryShorthandNeedsMath(helper),
+        ),
     );
   if (hasNonProtocol) {
     emitHeader(
@@ -324,9 +348,11 @@ function emitGoEnum(enumDef: EnumDef, lines: string[]): void {
       );
     }
     for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
-      for (const alias of aliases) {
-        lines.push(`\tcase ${JSON.stringify(alias)}:`);
-      }
+      if (aliases.length === 0) continue;
+      // Go cases never fall through, so every alias shares one case clause.
+      lines.push(
+        `\tcase ${aliases.map((alias) => JSON.stringify(alias)).join(", ")}:`,
+      );
       lines.push(
         `\t\treturn ${enumDef.name}${toPascalCase(canonical)}${enumDef.isOpen ? "" : ", nil"}`,
       );
@@ -528,18 +554,24 @@ function emitStruct(
   lines.push(`type ${typeName} struct {`);
 
   for (const field of type.fields) {
-    const goType = getGoFieldType(
-      field.category,
-      field.isOptional,
-      polymorphicTypeNames,
-      field.enumName,
-    );
+    const goType = getGoFieldType(field, polymorphicTypeNames);
     const fieldName = fieldNames.get(field.name) ?? goFieldName(field.name);
-    const tag = getStructTag(field.name, shouldPreserveOptionalAbsence(field));
+    const tag = getStructTag(
+      fieldWireKey(field),
+      shouldPreserveOptionalAbsence(field) && !isRequiredNullable(field),
+    );
     lines.push(`\t${fieldName} ${goType} ${tag}`);
   }
   if (absorbsUnknownIntoBase(type.polymorphicDispatch)) {
     lines.push("\traw map[string]interface{}");
+  }
+  if (type.additionalProperties) {
+    lines.push(
+      "\t// AdditionalProperties holds undeclared fields so they survive load -> save.",
+    );
+    lines.push(
+      '\tAdditionalProperties map[string]interface{} `json:"-" yaml:"-"`',
+    );
   }
 
   lines.push("}");
@@ -603,7 +635,7 @@ function emitLoadFunction(
       body.push(`\tresult := ${typeName}{`);
       for (const field of explicitCollectionDefaults) {
         body.push(
-          `\t\t${goFieldName(field.name)}: ${getGoFieldType(field.category, field.isOptional, polymorphicTypeNames, field.enumName)}{},`,
+          `\t\t${goFieldName(field.name)}: ${getGoFieldType(field, polymorphicTypeNames)}{},`,
         );
       }
       body.push("\t}");
@@ -634,19 +666,30 @@ function emitLoadFunction(
       const field = type.fields.find(
         (candidate) => candidate.name === assign.fieldName,
       );
+      if (isRequiredNullable(assign)) {
+        // Required nullable (#339): the key must be present; an explicit nil is accepted.
+        body.push(
+          `\t\tif _, exists := m[${goLiteral(assign.sourceName)}]; !exists {`,
+        );
+        body.push(
+          `\t\t\treturn result, fmt.Errorf("%s: missing required field", ctx.At(${goLiteral(assign.sourceName)}).Path)`,
+        );
+        body.push("\t\t}");
+        continue;
+      }
       if (!shouldGuardMissingRequiredField(field)) continue;
       body.push(
-        `\t\tif requiredValue, exists := m["${assign.sourceName}"]; !exists || requiredValue == nil {`,
+        `\t\tif requiredValue, exists := m[${goLiteral(assign.sourceName)}]; !exists || requiredValue == nil {`,
       );
       body.push(
-        `\t\t\treturn result, fmt.Errorf("%s: missing required field", ctx.At("${assign.sourceName}").Path)`,
+        `\t\t\treturn result, fmt.Errorf("%s: missing required field", ctx.At(${goLiteral(assign.sourceName)}).Path)`,
       );
       body.push("\t\t}");
     }
 
     for (const assign of type.load.assignments) {
       const helper = type.collectionHelpers.find(
-        (candidate) => candidate.propertyName === assign.sourceName,
+        (candidate) => candidate.propertyName === assign.fieldName,
       );
       emitLoadAssignment(
         assign,
@@ -663,11 +706,28 @@ function emitLoadFunction(
       body.push(`\t\t\tresult.raw[key] = clone${typeName}RawValue(value)`);
       body.push("\t\t}");
       for (const field of type.fields) {
-        body.push(`\t\tdelete(result.raw, "${field.name}")`);
+        body.push(`\t\tdelete(result.raw, ${goLiteral(fieldWireKey(field))})`);
       }
     }
+    if (type.additionalProperties) {
+      body.push("\t\tresult.AdditionalProperties = make(map[string]interface{})");
+      body.push("\t\tfor key, value := range m {");
+      body.push(
+        ...goKnownWireKeyGuard(type.additionalProperties.knownWireKeys, "\t\t\t"),
+      );
+      body.push("\t\t\tresult.AdditionalProperties[key] = value");
+      body.push("\t\t}");
+    }
 
-    body.push("\t}");
+    if (isPolymorphicBase) {
+      body.push("\t} else {");
+      body.push(
+        `\t\treturn result, fmt.Errorf("invalid ${typeName} input: expected object or supported scalar shorthand, got %T", data)`,
+      );
+      body.push("\t}");
+    } else {
+      body.push("\t}");
+    }
     body.push("");
     body.push("\treturn result, nil");
   }
@@ -692,6 +752,19 @@ function emitLoadFunction(
 // Polymorphic dispatch
 // ============================================================================
 
+/**
+ * A declared `*` wildcard carrier (a default variant that is not a base self-reference) absorbs
+ * absent, blank, unknown, and non-string discriminators, so the dispatch never emits `fmt.Errorf`.
+ * `needsFmt` keys on this too: requesting `fmt` for such a dispatch leaves an unused import (#305).
+ */
+function hasDeclaredDispatchDefault(
+  dispatch: PolymorphicDispatchDecl,
+): boolean {
+  return Boolean(
+    dispatch.defaultVariant && !dispatch.defaultVariant.isSelfReference,
+  );
+}
+
 function emitPolymorphicDispatch(
   typeName: string,
   dispatch: PolymorphicDispatchDecl,
@@ -707,16 +780,15 @@ function emitPolymorphicDispatch(
   // by self-reference all reject absent/blank up front — a blank discriminator
   // names no variant. Unknown NON-blank values still fall through to the declared
   // carrier / self-reference base construction below.
-  const declaredDefault =
-    defaultVariant && !defaultVariant.isSelfReference
-      ? defaultVariant
-      : undefined;
+  const declaredDefault = hasDeclaredDispatchDefault(dispatch)
+    ? defaultVariant
+    : undefined;
   const hasFallback = Boolean(declaredDefault);
 
   lines.push("\t// Handle polymorphic types based on discriminator");
   lines.push("\tif m, ok := data.(map[string]interface{}); ok {");
   lines.push(
-    `\t\tif discriminator, ok := m["${dispatch.discriminatorField}"]; ok {`,
+    `\t\tif discriminator, ok := m[${goLiteral(discriminatorWireKey(dispatch))}]; ok {`,
   );
   lines.push("\t\t\tswitch discriminator := discriminator.(type) {");
   lines.push("\t\t\tcase string:");
@@ -776,9 +848,7 @@ function emitPolymorphicDispatch(
   // default falls through to base construction below; otherwise reject.
   if (declaredDefault) {
     lines.push("\t\t} else {");
-    lines.push(
-      `\t\t\treturn Load${declaredDefault.typeName.name}(data, ctx)`,
-    );
+    lines.push(`\t\t\treturn Load${declaredDefault.typeName.name}(data, ctx)`);
     lines.push("\t\t}");
   } else if (!hasFallback) {
     lines.push("\t\t} else {");
@@ -872,9 +942,11 @@ function coercionExpansion(coercion: CoercionDecl): string {
   const entries: string[] = [];
   for (const assign of coercion.assignments) {
     if (assign.isInput) {
-      entries.push(`"${assign.fieldName}": v`);
+      entries.push(`${goLiteral(assignmentWireKey(assign))}: v`);
     } else {
-      entries.push(`"${assign.fieldName}": "${assign.literalValue}"`);
+      entries.push(
+        `${goLiteral(assignmentWireKey(assign))}: "${assign.literalValue}"`,
+      );
     }
   }
   return `map[string]interface{}{${entries.join(", ")}}`;
@@ -946,13 +1018,13 @@ function emitLoadScalar(
     // any/unknown type
     if (assign.isOptional) {
       lines.push(
-        `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+        `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
       );
       lines.push(`\t\t\tresult.${fieldName} = &val`);
       lines.push("\t\t}");
     } else {
       lines.push(
-        `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+        `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
       );
       lines.push(`\t\t\tresult.${fieldName} = val`);
       lines.push("\t\t}");
@@ -963,14 +1035,14 @@ function emitLoadScalar(
   if (goType === "bool") {
     if (assign.isOptional) {
       lines.push(
-        `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+        `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
       );
       lines.push(`\t\t\tv := val.(bool)`);
       lines.push(`\t\t\tresult.${fieldName} = &v`);
       lines.push("\t\t}");
     } else {
       lines.push(
-        `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+        `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
       );
       lines.push(`\t\t\tresult.${fieldName} = val.(bool)`);
       lines.push("\t\t}");
@@ -987,7 +1059,7 @@ function emitLoadScalar(
     : `${castType}(val.(string))`;
   if (assign.isOptional) {
     lines.push(
-      `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+      `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
     );
     if (useParser && !assign.isOpenEnum) {
       lines.push(`\t\t\tv, err := ${parseExpr}`);
@@ -1001,7 +1073,7 @@ function emitLoadScalar(
     lines.push("\t\t}");
   } else {
     lines.push(
-      `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`,
+      `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
     );
     if (useParser && !assign.isOpenEnum) {
       lines.push(`\t\t\tv, err := ${parseExpr}`);
@@ -1016,12 +1088,9 @@ function emitLoadScalar(
   }
 }
 
-function emitLoadNumeric(
-  assign: LoadAssignment,
-  fieldName: string,
+function goNumericCases(
   goType: string,
-  lines: string[],
-): void {
+): Array<{ caseType: string; expr: string }> {
   const isFloat = FLOAT_GO_TYPES.has(goType);
 
   // Build the coercion cases
@@ -1032,6 +1101,11 @@ function emitLoadNumeric(
   cases.push({ caseType: "int", expr: `${goType}(n)` });
   cases.push({ caseType: "int32", expr: `${goType}(n)` });
   cases.push({ caseType: "int64", expr: `${goType}(n)` });
+  // Sized/unsigned targets also need an identity arm: a saved map hands the typed value back
+  // on round-trip, and yaml.v3 decodes integers above math.MaxInt64 as uint64.
+  if (!["int", "int32", "int64", "float32", "float64"].includes(goType)) {
+    cases.push({ caseType: goType, expr: "n" });
+  }
 
   if (isFloat) {
     // Identity case for float types uses direct assignment
@@ -1047,10 +1121,20 @@ function emitLoadNumeric(
     // int types don't include float32
     cases.push({ caseType: "float64", expr: `${goType}(n)` });
   }
+  return cases;
+}
+
+function emitLoadNumeric(
+  assign: LoadAssignment,
+  fieldName: string,
+  goType: string,
+  lines: string[],
+): void {
+  const cases = goNumericCases(goType);
 
   if (assign.isOptional) {
     lines.push(
-      `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil { // Handle various numeric types from JSON/YAML/roundtrip`,
+      `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil { // Handle various numeric types from JSON/YAML/roundtrip`,
     );
     lines.push(`\t\t\tvar v ${goType}`);
     lines.push("\t\t\tswitch n := val.(type) {");
@@ -1063,7 +1147,7 @@ function emitLoadNumeric(
     lines.push("\t\t}");
   } else {
     lines.push(
-      `\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil { // Handle various numeric types from JSON/YAML/roundtrip`,
+      `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil { // Handle various numeric types from JSON/YAML/roundtrip`,
     );
     lines.push(`\t\t\tvar v ${goType}`);
     lines.push("\t\t\tswitch n := val.(type) {");
@@ -1088,10 +1172,12 @@ function emitLoadComplex(
   const isPolymorphic = polymorphicTypeNames.has(typeName);
   const acceptsScalarCoercion = scalarCoercibleTypeNames.has(typeName);
 
-  lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
+  lines.push(
+    `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
+  );
   lines.push(`\t\t\tif m, ok := val.(map[string]interface{}); ok {`);
   lines.push(
-    `\t\t\t\tloaded, err := Load${typeName}(m, ctx.At("${assign.sourceName}"))`,
+    `\t\t\t\tloaded, err := Load${typeName}(m, ctx.At(${goLiteral(assign.sourceName)}))`,
   );
   lines.push("\t\t\t\tif err != nil {");
   lines.push("\t\t\t\t\treturn result, err");
@@ -1117,7 +1203,7 @@ function emitLoadComplex(
   if (acceptsScalarCoercion) {
     lines.push("\t\t\t} else {");
     lines.push(
-      `\t\t\t\tloaded, err := Load${typeName}(val, ctx.At("${assign.sourceName}"))`,
+      `\t\t\t\tloaded, err := Load${typeName}(val, ctx.At(${goLiteral(assign.sourceName)}))`,
     );
     lines.push("\t\t\t\tif err != nil {");
     lines.push("\t\t\t\t\treturn result, err");
@@ -1140,7 +1226,9 @@ function emitLoadCollectionScalar(
 ): void {
   const goType = GO_TYPE_MAP[scalarType] || "interface{}";
 
-  lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
+  lines.push(
+    `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
+  );
   lines.push("\t\t\tswitch arr := val.(type) {");
 
   if (goType === "interface{}") {
@@ -1150,7 +1238,17 @@ function emitLoadCollectionScalar(
     lines.push("\t\t\tcase []interface{}:");
     lines.push(`\t\t\t\tresult.${fieldName} = make([]${goType}, len(arr))`);
     lines.push("\t\t\t\tfor i, v := range arr {");
-    lines.push(`\t\t\t\t\tresult.${fieldName}[i] = v.(${goType})`);
+    if (NUMERIC_GO_TYPES.has(goType)) {
+      // JSON decodes numbers as float64 and YAML as int, so a bare v.(int32) would panic.
+      lines.push("\t\t\t\t\tswitch n := v.(type) {");
+      for (const c of goNumericCases(goType)) {
+        lines.push(`\t\t\t\t\tcase ${c.caseType}:`);
+        lines.push(`\t\t\t\t\t\tresult.${fieldName}[i] = ${c.expr}`);
+      }
+      lines.push("\t\t\t\t\t}");
+    } else {
+      lines.push(`\t\t\t\t\tresult.${fieldName}[i] = v.(${goType})`);
+    }
     lines.push("\t\t\t\t}");
     lines.push(`\t\t\tcase []${goType}:`);
     lines.push(`\t\t\t\tresult.${fieldName} = arr`);
@@ -1171,7 +1269,9 @@ function emitLoadCollectionComplex(
   const isPolymorphic = polymorphicTypeNames.has(typeName);
   const goElemType = isPolymorphic ? "interface{}" : typeName;
 
-  lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
+  lines.push(
+    `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
+  );
   if (helper?.hasNameProperty) {
     lines.push("\t\t\tif named, ok := val.(map[string]interface{}); ok {");
     lines.push("\t\t\t\tkeys := make([]string, 0, len(named))");
@@ -1186,7 +1286,7 @@ function emitLoadCollectionComplex(
     lines.push("\t\t\t\t\tentry := named[key]");
     lines.push("\t\t\t\t\tif _, invalid := entry.([]interface{}); invalid {");
     lines.push(
-      `\t\t\t\t\t\treturn result, fmt.Errorf("%s: invalid named collection entry category array", ctx.At("${assign.sourceName}").At(key).Path)`,
+      `\t\t\t\t\t\treturn result, fmt.Errorf("%s: invalid named collection entry category array", ctx.At(${goLiteral(assign.sourceName)}).At(key).Path)`,
     );
     lines.push("\t\t\t\t\t}");
     lines.push("\t\t\t\t\titem, ok := entry.(map[string]interface{})");
@@ -1202,7 +1302,7 @@ function emitLoadCollectionComplex(
     lines.push("\t\t\t\t\t}");
     lines.push('\t\t\t\t\titem["name"] = key');
     lines.push(
-      `\t\t\t\t\tloaded, err := Load${typeName}(item, ctx.At("${assign.sourceName}").At(key))`,
+      `\t\t\t\t\tloaded, err := Load${typeName}(item, ctx.At(${goLiteral(assign.sourceName)}).At(key))`,
     );
     lines.push("\t\t\t\t\tif err != nil {");
     lines.push("\t\t\t\t\t\treturn result, err");
@@ -1217,22 +1317,13 @@ function emitLoadCollectionComplex(
   }
   lines.push(`\t\t\t\tresult.${fieldName} = make([]${goElemType}, len(arr))`);
   lines.push("\t\t\t\tfor i, v := range arr {");
-  lines.push("\t\t\t\t\tif item, ok := v.(map[string]interface{}); ok {");
   lines.push(
-    `\t\t\t\t\t\tloaded, err := Load${typeName}(item, ctx.At("${assign.sourceName}").AtIndex(i))`,
+    `\t\t\t\t\tloaded, err := Load${typeName}(v, ctx.At(${goLiteral(assign.sourceName)}).AtIndex(i))`,
   );
-  lines.push("\t\t\t\t\t\tif err != nil {");
-  lines.push("\t\t\t\t\t\t\treturn result, err");
-  lines.push("\t\t\t\t\t\t}");
-
-  if (isPolymorphic) {
-    lines.push("\t\t\t\t\t\t// Polymorphic type - store as interface{}");
-    lines.push(`\t\t\t\t\t\tresult.${fieldName}[i] = loaded`);
-  } else {
-    lines.push(`\t\t\t\t\t\tresult.${fieldName}[i] = loaded`);
-  }
-
+  lines.push("\t\t\t\t\tif err != nil {");
+  lines.push("\t\t\t\t\t\treturn result, err");
   lines.push("\t\t\t\t\t}");
+  lines.push(`\t\t\t\t\tresult.${fieldName}[i] = loaded`);
   lines.push("\t\t\t\t}");
   lines.push("\t\t\t}");
   lines.push("\t\t}");
@@ -1246,7 +1337,9 @@ function emitLoadDict(
 ): void {
   const valueType =
     assign.category.kind === "dict" ? assign.category.valueType : undefined;
-  lines.push(`\t\tif val, ok := m["${assign.sourceName}"]; ok && val != nil {`);
+  lines.push(
+    `\t\tif val, ok := m[${goLiteral(assign.sourceName)}]; ok && val != nil {`,
+  );
   if (!valueType || valueType === "unknown") {
     lines.push("\t\t\tif m, ok := val.(map[string]interface{}); ok {");
     lines.push(`\t\t\t\tresult.${fieldName} = m`);
@@ -1265,7 +1358,7 @@ function emitLoadDict(
       valueType,
       "item",
       "loaded",
-      `ctx.At("${assign.sourceName}").At(key)`,
+      `ctx.At(${goLiteral(assign.sourceName)}).At(key)`,
       polymorphicTypeNames,
       lines,
     );
@@ -1307,6 +1400,10 @@ function emitGoDictValueLoad(
     lines.push(`\t\t\t\t\t\t${targetName} = ${goType}(n)`);
     lines.push("\t\t\t\t\tcase float64:");
     lines.push(`\t\t\t\t\t\t${targetName} = ${goType}(n)`);
+    if (!["int", "int32", "int64", "float32", "float64"].includes(goType)) {
+      lines.push(`\t\t\t\t\tcase ${goType}:`);
+      lines.push(`\t\t\t\t\t\t${targetName} = n`);
+    }
     lines.push("\t\t\t\t\t}");
     return;
   }
@@ -1348,15 +1445,36 @@ function emitSaveMethod(
 
   for (const assign of type.save.assignments) {
     const helper = type.collectionHelpers.find(
-      (candidate) => candidate.propertyName === assign.targetName,
+      (candidate) => candidate.propertyName === assign.fieldName,
     );
     emitSaveAssignment(assign, helper, polymorphicTypeNames, fieldNames, lines);
+  }
+  if (type.additionalProperties) {
+    // Undeclared fields follow the declared ones; a declared wire key always wins.
+    lines.push("\tfor key, value := range obj.AdditionalProperties {");
+    lines.push(
+      ...goKnownWireKeyGuard(type.additionalProperties.knownWireKeys, "\t\t"),
+    );
+    lines.push("\t\tresult[key] = value");
+    lines.push("\t}");
   }
 
   lines.push("");
   lines.push("\treturn result");
   lines.push("}");
   lines.push("");
+}
+
+/** `continue`s the enclosing `for key, value := range ...` loop for declared wire keys. */
+function goKnownWireKeyGuard(knownWireKeys: string[], indent: string): string[] {
+  const keys = [...new Set(knownWireKeys)];
+  if (keys.length === 0) return [];
+  return [
+    `${indent}switch key {`,
+    `${indent}case ${keys.map((key) => goLiteral(key)).join(", ")}:`,
+    `${indent}\tcontinue`,
+    `${indent}}`,
+  ];
 }
 
 // ============================================================================
@@ -1404,7 +1522,9 @@ function emitGoEntryShorthandArms(
   const indent = "\t\t\t\t\t\t";
 
   if (!shorthand || shorthand.cases.length === 0) {
-    lines.push(`${indent}item["${entryShorthandTarget(helper)}"] = entry`);
+    lines.push(
+      `${indent}item[${goLiteral(entryShorthandTarget(helper))}] = entry`,
+    );
     return;
   }
 
@@ -1418,7 +1538,7 @@ function emitGoEntryShorthandArms(
   ) => {
     for (const a of entryCase.assignments) {
       lines.push(
-        `${depth}item["${a.fieldName}"] = ${goLiteral(a.literalValue)}`,
+        `${depth}item[${goLiteral(a.fieldName)}] = ${goLiteral(a.literalValue)}`,
       );
     }
   };
@@ -1429,7 +1549,9 @@ function emitGoEntryShorthandArms(
   if (integral) {
     lines.push(`${indent}case int, int32, int64:`);
     assignConstants(integral, `${indent}\t`);
-    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+    lines.push(
+      `${indent}\titem[${goLiteral(shorthand.valueField)}] = shorthandValue`,
+    );
   }
 
   if (integral && fractional) {
@@ -1439,11 +1561,15 @@ function emitGoEntryShorthandArms(
     lines.push(`${indent}\t} else {`);
     assignConstants(fractional, `${indent}\t\t`);
     lines.push(`${indent}\t}`);
-    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+    lines.push(
+      `${indent}\titem[${goLiteral(shorthand.valueField)}] = shorthandValue`,
+    );
   } else if (fractional) {
     lines.push(`${indent}case float32, float64:`);
     assignConstants(fractional, `${indent}\t`);
-    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+    lines.push(
+      `${indent}\titem[${goLiteral(shorthand.valueField)}] = shorthandValue`,
+    );
   }
 
   for (const entryCase of ordered) {
@@ -1456,11 +1582,15 @@ function emitGoEntryShorthandArms(
     if (!goCase) continue;
     lines.push(`${indent}case ${goCase}:`);
     assignConstants(entryCase, `${indent}\t`);
-    lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+    lines.push(
+      `${indent}\titem[${goLiteral(shorthand.valueField)}] = shorthandValue`,
+    );
   }
 
   lines.push(`${indent}default:`);
-  lines.push(`${indent}\titem["${shorthand.valueField}"] = shorthandValue`);
+  lines.push(
+    `${indent}\titem[${goLiteral(shorthand.valueField)}] = shorthandValue`,
+  );
   lines.push(`${indent}}`);
 }
 
@@ -1499,6 +1629,13 @@ function emitSaveAssignment(
   const fieldName =
     fieldNames.get(assign.fieldName) ?? goFieldName(assign.fieldName);
   const cat = assign.category;
+
+  if (isRequiredNullable(assign)) {
+    // Required nullable (#339): the key is always written, as nil when unset.
+    lines.push(`\tif obj.${fieldName} == nil {`);
+    lines.push(`\t\tresult[${goLiteral(assign.targetName)}] = nil`);
+    lines.push("\t}");
+  }
 
   switch (cat.kind) {
     case "scalar":
@@ -1550,10 +1687,12 @@ function emitSaveScalar(
 
   if (shouldOmitAbsentOnSave(assign, "go")) {
     lines.push(`\tif obj.${fieldName} != nil {`);
-    lines.push(`\t\tresult["${assign.targetName}"] = ${saveExprDeref}`);
+    lines.push(
+      `\t\tresult[${goLiteral(assign.targetName)}] = ${saveExprDeref}`,
+    );
     lines.push("\t}");
   } else {
-    lines.push(`\tresult["${assign.targetName}"] = ${saveExpr}`);
+    lines.push(`\tresult[${goLiteral(assign.targetName)}] = ${saveExpr}`);
   }
 }
 
@@ -1578,9 +1717,13 @@ function emitSaveComplex(
       lines.push("\t\t\tcase interface {");
       lines.push("\t\t\t\tSave(*SaveContext) map[string]interface{}");
       lines.push("\t\t\t}:");
-      lines.push(`\t\t\t\tresult["${assign.targetName}"] = v.Save(ctx)`);
+      lines.push(
+        `\t\t\t\tresult[${goLiteral(assign.targetName)}] = v.Save(ctx)`,
+      );
       lines.push("\t\t\tdefault:");
-      lines.push(`\t\t\t\tresult["${assign.targetName}"] = obj.${fieldName}`);
+      lines.push(
+        `\t\t\t\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}`,
+      );
       lines.push("\t\t\t}");
       lines.push("\t\t}");
       lines.push("\t}");
@@ -1592,23 +1735,25 @@ function emitSaveComplex(
       lines.push("\tcase interface {");
       lines.push("\t\tSave(*SaveContext) map[string]interface{}");
       lines.push("\t}:");
-      lines.push(`\t\tresult["${assign.targetName}"] = v.Save(ctx)`);
+      lines.push(`\t\tresult[${goLiteral(assign.targetName)}] = v.Save(ctx)`);
       lines.push("\tdefault:");
-      lines.push(`\t\tresult["${assign.targetName}"] = obj.${fieldName}`);
+      lines.push(
+        `\t\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}`,
+      );
       lines.push("\t}");
     }
   } else {
     if (shouldOmitAbsentOnSave(assign, "go")) {
       lines.push(`\tif obj.${fieldName} != nil {`);
       lines.push(
-        `\t\tresult["${assign.targetName}"] = obj.${fieldName}.Save(ctx)`,
+        `\t\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}.Save(ctx)`,
       );
       lines.push("\t}");
     } else {
       // Required non-polymorphic complex — blank line before
       lines.push("");
       lines.push(
-        `\tresult["${assign.targetName}"] = obj.${fieldName}.Save(ctx)`,
+        `\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}.Save(ctx)`,
       );
     }
   }
@@ -1621,10 +1766,12 @@ function emitSaveCollectionScalar(
 ): void {
   if (shouldOmitAbsentOnSave(assign, "go")) {
     lines.push(`\tif obj.${fieldName} != nil {`);
-    lines.push(`\t\tresult["${assign.targetName}"] = obj.${fieldName}`);
+    lines.push(
+      `\t\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}`,
+    );
     lines.push("\t}");
   } else {
-    lines.push(`\tresult["${assign.targetName}"] = obj.${fieldName}`);
+    lines.push(`\tresult[${goLiteral(assign.targetName)}] = obj.${fieldName}`);
   }
 }
 
@@ -1696,7 +1843,7 @@ function emitSaveCollectionComplex(
         `\t\t\tif (ctx == nil || ctx.UseShorthand) && len(copy) == 1 {`,
       );
       lines.push(
-        `\t\t\t\tif shorthand, ok := copy["${helper.coercionProperty}"]; ok {`,
+        `\t\t\t\tif shorthand, ok := copy[${goLiteral(helper.coercionProperty)}]; ok {`,
       );
       lines.push("\t\t\t\t\tobjectItems[name] = shorthand");
       lines.push("\t\t\t\t\tcontinue");
@@ -1708,12 +1855,12 @@ function emitSaveCollectionComplex(
     lines.push(
       "\t\tif losslessObject && (ctx == nil || ctx.CollectionFormat != CollectionFormatArray) {",
     );
-    lines.push(`\t\t\tresult["${assign.targetName}"] = objectItems`);
+    lines.push(`\t\t\tresult[${goLiteral(assign.targetName)}] = objectItems`);
     lines.push("\t\t} else {");
-    lines.push(`\t\t\tresult["${assign.targetName}"] = arr`);
+    lines.push(`\t\t\tresult[${goLiteral(assign.targetName)}] = arr`);
     lines.push("\t\t}");
   } else {
-    lines.push(`\t\tresult["${assign.targetName}"] = arr`);
+    lines.push(`\t\tresult[${goLiteral(assign.targetName)}] = arr`);
   }
 
   if (shouldOmitAbsentOnSave(assign, "go")) {
@@ -1764,7 +1911,7 @@ function emitGoDictSaveResult(
   indent: string,
 ): void {
   if (!serializesComplexValues) {
-    lines.push(`${indent}result["${targetName}"] = ${sourceExpr}`);
+    lines.push(`${indent}result[${goLiteral(targetName)}] = ${sourceExpr}`);
     return;
   }
   lines.push(
@@ -1783,7 +1930,7 @@ function emitGoDictSaveResult(
     lines.push(`${indent}\titems[key] = item.Save(ctx)`);
   }
   lines.push(`${indent}}`);
-  lines.push(`${indent}result["${targetName}"] = items`);
+  lines.push(`${indent}result[${goLiteral(targetName)}] = items`);
 }
 
 // ============================================================================
@@ -1804,9 +1951,12 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
 
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames)
-      .map(([provider, wireName]) => `"${provider}": "${wireName}"`)
+      .map(
+        ([provider, wireName]) =>
+          `${goLiteral(provider)}: ${goLiteral(wireName)}`,
+      )
       .join(", ");
-    lines.push(`\t\t"${mapping.fieldName}": {${entries}},`);
+    lines.push(`\t\t${goLiteral(assignmentWireKey(mapping))}: {${entries}},`);
   }
 
   lines.push(`\t}`);
@@ -1836,9 +1986,12 @@ function emitFromWireMethod(type: TypeDecl, lines: string[]): void {
 
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames)
-      .map(([provider, wireName]) => `"${provider}": "${wireName}"`)
+      .map(
+        ([provider, wireName]) =>
+          `${goLiteral(provider)}: ${goLiteral(wireName)}`,
+      )
       .join(", ");
-    lines.push(`\t\t"${mapping.fieldName}": {${entries}},`);
+    lines.push(`\t\t${goLiteral(assignmentWireKey(mapping))}: {${entries}},`);
   }
 
   lines.push(`\t}`);
@@ -1968,11 +2121,14 @@ function emitFromYAML(
 // ============================================================================
 
 function getGoFieldType(
-  category: PropertyCategory,
-  isOptional: boolean,
+  field: FieldDecl,
   polymorphicTypeNames: Set<string>,
-  enumName?: string | null,
 ): string {
+  const { category, isOptional, enumName } = field;
+  const lowering = resolveFieldLowering(
+    field,
+    loweringCapabilitiesForTarget("go", polymorphicTypeNames),
+  );
   // Named enum — use enum type alias
   if (enumName) {
     return isOptional ? `*${enumName}` : enumName;
@@ -1986,8 +2142,7 @@ function getGoFieldType(
       return isOptional ? `*${goType}` : goType;
     }
     case "complex": {
-      const isPolymorphic = polymorphicTypeNames.has(category.typeName);
-      if (isPolymorphic) {
+      if (lowering.storage === "value-backed") {
         // Polymorphic complex: always interface{} (no pointer even for optional)
         return "interface{}";
       }
@@ -1998,8 +2153,7 @@ function getGoFieldType(
       return `[]${goType}`;
     }
     case "collection_complex": {
-      const isPolymorphic = polymorphicTypeNames.has(category.typeName);
-      if (isPolymorphic) {
+      if (lowering.collectionElementStorage === "value-backed") {
         return "[]interface{}";
       }
       return `[]${category.typeName}`;
@@ -2075,7 +2229,15 @@ function goFactoryParamType(typeStr: string): string {
       return "bool";
     case "int32":
       return "int32";
+    case "int8":
+    case "int16":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
+      return typeStr;
     case "int64":
+    case "safeint":
     case "integer":
       return "int64";
     case "float32":
@@ -2136,8 +2298,39 @@ function goMethodReturnType(returns: string): string {
 // Protocol interface emission
 // ============================================================================
 
+/** Split `A | B` on top-level bars only, so `Record<A | null>` stays one arm. */
+function splitTopLevelUnion(typeStr: string): string[] {
+  const arms: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < typeStr.length; i++) {
+    const ch = typeStr[i];
+    if (ch === "<" || ch === "(") depth++;
+    else if (ch === ">" || ch === ")") depth--;
+    else if (ch === "|" && depth === 0) {
+      arms.push(typeStr.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  arms.push(typeStr.slice(start).trim());
+  return arms;
+}
+
 /** Map a protocol type string to a Go type. */
-export function protocolGoType(typeStr: string, modelQualifier?: string): string {
+export function protocolGoType(
+  typeStr: string,
+  modelQualifier?: string,
+): string {
+  // Go has no union types. `X | null` is an optional X; any other union (e.g. an HTTP op's
+  // `Created | Error` response) widens to interface{}, as polymorphic results already do.
+  const arms = splitTopLevelUnion(typeStr);
+  if (arms.length > 1) {
+    const nonNull = arms.filter((arm) => arm !== "null");
+    if (nonNull.length === 1) {
+      return `*${protocolGoType(nonNull[0], modelQualifier)}`;
+    }
+    return "interface{}";
+  }
   // Handle nullable types
   if (typeStr.endsWith("?")) {
     const inner = typeStr.slice(0, -1);

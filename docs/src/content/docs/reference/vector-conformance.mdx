@@ -386,6 +386,63 @@ adapter happens to resolve synchronously still passes, so no discovery adapter
 needs a rewrite. To make a `@sync` operation async-capable, drop `@sync`; to keep
 `@sync`, make the adapter resolve synchronously.
 
+### Typed conformance entrypoints and the error channel
+
+A plain (undispatched) seam whose params and return are scalars, `@serializable`
+models, arrays of those models, or (params only) untyped carriers also gets a
+**typed** entrypoint — Rust `run_<seam>_conformance(&impl)`, Go
+`Run<Seam>Conformance(t, seam)`, TypeScript `run<Seam>Conformance(seam)`, Python
+`run_<seam>_conformance(seam)`, and so on. It calls your real seam implementation
+directly, with no adapter registry. For an `expectedError` vector, the operation
+must fail through the target's native error channel, and the failure message must
+contain the expected string. A success vector must not fail.
+
+| Target | Error channel on a seam operation (sync or async) |
+| --- | --- |
+| TypeScript / Python / C# / Java | a thrown exception (or a rejected awaitable) |
+| Go | the trailing `error` return: `(T, error)` |
+| Swift | `throws` |
+| Rust | `Result<T, Box<dyn std::error::Error + Send + Sync>>`, so an `Err` matches `expectedError` and an `Ok` matches `expected` |
+
+Rust `@sync` operations now use the same `Result<T, Box<dyn std::error::Error +
+Send + Sync>>` return type as async operations. Previously they returned a bare
+`T`, so the typed entrypoint skipped their `expectedError` vectors. **This is a
+breaking change for Rust implementers.** Change each `fn op(&self, ..) -> T` to
+`fn op(&self, ..) -> Result<T, Box<dyn std::error::Error + Send + Sync>>` and
+return `Ok(value)`. An `@optionalOperation @sync` operation keeps its default body
+and in-band return type (`Option<T>`, `()`, or `T`), matching Go. Optional
+operations are not part of the typed entrypoint.
+
+Typed per-interface `@dispatch` conformance uses the same error channel. Each
+dispatched test first resolves the implementation through the emitted resolver
+and fails if no implementation is attached for the discriminator value, so a
+missing route never passes as the expected error. For an `expectedError`
+vector, the test then invokes the resolved seam and asserts it fails through
+the native channel above. When `expectedError` is a string, the failure message
+must contain it; any other value only requires the operation to fail. Vectors
+that need the stringly runner's extra machinery (`requires`, `normalization`,
+delegated portability, an explicit `provider`, or `$file` / `$env` / `$json`
+input references) are still rejected at emit time on the typed `@dispatch`
+rail.
+
+Open dispatched seams have one additional completeness rule. When the
+discriminator model declares a `*` subtype, every generated provider requires a
+single `wildcard` implementation. Unknown third-party discriminator values route
+to that slot without rewriting the discriminator to `custom` or discarding the
+payload. Known values still route to their named typed slots. Typra guarantees
+the deterministic selection and lossless input carrier; the consumer supplies
+the wildcard business behavior once per runtime provider.
+
+:::caution[Breaking provider API migration]
+Generated open-dispatch providers no longer expose an optional `custom` slot.
+TypeScript, Python, Go, C#, Java, Rust, and Swift consumers must rename that
+attachment to `wildcard` and make it required/non-null according to the target's
+generated provider type, constructor, interface, trait, or protocol. Closed
+providers are unchanged. Open dispatches without a schema-declared `*` child
+retain their legacy unimplemented/skip behavior and do not gain a `wildcard`
+member.
+:::
+
 ## Collaborator injection seams
 
 Some operations do not run in isolation — they select a strategy per
@@ -479,6 +536,12 @@ An operation carrying a vector but absent from both lists raises a blocking
 outright (both when the config is loaded and by the gate itself). The verify
 summary reports `vector coverage: <covered>/<operations> covered, <waived>
 waived, <missing> missing`.
+
+Operations exercised by the emitted typed conformance entrypoint or typed
+`@dispatch` conformance are credited as `typed` / `dispatched` without an
+adapter, but only when an emit target actually emits that rail (normally one
+with `test-dir`); otherwise `vectors.json` records `typedConformance: false` (or
+`dispatchedConformance: false`) and those operations need an adapter or waiver.
 
 The config declares the runtime's *intent* — it is a consistency check, not proof
 that the named adapters exist. The generated conformance suite remains the real

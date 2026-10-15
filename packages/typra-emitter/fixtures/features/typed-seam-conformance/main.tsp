@@ -171,6 +171,36 @@ interface Assembler {
   reassemble(note: Note, options?: Record<unknown>): Note[];
 }
 
+// ---------------------------------------------------------------------------
+// Error-channel parity for `@sync` ops (typra#338): a plain seam whose op is
+// `@sync` and declares BOTH an `expected` and an `expectedError` vector. Every
+// other runtime already has an error channel on a sync op (Go `(T, error)`,
+// Swift `throws`, exceptions in TS/Python/C#/Java), so an `expectedError`
+// vector is asserted through the typed rail. Rust previously emitted a bare
+// `fn check(&self, ..) -> String`, so the typed entrypoint SKIPPED the error
+// vector; it now returns `Result<String, Box<dyn Error + Send + Sync>>` and the
+// entrypoint asserts `Err` (message contains the expected substring) / `Ok`.
+// ---------------------------------------------------------------------------
+
+@doc("Sync plain seam with an error channel: accepts non-empty input, rejects empty input.")
+interface Checker {
+  @vector(#{
+    name: "check-accepts",
+    stage: "callable",
+    input: #{ text: "ok" },
+    expected: "ok",
+  })
+  @vector(#{
+    name: "check-rejects-empty",
+    stage: "callable",
+    input: #{ text: "" },
+    expectedError: "empty input rejected",
+  })
+  @sync
+  @doc("Return the input unchanged, or fail with `empty input rejected` when it is empty.")
+  check(text: string): string;
+}
+
 @doc("Fixture root aggregating the plain-seam graph.")
 @serializable
 model Root {

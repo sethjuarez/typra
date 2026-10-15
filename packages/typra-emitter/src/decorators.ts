@@ -68,6 +68,59 @@ export interface SampleEntry {
   description?: string;
 }
 
+/**
+ * The `@encodedName("application/json", ...)` wire key declared on a property, read
+ * from its decorator list so the result is independent of decorator execution order
+ * (`@sample` may run before `@encodedName`). Other mime types do not affect the
+ * canonical key.
+ */
+export function jsonEncodedNameFromDecorators(
+  target: ModelProperty,
+): string | undefined {
+  let encoded: string | undefined;
+  for (const application of target.decorators ?? []) {
+    if (application.decorator?.name !== "$encodedName") continue;
+    const [mime, name] = application.args ?? [];
+    if (
+      mime?.jsValue === "application/json" &&
+      typeof name?.jsValue === "string"
+    ) {
+      encoded = name.jsValue;
+    }
+  }
+  return encoded;
+}
+
+/**
+ * The nearest ancestor property that `target` overrides (same name on a base model),
+ * whose canonical key `target` inherits when it does not declare its own JSON
+ * `@encodedName`.
+ */
+export function overriddenBaseProperty(
+  target: ModelProperty,
+): ModelProperty | undefined {
+  for (let base = target.model?.baseModel; base; base = base.baseModel) {
+    const inherited = base.properties.get(target.name);
+    if (inherited) return inherited;
+  }
+  return undefined;
+}
+
+/** {@link jsonEncodedNameFromDecorators}, inherited from an overridden base property. */
+function inheritedJsonEncodedName(target: ModelProperty): string | undefined {
+  const visited = new Set<ModelProperty>();
+  for (
+    let current: ModelProperty | undefined = target;
+    current && !visited.has(current);
+    current = overriddenBaseProperty(current)
+  ) {
+    visited.add(current);
+    const own = jsonEncodedNameFromDecorators(current);
+    if (own !== undefined) return own;
+  }
+  return undefined;
+}
+
 export function $sample(
   context: DecoratorContext,
   target: ModelProperty,
@@ -106,10 +159,11 @@ export function $sample(
     s = sample as object;
   }
 
-  if (!s.hasOwnProperty(target.name)) {
+  const sampleKey = inheritedJsonEncodedName(target) ?? target.name;
+  if (!s.hasOwnProperty(sampleKey)) {
     context.program.reportDiagnostic({
       code: "typra-emitter-sample-name-mismatch",
-      message: `Sample object must have a property named '${target.name}' to match the target property.`,
+      message: `Sample object must have a property named '${sampleKey}' to match the target property.`,
       severity: "error",
       target: target,
     });
@@ -707,7 +761,6 @@ export function $defaultFor(
 // ============================================================================
 // Protocol decorator
 // ============================================================================
-
 
 // ============================================================================
 // Dispatch decorator (@dispatch)

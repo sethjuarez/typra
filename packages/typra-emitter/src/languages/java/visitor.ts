@@ -9,6 +9,7 @@ import {
 import { assertNever, ExprVisitor } from "../../ir/visitor.js";
 import {
   javaEnumTypeName,
+  javaIntegralScalar,
   javaPropertyName,
   javaTypeName,
 } from "./identifiers.js";
@@ -89,7 +90,7 @@ export class JavaExprVisitor implements ExprVisitor {
   }
 
   private numberLiteral(value: number, typeName: string): string {
-    if (typeName === "int64") return `${value}L`;
+    if (javaIntegralScalar(typeName) === "int64") return `${value}L`;
     if (typeName === "float32")
       return `${Number.isInteger(value) ? `${value}.0` : value}f`;
     if (["number", "float", "numeric", "float64"].includes(typeName)) {

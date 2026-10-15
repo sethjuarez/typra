@@ -13,6 +13,7 @@ import {
 } from "../../ir/expansion.js";
 import { ExprVisitor, assertNever } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
+import { rustEnumVariantName } from "./identifiers.js";
 
 const RUST_KEYWORDS = new Set([
   "as",
@@ -116,8 +117,7 @@ export class RustExprVisitor implements ExprVisitor {
             (p) => p.name === f.propertyName,
           );
           if (prop?.enumName) {
-            const variantName =
-              f.value.value.charAt(0).toUpperCase() + f.value.value.slice(1);
+            const variantName = rustEnumVariantName(f.value.value);
             const enumVal = `${prop.enumName}::${variantName}`;
             val = f.isOptional ? `Some(${enumVal})` : enumVal;
           }

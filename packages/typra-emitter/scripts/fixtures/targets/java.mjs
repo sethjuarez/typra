@@ -28,8 +28,13 @@ import {
   propertyCorpusJsonLiteral,
 } from "../conformance.mjs";
 
-export function runJavaBuild() {
-  runJavaTargetBuild("java", "Generated Java source build");
+export function runJavaBuild(
+  sourceDir = path.join(generatedRoot, "java"),
+) {
+  if (typeof sourceDir !== "string") {
+    sourceDir = path.join(generatedRoot, "java");
+  }
+  runJavaTargetBuild("java", "Generated Java source build", "", sourceDir);
 }
 
 export function runJavaJacksonBuild() {
@@ -42,8 +47,12 @@ export function runJavaJacksonBuild() {
   );
 }
 
-export function runJavaTargetBuild(targetDir, label, classpath = "") {
-  const sourceDir = path.join(generatedRoot, targetDir);
+export function runJavaTargetBuild(
+  targetDir,
+  label,
+  classpath = "",
+  sourceDir = path.join(generatedRoot, targetDir),
+) {
   const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".java"));
   if (sourceFiles.length === 0) {
     fail(`No generated Java files found to build for ${targetDir}.`);
@@ -72,8 +81,20 @@ export function runJavaTargetBuild(targetDir, label, classpath = "") {
   }
 }
 
-export function runJavaGeneratedTests() {
-  runJavaTargetGeneratedTests("java", "Generated Java tests");
+export function runJavaGeneratedTests(
+  sourceDir = path.join(generatedRoot, "java"),
+  packageName = "typra.fixtures",
+) {
+  if (typeof sourceDir !== "string") {
+    sourceDir = path.join(generatedRoot, "java");
+  }
+  runJavaTargetGeneratedTests(
+    "java",
+    "Generated Java tests",
+    "",
+    sourceDir,
+    packageName,
+  );
 }
 
 export function runJavaJacksonGeneratedTests() {
@@ -86,8 +107,13 @@ export function runJavaJacksonGeneratedTests() {
   );
 }
 
-export function runJavaTargetGeneratedTests(targetDir, label, classpath = "") {
-  const sourceDir = path.join(generatedRoot, targetDir);
+export function runJavaTargetGeneratedTests(
+  targetDir,
+  label,
+  classpath = "",
+  sourceDir = path.join(generatedRoot, targetDir),
+  packageName = "typra.fixtures",
+) {
   const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".java"));
   const classesDir = path.join(sourceDir, ".classes");
   const runnerPath = path.join(sourceDir, "TypraGeneratedTestsValidation.java");
@@ -121,7 +147,7 @@ export function runJavaTargetGeneratedTests(targetDir, label, classpath = "") {
   writeFileSync(
     runnerPath,
     [
-      "package typra.fixtures;",
+      `package ${packageName};`,
       "",
       "public final class TypraGeneratedTestsValidation {",
       "  private TypraGeneratedTestsValidation() { }",
@@ -168,7 +194,7 @@ export function runJavaTargetGeneratedTests(targetDir, label, classpath = "") {
         [
           "-cp",
           javaRuntimeClasspath(classesDir, classpath),
-          "typra.fixtures.TypraGeneratedTestsValidation",
+          `${packageName}.TypraGeneratedTestsValidation`,
         ],
         { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
       );
@@ -179,11 +205,16 @@ export function runJavaTargetGeneratedTests(targetDir, label, classpath = "") {
     const failed = new Set(
       [...output.matchAll(/^FAIL\s+(\S+)/gm)].map((match) => match[1]),
     );
-    assertKnownTestFailures(targetDir, failed, KNOWN_TEST_FAILURES[targetDir], {
-      crashed,
-      output,
-      crashMessage: `${label} failed to build or run`,
-    });
+    assertKnownTestFailures(
+      targetDir,
+      failed,
+      KNOWN_TEST_FAILURES[targetDir] ?? new Map(),
+      {
+        crashed,
+        output,
+        crashMessage: `${label} failed to build or run`,
+      },
+    );
   } catch (error) {
     const output =
       `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();

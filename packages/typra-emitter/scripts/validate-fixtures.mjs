@@ -50,11 +50,12 @@ import {
 import {
   runGoExecutableConformance,
   runGoTests,
+  runGoFocusedFixturesBuild,
   runGoVectorBridgeCompile,
   runGoVectorConformanceCompile,
 } from "./fixtures/targets/go.mjs";
 import {
-  runRustDispatchRegressionCompile,
+  runDispatchRegressionCrossTarget,
   runRustExecutableConformance,
   runRustSerializableClosureCompile,
   runRustSensitiveNeverLoadedCompile,
@@ -131,10 +132,11 @@ const EXPECTED_VALIDATION_STAGE_IDS = [
   "python_pydantic.generated-tests",
   "python.vector-conformance-compile",
   "go.generated-tests",
+  "go.focused-fixtures-build",
   "go.vector-bridge-compile",
   "go.vector-conformance-compile",
   "rust.generated-tests",
-  "rust.dispatch-regression-compile",
+  "dispatch-regression.cross-target",
   "rust.vector-conformance-compile",
   "rust.serializable-closure-compile",
   "rust.sensitive-never-loaded-compile",
@@ -721,6 +723,9 @@ function assertFocusedFeatureFixtures() {
     "features/polymorphism/main.tsp",
     "features/protocols/main.tsp",
     "features/wire/main.tsp",
+    "features/encoded-name/main.tsp",
+    "features/nullable/main.tsp",
+    "features/additional-properties/main.tsp",
     "features/transport/main.tsp",
     "features/dispatch/main.tsp",
     "features/dispatch-union-coerce/main.tsp",
@@ -828,6 +833,63 @@ function assertFocusedFeatureFixtures() {
             `Focused vectors fixture did not preserve expected vector payload: ${expected}`,
           );
         }
+      }
+    }
+
+    if (featureName === "nullable") {
+      // Issue #339: `x: T | null` is a required key whose value may be null,
+      // distinct from `x?: T` (omitted when unset). The IR must record both
+      // flags so every runtime can require the key on load and always write it.
+      const row = (model.properties ?? []).find(
+        (field) => field.name === "row",
+      )?.type;
+      const flags = Object.fromEntries(
+        (row?.properties ?? []).map((field) => [
+          field.name,
+          `${field.isOptional ? "optional" : "required"}${field.isNullable ? "+nullable" : ""}`,
+        ]),
+      );
+      const expected = {
+        caption: "required+nullable",
+        count: "required+nullable",
+        mood: "required+nullable",
+        detail: "required+nullable",
+        tags: "required+nullable",
+        details: "required+nullable",
+        labels: "required+nullable",
+        note: "optional",
+        hint: "optional+nullable",
+      };
+      if (JSON.stringify(flags) !== JSON.stringify(expected)) {
+        fail(
+          `Nullable fixture must preserve required/optional + nullable flags in the IR.\n` +
+            `  expected: ${JSON.stringify(expected)}\n  actual:   ${JSON.stringify(flags)}`,
+        );
+      }
+    }
+
+    if (featureName === "additional-properties") {
+      // Issue #336: a model whose string indexer is `unknown` passes undeclared
+      // fields through load and save. The IR must flag every such model (spread,
+      // `is Record<unknown>`, and a polymorphic base) and leave plain models alone.
+      const flags = Object.fromEntries(
+        (model.properties ?? []).map((field) => [
+          field.name,
+          field.type?.additionalProperties === true,
+        ]),
+      );
+      const expected = {
+        row: true,
+        bag: true,
+        plain: false,
+        event: true,
+        events: true,
+      };
+      if (JSON.stringify(flags) !== JSON.stringify(expected)) {
+        fail(
+          `Additional-properties fixture must flag Record<unknown> passthrough models in the IR.\n` +
+            `  expected: ${JSON.stringify(expected)}\n  actual:   ${JSON.stringify(flags)}`,
+        );
       }
     }
 
@@ -1897,7 +1959,13 @@ function assertStaticFixtureCoverage() {
   // filled or waived-with-reason.
   // ---------------------------------------------------------------------------
   const wireOptionsTestFiles = {
-    go: path.join("generated", "fixtures", "go", "tests", "wire_options_test.go"),
+    go: path.join(
+      "generated",
+      "fixtures",
+      "go",
+      "tests",
+      "wire_options_test.go",
+    ),
     java: path.join(
       "generated",
       "fixtures",
@@ -1986,7 +2054,10 @@ function assertStaticFixtureCoverage() {
     negativeInput: {
       go: ["func TestWireOptionsFromJSONInvalid", 'WireOptionsFromJSON("{")'],
       java: ['assertThrows(() -> WireOptions.fromJson("{")'],
-      python: ["def test_load_wireoptions_invalid", "WireOptions.load(object())"],
+      python: [
+        "def test_load_wireoptions_invalid",
+        "WireOptions.load(object())",
+      ],
       typescript: ["should reject malformed JSON", 'WireOptions.fromJson("{")'],
       csharp: ["public void RejectsMalformedJson", 'WireOptions.FromJson("{")'],
       rust: [
@@ -2754,6 +2825,11 @@ function runDeclaredValidationStages() {
       ],
       ["go.generated-tests", runGoTests],
       [
+        "go.focused-fixtures-build",
+        (context) =>
+          runGoFocusedFixturesBuild(context, findFocusedFeatureFixtures()),
+      ],
+      [
         "go.vector-bridge-compile",
         (context) => runGoVectorBridgeCompile(context),
       ],
@@ -2763,8 +2839,8 @@ function runDeclaredValidationStages() {
       ],
       ["rust.generated-tests", () => runRustTests()],
       [
-        "rust.dispatch-regression-compile",
-        (context) => runRustDispatchRegressionCompile(context),
+        "dispatch-regression.cross-target",
+        (context) => runDispatchRegressionCrossTarget(context),
       ],
       [
         "rust.vector-conformance-compile",
@@ -2825,10 +2901,11 @@ function runDeclaredValidationStages() {
     allowedSkips: {
       ...idempotencyAllowedSkips(),
       "typescript.runtime-neutrality": "no TypeScript targets generated",
-      "rust.dispatch-regression-compile": "cargo is not available",
+      "dispatch-regression.cross-target": "cargo is not available",
       "rust.vector-conformance-compile": "cargo is not available",
       "rust.serializable-closure-compile": "cargo is not available",
       "rust.sensitive-never-loaded-compile": "cargo is not available",
+      "go.focused-fixtures-build": "go is not available",
       "go.vector-bridge-compile": "go is not available",
       "go.vector-conformance-compile": "go is not available",
       "python.vector-conformance-compile": "uv is not available",

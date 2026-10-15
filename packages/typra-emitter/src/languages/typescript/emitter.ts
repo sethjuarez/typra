@@ -43,8 +43,11 @@ import {
   PropertyCategory,
   WireDecl,
   isClosedPolymorphicDispatch,
+  assignmentWireKey,
+  discriminatorWireKey,
 } from "../../ir/declarations.js";
 import {
+  isRequiredNullable,
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
@@ -52,9 +55,11 @@ import {
 import {
   orderedEntryShorthandCases,
   entryShorthandTarget,
+  isIntegralScalar,
   scalarRuntimeKind,
 } from "../../ir/scalar-kinds.js";
 import { ExprVisitor } from "../../ir/visitor.js";
+import { inheritedRequiredNullableAssignments } from "../../ir/inheritance.js";
 import { toKebabCase } from "../../ir/utilities.js";
 
 export interface TypeScriptEmitterOptions {
@@ -69,6 +74,13 @@ const TYPE_MAP: Record<string, string> = {
   boolean: "boolean",
   int32: "number",
   int64: "number",
+  int8: "number",
+  int16: "number",
+  safeint: "number",
+  uint8: "number",
+  uint16: "number",
+  uint32: "number",
+  uint64: "number",
   float32: "number",
   float64: "number",
   number: "number",
@@ -96,6 +108,13 @@ function typeofCheck(scalarType: string): string | null {
       return "boolean";
     case "int32":
     case "int64":
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "float32":
     case "float64":
     case "number":
@@ -197,7 +216,6 @@ export function emitTypeScriptFile(
     } else {
       lines.push(`export type ${enumDef.name} = ${values};`);
     }
-
   }
   if (decl.enums.length > 0) {
     lines.push("");
@@ -215,7 +233,55 @@ export function emitTypeScriptFile(
     lines.push("");
   }
 
+  if (
+    emitZod &&
+    decl.types.some((type) => type.serialized && type.additionalProperties)
+  ) {
+    emitZodProtoKeyHelper(lines);
+  }
+
   return lines.join("\n") + "\n";
+}
+
+/**
+ * Zod's `.passthrough()` silently drops an own `__proto__` key, so a passthrough
+ * model's wire schema validates with its object schema and then restores that
+ * key as own data on the parsed result (#336).
+ */
+function emitZodProtoKeyHelper(lines: string[]): void {
+  lines.push(
+    ...[
+      "/** Validates with `schema`, then restores an own `__proto__` key that zod's `.passthrough()` drops. */",
+      "function typraKeepProtoKey(",
+      "  schema: z.ZodTypeAny,",
+      "): z.ZodType<Record<string, unknown>> {",
+      "  return z.any().transform((value, ctx) => {",
+      "    const parsed = schema.safeParse(value);",
+      "    if (!parsed.success) {",
+      "      for (const issue of parsed.error.issues) {",
+      "        ctx.addIssue(issue);",
+      "      }",
+      "      return z.NEVER;",
+      "    }",
+      "    const data = parsed.data as Record<string, unknown>;",
+      "    if (",
+      "      value !== null &&",
+      '      typeof value === "object" &&',
+      '      Object.prototype.hasOwnProperty.call(value, "__proto__")',
+      "    ) {",
+      '      Object.defineProperty(data, "__proto__", {',
+      '        value: (value as Record<string, unknown>)["__proto__"],',
+      "        enumerable: true,",
+      "        writable: true,",
+      "        configurable: true,",
+      "      });",
+      "    }",
+      "    return data;",
+      "  });",
+      "}",
+      "",
+    ],
+  );
 }
 
 function relativeModulePath(
@@ -306,7 +372,7 @@ function emitType(
 
   // shorthandProperty static
   const shorthand = type.coercionProperty
-    ? `"${type.coercionProperty}"`
+    ? `${JSON.stringify(type.coercionProperty)}`
     : "undefined";
   lines.push(
     `  static readonly shorthandProperty: string | undefined = ${shorthand};`,
@@ -320,7 +386,9 @@ function emitType(
   for (const field of type.fields) {
     const annotation = tsTypeAnnotation(field);
     const defaultVal = tsDefaultValue(field);
-    if (field.isOptional) {
+    if (isRequiredNullable(field)) {
+      lines.push(`  ${field.name}: ${tsNullableAnnotation(field)} = null;`);
+    } else if (field.isOptional) {
       lines.push(`  ${field.name}?: ${annotation}${defaultVal};`);
     } else if (defaultVal === "" && field.category.kind === "complex") {
       // Required complex types without defaults need definite assignment assertion
@@ -334,10 +402,39 @@ function emitType(
     // separate subclass and has to populate this.
     lines.push("  protected raw: Record<string, unknown> = {};");
   }
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    lines.push(
+      "  /** Fields not declared by the schema, preserved verbatim across load/save (#336). */",
+    );
+    // A null-prototype dictionary keeps an unknown `__proto__` key as data
+    // instead of hitting Object.prototype's `__proto__` setter.
+    lines.push(
+      "  additionalProperties: Record<string, unknown> = Object.create(null);",
+    );
+  }
   lines.push("");
 
   if (absorbsUnknownValues(type.polymorphicDispatch)) {
     emitRawCloneMethod(lines);
+  }
+  if (type.additionalProperties) {
+    lines.push(
+      "  /** True when `key` is a declared wire key of this model (including inherited fields). */",
+    );
+    lines.push("  protected isKnownWireKey(key: string): boolean {");
+    // A switch stays formatter-stable regardless of how many keys there are.
+    lines.push("    switch (key) {");
+    for (const key of [...new Set(type.additionalProperties.knownWireKeys)]) {
+      lines.push(`      case ${JSON.stringify(key)}:`);
+    }
+    if (type.additionalProperties.knownWireKeys.length > 0) {
+      lines.push("        return true;");
+    }
+    lines.push("      default:");
+    lines.push("        return false;");
+    lines.push("    }");
+    lines.push("  }");
+    lines.push("");
   }
 
   // Constructor
@@ -351,7 +448,7 @@ function emitType(
     lines.push("");
 
     // load() static method
-    emitLoadMethod(type, lines);
+    emitLoadMethod(type, lines, allTypes);
 
     // Polymorphic dispatch
     if (type.polymorphicDispatch) {
@@ -488,7 +585,7 @@ function emitUnknownCarrier(type: TypeDecl, lines: string[]): void {
     `    instance.raw = ${parentName}.cloneRawValue(data) as Record<string, unknown>;`,
   );
   for (const a of type.load.assignments) {
-    lines.push(`    delete instance.raw["${a.sourceName}"];`);
+    lines.push(`    delete instance.raw[${JSON.stringify(a.sourceName)}];`);
   }
   lines.push("    return instance;");
   lines.push("  }");
@@ -576,6 +673,11 @@ function emitZodSchemas(
 }
 
 function zodWireSchemaExpression(type: TypeDecl): string {
+  const schema = zodWireSchemaBody(type);
+  return type.additionalProperties ? `typraKeepProtoKey(${schema})` : schema;
+}
+
+function zodWireSchemaBody(type: TypeDecl): string {
   const dispatch = type.polymorphicDispatch;
   if (!dispatch || dispatch.variants.length === 0) {
     return `${type.typeName.name}.wireObjectSchema`;
@@ -587,7 +689,7 @@ function zodWireSchemaExpression(type: TypeDecl): string {
   const knownSchema =
     dispatch.variants.length === 1
       ? variantSchemas
-      : `z.discriminatedUnion("${dispatch.discriminatorField}", [${variantSchemas}])`;
+      : `z.discriminatedUnion(${JSON.stringify(discriminatorWireKey(dispatch))}, [${variantSchemas}])`;
 
   if (isClosedPolymorphicDispatch(dispatch)) {
     return knownSchema;
@@ -598,7 +700,7 @@ function zodWireSchemaExpression(type: TypeDecl): string {
       ? `${dispatch.defaultVariant.typeName.name}.wireObjectSchema`
       : `${type.typeName.name}.wireObjectSchema.passthrough()`;
   const knownValues = `[${dispatch.variants.map((variant) => JSON.stringify(variant.value)).join(", ")}]`;
-  const guardedFallback = `${fallback}.refine(data => !${knownValues}.includes(String((data as Record<string, unknown>)["${dispatch.discriminatorField}"])), { message: "Known ${dispatch.discriminatorField} discriminator values must match their concrete schema." })`;
+  const guardedFallback = `${fallback}.refine(data => !${knownValues}.includes(String((data as Record<string, unknown>)[${JSON.stringify(discriminatorWireKey(dispatch))}])), { message: "Known ${dispatch.discriminatorField} discriminator values must match their concrete schema." })`;
   return `z.union([${knownSchema}, ${guardedFallback}])`;
 }
 
@@ -611,14 +713,15 @@ function zodObjectExpression(
     .filter((a) => a.fieldName !== omitField)
     .map(
       (a) =>
-        `    "${a.targetName}": ${zodFieldSchema(type, a, allTypes)}${a.isOptional ? ".optional()" : ""},`,
+        `    ${JSON.stringify(a.targetName)}: ${zodFieldSchema(type, a, allTypes)}${isRequiredNullable(a) ? ".nullable()" : a.isOptional && type.fields.find((f) => f.name === a.fieldName)?.isOptionalNullable ? ".nullable().optional()" : a.isOptional ? ".optional()" : ""},`,
     );
   const objectBody =
     entries.length > 0 ? `{\n${entries.join("\n")}\n  }` : "{}";
   const object = type.base
     ? `${type.base.name}.${omitField === "name" ? "wireObjectSchemaWithoutName" : "wireObjectSchema"}.extend(${objectBody})`
     : `z.object(${objectBody})`;
-  return absorbsUnknownValues(type.polymorphicDispatch)
+  return absorbsUnknownValues(type.polymorphicDispatch) ||
+    type.additionalProperties
     ? `${object}.passthrough()`
     : object;
 }
@@ -828,6 +931,11 @@ function tsTypeAnnotation(f: FieldDecl): string {
   }
 }
 
+/** `T | null` for a required nullable field (#339): the key is always present. */
+function tsNullableAnnotation(f: FieldDecl): string {
+  return `${tsTypeAnnotation({ ...f, isOptional: false })} | null`;
+}
+
 function tsRecordValueType(valueType: string | undefined): string {
   if (!valueType || valueType === "unknown") return "unknown";
   return TYPE_MAP[valueType] || valueType;
@@ -889,6 +997,13 @@ function tsScalarDefault(
     case "number":
     case "int32":
     case "int64":
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "float32":
     case "float64":
     case "integer":
@@ -953,6 +1068,14 @@ function emitConstructor(type: TypeDecl, lines: string[]): void {
     }
   }
 
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    lines.push("    if (init?.additionalProperties !== undefined) {");
+    lines.push(
+      "      this.additionalProperties = Object.assign(Object.create(null), init.additionalProperties);",
+    );
+    lines.push("    }");
+  }
+
   lines.push("  }");
   lines.push("");
 }
@@ -976,6 +1099,13 @@ function tsConstructorDefault(
     case "number":
     case "int32":
     case "int64":
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "float32":
     case "float64":
     case "integer":
@@ -991,7 +1121,11 @@ function tsConstructorDefault(
 // load() method
 // ============================================================================
 
-function emitLoadMethod(type: TypeDecl, lines: string[]): void {
+function emitLoadMethod(
+  type: TypeDecl,
+  lines: string[],
+  allTypes: TypeDecl[],
+): void {
   const name = type.typeName.name;
 
   lines.push(
@@ -1015,16 +1149,39 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
 
   lines.push("");
 
+  // Derived loaders do not load inherited fields, so guard inherited required
+  // nullable keys here too; base dispatch re-checks them harmlessly.
+  for (const a of inheritedRequiredNullableAssignments(type, allTypes)) {
+    lines.push(
+      `    if (data[${JSON.stringify(a.sourceName)}] === undefined) {`,
+    );
+    lines.push(
+      `      throw new Error(\`\${context.at(${JSON.stringify(a.sourceName)}).path}: missing required field\`);`,
+    );
+    lines.push("    }");
+  }
+
   for (const a of type.load.assignments) {
     const field = type.fields.find(
       (candidate) => candidate.name === a.fieldName,
     );
+    if (isRequiredNullable(a)) {
+      // Required nullable (#339): the key must be present; an explicit null is accepted.
+      lines.push(
+        `    if (data[${JSON.stringify(a.sourceName)}] === undefined) {`,
+      );
+      lines.push(
+        `      throw new Error(\`\${context.at(${JSON.stringify(a.sourceName)}).path}: missing required field\`);`,
+      );
+      lines.push("    }");
+      continue;
+    }
     if (!shouldGuardMissingRequiredField(field)) continue;
     lines.push(
-      `    if (data["${a.sourceName}"] === undefined || data["${a.sourceName}"] === null) {`,
+      `    if (data[${JSON.stringify(a.sourceName)}] === undefined || data[${JSON.stringify(a.sourceName)}] === null) {`,
     );
     lines.push(
-      `      throw new Error(\`\${context.at("${a.sourceName}").path}: missing required field\`);`,
+      `      throw new Error(\`\${context.at(${JSON.stringify(a.sourceName)}).path}: missing required field\`);`,
     );
     lines.push("    }");
   }
@@ -1042,7 +1199,7 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
   // Per-property assignments
   for (const a of type.load.assignments) {
     lines.push(
-      `    if (data["${a.sourceName}"] !== undefined && data["${a.sourceName}"] !== null) {`,
+      `    if (data[${JSON.stringify(a.sourceName)}] !== undefined && data[${JSON.stringify(a.sourceName)}] !== null) {`,
     );
     lines.push(`      ${emitLoadAssignment(a)}`);
     lines.push("    }");
@@ -1053,6 +1210,17 @@ function emitLoadMethod(type: TypeDecl, lines: string[]): void {
     lines.push(
       `      instance.raw = ${name}.cloneRawValue(data) as Record<string, unknown>;`,
     );
+    lines.push("    }");
+  }
+  if (type.additionalProperties) {
+    // Every undeclared key is captured; a base loader re-captures after variant
+    // dispatch, and `isKnownWireKey` is the instance's own (variant) key set.
+    lines.push("");
+    lines.push("    instance.additionalProperties = Object.create(null);");
+    lines.push("    for (const [key, value] of Object.entries(data)) {");
+    lines.push("      if (!instance.isKnownWireKey(key)) {");
+    lines.push("        instance.additionalProperties[key] = value;");
+    lines.push("      }");
     lines.push("    }");
   }
 
@@ -1070,9 +1238,9 @@ function emitLoadAssignment(a: LoadAssignment): string {
   // Named enum — cast string to enum type alias
   if (a.enumName && a.allowedValues.length > 0) {
     if (Object.keys(a.parseAliases).length > 0) {
-      return `instance.${a.fieldName} = ${enumParserName(a.enumName)}(data["${a.sourceName}"]);`;
+      return `instance.${a.fieldName} = ${enumParserName(a.enumName)}(data[${JSON.stringify(a.sourceName)}]);`;
     }
-    return `instance.${a.fieldName} = String(data["${a.sourceName}"]) as ${a.enumName};`;
+    return `instance.${a.fieldName} = String(data[${JSON.stringify(a.sourceName)}]) as ${a.enumName};`;
   }
   const cat = a.category;
   switch (cat.kind) {
@@ -1080,32 +1248,32 @@ function emitLoadAssignment(a: LoadAssignment): string {
       const tsType = TYPE_MAP[cat.scalarType];
       switch (tsType) {
         case "string":
-          return `instance.${a.fieldName} = String(data["${a.sourceName}"]);`;
+          return `instance.${a.fieldName} = String(data[${JSON.stringify(a.sourceName)}]);`;
         case "number":
-          return `instance.${a.fieldName} = Number(data["${a.sourceName}"]);`;
+          return `instance.${a.fieldName} = Number(data[${JSON.stringify(a.sourceName)}]);`;
         case "boolean":
-          return `instance.${a.fieldName} = Boolean(data["${a.sourceName}"]);`;
+          return `instance.${a.fieldName} = Boolean(data[${JSON.stringify(a.sourceName)}]);`;
         default:
-          return `instance.${a.fieldName} = data["${a.sourceName}"] as ${tsType};`;
+          return `instance.${a.fieldName} = data[${JSON.stringify(a.sourceName)}] as ${tsType};`;
       }
     }
     case "complex":
-      return `instance.${a.fieldName} = ${cat.typeName}.load(data["${a.sourceName}"] as Record<string, unknown>, context.at("${a.sourceName}"));`;
+      return `instance.${a.fieldName} = ${cat.typeName}.load(data[${JSON.stringify(a.sourceName)}] as Record<string, unknown>, context.at(${JSON.stringify(a.sourceName)}));`;
     case "collection_scalar": {
       const tsType = TYPE_MAP[cat.scalarType];
       switch (tsType) {
         case "string":
-          return `instance.${a.fieldName} = (data["${a.sourceName}"] as unknown[]).map(v => String(v));`;
+          return `instance.${a.fieldName} = (data[${JSON.stringify(a.sourceName)}] as unknown[]).map(v => String(v));`;
         case "number":
-          return `instance.${a.fieldName} = (data["${a.sourceName}"] as unknown[]).map(v => Number(v));`;
+          return `instance.${a.fieldName} = (data[${JSON.stringify(a.sourceName)}] as unknown[]).map(v => Number(v));`;
         case "boolean":
-          return `instance.${a.fieldName} = (data["${a.sourceName}"] as unknown[]).map(v => Boolean(v));`;
+          return `instance.${a.fieldName} = (data[${JSON.stringify(a.sourceName)}] as unknown[]).map(v => Boolean(v));`;
         default:
-          return `instance.${a.fieldName} = data["${a.sourceName}"] as ${tsType}[];`;
+          return `instance.${a.fieldName} = data[${JSON.stringify(a.sourceName)}] as ${tsType}[];`;
       }
     }
     case "collection_complex":
-      return `instance.${a.fieldName} = ${a.parentTypeName}.load${capitalize(a.fieldName)}(data["${a.sourceName}"] as unknown[], context.at("${a.sourceName}"));`;
+      return `instance.${a.fieldName} = ${a.parentTypeName}.load${capitalize(a.fieldName)}(data[${JSON.stringify(a.sourceName)}] as unknown[], context.at(${JSON.stringify(a.sourceName)}));`;
     case "dict":
       return dictLoadAssignment(a.fieldName, a.sourceName, cat.valueType);
   }
@@ -1117,14 +1285,14 @@ function dictLoadAssignment(
   valueType: string | undefined,
 ): string {
   if (!valueType || valueType === "unknown") {
-    return `instance.${fieldName} = data["${sourceName}"] as Record<string, unknown>;`;
+    return `instance.${fieldName} = data[${JSON.stringify(sourceName)}] as Record<string, unknown>;`;
   }
   const valueExpr = dictValueLoadExpr(
     "value",
     valueType,
-    `context.at("${sourceName}").at(key)`,
+    `context.at(${JSON.stringify(sourceName)}).at(key)`,
   );
-  return `instance.${fieldName} = Object.fromEntries(Object.entries(data["${sourceName}"] as Record<string, unknown>).map(([key, value]) => [key, ${valueExpr}]));`;
+  return `instance.${fieldName} = Object.fromEntries(Object.entries(data[${JSON.stringify(sourceName)}] as Record<string, unknown>).map(([key, value]) => [key, ${valueExpr}]));`;
 }
 
 function dictValueLoadExpr(
@@ -1201,9 +1369,7 @@ function emitCoercionBranches(
 }
 
 function isIntegerScalar(scalarType: string): boolean {
-  return (
-    scalarType === "int32" || scalarType === "int64" || scalarType === "integer"
-  );
+  return isIntegralScalar(scalarType);
 }
 
 /**
@@ -1237,7 +1403,7 @@ function emitCoercionBody(
     // Dynamic discriminator — must go through dispatch
     const dictFields = c.assignments.map((a) => {
       const val = a.isInput ? "data" : `"${a.literalValue}"`;
-      return `"${a.fieldName}": ${val}`;
+      return `${JSON.stringify(assignmentWireKey(a))}: ${val}`;
     });
     lines.push(
       `${indent}return ${typeName}.loadKind({ ${dictFields.join(", ")} } as Record<string, unknown>, context);`,
@@ -1334,7 +1500,7 @@ function emitPolymorphicDispatch(
     `  private static loadKind(data: Record<string, unknown>, context?: LoadContext): ${parentName} {`,
   );
   lines.push(
-    `    const discriminatorValue = data["${dispatch.discriminatorField}"];`,
+    `    const discriminatorValue = data[${JSON.stringify(discriminatorWireKey(dispatch))}];`,
   );
   if (hasFallback) {
     lines.push(
@@ -1453,7 +1619,7 @@ function emitTsEntryShorthandArms(
     );
 
   if (!shorthand || shorthand.cases.length === 0) {
-    load(`{ name: k, "${shorthandField}": v }`);
+    load(`{ name: k, ${JSON.stringify(shorthandField)}: v }`);
     return;
   }
 
@@ -1463,15 +1629,20 @@ function emitTsEntryShorthandArms(
     const check = tsScalarValueCheck(entryCase.scalarType);
     if (!check) continue;
     const fields = entryCase.assignments
-      .map((a) => `"${a.fieldName}": ${JSON.stringify(a.literalValue)}`)
-      .concat(`"${shorthand.valueField}": v`)
+      .map(
+        (a) =>
+          `${JSON.stringify(a.fieldName)}: ${JSON.stringify(a.literalValue)}`,
+      )
+      .concat(`${JSON.stringify(shorthand.valueField)}: v`)
       .join(", ");
     lines.push(`          ${first ? "if" : "} else if"} (${check}) {`);
     lines.push(`            shorthand = { ${fields} };`);
     first = false;
   }
   lines.push("          } else {");
-  lines.push(`            shorthand = { "${shorthand.valueField}": v };`);
+  lines.push(
+    `            shorthand = { ${JSON.stringify(shorthand.valueField)}: v };`,
+  );
   lines.push("          }");
   load("{ name: k, ...shorthand }");
 }
@@ -1602,10 +1773,32 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
         `    if (obj.${a.fieldName} !== undefined && obj.${a.fieldName} !== null) {`,
       );
       lines.push(`      ${emitSaveAssignment(a)}`);
+      if (isRequiredNullable(a)) {
+        lines.push("    } else {");
+        lines.push(`      result[${JSON.stringify(a.targetName)}] = null;`);
+      }
       lines.push("    }");
     } else {
       lines.push(`    ${emitSaveAssignment(a)}`);
     }
+  }
+
+  if (type.additionalProperties && !type.additionalProperties.inherited) {
+    // Undeclared fields follow the declared ones; a declared wire key always wins.
+    lines.push("");
+    lines.push("    const extras = obj.additionalProperties ?? {};");
+    lines.push("    for (const [key, value] of Object.entries(extras)) {");
+    lines.push("      if (!obj.isKnownWireKey(key)) {");
+    // defineProperty makes `__proto__` an own enumerable key rather than a
+    // prototype assignment, so JSON/YAML output keeps it.
+    lines.push("        Object.defineProperty(result, key, {");
+    lines.push("          value,");
+    lines.push("          enumerable: true,");
+    lines.push("          writable: true,");
+    lines.push("          configurable: true,");
+    lines.push("        });");
+    lines.push("      }");
+    lines.push("    }");
   }
 
   // Context post-processing (only for root types without base)
@@ -1633,13 +1826,13 @@ function emitSaveAssignment(a: SaveAssignment): string {
         cat.valueType !== "unknown" &&
         !TYPE_MAP[cat.valueType]
       ) {
-        return `result["${a.targetName}"] = Object.fromEntries(Object.entries(obj.${a.fieldName}).map(([key, value]) => [key, value.save(context)]));`;
+        return `result[${JSON.stringify(a.targetName)}] = Object.fromEntries(Object.entries(obj.${a.fieldName}).map(([key, value]) => [key, value.save(context)]));`;
       }
-      return `result["${a.targetName}"] = obj.${a.fieldName};`;
+      return `result[${JSON.stringify(a.targetName)}] = obj.${a.fieldName};`;
     case "collection_complex":
-      return `result["${a.targetName}"] = ${a.parentTypeName}.save${capitalize(a.fieldName)}(obj.${a.fieldName}, context);`;
+      return `result[${JSON.stringify(a.targetName)}] = ${a.parentTypeName}.save${capitalize(a.fieldName)}(obj.${a.fieldName}, context);`;
     case "complex":
-      return `result["${a.targetName}"] = obj.${a.fieldName}.save(context);`;
+      return `result[${JSON.stringify(a.targetName)}] = obj.${a.fieldName}.save(context);`;
   }
 }
 
@@ -1657,9 +1850,14 @@ function emitToWireMethod(type: TypeDecl, lines: string[]): void {
 
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames)
-      .map(([prov, wireName]) => `"${prov}": "${wireName}"`)
+      .map(
+        ([prov, wireName]) =>
+          `${JSON.stringify(prov)}: ${JSON.stringify(wireName)}`,
+      )
       .join(", ");
-    lines.push(`      "${mapping.fieldName}": { ${entries} },`);
+    lines.push(
+      `      ${JSON.stringify(assignmentWireKey(mapping))}: { ${entries} },`,
+    );
   }
 
   lines.push("    };");
@@ -1688,9 +1886,14 @@ function emitFromWireMethod(
 
   for (const mapping of wire.mappings) {
     const entries = Object.entries(mapping.wireNames)
-      .map(([prov, wireName]) => `"${prov}": "${wireName}"`)
+      .map(
+        ([prov, wireName]) =>
+          `${JSON.stringify(prov)}: ${JSON.stringify(wireName)}`,
+      )
       .join(", ");
-    lines.push(`      "${mapping.fieldName}": { ${entries} },`);
+    lines.push(
+      `      ${JSON.stringify(assignmentWireKey(mapping))}: { ${entries} },`,
+    );
   }
 
   lines.push("    };");

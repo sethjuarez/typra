@@ -14,6 +14,11 @@ import { lowerFile } from "../src/ir/lower.js";
 import { emitRustFile } from "../src/languages/rust/emitter.js";
 import { disambiguateGlobReexports } from "../src/languages/rust/driver.js";
 import { RustExprVisitor } from "../src/languages/rust/visitor.js";
+import {
+  rustEnumVariantName,
+  assertDistinctRustVariants,
+} from "../src/languages/rust/identifiers.js";
+import { rustTestOptions } from "../src/testing/test-context.js";
 
 interface PropOptions {
   isScalar?: boolean;
@@ -310,8 +315,13 @@ function emitValueBackedVariantOwner(): string {
   );
   const base = makeType(
     "Prop",
-    [makeProp("kind", "string", { isScalar: true })],
-    { discriminator: "kind", childTypes: [arrayVariant] },
+    [
+      makeProp("kind", "string", {
+        isScalar: true,
+        allowedValues: ["array"],
+      }),
+    ],
+    { discriminator: "kind", childTypes: [arrayVariant], isAbstract: true },
   );
 
   const registry = TypeRegistry.fromTypeGraph([base, arrayVariant]);
@@ -324,6 +334,13 @@ function emitValueBackedVariantOwner(): string {
 }
 
 describe("rust emitter — optional serde_json::Value fields", () => {
+  it("defaults an optional polymorphic variant field to None", () => {
+    const code = emitValueBackedVariantOwner();
+
+    assert.match(code, /fallback_items: None/);
+    assert.doesNotMatch(code, /fallback_items: serde_json::Value::Null/);
+  });
+
   it("declares an optional polymorphic variant field as Option<serde_json::Value>", () => {
     const code = emitValueBackedVariantOwner();
 
@@ -335,7 +352,9 @@ describe("rust emitter — optional serde_json::Value fields", () => {
       "an optional polymorphic variant field must be declared Option<serde_json::Value>",
     );
     assert.ok(
-      /fallback_items: value\.get\("fallbackItems"\)\.cloned\(\),/.test(code),
+      /fallback_items: value\.get\("fallbackItems"\)\.filter\(\|v\| !v\.is_null\(\)\)\.cloned\(\),/.test(
+        code,
+      ),
       "an optional polymorphic variant field must load without an unwrap_or(Null) fallback",
     );
     assert.ok(
@@ -359,7 +378,7 @@ describe("rust emitter — optional serde_json::Value fields", () => {
       "a required polymorphic variant field must not be wrapped in Option",
     );
     assert.ok(
-      /items: value\.get\("items"\)\.cloned\(\)\.unwrap_or\(serde_json::Value::Null\),/.test(
+      /items: value\.get\("items"\)\.filter\(\|v\| !v\.is_null\(\)\)\.cloned\(\)\.unwrap_or\(serde_json::Value::Null\),/.test(
         code,
       ),
       "a required polymorphic variant field must keep its Null sentinel on load",
@@ -783,6 +802,154 @@ describe("disambiguateGlobReexports", () => {
         { name: "aggregates", exposes: ["pipeline"] },
       ]),
       ["pub use aggregates::pipeline;"],
+    );
+  });
+});
+
+describe("rust emitter — typed scalar arrays (#341)", () => {
+  function emitArrays(scalarTypes: string[]): string {
+    const fields = scalarTypes.map((scalarType) => ({
+      ...scalarField(`items_${scalarType}`, scalarType, false),
+      category: { kind: "collection_scalar", scalarType },
+    })) as unknown as FieldDecl[];
+    const type = {
+      typeName: { namespace: "Test", name: "Arrays" },
+      base: null,
+      isAbstract: false,
+      isProtocol: false,
+      description: "",
+      fields,
+      coercionProperty: null,
+      load: {
+        coercions: [],
+        assignments: fields.map((field) => ({
+          sourceName: field.name,
+          fieldName: field.name,
+          category: field.category,
+          isOptional: false,
+          parentTypeName: "Arrays",
+          enumName: null,
+          allowedValues: [],
+          parseAliases: {},
+          defaultValue: null,
+          isOpenEnum: false,
+        })),
+        hasPolymorphicDispatch: false,
+        hasContextHooks: false,
+      },
+      save: { assignments: [], hasBase: false, hasContextHooks: false },
+      factories: [],
+      collectionHelpers: [],
+      polymorphicDispatch: null,
+      methods: [],
+      wire: null,
+      serialized: true,
+    } as unknown as TypeDecl;
+    const file = {
+      group: "",
+      imports: [],
+      enums: [],
+      types: [type],
+    } as unknown as FileDecl;
+    return emitRustFile(
+      file,
+      new RustExprVisitor(TypeRegistry.fromTypeGraph([])),
+      new Set<string>(),
+    );
+  }
+
+  it("converts each element to the declared Vec<T> element type", () => {
+    const code = emitArrays([
+      "int32",
+      "int64",
+      "float32",
+      "float64",
+      "boolean",
+      "string",
+    ]);
+    const expected: Record<string, [string, string]> = {
+      int32: ["Vec<i32>", "v.as_i64().map(|n| n as i32)"],
+      int64: ["Vec<i64>", "v.as_i64()"],
+      float32: ["Vec<f32>", "v.as_f64().map(|n| n as f32)"],
+      float64: ["Vec<f64>", "v.as_f64()"],
+      boolean: ["Vec<bool>", "v.as_bool()"],
+      string: ["Vec<String>", "v.as_str().map(|s| s.to_string())"],
+    };
+    for (const [scalar, [fieldType, element]] of Object.entries(expected)) {
+      assert.ok(
+        code.includes(`items_${scalar}: ${fieldType}`),
+        `${scalar} field type`,
+      );
+      assert.ok(
+        code.includes(
+          `items_${scalar}: value.get("items_${scalar}").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| ${element}).collect()).unwrap_or_default()`,
+        ),
+        `${scalar} must load typed elements, not Vec<Value>`,
+      );
+    }
+  });
+
+  it("keeps Value elements for untyped arrays", () => {
+    const code = emitArrays(["unknown"]);
+    assert.ok(code.includes("items_unknown: Vec<serde_json::Value>"));
+    assert.ok(code.includes(".map(|arr| arr.to_vec()).unwrap_or_default()"));
+  });
+});
+
+describe("rust emitter — multi-word string enum variants (#340)", () => {
+  it("derives one PascalCase variant name shared by the enum, load defaults, and tests", () => {
+    const kind = makeProp("kind", "string", {
+      isScalar: true,
+      allowedValues: ["subtle_push", "wide_hold_then_push"],
+      defaultValue: "subtle_push",
+    });
+    kind.enumName = "MotionPlanKind";
+    const plan = makeType("MotionPlan", [kind]);
+    const registry = TypeRegistry.fromTypeGraph([plan]);
+    const code = emitRustFile(
+      lowerFile(plan, registry, new Set()),
+      new RustExprVisitor(registry),
+      new Set(),
+    );
+
+    assert.match(code, /\bSubtlePush\b/);
+    assert.match(code, /\bWideHoldThenPush\b/);
+    assert.doesNotMatch(code, /Subtle_push|Wide_hold_then_push/);
+    assert.equal(
+      rustTestOptions.renderEnumValue!(
+        "MotionPlanKind",
+        "wide_hold_then_push",
+        "kind",
+      )?.value,
+      "MotionPlanKind::WideHoldThenPush",
+    );
+  });
+
+  it("produces valid identifiers for punctuated and numeric values", () => {
+    assert.equal(rustEnumVariantName("system"), "System");
+    assert.equal(rustEnumVariantName("camelCase"), "CamelCase");
+    assert.equal(rustEnumVariantName("gpt-4o.mini"), "Gpt4oMini");
+    assert.equal(rustEnumVariantName("4k"), "V4k");
+    assert.equal(rustEnumVariantName("self"), "SelfValue");
+  });
+
+  it("rejects values that normalize to the same variant", () => {
+    assert.throws(
+      () =>
+        assertDistinctRustVariants({ name: "E", values: ["foo_bar", "fooBar"] }),
+      /"foo_bar" and "fooBar" both map to variant FooBar/,
+    );
+    assert.throws(
+      () =>
+        assertDistinctRustVariants({
+          name: "E",
+          values: ["other_"],
+          isOpen: true,
+        }),
+      /variant Other/,
+    );
+    assert.doesNotThrow(() =>
+      assertDistinctRustVariants({ name: "E", values: ["a_b", "a_c"] }),
     );
   });
 });

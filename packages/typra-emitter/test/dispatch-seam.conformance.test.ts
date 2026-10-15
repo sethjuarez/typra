@@ -32,20 +32,21 @@ const ROOT_OBJECT = "Typra.Fixtures.DispatchSeam.Root";
 // delimiter style, so routing to the wrong renderer leaves the template
 // unsubstituted (output !== expected). That makes the dispatch decision
 // behaviorally load-bearing rather than cosmetic: if the emitter resolved the
-// wrong discriminator path, these vectors go red.
+// wrong discriminator path, these vectors go red. An unbound key throws
+// `unbound variable: <key>`, which the `expectedError` vector asserts.
 type Renderer = (content: string, values: Record<string, unknown>) => string;
+const bind = (values: Record<string, unknown>, key: string): string => {
+  if (!(key in values)) throw new Error(`unbound variable: ${key}`);
+  return String(values[key]);
+};
 const RENDERERS: Record<string, Renderer> = {
   mustache: (content, values) =>
-    content.replace(/\{\{(\w+)\}\}/g, (_m, key) =>
-      String(values[key] ?? `{{${key}}}`),
-    ),
+    content.replace(/\{\{(\w+)\}\}/g, (_m, key: string) => bind(values, key)),
   jinja2: (content, values) =>
-    content.replace(/\{\{ (\w+) \}\}/g, (_m, key) =>
-      String(values[key] ?? `{{ ${key} }}`),
-    ),
+    content.replace(/\{\{ (\w+) \}\}/g, (_m, key: string) => bind(values, key)),
   liquid: (content, values) =>
-    content.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key) =>
-      String(values[key] ?? `{{ ${key} }}`),
+    content.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key: string) =>
+      bind(values, key),
     ),
 };
 
@@ -78,7 +79,8 @@ interface VectorEntry {
       agent: { template: { content: string } };
       inputs: { values: Record<string, unknown> };
     };
-    expected: string;
+    expected?: string;
+    expectedError?: unknown;
   };
 }
 
@@ -117,7 +119,7 @@ describe("dispatch-seam behavioral conformance (dispatch-by-path)", () => {
       ".typra-generated",
       "vectors.json",
     ).vectors;
-    assert.equal(vectors.length, 2);
+    assert.equal(vectors.length, 3);
   });
 
   after(() => {
@@ -126,7 +128,7 @@ describe("dispatch-seam behavioral conformance (dispatch-by-path)", () => {
 
   it("routes every committed vector to the right renderer via the resolved path and reproduces `expected`", () => {
     for (const entry of vectors) {
-      const { input, expected, name } = entry.vector;
+      const { input, expected, expectedError, name } = entry.vector;
 
       // The ONLY emitter-derived decision under test: walk the resolved dispatch
       // path over the vector input to pick the implementation.
@@ -142,6 +144,17 @@ describe("dispatch-seam behavioral conformance (dispatch-by-path)", () => {
         renderer,
         `${name}: resolved discriminator '${String(kind)}' has no registered renderer`,
       );
+
+      if (expectedError !== undefined) {
+        assert.throws(
+          () => renderer(input.agent.template.content, input.inputs.values),
+          (error: Error) =>
+            typeof expectedError !== "string" ||
+            error.message.includes(expectedError),
+          `${name}: dispatched renderer must raise ${JSON.stringify(expectedError)}`,
+        );
+        continue;
+      }
 
       const actual = renderer(
         input.agent.template.content,

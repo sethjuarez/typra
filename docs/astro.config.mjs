@@ -58,6 +58,7 @@ export default defineConfig({
             { label: "Simple example", link: "/concepts/simple-example/" },
             { label: "End-to-end usage", link: "/concepts/end-to-end/" },
             { label: "Generated output", link: "/concepts/generated-output/" },
+            { label: "Emitter boundary", link: "/concepts/emitter-boundary/" },
           ],
         },
         {

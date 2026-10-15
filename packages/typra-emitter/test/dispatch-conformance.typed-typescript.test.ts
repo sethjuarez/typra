@@ -60,16 +60,19 @@ function transpile(code: string): string {
 
 // Consumer-authored provider VALUE: each renderer understands only its own
 // dialect's substitution braces (mustache `{{name}}`, jinja2 `{{ name }}`), so a
-// wrong slot would leave the template unsubstituted. `liquid` is explicitly null
+// wrong slot would leave the template unsubstituted. An unbound key throws
+// `unbound variable: <key>` (the `mustache-unbound` expectedError vector).
+// `liquid` is explicitly null
 // to model a valid-but-unimplemented variant. This is the `vector-adapters`
 // module the emitted conformance imports (`rendererProvider`).
 const VECTOR_ADAPTERS_JS = [
   "function make(pattern) {",
   "  return {",
   "    async render(agent, inputs) {",
-  "      return agent.template.content.replace(pattern, (_m, key) =>",
-  '        String(inputs.values[key] ?? ""),',
-  "      );",
+  "      return agent.template.content.replace(pattern, (_m, key) => {",
+  "        if (!(key in inputs.values)) throw new Error('unbound variable: ' + key);",
+  "        return String(inputs.values[key]);",
+  "      });",
   "    },",
   "  };",
   "}",
@@ -83,8 +86,8 @@ const VECTOR_ADAPTERS_JS = [
 ].join("\n");
 
 // Thin jest-shim: register the emitted conformance suite's describe/it, run each
-// test, and report PASS/FAIL. `expect(...).not.toBeNull()` and `.toEqual(...)`
-// are the two matchers the emitted suite uses.
+// test, and report PASS/FAIL. `expect(...).not.toBeNull()`, `.toEqual(...)`,
+// `.toBeDefined()` and `.toContain(...)` are the matchers the emitted suite uses.
 const POSITIVE_RUNNER = [
   "const suites = [];",
   "const tests = [];",
@@ -99,6 +102,7 @@ const POSITIVE_RUNNER = [
   "    toBeNull() { check(actual === null, 'toBeNull ' + String(actual)); },",
   "    toBeDefined() { check(actual !== undefined && actual !== null, 'toBeDefined'); },",
   "    toEqual(expected) { check(same(actual, expected), 'Expected ' + JSON.stringify(actual) + ' to equal ' + JSON.stringify(expected)); },",
+  "    toContain(expected) { check(String(actual).includes(expected), 'Expected ' + JSON.stringify(actual) + ' to contain ' + JSON.stringify(expected)); },",
   "  };",
   "}",
   "globalThis.expect = (actual) => matchers(actual, false);",
@@ -253,7 +257,7 @@ describe("emitted typed @vector conformance is runnable (TypeScript)", () => {
       );
       assert.match(
         conformanceSrc,
-        /const kind = agent\.template\.format\.kind;/,
+        /const kind = agent\?\.template\?\.format\?\.kind \?\? "";/,
         "emitted conformance must read the SAME typed discriminator the shape reads",
       );
       assert.match(
@@ -317,6 +321,10 @@ describe("emitted typed @vector conformance is runnable (TypeScript)", () => {
       assert.match(
         positive.output,
         /PASS Renderer @vector conformance > jinja2-basic/,
+      );
+      assert.match(
+        positive.output,
+        /PASS Renderer @vector conformance > mustache-unbound/,
       );
       assert.doesNotMatch(positive.output, /FAIL/);
 

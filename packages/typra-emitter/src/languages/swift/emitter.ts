@@ -9,8 +9,11 @@ import {
   TypeDecl,
   WireFieldMapping,
   isClosedPolymorphicDispatch,
+  assignmentWireKey,
+  discriminatorWireKey,
 } from "../../ir/declarations.js";
 import {
+  isRequiredNullable,
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
@@ -256,11 +259,11 @@ function emitPolymorphicEnum(
     // variant and is rejected up front. Unknown NON-blank values still flow to
     // the switch default (closed → throw; carrier/self-reference → base).
     lines.push(
-      `    let discriminator = try TypraRuntime.string(object[${swiftStringLiteral(dispatch.discriminatorField)}] ?? NSNull(), field: ${swiftStringLiteral(dispatch.discriminatorField)})`,
+      `    let discriminator = try TypraRuntime.string(object[${swiftStringLiteral(discriminatorWireKey(dispatch))}] ?? NSNull(), field: ${swiftStringLiteral(discriminatorWireKey(dispatch))})`,
     );
     lines.push("    if discriminator.isEmpty {");
     lines.push(
-      `      throw TypraRuntimeError.invalidField(field: context.at(${swiftStringLiteral(dispatch.discriminatorField)}).path, expected: "non-blank string")`,
+      `      throw TypraRuntimeError.invalidField(field: context.at(${swiftStringLiteral(discriminatorWireKey(dispatch))}).path, expected: "non-blank string")`,
     );
     lines.push("    }");
   } else {
@@ -270,7 +273,7 @@ function emitPolymorphicEnum(
     // selects — letting the coerce shorthand (object with no discriminator)
     // hydrate instead of throwing.
     lines.push(
-      `    let discriminator = object[${swiftStringLiteral(dispatch.discriminatorField)}] as? String ?? ""`,
+      `    let discriminator = object[${swiftStringLiteral(discriminatorWireKey(dispatch))}] as? String ?? ""`,
     );
   }
   lines.push("    switch discriminator {");
@@ -288,7 +291,25 @@ function emitPolymorphicEnum(
       `    default: throw TypraRuntimeError.unknownDiscriminator(type: ${swiftStringLiteral(typeName)}, field: ${swiftStringLiteral(dispatch.discriminatorField)}, value: discriminator)`,
     );
   } else {
-    lines.push("    default: return .unknown(object)");
+    // Required nullable base fields (#339) keep their contract on the raw
+    // `.unknown` carrier: the key must be present (null allowed), as in every
+    // other runtime's unknown-discriminator path.
+    const nullableBaseKeys = type.load.assignments
+      .filter((assignment) => isRequiredNullable(assignment))
+      .map((assignment) => assignment.sourceName);
+    if (nullableBaseKeys.length === 0) {
+      lines.push("    default: return .unknown(object)");
+    } else {
+      lines.push("    default:");
+      for (const key of nullableBaseKeys) {
+        lines.push(`      if object[${swiftStringLiteral(key)}] == nil {`);
+        lines.push(
+          `        throw TypraRuntimeError.unsupported(context.at(${swiftStringLiteral(key)}).path + ": missing required field")`,
+        );
+        lines.push("      }");
+      }
+      lines.push("      return .unknown(object)");
+    }
   }
   lines.push("    }");
   lines.push("  }");
@@ -405,7 +426,7 @@ function emitPolymorphicCoercion(
           type.fields.find((field) => field.name === assignment.fieldName),
           assignment.literalValue ?? "",
         );
-    return `${swiftStringLiteral(assignment.fieldName)}: ${value}`;
+    return `${swiftStringLiteral(assignmentWireKey(assignment))}: ${value}`;
   });
   lines.push(`      normalizedData = [${entries.join(", ")}]`);
   lines.push("    }");
@@ -416,8 +437,15 @@ function swiftWireLiteral(field: FieldDecl | undefined, value: string): string {
     switch (field.category.scalarType) {
       case "boolean":
         return value === "true" ? "true" : "false";
+      case "int8":
+      case "int16":
       case "int32":
       case "int64":
+      case "safeint":
+      case "uint8":
+      case "uint16":
+      case "uint32":
+      case "uint64":
       case "integer":
       case "float32":
       case "float64":
@@ -474,23 +502,41 @@ function emitStruct(
       `  public var ${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`,
     );
   }
+  const passthrough = type.additionalProperties;
+  if (passthrough) {
+    lines.push(
+      "  /// Undeclared fields captured on load and written back on save (unknown-field passthrough).",
+    );
+    lines.push("  public var additionalProperties: [String: Any] = [:]");
+    lines.push(
+      `  static let additionalPropertiesKnownKeys: Set<String> = [${[
+        ...new Set(passthrough.knownWireKeys),
+      ]
+        .map((key) => swiftStringLiteral(key))
+        .join(", ")}]`,
+    );
+  }
   lines.push("");
   lines.push(
-    `  public init(${type.fields
-      .map((field) => {
+    `  public init(${[
+      ...type.fields.map((field) => {
         const defaultValue = swiftFieldDefaultValue(
           field,
           polymorphicTypeNames,
           polymorphicDefaultCases,
         );
         return `${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`;
-      })
-      .join(", ")}) {`,
+      }),
+      ...(passthrough ? ["additionalProperties: [String: Any] = [:]"] : []),
+    ].join(", ")}) {`,
   );
   for (const field of type.fields) {
     lines.push(
       `    self.${swiftPropertyName(field.name)} = ${swiftPropertyName(field.name)}`,
     );
+  }
+  if (passthrough) {
+    lines.push("    self.additionalProperties = additionalProperties");
   }
   lines.push("  }");
   lines.push("");
@@ -577,7 +623,16 @@ function emitLoad(
         helper.propertyName === assignment.fieldName &&
         supportsNamedCollectionHelper(helper, polymorphicTypeNames),
     );
-    if (shouldGuardMissingRequiredField(field)) {
+    if (isRequiredNullable(assignment)) {
+      // Required nullable (#339): the key must be present; an explicit null is accepted.
+      lines.push(
+        `    if object[${swiftStringLiteral(assignment.sourceName)}] == nil {`,
+      );
+      lines.push(
+        `      throw TypraRuntimeError.unsupported(context.at(${swiftStringLiteral(assignment.sourceName)}).path + ": missing required field")`,
+      );
+      lines.push("    }");
+    } else if (shouldGuardMissingRequiredField(field)) {
       lines.push(
         `    if object[${swiftStringLiteral(assignment.sourceName)}] == nil || object[${swiftStringLiteral(assignment.sourceName)}] is NSNull {`,
       );
@@ -587,10 +642,12 @@ function emitLoad(
       lines.push("    }");
     }
     lines.push(
-      `    if let value = object[${swiftStringLiteral(assignment.sourceName)}] {`,
+      isRequiredNullable(assignment) || assignment.isOptionalNullable
+        ? `    if let value = object[${swiftStringLiteral(assignment.sourceName)}], !(value is NSNull) {`
+        : `    if let value = object[${swiftStringLiteral(assignment.sourceName)}] {`,
     );
     lines.push(
-      `      instance.${swiftPropertyName(assignment.fieldName)} = ${swiftLoadExpression(assignment.category, assignment.enumName, assignment.fieldName, "value", polymorphicTypeNames, collectionHelper)}`,
+      `      instance.${swiftPropertyName(assignment.fieldName)} = ${swiftLoadExpression(assignment.category, assignment.enumName, assignment.sourceName, "value", polymorphicTypeNames, collectionHelper)}`,
     );
     lines.push("    }");
     if (
@@ -604,6 +661,11 @@ function emitLoad(
       );
       lines.push("    }");
     }
+  }
+  if (type.additionalProperties) {
+    lines.push(
+      "    instance.additionalProperties = object.filter { !Self.additionalPropertiesKnownKeys.contains($0.key) }",
+    );
   }
   lines.push("    return instance");
   lines.push("  }");
@@ -850,11 +912,27 @@ function emitSave(
         `      result[${swiftStringLiteral(assignment.targetName)}] = ${swiftSaveExpression(assignment.category, assignment.enumName, "value", polymorphicTypeNames, collectionHelper)}`,
       );
       lines.push("    }");
+      if (isRequiredNullable(assignment)) {
+        // Required nullable (#339): the key is always written, as null when unset.
+        lines.push("    else {");
+        lines.push(
+          `      result[${swiftStringLiteral(assignment.targetName)}] = NSNull()`,
+        );
+        lines.push("    }");
+      }
     } else {
       lines.push(
         `    result[${swiftStringLiteral(assignment.targetName)}] = ${serialized}`,
       );
     }
+  }
+  if (type.additionalProperties) {
+    // Undeclared fields follow the declared ones; a declared wire key always wins.
+    lines.push(
+      "    for (key, value) in self.additionalProperties where !Self.additionalPropertiesKnownKeys.contains(key) {",
+    );
+    lines.push("      result[key] = value");
+    lines.push("    }");
   }
   lines.push("    return result");
   lines.push("  }");
@@ -875,7 +953,10 @@ function emitToWire(
         helper.propertyName === mapping.fieldName &&
         supportsNamedCollectionHelper(helper, polymorphicTypeNames),
     );
-    emitWireField(mapping, lines, polymorphicTypeNames, collectionHelper);
+    // Named string unions render as enums/RawRepresentable; toWire must unwrap them like save() (#331).
+    const enumName =
+      type.fields.find((field) => field.name === mapping.fieldName)?.enumName ?? null;
+    emitWireField(mapping, enumName, lines, polymorphicTypeNames, collectionHelper);
   }
   lines.push("    return result");
   lines.push("  }");
@@ -894,7 +975,9 @@ function emitFromWire(type: TypeDecl, lines: string[]): void {
           `${swiftStringLiteral(provider)}: ${swiftStringLiteral(wireName)}`,
       )
       .join(", ");
-    lines.push(`      ${swiftStringLiteral(mapping.fieldName)}: [${inner}],`);
+    lines.push(
+      `      ${swiftStringLiteral(assignmentWireKey(mapping))}: [${inner}],`,
+    );
   }
   lines.push("    ]");
   lines.push("    var inverse: [String: String] = [:]");
@@ -917,6 +1000,7 @@ function emitFromWire(type: TypeDecl, lines: string[]): void {
  */
 function emitWireField(
   mapping: WireFieldMapping,
+  enumName: string | null,
   lines: string[],
   polymorphicTypeNames: Set<string>,
   collectionHelper?: CollectionHelperDecl,
@@ -934,11 +1018,11 @@ function emitWireField(
   lines.push("    }");
   if (mapping.isOptional) {
     lines.push(
-      `    if let wireKey = ${target}, let value = ${source} { result[wireKey] = ${swiftSaveExpression(mapping.category, null, "value", polymorphicTypeNames, collectionHelper)} }`,
+      `    if let wireKey = ${target}, let value = ${source} { result[wireKey] = ${swiftSaveExpression(mapping.category, enumName, "value", polymorphicTypeNames, collectionHelper)} }`,
     );
   } else {
     lines.push(
-      `    if let wireKey = ${target} { result[wireKey] = ${swiftSaveExpression(mapping.category, null, source, polymorphicTypeNames, collectionHelper)} }`,
+      `    if let wireKey = ${target} { result[wireKey] = ${swiftSaveExpression(mapping.category, enumName, source, polymorphicTypeNames, collectionHelper)} }`,
     );
   }
 }
@@ -1110,6 +1194,14 @@ function scalarDefault(typeName: string): string {
       return "0";
     case "int64":
       return "0";
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
+      return "0";
     case "integer":
       return "0";
     case "float32":
@@ -1187,7 +1279,15 @@ function scalarLoadExpression(
     case "int32":
       return `try TypraRuntime.int32(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
     case "int64":
+    case "safeint":
       return `try TypraRuntime.int64(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
+    case "int8":
+    case "int16":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
+      return `try TypraRuntime.${scalarType}(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
     case "integer":
       return `try TypraRuntime.int(${valueExpr}, field: ${swiftStringLiteral(fieldName)})`;
     case "float32":
@@ -1244,8 +1344,15 @@ function swiftCoercionCheck(scalarType: string): string | undefined {
       return "data as? String";
     case "boolean":
       return "data as? Bool";
+    case "int8":
+    case "int16":
     case "int32":
     case "int64":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "integer":
       return "data as? Int";
     case "float32":

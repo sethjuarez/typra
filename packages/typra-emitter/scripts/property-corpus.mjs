@@ -187,6 +187,14 @@ function resolveTargetType(prop, state) {
 function generatePropertyValue(prop, state, path) {
   const explicit = propertyDefault(prop);
   if (explicit !== undefined) return explicit;
+  // A required `T | null` key (#339) must be present but may carry an explicit null.
+  if (
+    prop.isNullable &&
+    !prop.isOptional &&
+    stableHash(`${state.seed}:${state.caseIndex}:${path}:null`) % 3 === 0
+  ) {
+    return null;
+  }
   if ((prop.allowedValues ?? []).length > 0) {
     if (prop.isOpenEnum && state.random() < 0.25) {
       return `custom-${state.caseIndex}-${stableHash(path) % 997}`;
@@ -302,14 +310,16 @@ function generateConcretePayload(
     if (!shouldIncludeOptional(prop, state, path)) continue;
     const value = generatePropertyValue(prop, state, `${path}.${prop.name}`);
     if (value !== undefined) {
-      payload[prop.name] = value;
+      payload[prop.serializedName ?? prop.name] = value;
     } else if (!prop.isOptional) {
       return undefined;
     }
   }
 
   if (type.discriminator && wildcardDiscriminator) {
-    payload[type.discriminator] = wildcardDiscriminator;
+    const discriminatorProp = properties.get(type.discriminator);
+    payload[discriminatorProp?.serializedName ?? type.discriminator] =
+      wildcardDiscriminator;
   }
   return payload;
 }

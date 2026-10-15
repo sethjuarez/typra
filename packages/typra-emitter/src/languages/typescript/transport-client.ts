@@ -304,6 +304,13 @@ function typeScriptType(type: string, modelTypes = new Set<string>()): string {
       return "boolean";
     case "int32":
     case "int64":
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
     case "float32":
     case "float64":
     case "integer":

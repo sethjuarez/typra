@@ -45,6 +45,13 @@ function factoryParamTestValue(typeStr: string): string {
     case "integer":
     case "int32":
     case "int64":
+    case "int8":
+    case "int16":
+    case "safeint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
+    case "uint64":
       return "42";
     case "float":
     case "float64":
@@ -330,9 +337,13 @@ function emitPythonWireTest(
     for (const mapping of mappings.filter(
       (entry) => entry.provider === provider,
     )) {
-      lines.push(`    assert "${mapping.wireName}" in ${provider}_wire`);
+      lines.push(
+        `    assert ${JSON.stringify(mapping.wireName)} in ${provider}_wire`,
+      );
       if (mapping.fieldName !== mapping.wireName) {
-        lines.push(`    assert "${mapping.fieldName}" not in ${provider}_wire`);
+        lines.push(
+          `    assert ${JSON.stringify(mapping.fieldName)} not in ${provider}_wire`,
+        );
       }
     }
     lines.push(
@@ -453,6 +464,11 @@ export function emitPythonTest(
     }
     lines.push(`    reloaded = ${typeName}.load(saved_data)`);
     lines.push(`    assert reloaded is not None`);
+    for (const key of sample.nullKeys ?? []) {
+      const literal = JSON.stringify(key);
+      lines.push(`    assert ${literal} in saved_data`);
+      lines.push(`    assert saved_data[${literal}] is None`);
+    }
     for (const v of postSaveExample(sample, node).validations) {
       lines.push(renderValidation(v, "reloaded"));
     }
