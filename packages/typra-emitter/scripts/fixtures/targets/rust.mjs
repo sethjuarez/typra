@@ -856,7 +856,10 @@ export function runDispatchRegressionCrossTarget(context) {
         path.join(outRoot, "java", "tests", "VectorProviders.java"),
       );
       runJavaBuild(path.join(outRoot, "java"));
-      runJavaGeneratedTests(path.join(outRoot, "java"));
+      runJavaGeneratedTests(
+        path.join(outRoot, "java"),
+        "typra.fixtures.features.dispatchtargetregression",
+      );
     }
     if (commandExists("swift")) {
       cpSync(

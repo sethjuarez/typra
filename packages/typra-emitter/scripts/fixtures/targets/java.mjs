@@ -83,11 +83,18 @@ export function runJavaTargetBuild(
 
 export function runJavaGeneratedTests(
   sourceDir = path.join(generatedRoot, "java"),
+  packageName = "typra.fixtures",
 ) {
   if (typeof sourceDir !== "string") {
     sourceDir = path.join(generatedRoot, "java");
   }
-  runJavaTargetGeneratedTests("java", "Generated Java tests", "", sourceDir);
+  runJavaTargetGeneratedTests(
+    "java",
+    "Generated Java tests",
+    "",
+    sourceDir,
+    packageName,
+  );
 }
 
 export function runJavaJacksonGeneratedTests() {
@@ -105,6 +112,7 @@ export function runJavaTargetGeneratedTests(
   label,
   classpath = "",
   sourceDir = path.join(generatedRoot, targetDir),
+  packageName = "typra.fixtures",
 ) {
   const sourceFiles = walkFiles(sourceDir, (file) => file.endsWith(".java"));
   const classesDir = path.join(sourceDir, ".classes");
@@ -139,7 +147,7 @@ export function runJavaTargetGeneratedTests(
   writeFileSync(
     runnerPath,
     [
-      "package typra.fixtures;",
+      `package ${packageName};`,
       "",
       "public final class TypraGeneratedTestsValidation {",
       "  private TypraGeneratedTestsValidation() { }",
@@ -186,7 +194,7 @@ export function runJavaTargetGeneratedTests(
         [
           "-cp",
           javaRuntimeClasspath(classesDir, classpath),
-          "typra.fixtures.TypraGeneratedTestsValidation",
+          `${packageName}.TypraGeneratedTestsValidation`,
         ],
         { cwd: sourceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
       );
