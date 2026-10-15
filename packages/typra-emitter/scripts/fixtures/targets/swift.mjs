@@ -374,11 +374,16 @@ final class InheritedPropertyRoundTripTests: XCTestCase {
         (match) => match[1],
       ),
     ]);
-    assertKnownTestFailures(targetDir, failed, KNOWN_TEST_FAILURES[targetDir], {
-      crashed,
-      output,
-      crashMessage: `Generated ${label} package tests failed to build or run`,
-    });
+    assertKnownTestFailures(
+      targetDir,
+      failed,
+      KNOWN_TEST_FAILURES[targetDir] ?? new Map(),
+      {
+        crashed,
+        output,
+        crashMessage: `Generated ${label} package tests failed to build or run`,
+      },
+    );
   } finally {
     if (existsSync(inheritedPropertyTest)) {
       unlinkSync(inheritedPropertyTest);

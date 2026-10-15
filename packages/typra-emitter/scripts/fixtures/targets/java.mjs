@@ -205,11 +205,16 @@ export function runJavaTargetGeneratedTests(
     const failed = new Set(
       [...output.matchAll(/^FAIL\s+(\S+)/gm)].map((match) => match[1]),
     );
-    assertKnownTestFailures(targetDir, failed, KNOWN_TEST_FAILURES[targetDir], {
-      crashed,
-      output,
-      crashMessage: `${label} failed to build or run`,
-    });
+    assertKnownTestFailures(
+      targetDir,
+      failed,
+      KNOWN_TEST_FAILURES[targetDir] ?? new Map(),
+      {
+        crashed,
+        output,
+        crashMessage: `${label} failed to build or run`,
+      },
+    );
   } catch (error) {
     const output =
       `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
