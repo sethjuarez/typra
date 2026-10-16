@@ -1,0 +1,2 @@
+# gofmt rejects CRLF; keep Go sources LF on every checkout.
+*.go text eol=lf
