@@ -18,7 +18,8 @@ be explicit in diagnostics, the conformance matrix, or a tracked known failure.
 - A required TypeSpec property must be present when loading object-shaped data.
   Missing required fields must fail; generated runtimes must not fabricate a
   value to make construction succeed.
-- Defaults do not satisfy required-field presence. Until complex defaults are
+- Defaults do not satisfy required-field presence (the one exception is
+  `x: T | null = null`, below). Until complex defaults are
   supported end-to-end, a default on a model-typed or collection-typed property
   is a portability error rather than an implicit object factory.
 - Optional properties have distinct wire states: absent, present with a value,
@@ -33,6 +34,11 @@ be explicit in diagnostics, the conformance matrix, or a tracked known failure.
 
 ## Nulls and unknown values
 
+- `x: T | null` is a required key whose value may be null: load rejects an
+  absent key and accepts `null`; save always writes the key, as `null` when
+  unset. `x: T | null = null` keeps that save rule but loads an absent key as
+  `null` (for payloads written before the key existed). `x?: T | null` behaves
+  like `x?: T`.
 - `null` is accepted only where the lowered contract explicitly permits it or
   where the field type is an unknown/dictionary-shaped carrier. Otherwise it is
   a load error.

@@ -17,6 +17,7 @@ import {
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
+  shouldRejectAbsentNullableKey,
 } from "../../ir/field-emission-policy.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
@@ -295,7 +296,7 @@ function emitPolymorphicEnum(
     // `.unknown` carrier: the key must be present (null allowed), as in every
     // other runtime's unknown-discriminator path.
     const nullableBaseKeys = type.load.assignments
-      .filter((assignment) => isRequiredNullable(assignment))
+      .filter((assignment) => shouldRejectAbsentNullableKey(assignment))
       .map((assignment) => assignment.sourceName);
     if (nullableBaseKeys.length === 0) {
       lines.push("    default: return .unknown(object)");
@@ -339,7 +340,21 @@ function emitPolymorphicEnum(
     lines.push("      return result");
   }
   if (usesUnknownFallback) {
-    lines.push("    case .unknown(let value): return value");
+    const nullableKeys = type.save.assignments
+      .filter(isRequiredNullable)
+      .map((assignment) => assignment.targetName);
+    if (nullableKeys.length === 0) {
+      lines.push("    case .unknown(let value): return value");
+    } else {
+      lines.push("    case .unknown(let value):");
+      lines.push("      var result = value");
+      for (const key of nullableKeys) {
+        lines.push(`      if result[${swiftStringLiteral(key)}] == nil {`);
+        lines.push(`        result[${swiftStringLiteral(key)}] = NSNull()`);
+        lines.push("      }");
+      }
+      lines.push("      return result");
+    }
   }
   lines.push("    }");
   lines.push("  }");
@@ -623,7 +638,7 @@ function emitLoad(
         helper.propertyName === assignment.fieldName &&
         supportsNamedCollectionHelper(helper, polymorphicTypeNames),
     );
-    if (isRequiredNullable(assignment)) {
+    if (shouldRejectAbsentNullableKey(assignment)) {
       // Required nullable (#339): the key must be present; an explicit null is accepted.
       lines.push(
         `    if object[${swiftStringLiteral(assignment.sourceName)}] == nil {`,

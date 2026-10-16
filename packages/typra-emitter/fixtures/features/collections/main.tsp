@@ -12,6 +12,9 @@ model Root {
   scalarList: string[];
   objectList: CollectionItem[];
   unknownMap: Record<unknown>;
+  @sample(#{ stringMap: #{ label: "kept", empty: "" } })
+  stringMap: Record<string>;
+  nullableStringMap: Record<string> | null = null;
   objectMap: Record<CollectionItem>;
   dualForm: Record<NamedCollectionItem> | Named<NamedCollectionItem>[];
 }

@@ -14,6 +14,7 @@ export const fixtureRootSample = {
     version: 1,
   },
   typedRecords: {
+    names: { label: "kept", empty: "" },
     counts: {
       alpha: 1,
       beta: 2,
@@ -206,6 +207,62 @@ export const fixtureRootSample = {
       hoverTarget: { id: "menu" },
     },
   ],
+  nullDefaults: [
+    { requiredText: null },
+    {
+      requiredText: null,
+      legacy_text: null,
+      legacyCount: null,
+      legacyEnabled: null,
+      legacyPayload: null,
+      legacyState: null,
+      legacyOwner: null,
+      legacyTags: null,
+      legacyOwners: null,
+      legacyLabels: null,
+      legacyNames: null,
+      shapes: null,
+    },
+    {
+      requiredText: "kept",
+      legacy_text: "kept",
+      legacyCount: 0,
+      legacyEnabled: false,
+      legacyPayload: { opaque: [1, null, { nested: true }] },
+      legacyState: "ready",
+      legacyOwner: { id: "legacy-owner", displayName: "Kept Owner" },
+      legacyTags: ["kept"],
+      legacyOwners: [{ id: "legacy-item", displayName: "Kept Item" }],
+      legacyLabels: { key: "kept" },
+      legacyNames: { key: "kept", empty: "" },
+      shapes: [{ kind: "circle", label: null, state: "archived" }],
+      note: "",
+      status: "complete",
+    },
+    {
+      requiredText: "",
+      legacy_text: "",
+      legacyCount: 4294967295,
+      legacyEnabled: true,
+      legacyPayload: [],
+      legacyState: "ready",
+      legacyOwner: null,
+      legacyTags: [],
+      legacyOwners: [],
+      legacyLabels: {},
+      legacyNames: {},
+      shapes: [{
+        kind: "circle",
+        label: "kept",
+        legacyLabel: "kept",
+        legacyRadius: 0,
+      }],
+    },
+    {
+      requiredText: null,
+      shapes: [{ kind: "future", label: null }],
+    },
+  ],
 };
 
 // One canonical conformance input, embedded into every target program.
@@ -260,6 +317,33 @@ export const fixtureRootExpected = {
     },
     emptyForm: {},
   },
+  // Only the input may omit these keys. Canonical saved output must contain them,
+  // including inherited defaults on both known and unknown discriminator values.
+  nullDefaults: fixtureRootSample.nullDefaults.map((entry) => ({
+    legacy_text: null,
+    legacyCount: null,
+    legacyEnabled: null,
+    legacyPayload: null,
+    legacyState: null,
+    legacyOwner: null,
+    legacyTags: null,
+    legacyOwners: null,
+    legacyLabels: null,
+    legacyNames: null,
+    shapes: null,
+    ...entry,
+    // The shared FixtureStatus enum applies its parse alias here too.
+    ...(entry.status === "complete" ? { status: "ready" } : {}),
+    ...(entry.shapes
+      ? {
+          shapes: entry.shapes.map((shape) => ({
+            legacyLabel: null,
+            ...(shape.kind === "circle" ? { legacyRadius: null } : {}),
+            ...shape,
+          })),
+        }
+      : {}),
+  })),
 };
 
 let defaultCorpusCoverageChecked = false;

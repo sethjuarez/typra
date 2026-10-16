@@ -391,6 +391,9 @@ function lowerField(
     // key; `x?: T | null` lowers exactly like `x?: T` (#339).
     isOptional: prop.isOptional || prop.isNullable,
     ...(prop.isNullable && !prop.isOptional ? { isNullable: true } : {}),
+    ...(prop.isNullable && !prop.isOptional && prop.hasNullDefault
+      ? { hasNullDefault: true }
+      : {}),
     ...(prop.isNullable && prop.isOptional ? { isOptionalNullable: true } : {}),
     defaultValue: prop.defaultValue,
     hasExplicitDefault: prop.hasExplicitDefault,
@@ -464,6 +467,7 @@ function lowerLoad(
       category: f.category,
       isOptional: f.isOptional,
       ...(f.isNullable ? { isNullable: true } : {}),
+      ...(f.hasNullDefault ? { hasNullDefault: true } : {}),
       ...(f.isOptionalNullable ? { isOptionalNullable: true } : {}),
       hasExplicitDefault: f.hasExplicitDefault,
       parentTypeName: node.typeName.name,
@@ -873,6 +877,55 @@ function collectEnums(types: TypeDecl[]): EnumDef[] {
     }
   }
   return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Declare each string-literal enum shared across files once.
+ *
+ * `collectEnums` dedupes within a file, which suffices where every file is its own
+ * namespace (Python, TypeScript). Targets whose files share one namespace (a Go
+ * package, a Swift module, Rust's glob re-exports) would redeclare the enum, so the
+ * first file that uses it keeps the declaration and later files that use an identical
+ * enum import it from there. Same-named enums with different definitions stay put.
+ */
+export function hoistSharedEnums(files: FileDecl[]): FileDecl[] {
+  const owners = new Map<string, { file: FileDecl; def: EnumDef }>();
+  const signature = (def: EnumDef) =>
+    JSON.stringify([def.values, def.parseAliases, def.isOpen]);
+  return files.map((file) => {
+    const enums: EnumDef[] = [];
+    const imports = file.imports.map((imp) => ({
+      ...imp,
+      names: [...imp.names],
+    }));
+    for (const def of file.enums) {
+      const owner = owners.get(def.name);
+      if (!owner) {
+        owners.set(def.name, { file, def });
+        enums.push(def);
+        continue;
+      }
+      if (signature(owner.def) !== signature(def)) {
+        enums.push(def);
+        continue;
+      }
+      const module = owner.file.typeName.name;
+      const group = owner.file.group ?? "";
+      const existing = imports.find(
+        (imp) => imp.module === module && imp.group === group,
+      );
+      if (existing) {
+        if (!existing.names.includes(def.name)) {
+          existing.names.push(def.name);
+          existing.names.sort();
+        }
+      } else {
+        imports.push({ module, names: [def.name], group });
+        imports.sort((a, b) => a.module.localeCompare(b.module));
+      }
+    }
+    return { ...file, enums, imports };
+  });
 }
 
 // ============================================================================

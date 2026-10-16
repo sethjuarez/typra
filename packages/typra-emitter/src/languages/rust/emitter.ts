@@ -67,6 +67,7 @@ import {
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
   shouldPreserveOptionalAbsence,
+  shouldRejectAbsentNullableKey,
 } from "../../ir/field-emission-policy.js";
 import {
   INTEGRAL_SCALAR_TYPES,
@@ -1300,7 +1301,7 @@ function emitFieldInputValidation(
     const helper = type.collectionHelpers.find(
       (candidate) => candidate.propertyName === assignment.fieldName,
     );
-    if (isRequiredNullable(assignment)) {
+    if (shouldRejectAbsentNullableKey(assignment)) {
       // Required nullable (#339): the key must be present; an explicit null is accepted.
       lines.push(
         `${indent}if value.as_object().map_or(false, |object| !object.contains_key(${rustStringLiteral(field)})) {`,

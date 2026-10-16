@@ -17,6 +17,7 @@ import { toSnakeCase } from "../../ir/utilities.js";
 import { TypeRegistry } from "../../ir/expansion.js";
 import { GoExprVisitor } from "./visitor.js";
 import {
+  hoistSharedEnums,
   lowerFile,
   lowerType,
   collectPolymorphicTypeNames,
@@ -123,6 +124,15 @@ export const generateGo = async (
   const declarationUniverse = nodes.map((n) =>
     lowerType(n, registry, polymorphicTypeNames, serializationClosure),
   );
+  // One Go package: a string-literal enum shared across files is declared once.
+  const rootNodes = nodes.filter((n) => !n.base);
+  const fileDecls = new Map(
+    hoistSharedEnums(
+      rootNodes.map((n) =>
+        lowerFile(n, registry, polymorphicTypeNames, serializationClosure),
+      ),
+    ).map((fileDecl, index) => [rootNodes[index], fileDecl]),
+  );
 
   // Emit context file (LoadContext/SaveContext utilities)
   const contextContent = emitGoContext({
@@ -140,12 +150,7 @@ export const generateGo = async (
   for (const n of nodes) {
     // Skip child types - they're rendered with their parent
     if (!n.base) {
-      const fileDecl = lowerFile(
-        n,
-        registry,
-        polymorphicTypeNames,
-        serializationClosure,
-      );
+      const fileDecl = fileDecls.get(n)!;
       // Go stays flat: pass group as a header comment only, no subfolder emission
       const fileContent = emitGoFileContent(
         fileDecl.types,

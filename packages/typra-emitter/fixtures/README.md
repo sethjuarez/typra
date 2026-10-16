@@ -27,9 +27,9 @@ behavior is genuinely runtime-specific.
 | --- | --- | --- |
 | Model shapes | `features/model-shapes/main.tsp` | Required, optional, scalar-defaulted fields, typed records, unknown records, and named references. |
 | Scalars | `features/scalars/main.tsp` | String, boolean, integer widths, numeric, float32, float64, and unknown values. |
-| Collections | `features/collections/main.tsp` | Scalar arrays, model arrays, unknown maps, model maps, and `Record<T> \| Named<T>[]` dual-form collections. |
+| Collections | `features/collections/main.tsp` | Scalar arrays, model arrays, unknown maps, string maps (including nullable defaults), model maps, and `Record<T> \| Named<T>[]` dual-form collections. |
 | Polymorphism | `features/polymorphism/main.tsp` | Closed discriminated unions, abstract open bases, and named open discriminator bases. |
-| Enums | `features/enums/main.tsp` | Closed string unions, open string unions, and parse-only aliases. |
+| Enums | `features/enums/main.tsp` | Closed string unions, open string unions, parse-only aliases, and a union shared across model files. |
 | Samples | `features/samples/main.tsp` | Inline `@sample` payloads and imported constant sample payloads with nested items. |
 | Vectors | `features/vectors/main.tsp` | Inline `@vector` payloads, imported vector arrays, success expectations, and error expectations. |
 | Coercions | `features/coercions/main.tsp` | Scalar-to-model coercions, factories, method stubs, and entry shorthand for named collections. |
@@ -38,7 +38,7 @@ behavior is genuinely runtime-specific.
 | Dispatch | `features/dispatch/main.tsp` | Behavioral polymorphic dispatch via `@dispatch`, resolving a discriminator field to a deterministic parameter access path. |
 | Provider wire | `features/wire/main.tsp` | Provider-specific names with `@@knownAs` and provider defaults with `@@defaultFor`. |
 | Encoded names | `features/encoded-name/main.tsp` | `@encodedName("application/json", ...)` as the canonical dict/JSON/YAML key on load and save (scalar, nested model, collection, discriminator, inherited `@coerce` target, and `@@knownAs` interplay); non-JSON mimes are ignored. |
-| Nullable fields | `features/nullable/main.tsp` | `x: T \| null` (required key, value may be null: load rejects an absent key and accepts `null`; save always writes the key, as `null` when unset) versus `x?: T` and `x?: T \| null` (both omitted when unset) across scalars, enums, models, arrays, and records. |
+| Nullable fields | `features/nullable/main.tsp` | `x: T \| null` (required key, value may be null: load rejects an absent key and accepts `null`; save always writes the key, as `null` when unset) versus `x?: T` and `x?: T \| null` (both omitted when unset) across scalars, enums, models, arrays, and records. `x: T \| null = null` keeps the always-written save but loads an absent key as `null` (including inherited through a discriminated base). |
 | Additional properties | `features/additional-properties/main.tsp` | Unknown-field passthrough (#336): `...Record<unknown>` and `is Record<unknown>` models keep every undeclared key in a generated `additionalProperties` member on load and write it back on save; known keys are matched by wire name (`@encodedName`), and a polymorphic base passes its passthrough to derived variants. A plain model stays closed. |
 | Transport | `features/transport/main.tsp` | Path, query, header, cookie, body, status, success/error body envelopes, and wildcard status bodies. |
 | Namespaces | `features/namespaces/main.tsp` | Nested namespaces and cross-namespace references. |

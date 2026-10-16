@@ -465,6 +465,40 @@ final class ConformanceValidateTests: XCTestCase {
   }`
   }
 
+  func testUnknownKindNullDefaults() throws {
+    let inputs: [[String: Any]] = [
+      ["kind": "future", "label": NSNull(), "extra": ["nested": [1, NSNull(), "kept"]]],
+      ["kind": "future", "label": NSNull(), "legacyLabel": NSNull(), "extra": false],
+      ["kind": "future", "label": "label", "legacyLabel": "kept", "extra": ["key": "value"]],
+    ]
+    for input in inputs {
+      ${
+        useCodable
+          ? "let shape = try JSONDecoder().decode(FixtureNullDefaultShape.self, from: JSONSerialization.data(withJSONObject: input))"
+          : "let shape = try FixtureNullDefaultShape.load(input)"
+      }
+      let saved = try shape.save()
+      var expected = input
+      if expected["legacyLabel"] == nil { expected["legacyLabel"] = NSNull() }
+      XCTAssertEqual(try TypraRuntime.jsonString(from: saved), try TypraRuntime.jsonString(from: expected))
+      XCTAssertNotNil(saved["legacyLabel"], "absent null-default key must be written")
+      try assertCodableMatchesTypra(shape, "unknown-kind Codable encode must preserve null defaults and raw fields")
+      let reloaded = try FixtureNullDefaultShape.load(saved)
+      XCTAssertEqual(try TypraRuntime.jsonString(from: reloaded.save()), try TypraRuntime.jsonString(from: expected))
+    }
+    for kind in ["future", "circle"] {
+      let missingRequired: [String: Any] = ["kind": kind]
+      XCTAssertThrowsError(${
+        useCodable
+          ? "try JSONDecoder().decode(FixtureNullDefaultShape.self, from: JSONSerialization.data(withJSONObject: missingRequired))"
+          : "try FixtureNullDefaultShape.load(missingRequired)"
+      }) { error in
+        let diagnostic = String(describing: error)
+        XCTAssertTrue(diagnostic.contains("label") && diagnostic.contains("missing required field"), diagnostic)
+      }
+    }
+  }
+
   func testEmitsCanonicalConformancePayload() throws {
     let propertyCases = try JSONSerialization.jsonObject(with: Data(${propertyCorpusJsonLiteral}.utf8)) as! [[String: Any]]
     let propertyOutputs = try propertyCases.map { entry -> [String: Any] in
@@ -618,7 +652,7 @@ final class ConformanceValidateTests: XCTestCase {
   const payloadPath = path.join(buildDir, "conformance.json");
 
   try {
-    execFileSync(
+    const output = execFileSync(
       "swift",
       [
         "test",
@@ -639,6 +673,7 @@ final class ConformanceValidateTests: XCTestCase {
       },
     );
     assertConformanceResult(targetDir, readFileSync(payloadPath, "utf8"));
+    return output;
   } catch (error) {
     const output =
       `${error.stdout?.toString() ?? ""}${error.stderr?.toString() ?? ""}`.trim();
@@ -654,7 +689,7 @@ final class ConformanceValidateTests: XCTestCase {
 }
 
 export function runSwiftCodableExecutableConformance() {
-  runSwiftExecutableConformance("swift-codable", true);
+  return runSwiftExecutableConformance("swift-codable", true);
 }
 
 export function runSwiftVectorConformanceCompile(context) {

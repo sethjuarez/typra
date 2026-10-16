@@ -43,6 +43,7 @@ import {
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
+  shouldRejectAbsentNullableKey,
 } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
@@ -802,7 +803,7 @@ function emitLoadMethod(
     const field = type.fields.find(
       (candidate) => candidate.name === assign.fieldName,
     );
-    if (isRequiredNullable(assign)) {
+    if (shouldRejectAbsentNullableKey(assign)) {
       // Required nullable (#339): the key must be present; an explicit null is accepted.
       lines.push(
         `        if (!data.ContainsKey(${csStringLiteral(assign.sourceName)}))`,
@@ -1526,7 +1527,8 @@ function csharpDictValueLoadExpr(
   contextExpr: string,
 ): string {
   const csType = CSHARP_TYPE_MAP[valueType];
-  if (csType === "string") return `${valueExpr}.ToString()!`;
+  if (csType === "string")
+    return `(${valueExpr} ?? throw new ArgumentException(${contextExpr}.Path + ": expected non-null string")).ToString()!`;
   if (csType && NON_NULLABLE_VALUE_TYPES.has(csType)) {
     return `Convert.To${CONVERT_MAP[csType]}(${valueExpr})`;
   }

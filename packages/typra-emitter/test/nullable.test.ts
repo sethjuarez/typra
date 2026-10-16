@@ -1,6 +1,7 @@
 // Issue #339: `x: T | null` is a REQUIRED key whose value may be null — load rejects an
 // absent key but accepts `null`, and save always writes the key (as `null` when unset) —
 // distinct from `x?: T` / `x?: T | null`, which are omitted when unset.
+// `x: T | null = null` keeps the save rule but loads an absent key as null.
 
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -152,6 +153,100 @@ describe("required nullable fields `x: T | null` (#339)", () => {
     assert.doesNotMatch(output, /unsupported-union-types|error/i, output);
   });
 
+  it("keeps the alias name for an `Alias | null` enum in every target", () => {
+    for (const dir of ["python", "python-pydantic"]) {
+      const source = model(dir, /^_Row\.py$/);
+      assert.match(source, /^Mood = Literal\["calm", "busy"\]$/m, dir);
+      assert.match(source, /^ {4}mood: Mood \| None\b/m, dir);
+      assert.doesNotMatch(source, /^mood = /m, dir);
+      assert.match(source, /^Combo = Literal\["other", "calm", "busy"\]$/m, dir);
+      assert.match(source, /^ {4}combo: Combo \| None\b/m, dir);
+      assert.doesNotMatch(source, /^combo = /m, dir);
+    }
+    for (const dir of ["typescript", "typescript-zod"]) {
+      const source = model(dir, /^row\.ts$/);
+      assert.match(source, /export type Mood = "calm" \| "busy";/, dir);
+      assert.match(source, /export type Combo = "other" \| "calm" \| "busy";/, dir);
+    }
+    for (const name of ["Mood", "Combo"]) {
+      assert.match(model("go", /^row\.go$/), new RegExp(`^type ${name} string$`, "m"));
+      for (const dir of ["rust", "rust-serde"]) {
+        assert.match(
+          model(dir, /\/row\.rs$|^row\.rs$/),
+          new RegExp(`^pub enum ${name} \\{$`, "m"),
+          dir,
+        );
+      }
+      for (const dir of ["swift", "swift-codable"]) {
+        assert.match(
+          model(dir, /^Sources\/.*\/row\.swift$/),
+          new RegExp(`public var ${name.toLowerCase()}: ${name}\\?`),
+          dir,
+        );
+      }
+      for (const dir of ["csharp", "java", "java-jackson"]) {
+        assert.ok(
+          [...generated.get(dir)!.keys()].some((file) =>
+            new RegExp(`(^|[\\\\/])${name}\\.(cs|java)$`).test(file),
+          ),
+          `${dir} ${name}`,
+        );
+      }
+    }
+  });
+
+  it("Python imports and round-trips nullable aliases, including nested aliases", (t) => {
+    if (spawnSync("uv", ["--version"]).status !== 0) {
+      t.skip("uv toolchain not available");
+      return;
+    }
+    const script = path.join(root, "mood_probe.py");
+    writeFileSync(
+      script,
+      [
+        "import importlib.util, json, os, sys",
+        "pkg = sys.argv[1]",
+        'spec = importlib.util.spec_from_file_location("mood_pkg", os.path.join(pkg, "__init__.py"), submodule_search_locations=[pkg])',
+        "m = importlib.util.module_from_spec(spec)",
+        'sys.modules["mood_pkg"] = m',
+        "spec.loader.exec_module(m)",
+        'row = {key: None for key in ["caption", "count", "detail", "tags", "details", "labels"]}',
+        "print(json.dumps({",
+        '    "calm": m.Row.load({**row, "mood": "calm"}).save()["mood"],',
+        '    "null": m.Row.load({**row, "mood": None}).save()["mood"],',
+        '    "combo": m.Row.load({**row, "mood": None, "combo": "other"}).save()["combo"],',
+        "}))",
+        "",
+      ].join("\n"),
+    );
+    for (const target of ["python", "python-pydantic"]) {
+      const result = spawnSync(
+        "uv",
+        [
+          "run",
+          "--python",
+          "3.12",
+          "--with",
+          "pydantic",
+          "--with",
+          "pytest",
+          "--with",
+          "PyYAML",
+          "python",
+          script,
+          path.join(root, "generated", target),
+        ],
+        { encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, `${target}: ${result.stdout}${result.stderr}`);
+      assert.deepEqual(
+        JSON.parse(result.stdout.trim().split("\n").pop()!),
+        { calm: "calm", null: null, combo: "other" },
+        target,
+      );
+    }
+  });
+
   it("TypeScript requires the key, accepts null, and always writes it", () => {
     for (const dir of ["typescript", "typescript-zod"]) {
       const source = model(dir, /^row\.ts$/);
@@ -198,7 +293,10 @@ describe("required nullable fields `x: T | null` (#339)", () => {
 
   it("Go uses pointers without omitempty and always writes the key", () => {
     const source = model("go", /^row\.go$/);
-    assert.match(source, /Caption \*string\s+`json:"caption" yaml:"caption"`/);
+    assert.match(
+      source,
+      /Caption\s+\*string\s+`json:"caption" yaml:"caption"`/,
+    );
     assert.match(source, /`json:"hint,omitempty" yaml:"hint,omitempty"`/);
     for (const key of NULLABLE) {
       assert.match(source, new RegExp(`json:"${key}" yaml:"${key}"`));
@@ -537,6 +635,16 @@ describe("required nullable fields `x: T | null` (#339)", () => {
           assert.match(variant, /result\["label"\] = NSNull\(\)/);
         }
         assert.match(circle, /result\["center"\] = NSNull\(\)/);
+        const unknownSave = section(shape, "case .unknown(let value):", "\n    }");
+        for (const key of ["label", "legacyLabel"]) {
+          assert.match(
+            unknownSave,
+            new RegExp(`if result\\["${key}"\\] == nil \\{\\s*result\\["${key}"\\] = NSNull\\(\\)`),
+            `${dir} unknown carrier saves absent ${key} as null`,
+          );
+        }
+        assert.match(unknownSave, /return result/);
+        assert.doesNotMatch(unknownSave, /result\["center"\]/);
       }
     });
   });
@@ -579,5 +687,257 @@ describe("required nullable fields `x: T | null` (#339)", () => {
         assert.match(source, /\\?"label\\?": null/, `${dir} ${name}`);
       }
     }
+  });
+
+  // `x: T | null = null` (lenient load, strict save): an absent key loads as null, so no
+  // missing-key guard is emitted, yet save still always writes the key as null.
+  describe("required nullable with a `null` default", () => {
+    const RUNTIMES: Array<{
+      dirs: string[];
+      row: RegExp;
+      shape: RegExp;
+      guard: (key: string) => RegExp;
+      save: (key: string) => RegExp;
+    }> = [
+      {
+        dirs: ["typescript", "typescript-zod"],
+        row: /^row\.ts$/,
+        shape: /^shape\.ts$/,
+        guard: (k) => new RegExp(`data\\["${k}"\\] === undefined\\) \\{`),
+        save: (k) => new RegExp(`result\\["${k}"\\] = null;`),
+      },
+      {
+        dirs: ["python", "python-pydantic"],
+        row: /_Row\.py$/,
+        shape: /_Shape\.py$/,
+        guard: (k) => new RegExp(`"${k}" not in data`),
+        save: (k) => new RegExp(`result\\["${k}"\\] = None`),
+      },
+      {
+        dirs: ["go"],
+        row: /^row\.go$/,
+        shape: /^shape\.go$/,
+        guard: (k) => new RegExp(`m\\["${k}"\\]; !exists`),
+        save: (k) => new RegExp(`result\\["${k}"\\] = nil`),
+      },
+      {
+        dirs: ["csharp"],
+        row: /^Row\.cs$/,
+        shape: /^(Shape|Circle|Square)\.cs$/,
+        guard: (k) => new RegExp(`!data\\.ContainsKey\\("${k}"\\)`),
+        save: (k) => new RegExp(`result\\["${k}"\\] = null;`),
+      },
+      {
+        dirs: ["java", "java-jackson"],
+        row: /(^|\/)Row\.java$/,
+        shape: /(^|\/)(Shape|Circle|Square)\.java$/,
+        guard: (k) => new RegExp(`!map\\.containsKey\\("${k}"\\)`),
+        save: (k) => new RegExp(`result\\.put\\("${k}", null\\)`),
+      },
+      {
+        dirs: ["rust", "rust-serde"],
+        row: /(^|\/)row\.rs$/,
+        shape: /(^|\/)shape\.rs$/,
+        guard: (k) => new RegExp(`!object\\.contains_key\\("${k}"\\)`),
+        save: (k) =>
+          new RegExp(
+            `result\\.insert\\("${k}"\\.to_string\\(\\), serde_json::Value::Null\\)`,
+          ),
+      },
+      {
+        dirs: ["swift", "swift-codable"],
+        row: /^Sources\/.*\/row\.swift$/,
+        shape: /^Sources\/.*\/shape\.swift$/,
+        guard: (k) => new RegExp(`object\\["${k}"\\] == nil`),
+        save: (k) => new RegExp(`result\\["${k}"\\] = NSNull\\(\\)`),
+      },
+    ];
+
+    for (const { dirs, row, shape, guard, save } of RUNTIMES) {
+      for (const dir of dirs) {
+        it(`${dir} skips the missing-key guard but always writes the key`, () => {
+          const rowSource = model(dir, row);
+          const shapeSource = model(dir, shape);
+          // The plain required nullable keeps its guard alongside.
+          assert.match(rowSource, guard("caption"), `${dir} caption guard`);
+          assert.match(shapeSource, guard("label"), `${dir} label guard`);
+          for (const key of ["legacy", "legacyDetail"]) {
+            assert.doesNotMatch(rowSource, guard(key), `${dir} ${key} guard`);
+            assert.match(rowSource, save(key), `${dir} ${key} save`);
+          }
+          // Inherited through the discriminated base, the variants, and (Swift) the
+          // unknown-discriminator carrier.
+          assert.doesNotMatch(shapeSource, guard("legacyLabel"), dir);
+          assert.match(shapeSource, save("legacyLabel"), dir);
+        });
+      }
+    }
+
+    it("keeps the TypeScript declaration and zod schema nullable", () => {
+      for (const dir of ["typescript", "typescript-zod"]) {
+        assert.match(model(dir, /^row\.ts$/), /legacy: string \| null = null;/);
+      }
+      // zod describes the canonical saved form, where the key is always present.
+      assert.match(
+        model("typescript-zod", /^row\.ts$/),
+        /legacy: z\.string\(\)\.nullable\(\),/,
+      );
+      assert.match(
+        model("typescript-zod", /^shape\.ts$/),
+        /legacyLabel: z\.string\(\)\.nullable\(\),/,
+      );
+    });
+
+    it("Go does not import an unused fmt when no key is guarded", () => {
+      assert.doesNotMatch(model("go", /^legacy_only\.go$/), /"fmt"/);
+    });
+
+    // Executed against a small dedicated spec that isolates the null-default contract.
+    it("Python loads an absent key as None and saves it as null", (t) => {
+      if (spawnSync("uv", ["--version"]).status !== 0) {
+        t.skip("uv toolchain not available");
+        return;
+      }
+      const dir = mkdtempSync(path.join(process.cwd(), "tmp-null-default-py-"));
+      try {
+        const source = path.join(dir, "main.tsp");
+        writeFileSync(
+          source,
+          [
+            'import "@typra/emitter";',
+            "namespace Typra.Fixtures.NullDefaultProbe;",
+            "@serializable",
+            "model Root {",
+            "  caption: string | null;",
+            "  legacy: string | null = null;",
+            "  legacyDetail: Detail | null = null;",
+            "  shape: Shape;",
+            "}",
+            "model Detail { label: string; }",
+            '@discriminator("kind")',
+            "model Shape {",
+            "  kind: string;",
+            "  legacyLabel: string | null = null;",
+            "}",
+            'model Circle extends Shape { kind: "circle"; radius: int32; }',
+            "",
+          ].join("\n"),
+        );
+        const output = compile(
+          dir,
+          source,
+          "Typra.Fixtures.NullDefaultProbe.Root",
+          [
+            ["Python", "python"],
+            ["Python", "python-pydantic", "pydantic"],
+          ],
+        );
+        assert.match(output, /Compilation completed successfully/, output);
+        const script = path.join(dir, "probe.py");
+        writeFileSync(
+          script,
+          [
+            "import importlib.util, json, os, sys",
+            "pkg = sys.argv[1]",
+            'spec = importlib.util.spec_from_file_location("probe_pkg", os.path.join(pkg, "__init__.py"), submodule_search_locations=[pkg])',
+            "m = importlib.util.module_from_spec(spec)",
+            'sys.modules["probe_pkg"] = m',
+            "spec.loader.exec_module(m)",
+            'circle = {"kind": "circle", "radius": 1}',
+            "try:",
+            '    m.Root.load({"shape": circle})',
+            "    missing = None",
+            "except Exception as e:",
+            "    missing = str(e)",
+            "print(json.dumps({",
+            '    "absent": m.Root.load({"caption": None, "shape": circle}).save(),',
+            '    "kept": m.Root.load({"caption": "c", "legacy": "x", "legacyDetail": {"label": "d"}, "shape": {**circle, "legacyLabel": "l"}}).save(),',
+            '    "missingCaption": missing,',
+            "}))",
+            "",
+          ].join("\n"),
+        );
+        for (const target of ["python", "python-pydantic"]) {
+          const result = spawnSync(
+            "uv",
+            [
+              "run",
+              "--python",
+              "3.12",
+              "--with",
+              "pydantic",
+              "--with",
+              "pytest",
+              "--with",
+              "PyYAML",
+              "python",
+              script,
+              path.join(dir, "generated", target),
+            ],
+            { encoding: "utf8" },
+          );
+          assert.equal(
+            result.status,
+            0,
+            `${target}: ${result.stdout}${result.stderr}`,
+          );
+          const probe = JSON.parse(result.stdout.trim().split("\n").pop()!);
+          // Absent keys load as null and are still written as null.
+          assert.deepEqual(
+            probe.absent,
+            {
+              caption: null,
+              legacy: null,
+              legacyDetail: null,
+              shape: { kind: "circle", radius: 1, legacyLabel: null },
+            },
+            target,
+          );
+          assert.deepEqual(
+            probe.kept,
+            {
+              caption: "c",
+              legacy: "x",
+              legacyDetail: { label: "d" },
+              shape: { kind: "circle", radius: 1, legacyLabel: "l" },
+            },
+            target,
+          );
+          // A plain required nullable still rejects an absent key.
+          assert.match(String(probe.missingCaption), /missing required field/);
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("still rejects a `null` default on an optional field", () => {
+      const dir = mkdtempSync(path.join(process.cwd(), "tmp-null-default-"));
+      try {
+        const source = path.join(dir, "main.tsp");
+        writeFileSync(
+          source,
+          [
+            'import "@typra/emitter";',
+            "namespace Typra.Fixtures.NullDefault;",
+            "@serializable",
+            "model Root {",
+            "  hint?: string | null = null;",
+            "}",
+            "",
+          ].join("\n"),
+        );
+        const result = compile(dir, source, "Typra.Fixtures.NullDefault.Root", [
+          ["TypeScript", "typescript"],
+        ]);
+        assert.match(result, /typra-emitter-unsupported-complex-default/);
+        assert.match(
+          result,
+          /only supported on a required nullable property \(`x: T \| null = null`\)/,
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 });

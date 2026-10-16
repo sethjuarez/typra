@@ -23,7 +23,7 @@ model FixtureRoot {
   @doc("Dictionary-shaped metadata")
   metadata?: Record<unknown>;
 
-  @sample(#{ typedRecords: #{ counts: #{ alpha: 1, beta: 2 }, owners: #{ primary: #{ id: "owner-typed-1", displayName: "Typed Owner" } } } })
+  @sample(#{ typedRecords: #{ counts: #{ alpha: 1, beta: 2 }, owners: #{ primary: #{ id: "owner-typed-1", displayName: "Typed Owner" } }, names: #{ label: "kept", empty: "" } } })
   @doc("Records with scalar and model value types")
   typedRecords: FixtureTypedRecords;
 
@@ -85,6 +85,48 @@ model FixtureRoot {
   @sample(#{ passthroughEvents: #[#{ kind: "click", event_id: "event-1", x: 3 }] })
   @doc("Polymorphic models whose base preserves undeclared fields (#336)")
   passthroughEvents: FixturePassthroughEvent[];
+
+  // Shape samples are canonical; executable conformance separately feeds omitted keys.
+  @sample(#{ nullDefaults: #[#{ requiredText: null, legacy_text: null, legacyCount: null, legacyEnabled: null, legacyPayload: null, legacyState: null, legacyOwner: null, legacyTags: null, legacyOwners: null, legacyLabels: null, legacyNames: null, shapes: null }] })
+  @doc("Absent nullable defaults become explicit nulls on save; ordinary required keys remain required")
+  nullDefaults: FixtureNullDefaults[];
+}
+
+model FixtureNullDefaults {
+  requiredText: string | null;
+
+  @encodedName("application/json", "legacy_text")
+  legacyText: string | null = null;
+  legacyCount: uint32 | null = null;
+  legacyEnabled: boolean | null = null;
+  legacyPayload: unknown | null = null;
+  legacyState: FixtureNullDefaultState | null = null;
+  legacyOwner: FixtureOwner | null = null;
+  legacyTags: string[] | null = null;
+  legacyOwners: FixtureOwner[] | null = null;
+  legacyLabels: Record<unknown> | null = null;
+  legacyNames: Record<string> | null = null;
+  shapes: FixtureNullDefaultShape[] | null = null;
+  note?: string;
+
+  // Shares FixtureStatus with FixtureRoot, so a target whose files share one namespace
+  // (Go package, Swift module, Rust re-exports) must still declare the enum only once.
+  status?: FixtureStatus;
+}
+
+alias FixtureNullDefaultState = "ready" | "archived";
+
+@discriminator("kind")
+model FixtureNullDefaultShape {
+  kind: string;
+  label: string | null;
+  legacyLabel: string | null = null;
+  state?: FixtureNullDefaultState;
+}
+
+model FixtureNullDefaultCircle extends FixtureNullDefaultShape {
+  kind: "circle";
+  legacyRadius: uint32 | null = null;
 }
 
 @doc("""
@@ -122,6 +164,9 @@ model FixturePassthroughClick extends FixturePassthroughEvent {
 @doc("Typed record values must preserve their declared value type.")
 @serializable
 model FixtureTypedRecords {
+  @sample(#{ names: #{ label: "kept", empty: "" } })
+  names: Record<string>;
+
   @sample(#{ counts: #{ alpha: 1, beta: 2 } })
   @doc("A record whose values are declared scalar integers")
   counts: Record<int32>;

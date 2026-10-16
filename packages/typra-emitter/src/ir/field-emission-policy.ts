@@ -67,13 +67,24 @@ export function shouldGuardMissingRequiredField(
 
 /**
  * Required nullable field (`x: T | null`, #339): the value is typed and stored like an
- * optional field, but load must reject an ABSENT key (an explicit `null` is accepted and
- * leaves the value unset) and save must ALWAYS write the key, as `null` when unset.
+ * optional field, and save must ALWAYS write the key, as `null` when unset. Whether load
+ * rejects an absent key is {@link shouldRejectAbsentNullableKey}.
  */
 export function isRequiredNullable(
   field: { isNullable?: boolean } | undefined,
 ): boolean {
   return field?.isNullable === true;
+}
+
+/**
+ * Whether load must reject an ABSENT required nullable key (an explicit `null` is always
+ * accepted and leaves the value unset). `x: T | null` rejects it; `x: T | null = null`
+ * loads it as null, so payloads written before the key existed stay loadable.
+ */
+export function shouldRejectAbsentNullableKey(
+  field: { isNullable?: boolean; hasNullDefault?: boolean } | undefined,
+): boolean {
+  return isRequiredNullable(field) && field?.hasNullDefault !== true;
 }
 
 export function saveFieldEmissionPolicy(

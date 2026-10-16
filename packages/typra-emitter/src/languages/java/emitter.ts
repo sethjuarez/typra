@@ -20,6 +20,7 @@ import {
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
+  shouldRejectAbsentNullableKey,
 } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
@@ -637,7 +638,7 @@ function emitLoadBaseInto(
       (helper) =>
         helper.propertyName === assignment.fieldName && helper.hasNameProperty,
     );
-    if (isRequiredNullable(assignment)) {
+    if (shouldRejectAbsentNullableKey(assignment)) {
       // Required nullable (#339): the key must be present; an explicit null is accepted.
       const wireName = escapeJava(assignment.sourceName);
       lines.push(`    if (!map.containsKey("${wireName}")) {`);

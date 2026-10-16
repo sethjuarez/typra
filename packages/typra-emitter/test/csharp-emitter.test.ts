@@ -114,6 +114,13 @@ describe("C# emitter guarded scalar loads", () => {
       typeName: { namespace: "Test", name: "Record<FixtureOwner>" },
       category: { kind: "dict" as const, valueType: "FixtureOwner" },
     };
+    const stringField = {
+      ...field,
+      name: "names",
+      typeName: { namespace: "", name: "Record<string>" },
+      category: { kind: "dict" as const, valueType: "string" },
+    };
+    const fields = [field, optionalField, typedField, stringField];
     const model: TypeDecl = {
       typeName: { namespace: "Test", name: "Envelope" },
       serialized: true,
@@ -121,11 +128,11 @@ describe("C# emitter guarded scalar loads", () => {
       isAbstract: false,
       isProtocol: false,
       description: "",
-      fields: [field, optionalField, typedField],
+      fields,
       coercionProperty: null,
       load: {
         coercions: [],
-        assignments: [field, optionalField, typedField].map((item) => ({
+        assignments: fields.map((item) => ({
           sourceName: item.name,
           fieldName: item.name,
           category: item.category,
@@ -141,7 +148,7 @@ describe("C# emitter guarded scalar loads", () => {
         hasContextHooks: true,
       },
       save: {
-        assignments: [field, optionalField, typedField].map((item) => ({
+        assignments: fields.map((item) => ({
           targetName: item.name,
           fieldName: item.name,
           category: item.category,
@@ -181,6 +188,14 @@ describe("C# emitter guarded scalar loads", () => {
       /public IDictionary<string, FixtureOwner> Owners \{ get; set; \} = new Dictionary<string, FixtureOwner>\(\);/,
     );
     assert.doesNotMatch(source, /IDictionary<string, FixtureOwner\?>/);
+    assert.match(source, /public IDictionary<string, string> Names/);
+    assert.ok(
+      source.includes(
+        '(kvp.Value ?? throw new ArgumentException(context!.At("names").At(kvp.Key).Path + ": expected non-null string")).ToString()!',
+      ),
+      "string record values must be checked before dereferencing",
+    );
+    assert.doesNotMatch(source, /kvp\.Value\.ToString\(\)/);
   });
 
   it("emits nullable Record<unknown> values in protocol parameters", () => {

@@ -840,23 +840,28 @@ function assertFocusedFeatureFixtures() {
       // Issue #339: `x: T | null` is a required key whose value may be null,
       // distinct from `x?: T` (omitted when unset). The IR must record both
       // flags so every runtime can require the key on load and always write it.
+      // `x: T | null = null` additionally records `hasNullDefault`, so load treats
+      // an absent key as null while save still always writes it.
       const row = (model.properties ?? []).find(
         (field) => field.name === "row",
       )?.type;
       const flags = Object.fromEntries(
         (row?.properties ?? []).map((field) => [
           field.name,
-          `${field.isOptional ? "optional" : "required"}${field.isNullable ? "+nullable" : ""}`,
+          `${field.isOptional ? "optional" : "required"}${field.isNullable ? "+nullable" : ""}${field.hasNullDefault ? "+nullDefault" : ""}`,
         ]),
       );
       const expected = {
         caption: "required+nullable",
         count: "required+nullable",
         mood: "required+nullable",
+        combo: "optional+nullable",
         detail: "required+nullable",
         tags: "required+nullable",
         details: "required+nullable",
         labels: "required+nullable",
+        legacy: "required+nullable+nullDefault",
+        legacyDetail: "required+nullable+nullDefault",
         note: "optional",
         hint: "optional+nullable",
       };
@@ -2615,7 +2620,6 @@ function assertActualGeneratedSurface() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "rust", "fixture_root.rs"),
-    "pub enum FixtureStatus",
     "pub enum FixtureMode",
     "Self::from_str_ignore_case_opt(s)",
     "pub fn from_str_ignore_case_opt(s: &str) -> Option<Self>",
@@ -2666,6 +2670,37 @@ function assertActualGeneratedSurface() {
     "public protocol EventSink",
     "func emit(event: Any) async throws",
   );
+  // FixtureRoot and FixtureNullDefaults share FixtureStatus. Targets whose generated files
+  // share one namespace must declare it in exactly one file and import it elsewhere.
+  for (const [dir, declaration] of [
+    [["rust"], "pub enum FixtureStatus {"],
+    [["rust-serde"], "pub enum FixtureStatus {"],
+    [["go"], "type FixtureStatus string"],
+    [["swift", "Sources", "TypraFixtures"], "public enum FixtureStatus:"],
+    [["swift-codable", "Sources", "TypraFixtures"], "public enum FixtureStatus:"],
+    [["rust"], "pub enum FixtureNullDefaultState {"],
+    [["rust-serde"], "pub enum FixtureNullDefaultState {"],
+    [["go"], "type FixtureNullDefaultState string"],
+    [["swift", "Sources", "TypraFixtures"], "public enum FixtureNullDefaultState:"],
+    [["swift-codable", "Sources", "TypraFixtures"], "public enum FixtureNullDefaultState:"],
+  ]) {
+    assertDeclaredOnce(path.join("generated", "fixtures", ...dir), declaration);
+  }
+}
+
+function assertDeclaredOnce(relativeDir, declaration) {
+  const dir = requirePath(relativeDir);
+  const owners = walkFiles(
+    dir,
+    (file) => !path.relative(dir, file).split(path.sep).includes("tests"),
+  ).filter((file) => readFileSync(file, "utf8").includes(declaration));
+  if (owners.length !== 1) {
+    fail(
+      `${relativeDir} must declare \`${declaration}\` in exactly one file; found ${owners.length}: ${owners
+        .map((file) => path.relative(dir, file))
+        .join(", ")}`,
+    );
+  }
 }
 
 function assertNoEmptyTargetDirs() {

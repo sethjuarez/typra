@@ -21,8 +21,14 @@ model FixtureRoot {
 | `string[]` | Array or list of scalar values. |
 | `FixtureContent[]` | Array or list of nested model values, including polymorphic dispatch when the item type is discriminated. |
 | `Record<unknown>` | Dictionary-shaped metadata with unknown values. |
+| `Record<string>` | Dictionary with string values. |
 
 Generated tests exercise scalar arrays, nested object arrays, dictionaries, and polymorphic collections from fixture samples.
+
+In C#, `Record<string>` emits `IDictionary<string, string>`. Loading a null entry
+throws an error that includes its key path. `Record<string> | null = null` allows
+the whole dictionary to be absent or null, but its entries still cannot be null.
+Use `Record<unknown>` for values that may include null.
 
 ## Unknown-field passthrough
 
