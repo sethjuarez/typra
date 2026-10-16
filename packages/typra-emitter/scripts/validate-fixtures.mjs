@@ -864,6 +864,9 @@ function assertFocusedFeatureFixtures() {
         legacyDetail: "required+nullable+nullDefault",
         note: "optional",
         hint: "optional+nullable",
+        unknownNullable: "required+nullable+nullDefault",
+        optionalUnknownNullable: "optional+nullable",
+        plainUnknown: "optional",
       };
       if (JSON.stringify(flags) !== JSON.stringify(expected)) {
         fail(

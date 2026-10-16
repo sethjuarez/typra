@@ -3125,7 +3125,12 @@ function loadExpr(
 
   switch (cat.kind) {
     case "scalar":
-      return scalarLoadExpr(key, cat.scalarType, a.isOptional);
+      return scalarLoadExpr(
+        key,
+        cat.scalarType,
+        a.isOptional,
+        a.isNullable || a.isOptionalNullable,
+      );
     case "complex": {
       const lowering = resolveFieldLowering(
         {
@@ -3219,14 +3224,18 @@ function scalarLoadExpr(
   key: string,
   scalarType: string,
   isOptional: boolean,
+  isNullable: boolean = false,
 ): string {
   if (isValueType(scalarType)) {
     // dictionary is never optional; any/object/unknown may be optional
     if (scalarType === "dictionary") {
       return `value.get(${rustStringLiteral(key)}).cloned().unwrap_or(serde_json::Value::Null)`;
     }
+    const nullableFilter = isNullable
+      ? ".filter(|v| !v.is_null())"
+      : "";
     return isOptional
-      ? `value.get(${rustStringLiteral(key)}).cloned()`
+      ? `value.get(${rustStringLiteral(key)})${nullableFilter}.cloned()`
       : `value.get(${rustStringLiteral(key)}).cloned().unwrap_or(serde_json::Value::Null)`;
   }
 
@@ -3361,7 +3370,12 @@ function variantLoadExpr(
 
   switch (cat.kind) {
     case "scalar":
-      return scalarLoadExpr(key, cat.scalarType, field.isOptional);
+      return scalarLoadExpr(
+        key,
+        cat.scalarType,
+        field.isOptional,
+        field.isNullable || field.isOptionalNullable,
+      );
     case "complex": {
       const lowering = resolveFieldLowering(
         field,
