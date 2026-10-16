@@ -21,6 +21,16 @@ union FixtureStatus {
 
 `@parseAlias` is parse-only. Loading accepts `complete`, but saving emits the canonical TypeSpec value `ready`.
 
+String literal aliases keep their declared name when combined with `null`.
+For `alias Mood = "calm" | "busy";`, a field `mood: Mood | null` uses the generated
+type `Mood`, not `mood`. Regenerating code produced by 3.0.0 can change these
+property-derived type names; update any direct references to the old names.
+
+Go and Swift declare an enum shared by several models once in their package or
+module. Rust also declares it once and imports it into the other model files.
+Use Rust's generated module re-exports rather than depending on which model file
+owns the enum.
+
 ## Open string unions
 
 ```typespec
@@ -54,6 +64,11 @@ model ImageContent extends FixtureContent {
 ```
 
 Typra uses the discriminator field to load and save the right child shape. In the fixture contract, `FixtureRoot.content` and `FixtureRoot.contentItems` exercise both a single polymorphic value and a polymorphic collection.
+
+Rust stores a single polymorphic reference as raw `serde_json::Value`. Saving its
+parent preserves that JSON without filling in nested defaults, including absent
+`T | null = null` fields. Direct model loading and typed polymorphic collections
+do apply those defaults. This limitation is unchanged.
 
 ## Generated shape
 

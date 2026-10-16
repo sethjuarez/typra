@@ -29,7 +29,7 @@ behavior is genuinely runtime-specific.
 | Scalars | `features/scalars/main.tsp` | String, boolean, integer widths, numeric, float32, float64, and unknown values. |
 | Collections | `features/collections/main.tsp` | Scalar arrays, model arrays, unknown maps, string maps (including nullable defaults), model maps, and `Record<T> \| Named<T>[]` dual-form collections. |
 | Polymorphism | `features/polymorphism/main.tsp` | Closed discriminated unions, abstract open bases, and named open discriminator bases. |
-| Enums | `features/enums/main.tsp` | Closed string unions, open string unions, and parse-only aliases. |
+| Enums | `features/enums/main.tsp` | Closed string unions, open string unions, parse-only aliases, and a union shared across model files. |
 | Samples | `features/samples/main.tsp` | Inline `@sample` payloads and imported constant sample payloads with nested items. |
 | Vectors | `features/vectors/main.tsp` | Inline `@vector` payloads, imported vector arrays, success expectations, and error expectations. |
 | Coercions | `features/coercions/main.tsp` | Scalar-to-model coercions, factories, method stubs, and entry shorthand for named collections. |
