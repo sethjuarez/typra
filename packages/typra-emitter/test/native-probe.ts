@@ -162,6 +162,34 @@ export function buildCSharp(sourceDir: string, program?: string): string {
   );
 }
 
+/**
+ * Builds and vets the emitted Go package as module `probe`. `testSource` becomes an
+ * in-package `probe_test.go` (its `package` clause is filled in) and runs via `go test`.
+ */
+export function buildGo(sourceDir: string, testSource?: string): string {
+  const goFile = listFiles(sourceDir, ".go").find((file) =>
+    path.dirname(file) === sourceDir,
+  );
+  const pkg = goFile
+    ? /^package\s+(\w+)/m.exec(readFileSync(goFile, "utf8"))?.[1]
+    : undefined;
+  if (!pkg) throw new Error(`no Go package found in ${sourceDir}`);
+  writeFileSync(
+    path.join(sourceDir, "go.mod"),
+    "module probe\n\ngo 1.22\n\nrequire gopkg.in/yaml.v3 v3.0.1\n",
+  );
+  if (testSource) {
+    writeFileSync(
+      path.join(sourceDir, "probe_test.go"),
+      `package ${pkg}\n\n${testSource}`,
+    );
+  }
+  const env = { ...process.env, GOFLAGS: "-mod=mod" };
+  let output = run("go", ["vet", "."], sourceDir, env);
+  if (testSource) output += run("go", ["test", "-count=1", "."], sourceDir, env);
+  return output;
+}
+
 const cargoTargetDir = path.join(tmpdir(), "typra-native-probe-cargo-target");
 
 /**
