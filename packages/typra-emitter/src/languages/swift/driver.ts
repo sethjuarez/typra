@@ -6,6 +6,7 @@ import { BaseTestContext, enumerateTypes, TypeNode } from "../../ir/ast.js";
 import { GeneratorOptions, filterNodes } from "../../emitter.js";
 import { TypeRegistry } from "../../ir/expansion.js";
 import {
+  hoistSharedEnums,
   lowerFile,
   collectPolymorphicTypeNames,
   computeSerializationClosure,
@@ -111,10 +112,15 @@ export const generateSwift = async (
   // Serialization is opt-in via `@serializable`: compute the closure once and
   // thread it so only its members emit load/save.
   const serializationClosure = computeSerializationClosure(nodes, registry);
+  // One Swift module: a string-literal enum shared across files is declared once.
   const fileDecls = new Map(
-    rootNodes.map((n) => [
-      `${n.typeName.namespace}.${n.typeName.name}`,
-      lowerFile(n, registry, polymorphicTypeNames, serializationClosure),
+    hoistSharedEnums(
+      rootNodes.map((n) =>
+        lowerFile(n, registry, polymorphicTypeNames, serializationClosure),
+      ),
+    ).map((fileDecl, index) => [
+      `${rootNodes[index].typeName.namespace}.${rootNodes[index].typeName.name}`,
+      fileDecl,
     ]),
   );
   const declarationUniverse = Array.from(fileDecls.values()).flatMap(

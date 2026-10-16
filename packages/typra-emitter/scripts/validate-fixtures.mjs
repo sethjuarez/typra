@@ -2619,7 +2619,6 @@ function assertActualGeneratedSurface() {
   );
   assertIncludes(
     path.join("generated", "fixtures", "rust", "fixture_root.rs"),
-    "pub enum FixtureStatus",
     "pub enum FixtureMode",
     "Self::from_str_ignore_case_opt(s)",
     "pub fn from_str_ignore_case_opt(s: &str) -> Option<Self>",
@@ -2670,6 +2669,32 @@ function assertActualGeneratedSurface() {
     "public protocol EventSink",
     "func emit(event: Any) async throws",
   );
+  // FixtureRoot and FixtureNullDefaults share FixtureStatus. Targets whose generated files
+  // share one namespace must declare it in exactly one file and import it elsewhere.
+  for (const [dir, declaration] of [
+    [["rust"], "pub enum FixtureStatus {"],
+    [["rust-serde"], "pub enum FixtureStatus {"],
+    [["go"], "type FixtureStatus string"],
+    [["swift", "Sources", "TypraFixtures"], "public enum FixtureStatus:"],
+    [["swift-codable", "Sources", "TypraFixtures"], "public enum FixtureStatus:"],
+  ]) {
+    assertDeclaredOnce(path.join("generated", "fixtures", ...dir), declaration);
+  }
+}
+
+function assertDeclaredOnce(relativeDir, declaration) {
+  const dir = requirePath(relativeDir);
+  const owners = walkFiles(
+    dir,
+    (file) => !path.relative(dir, file).split(path.sep).includes("tests"),
+  ).filter((file) => readFileSync(file, "utf8").includes(declaration));
+  if (owners.length !== 1) {
+    fail(
+      `${relativeDir} must declare \`${declaration}\` in exactly one file; found ${owners.length}: ${owners
+        .map((file) => path.relative(dir, file))
+        .join(", ")}`,
+    );
+  }
 }
 
 function assertNoEmptyTargetDirs() {

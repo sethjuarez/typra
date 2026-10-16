@@ -38,6 +38,7 @@ import {
   isTypedSeamEntry,
 } from "../../ir/vector.js";
 import {
+  hoistSharedEnums,
   lowerFile,
   collectPolymorphicTypeNames,
   computeSerializationClosure,
@@ -240,18 +241,24 @@ export const generateRust = async (
     }
   }
 
+  // Rust re-exports every module with `pub use module::*`, so a string-literal enum
+  // shared across files is declared once and imported by the other modules.
+  const rootNodes = nodes.filter((n) => !n.base);
+  const fileDecls = new Map(
+    hoistSharedEnums(
+      rootNodes.map((n) =>
+        lowerFile(n, registry, polymorphicTypeNames, serializationClosure),
+      ),
+    ).map((fileDecl, index) => [rootNodes[index], fileDecl]),
+  );
+
   // Render each base type and its children as a single file, into group subfolder
   const groupModuleNames = new Map<string, string[]>(); // group → module names
   const testGroupModuleNames = new Map<string, string[]>(); // group → test module names
   for (const n of nodes) {
     if (!n.base) {
       const group = n.group || "";
-      const fileDecl = lowerFile(
-        n,
-        registry,
-        polymorphicTypeNames,
-        serializationClosure,
-      );
+      const fileDecl = fileDecls.get(n)!;
       const fileContent = emitRustFileDecl(
         fileDecl,
         visitor,

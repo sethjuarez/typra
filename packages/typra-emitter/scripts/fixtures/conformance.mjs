@@ -234,6 +234,7 @@ export const fixtureRootSample = {
       legacyLabels: { key: "kept" },
       shapes: [{ kind: "circle", label: null }],
       note: "",
+      status: "complete",
     },
     {
       requiredText: "",
@@ -326,6 +327,8 @@ export const fixtureRootExpected = {
     legacyLabels: null,
     shapes: null,
     ...entry,
+    // The shared FixtureStatus enum applies its parse alias here too.
+    ...(entry.status === "complete" ? { status: "ready" } : {}),
     ...(entry.shapes
       ? {
           shapes: entry.shapes.map((shape) => ({

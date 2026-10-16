@@ -29,5 +29,7 @@ union MotionPlanKind {
 @serializable
 model MotionPlan {
   kind: MotionPlanKind = MotionPlanKind.subtlePush;
-}
 
+  @sample(#{ status: "ready" })
+  status?: Status;
+}

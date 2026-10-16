@@ -107,6 +107,10 @@ model FixtureNullDefaults {
   legacyLabels: Record<unknown> | null = null;
   shapes: FixtureNullDefaultShape[] | null = null;
   note?: string;
+
+  // Shares FixtureStatus with FixtureRoot, so a target whose files share one namespace
+  // (Go package, Swift module, Rust re-exports) must still declare the enum only once.
+  status?: FixtureStatus;
 }
 
 alias FixtureNullDefaultState = "ready" | "archived";
