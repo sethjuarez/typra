@@ -86,7 +86,8 @@ model FixtureRoot {
   @doc("Polymorphic models whose base preserves undeclared fields (#336)")
   passthroughEvents: FixturePassthroughEvent[];
 
-  @sample(#{ nullDefaults: #[#{ requiredText: null }] })
+  // Shape samples are canonical; executable conformance separately feeds omitted keys.
+  @sample(#{ nullDefaults: #[#{ requiredText: null, legacy_text: null, legacyCount: null, legacyEnabled: null, legacyPayload: null, legacyState: null, legacyOwner: null, legacyTags: null, legacyOwners: null, legacyLabels: null, shapes: null }] })
   @doc("Absent nullable defaults become explicit nulls on save; ordinary required keys remain required")
   nullDefaults: FixtureNullDefaults[];
 }
