@@ -855,6 +855,7 @@ function assertFocusedFeatureFixtures() {
         caption: "required+nullable",
         count: "required+nullable",
         mood: "required+nullable",
+        combo: "optional+nullable",
         detail: "required+nullable",
         tags: "required+nullable",
         details: "required+nullable",
