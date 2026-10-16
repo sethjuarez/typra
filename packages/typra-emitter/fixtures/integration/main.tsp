@@ -85,6 +85,41 @@ model FixtureRoot {
   @sample(#{ passthroughEvents: #[#{ kind: "click", event_id: "event-1", x: 3 }] })
   @doc("Polymorphic models whose base preserves undeclared fields (#336)")
   passthroughEvents: FixturePassthroughEvent[];
+
+  @sample(#{ nullDefaults: #[#{ requiredText: null }] })
+  @doc("Absent nullable defaults become explicit nulls on save; ordinary required keys remain required")
+  nullDefaults: FixtureNullDefaults[];
+}
+
+model FixtureNullDefaults {
+  requiredText: string | null;
+
+  @encodedName("application/json", "legacy_text")
+  legacyText: string | null = null;
+  legacyCount: uint32 | null = null;
+  legacyEnabled: boolean | null = null;
+  legacyPayload: unknown | null = null;
+  legacyState: FixtureNullDefaultState | null = null;
+  legacyOwner: FixtureOwner | null = null;
+  legacyTags: string[] | null = null;
+  legacyOwners: FixtureOwner[] | null = null;
+  legacyLabels: Record<unknown> | null = null;
+  shapes: FixtureNullDefaultShape[] | null = null;
+  note?: string;
+}
+
+alias FixtureNullDefaultState = "ready" | "archived";
+
+@discriminator("kind")
+model FixtureNullDefaultShape {
+  kind: string;
+  label: string | null;
+  legacyLabel: string | null = null;
+}
+
+model FixtureNullDefaultCircle extends FixtureNullDefaultShape {
+  kind: "circle";
+  legacyRadius: uint32 | null = null;
 }
 
 @doc("""

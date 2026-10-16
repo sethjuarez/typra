@@ -541,6 +541,16 @@ describe("required nullable fields `x: T | null` (#339)", () => {
           assert.match(variant, /result\["label"\] = NSNull\(\)/);
         }
         assert.match(circle, /result\["center"\] = NSNull\(\)/);
+        const unknownSave = section(shape, "case .unknown(let value):", "\n    }");
+        for (const key of ["label", "legacyLabel"]) {
+          assert.match(
+            unknownSave,
+            new RegExp(`if result\\["${key}"\\] == nil \\{\\s*result\\["${key}"\\] = NSNull\\(\\)`),
+            `${dir} unknown carrier saves absent ${key} as null`,
+          );
+        }
+        assert.match(unknownSave, /return result/);
+        assert.doesNotMatch(unknownSave, /result\["center"\]/);
       }
     });
   });

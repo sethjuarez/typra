@@ -340,7 +340,21 @@ function emitPolymorphicEnum(
     lines.push("      return result");
   }
   if (usesUnknownFallback) {
-    lines.push("    case .unknown(let value): return value");
+    const nullableKeys = type.save.assignments
+      .filter(isRequiredNullable)
+      .map((assignment) => assignment.targetName);
+    if (nullableKeys.length === 0) {
+      lines.push("    case .unknown(let value): return value");
+    } else {
+      lines.push("    case .unknown(let value):");
+      lines.push("      var result = value");
+      for (const key of nullableKeys) {
+        lines.push(`      if result[${swiftStringLiteral(key)}] == nil {`);
+        lines.push(`        result[${swiftStringLiteral(key)}] = NSNull()`);
+        lines.push("      }");
+      }
+      lines.push("      return result");
+    }
   }
   lines.push("    }");
   lines.push("  }");
