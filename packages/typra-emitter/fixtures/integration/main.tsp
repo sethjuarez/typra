@@ -120,6 +120,7 @@ model FixtureNullDefaultShape {
   kind: string;
   label: string | null;
   legacyLabel: string | null = null;
+  state?: FixtureNullDefaultState;
 }
 
 model FixtureNullDefaultCircle extends FixtureNullDefaultShape {

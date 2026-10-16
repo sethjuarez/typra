@@ -2677,6 +2677,11 @@ function assertActualGeneratedSurface() {
     [["go"], "type FixtureStatus string"],
     [["swift", "Sources", "TypraFixtures"], "public enum FixtureStatus:"],
     [["swift-codable", "Sources", "TypraFixtures"], "public enum FixtureStatus:"],
+    [["rust"], "pub enum FixtureNullDefaultState {"],
+    [["rust-serde"], "pub enum FixtureNullDefaultState {"],
+    [["go"], "type FixtureNullDefaultState string"],
+    [["swift", "Sources", "TypraFixtures"], "public enum FixtureNullDefaultState:"],
+    [["swift-codable", "Sources", "TypraFixtures"], "public enum FixtureNullDefaultState:"],
   ]) {
     assertDeclaredOnce(path.join("generated", "fixtures", ...dir), declaration);
   }

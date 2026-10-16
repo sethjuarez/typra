@@ -153,6 +153,100 @@ describe("required nullable fields `x: T | null` (#339)", () => {
     assert.doesNotMatch(output, /unsupported-union-types|error/i, output);
   });
 
+  it("keeps the alias name for an `Alias | null` enum in every target", () => {
+    for (const dir of ["python", "python-pydantic"]) {
+      const source = model(dir, /^_Row\.py$/);
+      assert.match(source, /^Mood = Literal\["calm", "busy"\]$/m, dir);
+      assert.match(source, /^ {4}mood: Mood \| None\b/m, dir);
+      assert.doesNotMatch(source, /^mood = /m, dir);
+      assert.match(source, /^Combo = Literal\["other", "calm", "busy"\]$/m, dir);
+      assert.match(source, /^ {4}combo: Combo \| None\b/m, dir);
+      assert.doesNotMatch(source, /^combo = /m, dir);
+    }
+    for (const dir of ["typescript", "typescript-zod"]) {
+      const source = model(dir, /^row\.ts$/);
+      assert.match(source, /export type Mood = "calm" \| "busy";/, dir);
+      assert.match(source, /export type Combo = "other" \| "calm" \| "busy";/, dir);
+    }
+    for (const name of ["Mood", "Combo"]) {
+      assert.match(model("go", /^row\.go$/), new RegExp(`^type ${name} string$`, "m"));
+      for (const dir of ["rust", "rust-serde"]) {
+        assert.match(
+          model(dir, /\/row\.rs$|^row\.rs$/),
+          new RegExp(`^pub enum ${name} \\{$`, "m"),
+          dir,
+        );
+      }
+      for (const dir of ["swift", "swift-codable"]) {
+        assert.match(
+          model(dir, /^Sources\/.*\/row\.swift$/),
+          new RegExp(`public var ${name.toLowerCase()}: ${name}\\?`),
+          dir,
+        );
+      }
+      for (const dir of ["csharp", "java", "java-jackson"]) {
+        assert.ok(
+          [...generated.get(dir)!.keys()].some((file) =>
+            new RegExp(`(^|[\\\\/])${name}\\.(cs|java)$`).test(file),
+          ),
+          `${dir} ${name}`,
+        );
+      }
+    }
+  });
+
+  it("Python imports and round-trips nullable aliases, including nested aliases", (t) => {
+    if (spawnSync("uv", ["--version"]).status !== 0) {
+      t.skip("uv toolchain not available");
+      return;
+    }
+    const script = path.join(root, "mood_probe.py");
+    writeFileSync(
+      script,
+      [
+        "import importlib.util, json, os, sys",
+        "pkg = sys.argv[1]",
+        'spec = importlib.util.spec_from_file_location("mood_pkg", os.path.join(pkg, "__init__.py"), submodule_search_locations=[pkg])',
+        "m = importlib.util.module_from_spec(spec)",
+        'sys.modules["mood_pkg"] = m',
+        "spec.loader.exec_module(m)",
+        'row = {key: None for key in ["caption", "count", "detail", "tags", "details", "labels"]}',
+        "print(json.dumps({",
+        '    "calm": m.Row.load({**row, "mood": "calm"}).save()["mood"],',
+        '    "null": m.Row.load({**row, "mood": None}).save()["mood"],',
+        '    "combo": m.Row.load({**row, "mood": None, "combo": "other"}).save()["combo"],',
+        "}))",
+        "",
+      ].join("\n"),
+    );
+    for (const target of ["python", "python-pydantic"]) {
+      const result = spawnSync(
+        "uv",
+        [
+          "run",
+          "--python",
+          "3.12",
+          "--with",
+          "pydantic",
+          "--with",
+          "pytest",
+          "--with",
+          "PyYAML",
+          "python",
+          script,
+          path.join(root, "generated", target),
+        ],
+        { encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, `${target}: ${result.stdout}${result.stderr}`);
+      assert.deepEqual(
+        JSON.parse(result.stdout.trim().split("\n").pop()!),
+        { calm: "calm", null: null, combo: "other" },
+        target,
+      );
+    }
+  });
+
   it("TypeScript requires the key, accepts null, and always writes it", () => {
     for (const dir of ["typescript", "typescript-zod"]) {
       const source = model(dir, /^row\.ts$/);
@@ -698,9 +792,7 @@ describe("required nullable fields `x: T | null` (#339)", () => {
       assert.doesNotMatch(model("go", /^legacy_only\.go$/), /"fmt"/);
     });
 
-    // Executed against a small dedicated spec rather than the fixture: the fixture's
-    // `mood: Mood | null` hits an unrelated Python literal-alias/field name collision
-    // (`mood: mood | None = None`) that makes its package un-importable.
+    // Executed against a small dedicated spec that isolates the null-default contract.
     it("Python loads an absent key as None and saves it as null", (t) => {
       if (spawnSync("uv", ["--version"]).status !== 0) {
         t.skip("uv toolchain not available");

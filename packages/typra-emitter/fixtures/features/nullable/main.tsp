@@ -58,6 +58,7 @@ model Square extends Shape {
 }
 
 alias Mood = "calm" | "busy";
+alias Combo = "other" | Mood;
 
 model Detail {
   label: string;
@@ -70,6 +71,7 @@ model Row {
 
   count: int32 | null;
   mood: Mood | null;
+  combo?: Combo | null;
   detail: Detail | null;
   tags: string[] | null;
   details: Detail[] | null;

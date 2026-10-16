@@ -232,7 +232,7 @@ export const fixtureRootSample = {
       legacyTags: ["kept"],
       legacyOwners: [{ id: "legacy-item", displayName: "Kept Item" }],
       legacyLabels: { key: "kept" },
-      shapes: [{ kind: "circle", label: null }],
+      shapes: [{ kind: "circle", label: null, state: "archived" }],
       note: "",
       status: "complete",
     },

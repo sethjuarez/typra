@@ -1452,19 +1452,24 @@ export const resolveUnionProperty = (
         getStateValue<ParseAliasEntry>(program, StateKeys.parseAliases, union),
         prop.allowedValues,
       );
-      // Resolve enum type name from union.name (named unions) or alias name (alias statements)
-      let enumName: string | undefined = union.name;
-      if (!enumName && union.node) {
-        const node = union.node as any;
-        // For aliases: union.node is a UnionExpression whose parent is the AliasStatement
-        if (node.parent?.id?.sv && typeof node.parent.id.sv === "string") {
-          // Guard against parent.id being a file path (happens for named union declarations)
-          const parentId: string = node.parent.id.sv;
-          if (!parentId.includes("/") && !parentId.includes("\\")) {
-            enumName = parentId;
+      // `Alias | null` flattens variants but preserves their declaring union.
+      // Match the entire non-null variant set so nested aliases keep their own name.
+      const nonNullVariants = Array.from(union.variants.values()).filter(
+        (v) => !isNullType(v.type),
+      );
+      const aliasUnion = [...new Set(nonNullVariants.map((v) => v.union))].find(
+        (candidate) => {
+          if (
+            candidate === union ||
+            candidate.variants.size !== nonNullVariants.length
+          ) {
+            return false;
           }
-        }
-      }
+          const candidateVariants = new Set(candidate.variants.values());
+          return nonNullVariants.every((v) => candidateVariants.has(v));
+        },
+      );
+      const enumName = literalUnionName(aliasUnion ?? union);
       if (enumName) {
         prop.enumName = enumName;
       }
@@ -1484,6 +1489,17 @@ export const resolveUnionProperty = (
   }
   return prop;
 };
+
+function literalUnionName(union: Union): string | undefined {
+  if (union.name) return union.name;
+  const parent = union.node?.parent;
+  if (parent && "id" in parent && typeof parent.id?.sv === "string") {
+    const name = parent.id.sv;
+    // A script's id is a path, not an enum name.
+    if (!name.includes("/") && !name.includes("\\")) return name;
+  }
+  return undefined;
+}
 
 function normalizeParseAliases(
   program: Program,
