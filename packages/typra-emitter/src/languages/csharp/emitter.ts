@@ -709,13 +709,34 @@ function getPropertyDefault(field: FieldDecl): string {
       }
       // number types: only emit default if there is one
       if (field.defaultValue != null) {
-        return ` = ${field.defaultValue};`;
+        return ` = ${csNumericLiteral(field.defaultValue, csType)};`;
       }
       return "";
     }
     case "complex":
       return "";
   }
+}
+
+/**
+ * C# types an unsuffixed real literal as `double`, which cannot narrow implicitly into a
+ * `float`, and an integer literal past `ulong` does not compile at all, so floating
+ * literals carry an explicit `F`/`D` suffix; `-0` keeps its sign.
+ */
+export function csNumericLiteral(value: unknown, csType: string): string {
+  const text = String(value);
+  if (typeof value !== "number") return text;
+  if (csType !== "float" && csType !== "double") return text;
+  const real = Object.is(value, -0) ? "-0" : text;
+  if (csType === "float") return `${real}F`;
+  return /[.eE]/.test(real) ? real : `${real}D`;
+}
+
+/** C# type for a TypeSpec scalar, or `undefined` when the name is not a scalar. */
+export function csharpScalarType(scalarType: string): string | undefined {
+  return Object.hasOwn(CSHARP_TYPE_MAP, scalarType)
+    ? CSHARP_TYPE_MAP[scalarType]
+    : undefined;
 }
 
 function getCSharpDictionaryValueType(

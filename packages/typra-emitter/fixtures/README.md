@@ -33,7 +33,7 @@ behavior is genuinely runtime-specific.
 | Samples | `features/samples/main.tsp` | Inline `@sample` payloads and imported constant sample payloads with nested items. |
 | Vectors | `features/vectors/main.tsp` | Inline `@vector` payloads, imported vector arrays, success expectations, and error expectations. |
 | Coercions | `features/coercions/main.tsp` | Scalar-to-model coercions, factories, method stubs, and entry shorthand for named collections. |
-| Defaults | `features/defaults/main.tsp` | Explicit scalar defaults, optional collections, and required complex field sample synthesis. |
+| Defaults | `features/defaults/main.tsp` | Explicit scalar defaults (including exponent, large whole, and `float32`-underflow literals), a numeric `@factory` with a `float32[]` value, optional collections, and required complex field sample synthesis. |
 | Protocols | `features/protocols/main.tsp` | TypeSpec-native interfaces/operations plus runtime cancellation, sync, optional, and effect metadata. |
 | Dispatch | `features/dispatch/main.tsp` | Behavioral polymorphic dispatch via `@dispatch`, resolving a discriminator field to a deterministic parameter access path. |
 | Provider wire | `features/wire/main.tsp` | Provider-specific names with `@@knownAs` and provider defaults with `@@defaultFor`. |

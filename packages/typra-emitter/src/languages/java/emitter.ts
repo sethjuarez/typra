@@ -40,6 +40,7 @@ import {
   javaEnumTypeName,
   javaIntegralScalar,
   javaMethodName,
+  javaNumericLiteral,
   javaPropertyName,
   javaTypeName,
 } from "./identifiers.js";
@@ -1687,22 +1688,6 @@ function javaLiteral(
 
 function scalarTypeOf(field: FieldDecl): string | null {
   return field.category.kind === "scalar" ? field.category.scalarType : null;
-}
-
-function javaNumericLiteral(value: number, scalarType: string): string {
-  switch (javaIntegralScalar(scalarType)) {
-    case "int64":
-      return `${value}L`;
-    case "float32":
-      return `${Number.isInteger(value) ? `${value}.0` : value}f`;
-    case "number":
-    case "float":
-    case "numeric":
-    case "float64":
-      return `${Number.isInteger(value) ? `${value}.0` : value}d`;
-    default:
-      return String(value);
-  }
 }
 
 function escapeJava(value: string): string {

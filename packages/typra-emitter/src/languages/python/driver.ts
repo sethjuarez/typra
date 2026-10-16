@@ -2194,7 +2194,7 @@ function buildClassContext(
       ? (node.factories || []).map((f) => {
           const expr = resolveFactoryExpr(f.sets, f.params, node, registry);
           for (const ref of collectExprTypeRefs(expr)) {
-            factoryTypeRefs.push(ref.name);
+            if (registry.get(ref.name)) factoryTypeRefs.push(ref.name);
           }
           return {
             name: f.name,

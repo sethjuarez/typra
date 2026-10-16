@@ -12,6 +12,7 @@ import {
   TypeRegistry,
 } from "../../ir/expansion.js";
 import { ExprVisitor, assertNever } from "../../ir/visitor.js";
+import type { TypeNode } from "../../ir/ast.js";
 import { toSnakeCase } from "../../ir/utilities.js";
 import { rustEnumVariantName } from "./identifiers.js";
 
@@ -55,6 +56,25 @@ const RUST_KEYWORDS = new Set([
   "await",
   "dyn",
 ]);
+
+const RUST_FLOAT_SCALARS = new Set([
+  "float",
+  "float32",
+  "float64",
+  "number",
+  "numeric",
+]);
+
+/** An integer literal never infers as `f32`/`f64` in Rust, so whole floats gain `.0`. */
+function rustNumericLiteral(
+  value: number,
+  scalarType: string | undefined,
+): string {
+  const text = String(value);
+  return scalarType && RUST_FLOAT_SCALARS.has(scalarType) && !/[.eE]/.test(text)
+    ? `${text}.0`
+    : text;
+}
 
 function rustFieldName(name: string): string {
   const snake = toSnakeCase(name);
@@ -110,7 +130,7 @@ export class RustExprVisitor implements ExprVisitor {
     }
     const fields = expr.fields
       .map((f) => {
-        let val = this.wrapFieldValue(f);
+        let val = this.wrapFieldValue(f, typeNode);
         // For enum fields, convert string literals to EnumName::VariantName
         if (f.value.kind === "string" && typeNode) {
           const prop = typeNode.properties.find(
@@ -147,7 +167,10 @@ export class RustExprVisitor implements ExprVisitor {
     // If no discriminator field or not a string literal, fall back to normal construction
     if (!discField || discValue?.kind !== "string") {
       const fields = expr.fields
-        .map((f) => `${toSnakeCase(f.propertyName)}: ${this.wrapFieldValue(f)}`)
+        .map(
+          (f) =>
+            `${toSnakeCase(f.propertyName)}: ${this.wrapFieldValue(f, typeNode)}`,
+        )
         .join(", ");
       return fields.length > 0
         ? `${typeName} { ${fields}, ..Default::default() }`
@@ -177,7 +200,10 @@ export class RustExprVisitor implements ExprVisitor {
     // Non-discriminator fields
     const baseFields = expr.fields
       .filter((f) => f.propertyName !== discFieldName)
-      .map((f) => `${toSnakeCase(f.propertyName)}: ${this.wrapFieldValue(f)}`);
+      .map(
+        (f) =>
+          `${toSnakeCase(f.propertyName)}: ${this.wrapFieldValue(f, typeNode)}`,
+      );
 
     const allFields = [
       `${toSnakeCase(discFieldName)}: ${kindValue}`,
@@ -191,8 +217,17 @@ export class RustExprVisitor implements ExprVisitor {
     const baseName = expr.baseTypeName.name;
     const variantName = expr.variantTypeName.name;
     const enumName = `${baseName}Kind`;
+    const variantType = this.registry?.get(variantName);
     const fields = expr.fields
-      .map((f) => `${toSnakeCase(f.propertyName)}: ${this.wrapFieldValue(f)}`)
+      .map(
+        (f) =>
+          `${toSnakeCase(f.propertyName)}: ${this.wrapFieldValue(
+            f,
+            variantType?.properties.some((p) => p.name === f.propertyName)
+              ? variantType
+              : this.registry?.get(baseName),
+          )}`,
+      )
       .join(", ");
     const kindValue =
       fields.length > 0
@@ -205,7 +240,14 @@ export class RustExprVisitor implements ExprVisitor {
     if (expr.items.length === 0) {
       return "vec![]";
     }
-    const items = expr.items.map((i) => this.visitExpr(i)).join(", ");
+    const elementType = expr.elementTypeName.name;
+    const items = expr.items
+      .map((i) =>
+        i.kind === "number"
+          ? rustNumericLiteral(i.value, elementType)
+          : this.visitExpr(i),
+      )
+      .join(", ");
     return `vec![${items}]`;
   }
 
@@ -213,8 +255,15 @@ export class RustExprVisitor implements ExprVisitor {
    * Wrap field values appropriately for Rust — Option<T> fields need Some(),
    * string fields need .into(), etc.
    */
-  private wrapFieldValue(field: FieldAssignment): string {
-    const inner = this.visitExpr(field.value);
+  private wrapFieldValue(field: FieldAssignment, owner?: TypeNode): string {
+    const inner =
+      field.value.kind === "number"
+        ? rustNumericLiteral(
+            field.value.value,
+            owner?.properties.find((p) => p.name === field.propertyName)
+              ?.typeName.name,
+          )
+        : this.visitExpr(field.value);
     if (field.isOptional) {
       return `Some(${inner})`;
     }
