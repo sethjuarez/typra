@@ -14,6 +14,7 @@ export const fixtureRootSample = {
     version: 1,
   },
   typedRecords: {
+    names: { label: "kept", empty: "" },
     counts: {
       alpha: 1,
       beta: 2,
@@ -219,6 +220,7 @@ export const fixtureRootSample = {
       legacyTags: null,
       legacyOwners: null,
       legacyLabels: null,
+      legacyNames: null,
       shapes: null,
     },
     {
@@ -232,6 +234,7 @@ export const fixtureRootSample = {
       legacyTags: ["kept"],
       legacyOwners: [{ id: "legacy-item", displayName: "Kept Item" }],
       legacyLabels: { key: "kept" },
+      legacyNames: { key: "kept", empty: "" },
       shapes: [{ kind: "circle", label: null, state: "archived" }],
       note: "",
       status: "complete",
@@ -247,6 +250,7 @@ export const fixtureRootSample = {
       legacyTags: [],
       legacyOwners: [],
       legacyLabels: {},
+      legacyNames: {},
       shapes: [{
         kind: "circle",
         label: "kept",
@@ -325,6 +329,7 @@ export const fixtureRootExpected = {
     legacyTags: null,
     legacyOwners: null,
     legacyLabels: null,
+    legacyNames: null,
     shapes: null,
     ...entry,
     // The shared FixtureStatus enum applies its parse alias here too.

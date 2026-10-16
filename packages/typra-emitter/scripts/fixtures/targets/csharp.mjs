@@ -457,6 +457,8 @@ export function runCSharpExecutableConformance() {
       'if (reloadedUnknownRecords.RequiredValues["null"] is not null || reloadedUnknownRecords.OptionalValues?["null"] is not null) throw new InvalidOperationException("Record<unknown> null values must survive load/save/reload");',
       "unknownRecords.OptionalValues = null;",
       'if (unknownRecords.OptionalValues is not null) throw new InvalidOperationException("optional Record<unknown> must accept an absent dictionary");',
+      'try { FixtureTypedRecords.FromJson("""{"names":{"bad":null},"counts":{},"owners":{}}"""); throw new InvalidOperationException("Record<string> accepted a null entry"); } catch (ArgumentException error) { if (!error.Message.Contains("names.bad") || !error.Message.Contains("expected non-null string")) throw; }',
+      'try { FixtureNullDefaults.FromJson("""{"requiredText":null,"legacyNames":{"bad":null}}"""); throw new InvalidOperationException("nullable Record<string> accepted a null entry"); } catch (ArgumentException error) { if (!error.Message.Contains("legacyNames.bad") || !error.Message.Contains("expected non-null string")) throw; }',
       'var wire = WireOptions.Load(new Dictionary<string, object?> { ["maxOutputTokens"] = 256, ["temperature"] = 0.7 });',
       'var imageContent = FixtureContent.Load(new Dictionary<string, object?> { ["kind"] = "image", ["url"] = "https://example.com/fixture.png" });',
       'var knownContent = FixtureContent.Load(new Dictionary<string, object?> { ["kind"] = "text", ["value"] = "hello" }).Save();',

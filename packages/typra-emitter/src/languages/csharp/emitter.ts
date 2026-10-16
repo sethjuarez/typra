@@ -1527,7 +1527,8 @@ function csharpDictValueLoadExpr(
   contextExpr: string,
 ): string {
   const csType = CSHARP_TYPE_MAP[valueType];
-  if (csType === "string") return `${valueExpr}.ToString()!`;
+  if (csType === "string")
+    return `(${valueExpr} ?? throw new ArgumentException(${contextExpr}.Path + ": expected non-null string")).ToString()!`;
   if (csType && NON_NULLABLE_VALUE_TYPES.has(csType)) {
     return `Convert.To${CONVERT_MAP[csType]}(${valueExpr})`;
   }
