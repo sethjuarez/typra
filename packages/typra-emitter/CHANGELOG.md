@@ -6,6 +6,25 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [4.0.0](https://github.com/sethjuarez/typra/compare/v3.0.0...v4.0.0) (2026-10-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **csharp:** nullable literal aliases now use their declared type name (for example Mood rather than the property-derived mood). Update direct references to old generated symbols when regenerating 3.0.0 output. Shared Rust enums may move between model source modules; use the unchanged generated module re-exports rather than an owner-file-specific import.
+
+### Features
+
+* **emitter:** load absent required nullable keys as null with `= null` ([3ab2d65](https://github.com/sethjuarez/typra/commit/3ab2d6593c3f68f1e2975e58fcdfe84173284495))
+
+
+### Bug Fixes
+
+* **csharp:** guard nullable string record values before conversion ([3ab2d65](https://github.com/sethjuarez/typra/commit/3ab2d6593c3f68f1e2975e58fcdfe84173284495))
+* **emitter:** declare shared string enums once in Go, Swift, and Rust ([3ab2d65](https://github.com/sethjuarez/typra/commit/3ab2d6593c3f68f1e2975e58fcdfe84173284495))
+* **emitter:** preserve enum alias names through nullable unions ([3ab2d65](https://github.com/sethjuarez/typra/commit/3ab2d6593c3f68f1e2975e58fcdfe84173284495))
+* **swift:** materialize inherited nullable defaults in unknown discriminator saves ([3ab2d65](https://github.com/sethjuarez/typra/commit/3ab2d6593c3f68f1e2975e58fcdfe84173284495))
+
 ## [3.0.0](https://github.com/sethjuarez/typra/compare/v2.1.8...v3.0.0) (2026-10-15)
 
 
