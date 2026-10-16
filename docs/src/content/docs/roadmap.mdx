@@ -8,8 +8,9 @@ Typra moves toward an agent drift prevention layer: TypeSpec is the
 durable source of truth, and Typra projects equivalent runtime behavior across
 languages with executable evidence.
 
-The current priority is callable and vector conformance informed by Prompty's
-consumer needs, not HTTP transport projection. Prompty is evidence for what must
+Callable and vector conformance, informed by Prompty's consumer needs, came
+first. HTTP transport projection now builds on that foundation rather than
+driving the contract shape. Prompty is evidence for what must
 work; Typra's principles decide what should become the durable contract model.
 If this reveals a better way to build Prompty with Typra, that is a valid
 success path, not a regression.
@@ -25,8 +26,8 @@ success path, not a regression.
 5. Add `@vector` for callable behavior backed by a callable conformance oracle.
 6. Add shared structural CodeModel and target renderers to reduce per-language
    emitter duplication.
-7. Defer HTTP transport projection until callable/vector
-   conformance is proven.
+7. Layer [HTTP transport projection](/mappings/operations/#http-transport) on
+   callable IR, adding producer and consumer targets as real consumers need them.
 
 ## Executable conformance specification
 
