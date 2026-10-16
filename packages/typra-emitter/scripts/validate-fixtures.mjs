@@ -306,11 +306,11 @@ function assertConformanceMatrix() {
 }
 
 function findFocusedFeatureFixtures() {
-  return walkFiles(path.join(packageRoot, "fixtures", "features"), (filePath) =>
-    filePath.endsWith(`${path.sep}main.tsp`) &&
-    !filePath.endsWith(
-      `${path.sep}numeric-literal-union${path.sep}main.tsp`,
-    ),
+  return walkFiles(
+    path.join(packageRoot, "fixtures", "features"),
+    (filePath) =>
+      filePath.endsWith(`${path.sep}main.tsp`) &&
+      !filePath.endsWith(`${path.sep}numeric-literal-union${path.sep}main.tsp`),
   ).sort();
 }
 
@@ -722,6 +722,7 @@ function assertFocusedFeatureFixtures() {
     "features/defaults/main.tsp",
     "features/docs/main.tsp",
     "features/enums/main.tsp",
+    "features/string-enum-identifiers/main.tsp",
     "features/namespaces/main.tsp",
     "features/polymorphism/main.tsp",
     "features/polymorphic-reference/main.tsp",
@@ -2684,12 +2685,21 @@ function assertActualGeneratedSurface() {
     [["rust-serde"], "pub enum FixtureStatus {"],
     [["go"], "type FixtureStatus string"],
     [["swift", "Sources", "TypraFixtures"], "public enum FixtureStatus:"],
-    [["swift-codable", "Sources", "TypraFixtures"], "public enum FixtureStatus:"],
+    [
+      ["swift-codable", "Sources", "TypraFixtures"],
+      "public enum FixtureStatus:",
+    ],
     [["rust"], "pub enum FixtureNullDefaultState {"],
     [["rust-serde"], "pub enum FixtureNullDefaultState {"],
     [["go"], "type FixtureNullDefaultState string"],
-    [["swift", "Sources", "TypraFixtures"], "public enum FixtureNullDefaultState:"],
-    [["swift-codable", "Sources", "TypraFixtures"], "public enum FixtureNullDefaultState:"],
+    [
+      ["swift", "Sources", "TypraFixtures"],
+      "public enum FixtureNullDefaultState:",
+    ],
+    [
+      ["swift-codable", "Sources", "TypraFixtures"],
+      "public enum FixtureNullDefaultState:",
+    ],
   ]) {
     assertDeclaredOnce(path.join("generated", "fixtures", ...dir), declaration);
   }

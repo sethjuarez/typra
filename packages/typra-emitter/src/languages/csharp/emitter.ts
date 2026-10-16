@@ -54,7 +54,7 @@ import {
 } from "../../ir/scalar-kinds.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
-import { csharpIdentifier } from "./identifiers.js";
+import { csharpEnumMemberNames, csharpIdentifier } from "./identifiers.js";
 
 // ============================================================================
 // Type maps
@@ -254,14 +254,15 @@ export function emitCSharpEnum(enumDef: EnumDef, namespace: string): string {
 
   // Use string converter for JSON round-tripping
   const csEnumName = toPascalCase(enumDef.name);
+  const memberNames = csharpEnumMemberNames(enumDef.values);
   lines.push("[JsonConverter(typeof(JsonStringEnumConverter))]");
   lines.push(`public enum ${csEnumName}`);
   lines.push("{");
 
   for (const value of enumDef.values) {
-    const memberName = toPascalCase(value);
+    const memberName = memberNames.get(value)!;
     // Add EnumMember attribute if the wire value doesn't match the member name exactly
-    lines.push(`    [JsonPropertyName("${value}")]`);
+    lines.push(`    [JsonPropertyName(${csharpString(value)})]`);
     lines.push(`    ${memberName},`);
     lines.push("");
   }
@@ -276,13 +277,13 @@ export function emitCSharpEnum(enumDef: EnumDef, namespace: string): string {
   lines.push("        {");
   for (const value of enumDef.values) {
     lines.push(
-      `            ${csharpString(value)} => ${csEnumName}.${toPascalCase(value)},`,
+      `            ${csharpString(value)} => ${csEnumName}.${memberNames.get(value)},`,
     );
   }
   for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
     for (const alias of aliases) {
       lines.push(
-        `            ${csharpString(alias)} => ${csEnumName}.${toPascalCase(canonical)},`,
+        `            ${csharpString(alias)} => ${csEnumName}.${memberNames.get(canonical)},`,
       );
     }
   }
@@ -296,7 +297,7 @@ export function emitCSharpEnum(enumDef: EnumDef, namespace: string): string {
   lines.push("        {");
   for (const value of enumDef.values) {
     lines.push(
-      `            ${csEnumName}.${toPascalCase(value)} => ${csharpString(value)},`,
+      `            ${csEnumName}.${memberNames.get(value)} => ${csharpString(value)},`,
     );
   }
   lines.push("            _ => value.ToString().ToLowerInvariant(),");
@@ -590,7 +591,9 @@ function emitProperties(
       lines.push("");
     }
     const keys = [...new Set(type.additionalProperties.knownWireKeys)];
-    const modifier = type.additionalProperties.inherited ? "override" : "virtual";
+    const modifier = type.additionalProperties.inherited
+      ? "override"
+      : "virtual";
     lines.push(
       `    protected ${modifier} bool IsKnownWireKey(string key) => ${
         keys.length === 0
@@ -679,7 +682,7 @@ function getPropertyDefault(field: FieldDecl): string {
       typeof field.defaultValue === "string" && field.defaultValue !== "*"
         ? field.defaultValue
         : field.allowedValues[0];
-    const memberName = toPascalCase(dv);
+    const memberName = csharpEnumMemberNames(field.allowedValues).get(dv);
     return ` = ${csEnumName}.${memberName};`;
   }
 
@@ -877,12 +880,16 @@ function emitLoadMethod(
   if (type.additionalProperties) {
     // A base loader re-captures after variant dispatch; IsKnownWireKey is virtual so
     // the variant's own key set applies.
-    lines.push("        instance.AdditionalProperties = new Dictionary<string, object?>();");
+    lines.push(
+      "        instance.AdditionalProperties = new Dictionary<string, object?>();",
+    );
     lines.push("        foreach (var entry in data)");
     lines.push("        {");
     lines.push("            if (!instance.IsKnownWireKey(entry.Key))");
     lines.push("            {");
-    lines.push("                instance.AdditionalProperties[entry.Key] = entry.Value;");
+    lines.push(
+      "                instance.AdditionalProperties[entry.Key] = entry.Value;",
+    );
     lines.push("            }");
     lines.push("        }");
     lines.push("");
@@ -1335,7 +1342,9 @@ function emitSaveMethod(
   }
   if (type.additionalProperties && !type.additionalProperties.inherited) {
     // Undeclared fields follow the declared ones; a declared wire key always wins.
-    lines.push("        foreach (var entry in obj.AdditionalProperties ?? new())");
+    lines.push(
+      "        foreach (var entry in obj.AdditionalProperties ?? new())",
+    );
     lines.push("        {");
     lines.push("            if (!obj.IsKnownWireKey(entry.Key))");
     lines.push("            {");

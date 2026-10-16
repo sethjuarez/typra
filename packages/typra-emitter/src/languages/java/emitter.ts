@@ -36,7 +36,7 @@ import {
   hasEditableSeamMarker,
 } from "../../cleanup/generated-file.js";
 import {
-  javaEnumMemberName,
+  javaEnumMemberNames,
   javaEnumTypeName,
   javaIntegralScalar,
   javaMethodName,
@@ -147,9 +147,10 @@ function emitEnum(
 ): void {
   if (enumDef.isOpen) return;
   const enumName = javaEnumTypeName(enumDef.name);
+  const memberNames = javaEnumMemberNames(enumDef.values);
   lines.push(`${isPublic ? "public " : ""}enum ${enumName} {`);
   for (const value of enumDef.values) {
-    lines.push(`  ${javaEnumMemberName(value)}("${escapeJava(value)}"),`);
+    lines.push(`  ${memberNames.get(value)}("${escapeJava(value)}"),`);
   }
   lines.push("  ;");
   lines.push("");
@@ -164,7 +165,7 @@ function emitEnum(
       for (const alias of aliases) {
         lines.push(`      case "${escapeJava(alias)}":`);
       }
-      lines.push(`        return ${javaEnumMemberName(canonical)};`);
+      lines.push(`        return ${memberNames.get(canonical)};`);
     }
     lines.push("      default:");
     lines.push("        break;");
@@ -495,7 +496,9 @@ function emitJacksonHelpers(typeName: string, lines: string[]): void {
   lines.push("        generator.writeNull();");
   lines.push("      } else if (value instanceof java.util.Map<?, ?> map) {");
   lines.push("        generator.writeStartObject();");
-  lines.push("        for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {");
+  lines.push(
+    "        for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {",
+  );
   lines.push(
     "          generator.writeFieldName(String.valueOf(entry.getKey()));",
   );
@@ -666,7 +669,9 @@ function emitLoadBaseInto(
     lines.push("    for (Map.Entry<?, ?> entry : map.entrySet()) {");
     lines.push("      String key = String.valueOf(entry.getKey());");
     lines.push("      if (!result.isKnownWireKey(key)) {");
-    lines.push("        result.additionalProperties.put(key, entry.getValue());");
+    lines.push(
+      "        result.additionalProperties.put(key, entry.getValue());",
+    );
     lines.push("      }");
     lines.push("    }");
   }

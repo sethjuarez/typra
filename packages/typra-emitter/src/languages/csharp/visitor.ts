@@ -10,7 +10,7 @@ import {
   TypeRegistry,
 } from "../../ir/expansion.js";
 import { ExprVisitor, toPascalCase, assertNever } from "../../ir/visitor.js";
-import { csharpIdentifier } from "./identifiers.js";
+import { csharpEnumMemberNames, csharpIdentifier } from "./identifiers.js";
 import { csNumericLiteral, csharpScalarType } from "./emitter.js";
 
 export class CSharpExprVisitor implements ExprVisitor {
@@ -61,7 +61,10 @@ export class CSharpExprVisitor implements ExprVisitor {
         let val = this.visitFieldValue(f.value, prop?.typeName.name);
         // For enum fields, convert string literals to EnumName.MemberName
         if (f.value.kind === "string" && prop?.enumName) {
-          val = `${prop.enumName}.${toPascalCase(f.value.value)}`;
+          const memberName = csharpEnumMemberNames(prop.allowedValues).get(
+            f.value.value,
+          )!;
+          val = `${prop.enumName}.${memberName}`;
         }
         return `${toPascalCase(f.propertyName)} = ${val}`;
       })

@@ -21,6 +21,7 @@ import {
   swiftTypeName,
 } from "../languages/swift/identifiers.js";
 import { goFieldName } from "../languages/go/identifiers.js";
+import { csharpEnumMemberNames } from "../languages/csharp/identifiers.js";
 import * as YAML from "yaml";
 
 const RUST_KEYWORDS = new Set([
@@ -105,7 +106,7 @@ export interface TestContextOptions {
 
   /**
    * Render an enum assertion value for a closed enum field.
-   * Called with (enumName, rawStringValue, fieldName).
+   * Called with (enumName, rawStringValue, fieldName, isOpenEnum, allowedValues).
    * If provided and returns non-null, overrides default string/bool/number rendering.
    * The returned value+delimiter replace the default.
    */
@@ -114,6 +115,7 @@ export interface TestContextOptions {
     rawValue: string,
     fieldName: string,
     isOpenEnum?: boolean,
+    allowedValues?: readonly string[],
   ) => { value: string; delimiter: string } | null;
 
   /** Include scalar samples for complex properties that support scalar coercion. */
@@ -607,6 +609,7 @@ function buildValidations(
           rawValue,
           key,
           prop.isOpenEnum,
+          prop.allowedValues,
         );
         if (enumResult) {
           return {
@@ -778,6 +781,7 @@ function buildCoercions(
             strValue,
             key,
             prop.isOpenEnum,
+            prop.allowedValues,
           );
           if (enumResult) {
             return {
@@ -835,11 +839,17 @@ export const csharpTestOptions: TestContextOptions = {
   getDelimiter: (str: string) => (str.includes("\n") ? '@"' : '"'),
   // Closed enums assert against `EnumName.MemberName`; open enums fall through to plain
   // string rendering (return null) exactly as the C# driver's own enum branch did.
-  renderEnumValue: (enumName, rawValue, _fieldName, isOpenEnum) =>
+  renderEnumValue: (
+    enumName,
+    rawValue,
+    _fieldName,
+    isOpenEnum,
+    allowedValues,
+  ) =>
     isOpenEnum
       ? null
       : {
-          value: `${toPascalCase(enumName)}.${toPascalCase(rawValue)}`,
+          value: `${toPascalCase(enumName)}.${csharpEnumMemberNames(allowedValues?.length ? allowedValues : [rawValue]).get(rawValue)}`,
           delimiter: "",
         },
   // yaml's default (40) folds a long double-quoted scalar across lines using `\`

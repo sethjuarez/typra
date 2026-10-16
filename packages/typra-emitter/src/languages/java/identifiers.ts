@@ -1,4 +1,5 @@
 import { toPascalCase } from "../../ir/visitor.js";
+import { createUniqueEnumMemberNames } from "../enum-identifiers.js";
 
 /**
  * Java has no unsigned primitives, so sized/unsigned TypeSpec integers widen to the
@@ -147,10 +148,14 @@ export function javaEnumTypeName(name: string): string {
   return javaTypeName(name);
 }
 
-export function javaEnumMemberName(value: string): string {
-  const normalized = value
-    .replace(/[^A-Za-z0-9]+/g, "_")
-    .replace(/^(\d)/, "_$1")
-    .toUpperCase();
-  return javaIdentifier(normalized || "VALUE", "VALUE");
+export function javaEnumMemberNames(
+  values: readonly string[],
+): Map<string, string> {
+  return createUniqueEnumMemberNames(values, (value) => {
+    const normalized = value
+      .replace(/[^A-Za-z0-9]+/g, "_")
+      .replace(/^(\d)/, "_$1")
+      .toUpperCase();
+    return javaIdentifier(normalized || "VALUE", "VALUE");
+  });
 }

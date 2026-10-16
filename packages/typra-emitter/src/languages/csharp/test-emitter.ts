@@ -11,6 +11,7 @@
 import { FactoryEntry } from "../../decorators.js";
 import { TypeNode } from "../../ir/ast.js";
 import { toPascalCase } from "../../ir/visitor.js";
+import { csharpEnumMemberNames } from "./identifiers.js";
 import {
   wireTestMappings,
   wireTestProviders,
@@ -327,7 +328,9 @@ export function emitCSharpTest(ctx: CSharpTestContext): string {
           const isDiscriminator = ctx.node.discriminator === propName;
           if (prop && prop.enumName && !prop.isOpenEnum && !isDiscriminator) {
             const csEnumName = toPascalCase(prop.enumName);
-            const memberName = toPascalCase(value);
+            const memberName = csharpEnumMemberNames(prop.allowedValues).get(
+              value,
+            )!;
             L.push(
               `        Assert.Equal(${csEnumName}.${memberName}, instance.${ctx.renderName(propName)});`,
             );
