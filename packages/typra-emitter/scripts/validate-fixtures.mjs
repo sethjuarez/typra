@@ -716,6 +716,7 @@ function assertFocusedFeatureFixtures() {
     "features/serialization/main.tsp",
     "features/vectors/main.tsp",
     "features/model-shapes/main.tsp",
+    "features/field-identifiers/main.tsp",
     "features/scalars/main.tsp",
     "features/collections/main.tsp",
     "features/coercions/main.tsp",

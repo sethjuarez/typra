@@ -166,7 +166,25 @@ const RUST_KEYWORDS = new Set([
 
 function rustFieldName(name: string): string {
   const snake = toSnakeCase(name);
+  if (snake === "_") return "value_";
+  if (snake === "self" || snake === "super" || snake === "crate") {
+    return `${snake}_`;
+  }
   return RUST_KEYWORDS.has(snake) ? `r#${snake}` : snake;
+}
+
+function assertDistinctRustFields(type: TypeDecl): void {
+  const names = new Map<string, string>();
+  for (const field of type.fields) {
+    const rustName = rustFieldName(field.name);
+    const prior = names.get(rustName);
+    if (prior !== undefined) {
+      throw new Error(
+        `Rust type ${type.typeName.name}: fields "${prior}" and "${field.name}" both map to the identifier "${rustName}". Rename one of the fields to generate Rust.`,
+      );
+    }
+    names.set(rustName, field.name);
+  }
 }
 
 /**
@@ -367,6 +385,8 @@ export function emitRustFile(
   options: RustEmitterOptions = {},
   declsByName: Map<string, TypeDecl> = new Map(),
 ): string {
+  for (const type of file.types) assertDistinctRustFields(type);
+
   const lines: string[] = [];
   const hasNonProtocol = file.types.some((t) => !t.isProtocol);
   const hasRuntimeCancellation = file.types.some((type) =>

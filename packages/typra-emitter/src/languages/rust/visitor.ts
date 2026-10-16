@@ -78,6 +78,10 @@ function rustNumericLiteral(
 
 function rustFieldName(name: string): string {
   const snake = toSnakeCase(name);
+  if (snake === "_") return "value_";
+  if (snake === "self" || snake === "super" || snake === "crate") {
+    return `${snake}_`;
+  }
   return RUST_KEYWORDS.has(snake) ? `r#${snake}` : snake;
 }
 
