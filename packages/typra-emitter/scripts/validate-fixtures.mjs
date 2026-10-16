@@ -307,7 +307,10 @@ function assertConformanceMatrix() {
 
 function findFocusedFeatureFixtures() {
   return walkFiles(path.join(packageRoot, "fixtures", "features"), (filePath) =>
-    filePath.endsWith(`${path.sep}main.tsp`),
+    filePath.endsWith(`${path.sep}main.tsp`) &&
+    !filePath.endsWith(
+      `${path.sep}numeric-literal-union${path.sep}main.tsp`,
+    ),
   ).sort();
 }
 

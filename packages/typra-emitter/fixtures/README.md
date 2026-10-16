@@ -27,6 +27,7 @@ behavior is genuinely runtime-specific.
 | --- | --- | --- |
 | Model shapes | `features/model-shapes/main.tsp` | Required, optional, scalar-defaulted fields, typed records, unknown records, and named references. |
 | Scalars | `features/scalars/main.tsp` | String, boolean, integer widths, numeric, float32, float64, and unknown values. |
+| Numeric literal union diagnostic | `features/numeric-literal-union/main.tsp` | Unsupported numeric literal unions produce a diagnostic that names the property instead of an internal-looking resolution error. |
 | Collections | `features/collections/main.tsp` | Scalar arrays, model arrays, unknown maps, string maps (including nullable defaults), model maps, and `Record<T> \| Named<T>[]` dual-form collections. |
 | Polymorphism | `features/polymorphism/main.tsp` | Closed discriminated unions, abstract open bases, and named open discriminator bases. |
 | Enums | `features/enums/main.tsp` | Closed string unions, open string unions, parse-only aliases, and a union shared across model files. |

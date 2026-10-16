@@ -1477,6 +1477,16 @@ export const resolveUnionProperty = (
       prop.isOpenEnum = variants.some(
         (v) => v.kind === "Scalar" && v.name === "string",
       );
+    } else if (
+      variants.length > 0 &&
+      variants.every((variant) => variant.kind === "Number")
+    ) {
+      program.reportDiagnostic({
+        code: "typra-emitter-unsupported-numeric-literal-union",
+        message: `Numeric literal unions are not supported for property '${property.name}'.`,
+        severity: "error",
+        target: property,
+      });
     } else {
       program.reportDiagnostic({
         code: "typra-emitter-unsupported-union-types",
