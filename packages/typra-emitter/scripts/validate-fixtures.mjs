@@ -724,6 +724,7 @@ function assertFocusedFeatureFixtures() {
     "features/enums/main.tsp",
     "features/namespaces/main.tsp",
     "features/polymorphism/main.tsp",
+    "features/polymorphic-reference/main.tsp",
     "features/protocols/main.tsp",
     "features/wire/main.tsp",
     "features/encoded-name/main.tsp",

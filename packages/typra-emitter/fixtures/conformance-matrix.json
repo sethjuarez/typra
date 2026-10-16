@@ -349,8 +349,9 @@
               "tags: value.get(\"tags\")",
               "metadata: value.get(\"metadata\").cloned",
               "owner: value.get(\"owner\")",
-              "content: value.get(\"content\").cloned",
-              "result.insert(\"content\".to_string(), self.content.clone())"
+              "content: value.get(\"content\").filter(|v| v.is_object() || v.is_array() || v.is_string()).map(|v| FixtureContent::load_from_value(v, ctx)).unwrap_or_default()",
+              "let nested = self.content.to_value(ctx)",
+              "result.insert(\"content\".to_string(), nested)"
             ]
           }
         ],

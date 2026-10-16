@@ -30,6 +30,7 @@ behavior is genuinely runtime-specific.
 | Numeric literal union diagnostic | `features/numeric-literal-union/main.tsp` | Unsupported numeric literal unions produce a diagnostic that names the property instead of an internal-looking resolution error. |
 | Collections | `features/collections/main.tsp` | Scalar arrays, model arrays, unknown maps, string maps (including nullable defaults), model maps, and `Record<T> \| Named<T>[]` dual-form collections. |
 | Polymorphism | `features/polymorphism/main.tsp` | Closed discriminated unions, abstract open bases, and named open discriminator bases. |
+| Polymorphic references | `features/polymorphic-reference/main.tsp` | Single non-recursive Rust polymorphic references hydrate and save like collection elements; recursive polymorphic references retain value-backed storage. |
 | Enums | `features/enums/main.tsp` | Closed string unions, open string unions, parse-only aliases, and a union shared across model files. |
 | Samples | `features/samples/main.tsp` | Inline `@sample` payloads and imported constant sample payloads with nested items. |
 | Vectors | `features/vectors/main.tsp` | Inline `@vector` payloads, imported vector arrays, success expectations, and error expectations. |
