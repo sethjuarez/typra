@@ -6,6 +6,9 @@ namespace Typra.Fixtures.Features.Nullable;
 // but its value may be null": load rejects an absent key yet accepts an explicit
 // null, and save always writes the key (as null when unset). This is distinct from
 // `x?: T`, which is omitted when unset. `x?: T | null` behaves like `x?: T`.
+//
+// `x: T | null = null` keeps the same save rule but lets load treat an absent key
+// as null (lenient load, strict save), e.g. for legacy documents that omit it.
 @serializable
 model Root {
   row: Row;
@@ -14,6 +17,16 @@ model Root {
   // variant's own nullable field must both keep the required-nullable contract.
   shape: Shape;
   shapes: Shape[];
+
+  legacyOnly: LegacyOnly;
+}
+
+// Every nullable field has a `null` default, so load emits no missing-key guard at all
+// (Go must then not import an unused `fmt`).
+model LegacyOnly {
+  @sample(#{ legacyNote: null })
+  @sample(#{ legacyNote: "kept" })
+  legacyNote: string | null = null;
 }
 
 @discriminator("kind")
@@ -24,6 +37,9 @@ model Shape {
   @sample(#{ label: null })
   @sample(#{ label: "unit" })
   label: string | null;
+
+  // Inherited required-nullable field with a `null` default: absent loads as null.
+  legacyLabel: string | null = null;
 }
 
 model Circle extends Shape {
@@ -58,6 +74,11 @@ model Row {
   tags: string[] | null;
   details: Detail[] | null;
   labels: Record<string> | null;
+
+  // Required nullable with a `null` default: an absent key loads as null, and save
+  // still always writes the key.
+  legacy: string | null = null;
+  legacyDetail: Detail | null = null;
 
   // Plain optional: omitted when unset.
   note?: string;

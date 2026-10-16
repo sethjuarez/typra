@@ -356,6 +356,12 @@ export class PropertyNode {
    * stripped and `T` resolved as usual; `isOptional` keeps the TypeSpec `?`.
    */
   public isNullable: boolean = false;
+  /**
+   * True for a required nullable property declared `= null` (`x: T | null = null`): an
+   * absent key loads as null instead of failing. Save still always writes the key.
+   * `hasExplicitDefault` stays false because there is no value to materialize.
+   */
+  public hasNullDefault: boolean = false;
   public isCollection: boolean = false;
   public isAny: boolean = false;
   public isDict: boolean = false;
@@ -409,6 +415,7 @@ export class PropertyNode {
       isScalar: this.isScalar,
       isOptional: this.isOptional,
       ...(this.isNullable ? { isNullable: true } : {}),
+      ...(this.hasNullDefault ? { hasNullDefault: true } : {}),
       isCollection: this.isCollection,
       isAny: this.isAny,
       isDict: this.isDict,
@@ -1079,12 +1086,19 @@ export const resolveProperty = (
   }
   prop.isNullable = isNullable;
   if (property.defaultValue?.valueKind === "NullValue") {
-    reportUnsupportedDefault(
-      program,
-      property,
-      prop,
-      "A `null` default is not supported; a nullable field is already null when unset, so remove the default.",
-    );
+    if (isNullable && !property.optional) {
+      // `x: T | null = null`: an absent key loads as null; save still always writes it.
+      prop.hasNullDefault = true;
+      prop.hasExplicitDefault = false;
+      prop.defaultValue = null;
+    } else {
+      reportUnsupportedDefault(
+        program,
+        property,
+        prop,
+        "A `null` default is only supported on a required nullable property (`x: T | null = null`); an optional field is already null when unset, so remove the default.",
+      );
+    }
   }
   if (property.defaultValue?.valueKind === "ObjectValue") {
     reportUnsupportedDefault(

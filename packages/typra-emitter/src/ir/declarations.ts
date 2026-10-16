@@ -201,6 +201,12 @@ export interface FieldDecl {
    */
   isNullable?: boolean;
   /**
+   * Required nullable field declared `= null` (`x: T | null = null`). Present (always
+   * `true`) only alongside {@link FieldDecl.isNullable}: load accepts an ABSENT key as
+   * null instead of rejecting it; save is unchanged and always writes the key.
+   */
+  hasNullDefault?: boolean;
+  /**
    * Optional nullable field (`x?: T | null`, issue #339). Present (always `true`) only
    * for that shape. It behaves like `x?: T` (omitted on save when unset); the flag only
    * lets runtimes that would otherwise reject an explicit `null` (Swift) treat it as unset.
@@ -459,6 +465,8 @@ export interface LoadAssignment {
   isOptional: boolean;
   /** Required nullable field (see {@link FieldDecl.isNullable}). */
   isNullable?: boolean;
+  /** Absent key loads as null (see {@link FieldDecl.hasNullDefault}). */
+  hasNullDefault?: boolean;
   /** Optional nullable field (see {@link FieldDecl.isOptionalNullable}). */
   isOptionalNullable?: boolean;
   /** Parent type name (needed for calling collection helpers like Parent.load_items) */

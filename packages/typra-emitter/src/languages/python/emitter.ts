@@ -45,6 +45,7 @@ import {
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
+  shouldRejectAbsentNullableKey,
 } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
@@ -1154,7 +1155,7 @@ function emitLoadMethod(
     const field = type.fields.find(
       (candidate) => candidate.name === a.fieldName,
     );
-    if (isRequiredNullable(a)) {
+    if (shouldRejectAbsentNullableKey(a)) {
       // Required nullable (#339): the key must be present; an explicit None is accepted.
       lines.push(`        if ${pythonLiteral(a.sourceName)} not in data:`);
       lines.push(

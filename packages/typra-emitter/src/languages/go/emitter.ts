@@ -47,6 +47,7 @@ import {
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
   shouldPreserveOptionalAbsence,
+  shouldRejectAbsentNullableKey,
 } from "../../ir/field-emission-policy.js";
 import {
   INTEGRAL_SCALAR_TYPES,
@@ -163,7 +164,8 @@ export function emitGoFileContent(
       type.serialized &&
       type.fields.some(
         (field) =>
-          shouldGuardMissingRequiredField(field) || isRequiredNullable(field),
+          shouldGuardMissingRequiredField(field) ||
+          shouldRejectAbsentNullableKey(field),
       ),
   );
   const needsFmt =
@@ -666,7 +668,7 @@ function emitLoadFunction(
       const field = type.fields.find(
         (candidate) => candidate.name === assign.fieldName,
       );
-      if (isRequiredNullable(assign)) {
+      if (shouldRejectAbsentNullableKey(assign)) {
         // Required nullable (#339): the key must be present; an explicit nil is accepted.
         body.push(
           `\t\tif _, exists := m[${goLiteral(assign.sourceName)}]; !exists {`,

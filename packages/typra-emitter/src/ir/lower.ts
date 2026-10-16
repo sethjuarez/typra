@@ -391,6 +391,9 @@ function lowerField(
     // key; `x?: T | null` lowers exactly like `x?: T` (#339).
     isOptional: prop.isOptional || prop.isNullable,
     ...(prop.isNullable && !prop.isOptional ? { isNullable: true } : {}),
+    ...(prop.isNullable && !prop.isOptional && prop.hasNullDefault
+      ? { hasNullDefault: true }
+      : {}),
     ...(prop.isNullable && prop.isOptional ? { isOptionalNullable: true } : {}),
     defaultValue: prop.defaultValue,
     hasExplicitDefault: prop.hasExplicitDefault,
@@ -464,6 +467,7 @@ function lowerLoad(
       category: f.category,
       isOptional: f.isOptional,
       ...(f.isNullable ? { isNullable: true } : {}),
+      ...(f.hasNullDefault ? { hasNullDefault: true } : {}),
       ...(f.isOptionalNullable ? { isOptionalNullable: true } : {}),
       hasExplicitDefault: f.hasExplicitDefault,
       parentTypeName: node.typeName.name,

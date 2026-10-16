@@ -840,13 +840,15 @@ function assertFocusedFeatureFixtures() {
       // Issue #339: `x: T | null` is a required key whose value may be null,
       // distinct from `x?: T` (omitted when unset). The IR must record both
       // flags so every runtime can require the key on load and always write it.
+      // `x: T | null = null` additionally records `hasNullDefault`, so load treats
+      // an absent key as null while save still always writes it.
       const row = (model.properties ?? []).find(
         (field) => field.name === "row",
       )?.type;
       const flags = Object.fromEntries(
         (row?.properties ?? []).map((field) => [
           field.name,
-          `${field.isOptional ? "optional" : "required"}${field.isNullable ? "+nullable" : ""}`,
+          `${field.isOptional ? "optional" : "required"}${field.isNullable ? "+nullable" : ""}${field.hasNullDefault ? "+nullDefault" : ""}`,
         ]),
       );
       const expected = {
@@ -857,6 +859,8 @@ function assertFocusedFeatureFixtures() {
         tags: "required+nullable",
         details: "required+nullable",
         labels: "required+nullable",
+        legacy: "required+nullable+nullDefault",
+        legacyDetail: "required+nullable+nullDefault",
         note: "optional",
         hint: "optional+nullable",
       };

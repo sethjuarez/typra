@@ -43,6 +43,7 @@ import {
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
+  shouldRejectAbsentNullableKey,
 } from "../../ir/field-emission-policy.js";
 import {
   orderedEntryShorthandCases,
@@ -802,7 +803,7 @@ function emitLoadMethod(
     const field = type.fields.find(
       (candidate) => candidate.name === assign.fieldName,
     );
-    if (isRequiredNullable(assign)) {
+    if (shouldRejectAbsentNullableKey(assign)) {
       // Required nullable (#339): the key must be present; an explicit null is accepted.
       lines.push(
         `        if (!data.ContainsKey(${csStringLiteral(assign.sourceName)}))`,

@@ -17,6 +17,7 @@ import {
   shouldGuardMissingRequiredField,
   shouldMaterializeCollectionDefault,
   shouldOmitAbsentOnSave,
+  shouldRejectAbsentNullableKey,
 } from "../../ir/field-emission-policy.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
@@ -295,7 +296,7 @@ function emitPolymorphicEnum(
     // `.unknown` carrier: the key must be present (null allowed), as in every
     // other runtime's unknown-discriminator path.
     const nullableBaseKeys = type.load.assignments
-      .filter((assignment) => isRequiredNullable(assignment))
+      .filter((assignment) => shouldRejectAbsentNullableKey(assignment))
       .map((assignment) => assignment.sourceName);
     if (nullableBaseKeys.length === 0) {
       lines.push("    default: return .unknown(object)");
@@ -623,7 +624,7 @@ function emitLoad(
         helper.propertyName === assignment.fieldName &&
         supportsNamedCollectionHelper(helper, polymorphicTypeNames),
     );
-    if (isRequiredNullable(assignment)) {
+    if (shouldRejectAbsentNullableKey(assignment)) {
       // Required nullable (#339): the key must be present; an explicit null is accepted.
       lines.push(
         `    if object[${swiftStringLiteral(assignment.sourceName)}] == nil {`,

@@ -1,4 +1,5 @@
 import { LoadAssignment, TypeDecl, WireDecl } from "./declarations.js";
+import { shouldRejectAbsentNullableKey } from "./field-emission-policy.js";
 
 function mergeInheritedByKey<T>(groups: T[][], key: (item: T) => string): T[] {
   const order: string[] = [];
@@ -111,6 +112,7 @@ export function inheritedRequiredNullableAssignments(
   const own = new Set(type.load.assignments.map((a) => a.fieldName));
   const [flattened] = flattenInheritance([type], declarationUniverse);
   return flattened.load.assignments.filter(
-    (assignment) => assignment.isNullable === true && !own.has(assignment.fieldName),
+    (assignment) =>
+      shouldRejectAbsentNullableKey(assignment) && !own.has(assignment.fieldName),
   );
 }
