@@ -1,0 +1,11 @@
+emit:
+  - "@typra/emitter"
+options:
+  "@typra/emitter":
+    emitter-output-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-additional-props-0YDPkW\\generated"
+    root-object: "Probe.Root"
+    root-namespace: "Probe"
+    emit-targets:
+      - type: TypeScript
+        output-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-additional-props-0YDPkW\\generated\\typescript"
+        format: false

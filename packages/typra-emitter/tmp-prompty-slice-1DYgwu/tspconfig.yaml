@@ -1,0 +1,21 @@
+emit:
+  - "@typra/emitter"
+options:
+  "@typra/emitter":
+    emitter-output-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-prompty-slice-1DYgwu\\generated"
+    root-object: "Typra.PromptySlice.Root"
+    root-namespace: "Typra.PromptySlice"
+    hydration-zones:
+      - "runtime/prompty"
+    emit-targets:
+      - type: TypeScript
+        output-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-prompty-slice-1DYgwu\\generated\\typescript"
+        test-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-prompty-slice-1DYgwu\\generated\\typescript-tests"
+        import-path: "../typescript/index"
+        native-serialization: "zod"
+        outputs:
+          - kind: models
+          - kind: native-serialization
+            provider: zod
+        protocol-scaffolds: "compile-only"
+        format: false

@@ -1,12 +1,9 @@
 import { toSnakeCase } from "../../ir/utilities.js";
 
-// Python 3 hard keywords (keyword.kwlist). ``toSnakeCase`` lowercases its input,
-// so only the lowercase spellings can ever collide, but the full set is listed
-// for clarity.
+// Python 3 hard keywords (keyword.kwlist) that a snake_cased field name can hit.
+// `True`/`False`/`None` are omitted: toSnakeCase lowercases, and lowercase
+// `true`/`false`/`none` are ordinary, valid attribute names.
 const PY_KEYWORDS = new Set<string>([
-  "false",
-  "none",
-  "true",
   "and",
   "as",
   "assert",
@@ -47,6 +44,17 @@ const PY_KEYWORDS = new Set<string>([
  */
 export function pythonIdentifier(candidate: string): string {
   return PY_KEYWORDS.has(candidate) ? `${candidate}_` : candidate;
+}
+
+// Dispatch resolver names have always escaped these too; kept so existing
+// generated resolver APIs do not change.
+const PY_DISPATCH_LEGACY_ESCAPES = new Set(["true", "false", "none"]);
+
+/** Identifier for an emitted dispatch resolver parameter or method. */
+export function pythonDispatchIdentifier(candidate: string): string {
+  return PY_DISPATCH_LEGACY_ESCAPES.has(candidate)
+    ? `${candidate}_`
+    : pythonIdentifier(candidate);
 }
 
 /**

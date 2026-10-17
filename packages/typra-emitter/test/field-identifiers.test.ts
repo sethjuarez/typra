@@ -6,6 +6,10 @@ import path from "node:path";
 
 import { RustExprVisitor } from "../src/languages/rust/visitor.js";
 import {
+  pythonDispatchIdentifier,
+  pythonFieldName,
+} from "../src/languages/python/identifiers.js";
+import {
   buildCSharp,
   buildGo,
   buildJava,
@@ -227,6 +231,15 @@ describe("field identifiers and encoded wire names (#356)", () => {
       assert.match(python, new RegExp(`\\b${keyword}_\\b`));
     }
     assert.doesNotMatch(python, /^\s+(def|lambda|yield|from|async|await|return|pass)\s*:/m);
+    // Only `True`/`False`/`None` are keywords; snake_case lowercases, so these stay as-is.
+    for (const name of ["true", "false", "none"]) {
+      assert.match(python, new RegExp(`^\\s+${name}: `, "m"));
+      assert.doesNotMatch(python, new RegExp(`\\b${name}_\\b`));
+    }
+    assert.equal(pythonFieldName("None"), "none");
+    assert.equal(pythonFieldName("class"), "class_");
+    assert.equal(pythonDispatchIdentifier("none"), "none_");
+    assert.equal(pythonDispatchIdentifier("class"), "class_");
     const swift = sources(out, "swift", ".swift");
     for (const keyword of ["await", "func", "default", "where", "protocol", "struct", "self"]) {
       assert.ok(swift.includes(`\`${keyword}\``), `swift should escape ${keyword}`);
@@ -305,6 +318,7 @@ describe("field identifiers and encoded wire names (#356)", () => {
         `data = json.loads(${JSON.stringify(INPUT_JSON)})`,
         "root = Root.load(data)",
         'assert root.def_ == "v-def" and root.self == "v-self", vars(root)',
+        'assert (root.true, root.false, root.none) == ("v-true", "v-false", "v-None"), vars(root)',
         "assert root.save() == data, root.save()",
         'print("py-roundtrip-ok")',
         "",

@@ -82,7 +82,7 @@ import {
   emitPythonProtocolScaffolds,
   shouldEmitCompileOnlyProtocolScaffolds,
 } from "../../protocol-scaffolds.js";
-import { pythonFieldName, pythonIdentifier } from "./identifiers.js";
+import { pythonDispatchIdentifier, pythonFieldName } from "./identifiers.js";
 
 /**
  * Type mapping from TypeSpec scalar types to Python types.
@@ -2609,7 +2609,7 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
 // trailing underscore to sidestep the clash (e.g. ``class_``). The raw variant
 // value is still used verbatim as the mapping key and switch literal — only the
 // emitted Python identifier is adjusted, keeping the resolver a faithful twin.
-const pyDispatchIdentifier = pythonIdentifier;
+const pyDispatchIdentifier = pythonDispatchIdentifier;
 
 /**
  * Write generated Python content to file using TypeSpec's emitFile API.

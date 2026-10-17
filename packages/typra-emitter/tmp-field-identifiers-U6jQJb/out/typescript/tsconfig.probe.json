@@ -1,0 +1,1 @@
+{"include":["**/*.ts"],"exclude":[".js","tests"],"compilerOptions":{"target":"ES2022","lib":["ES2022"],"module":"commonjs","moduleResolution":"node","strict":true,"skipLibCheck":true,"rootDir":".","outDir":"C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-field-identifiers-U6jQJb\\out\\typescript\\.js"}}
