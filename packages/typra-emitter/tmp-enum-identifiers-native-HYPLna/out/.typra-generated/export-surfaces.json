@@ -1,0 +1,99 @@
+{
+  "emitter": "typra-emitter",
+  "version": 1,
+  "toolchain": {
+    "packages": [
+      {
+        "name": "@typespec/compiler",
+        "version": "1.15.0",
+        "supportedRange": ">=1.10.0 <2.0.0",
+        "supported": true
+      },
+      {
+        "name": "@typespec/json-schema",
+        "version": "1.15.0",
+        "supportedRange": ">=1.10.0 <2.0.0",
+        "supported": true
+      },
+      {
+        "name": "@typra/emitter",
+        "version": "4.0.0",
+        "supportedRange": "4.0.0",
+        "supported": true
+      }
+    ]
+  },
+  "root": {
+    "object": "Typra.Fixtures.Features.StringEnumIdentifiers.Root",
+    "namespace": "Typra",
+    "alias": "Typra"
+  },
+  "targets": [
+    {
+      "target": "csharp",
+      "outputRoot": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-enum-identifiers-native-HYPLna\\out\\csharp",
+      "namespace": "Typra",
+      "rootExports": [
+        "Root"
+      ],
+      "exports": [
+        {
+          "name": "Root",
+          "kind": "value",
+          "group": "",
+          "source": "Root.cs",
+          "protocol": false
+        }
+      ],
+      "groups": [],
+      "protocols": [],
+      "modules": [
+        "Root.cs"
+      ]
+    },
+    {
+      "target": "go",
+      "outputRoot": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-enum-identifiers-native-HYPLna\\out\\go",
+      "packageName": "typra",
+      "rootExports": [
+        "Root"
+      ],
+      "exports": [
+        {
+          "name": "Root",
+          "kind": "value",
+          "group": "",
+          "source": "root.go",
+          "protocol": false
+        }
+      ],
+      "groups": [],
+      "protocols": [],
+      "modules": [
+        "root.go"
+      ]
+    },
+    {
+      "target": "java",
+      "outputRoot": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-enum-identifiers-native-HYPLna\\out\\java",
+      "packageName": "typra",
+      "rootExports": [
+        "Root"
+      ],
+      "exports": [
+        {
+          "name": "Root",
+          "kind": "value",
+          "group": "",
+          "source": "Root.java",
+          "protocol": false
+        }
+      ],
+      "groups": [],
+      "protocols": [],
+      "modules": [
+        "Root.java"
+      ]
+    }
+  ]
+}

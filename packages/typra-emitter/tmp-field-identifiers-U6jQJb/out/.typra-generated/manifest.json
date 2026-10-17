@@ -1,0 +1,172 @@
+{
+  "emitter": "typra-emitter",
+  "version": 1,
+  "generatedAt": "1970-01-01T00:00:00.000Z",
+  "files": [
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Context.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Fixtures/Features/FieldIdentifiers/Root.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Utils.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "",
+      "path": "eslint.config.js",
+      "marker": true
+    },
+    {
+      "outputRoot": "go",
+      "path": "go/context.go",
+      "marker": true
+    },
+    {
+      "outputRoot": "go",
+      "path": "go/root.go",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/LoadContext.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/Root.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/SaveContext.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/TypraJson.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/TypraMaps.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/TypraYaml.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "json-ast",
+      "path": "json-ast/model.json",
+      "marker": false
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/__init__.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/_context.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/fixtures/__init__.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/fixtures/features/__init__.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/fixtures/features/fieldidentifiers/__init__.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/fixtures/features/fieldidentifiers/_Root.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/py.typed",
+      "marker": false
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/context.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/fixtures/features/field_identifiers/mod.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/fixtures/features/field_identifiers/root.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/fixtures/features/mod.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/fixtures/mod.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/mod.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "swift",
+      "path": "swift/Package.swift",
+      "marker": false
+    },
+    {
+      "outputRoot": "swift",
+      "path": "swift/Sources/TypraFixturesFeaturesFieldIdentifiers/Fixtures/Features/FieldIdentifiers/root.swift",
+      "marker": true
+    },
+    {
+      "outputRoot": "swift",
+      "path": "swift/Sources/TypraFixturesFeaturesFieldIdentifiers/TypraRuntime.swift",
+      "marker": true
+    },
+    {
+      "outputRoot": "typescript",
+      "path": "typescript/context.ts",
+      "marker": true
+    },
+    {
+      "outputRoot": "typescript",
+      "path": "typescript/fixtures/features/field-identifiers/index.ts",
+      "marker": true
+    },
+    {
+      "outputRoot": "typescript",
+      "path": "typescript/fixtures/features/field-identifiers/root.ts",
+      "marker": true
+    },
+    {
+      "outputRoot": "typescript",
+      "path": "typescript/index.ts",
+      "marker": true
+    }
+  ]
+}

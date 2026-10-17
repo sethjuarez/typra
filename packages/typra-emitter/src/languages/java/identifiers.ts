@@ -1,4 +1,5 @@
 import { toPascalCase } from "../../ir/visitor.js";
+import { createUniqueEnumMemberNames } from "../enum-identifiers.js";
 
 /**
  * Java has no unsigned primitives, so sized/unsigned TypeSpec integers widen to the
@@ -19,6 +20,34 @@ export function javaIntegralScalar(scalarType: string): string {
       return "int64";
     default:
       return scalarType;
+  }
+}
+
+/**
+ * Renders a numeric default as a Java literal typed for its field. Floating literals keep
+ * JavaScript's exponent form (`1e+300`, valid in Java) and only gain `.0` when they have
+ * neither a fraction nor an exponent, so `1e300` never becomes the invalid `1e+300.0d`.
+ * javac rejects a nonzero `float` literal that rounds to zero, so those narrow from a
+ * `double` literal instead; `-0` keeps its sign.
+ */
+export function javaNumericLiteral(value: number, scalarType: string): string {
+  const text = String(value);
+  const real = Object.is(value, -0) ? "-0" : text;
+  const floating = /[.eE]/.test(real) ? real : `${real}.0`;
+  switch (javaIntegralScalar(scalarType)) {
+    case "int64":
+      return `${text}L`;
+    case "float32":
+      return value !== 0 && Math.fround(value) === 0
+        ? `(float) ${floating}d`
+        : `${floating}f`;
+    case "number":
+    case "float":
+    case "numeric":
+    case "float64":
+      return `${floating}d`;
+    default:
+      return text;
   }
 }
 
@@ -119,10 +148,14 @@ export function javaEnumTypeName(name: string): string {
   return javaTypeName(name);
 }
 
-export function javaEnumMemberName(value: string): string {
-  const normalized = value
-    .replace(/[^A-Za-z0-9]+/g, "_")
-    .replace(/^(\d)/, "_$1")
-    .toUpperCase();
-  return javaIdentifier(normalized || "VALUE", "VALUE");
+export function javaEnumMemberNames(
+  values: readonly string[],
+): Map<string, string> {
+  return createUniqueEnumMemberNames(values, (value) => {
+    const normalized = value
+      .replace(/[^A-Za-z0-9]+/g, "_")
+      .replace(/^(\d)/, "_$1")
+      .toUpperCase();
+    return javaIdentifier(normalized || "VALUE", "VALUE");
+  });
 }

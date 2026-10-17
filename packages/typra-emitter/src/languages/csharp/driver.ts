@@ -25,7 +25,7 @@ import {
   protocolCSharpType,
 } from "./emitter.js";
 import { emitCSharpContext, emitCSharpUtils } from "./scaffolding.js";
-import { csharpIdentifier } from "./identifiers.js";
+import { csharpEnumMemberNames, csharpIdentifier } from "./identifiers.js";
 import { emitCSharpTest } from "./test-emitter.js";
 import { toPascalCase } from "../../ir/visitor.js";
 import { emitGeneratedFile } from "../../cleanup/generated-file.js";
@@ -376,17 +376,21 @@ export const generateCsharp = async (
   // param branch with no extra emission, and stays param-only so the return
   // keeps its own rule. Emitted additively beside the stringly runner.
   if ((options?.callableVectors?.vectors.length ?? 0) > 0) {
-    const conformanceEntries = options!.callableVectors!.vectors.filter((entry) =>
-      isTypedSeamEntry(entry, serializationClosure, {
-        arrays: true,
-        carriers: true,
-      }),
+    const conformanceEntries = options!.callableVectors!.vectors.filter(
+      (entry) =>
+        isTypedSeamEntry(entry, serializationClosure, {
+          arrays: true,
+          carriers: true,
+        }),
     );
     if (conformanceEntries.length > 0) {
       await emitCsharpFile(
         context,
         node,
-        emitCSharpVectorConformanceEntrypoint(conformanceEntries, csharpNamespace),
+        emitCSharpVectorConformanceEntrypoint(
+          conformanceEntries,
+          csharpNamespace,
+        ),
         "VectorConformance.cs",
         emitTarget["output-dir"],
         emitTarget["output-dir"],
@@ -496,7 +500,9 @@ export const renderTests = (
                 ? value.replace(/^"|"$/g, "")
                 : String(value);
             const csEnumName = toPascalCase(prop.enumName);
-            const memberName = toPascalCase(rawValue);
+            const memberName = csharpEnumMemberNames(prop.allowedValues).get(
+              rawValue,
+            )!;
             return {
               key: renderName(key),
               value: `${csEnumName}.${memberName}`,
@@ -809,7 +815,7 @@ function emitCSharpVectorRunner(
     "                            {",
     '                                case "$env":',
     "                                    return JsonValue.Create(",
-    "                                        Environment.GetEnvironmentVariable(raw) ?? \"\");",
+    '                                        Environment.GetEnvironmentVariable(raw) ?? "");',
     '                                case "$file":',
     "                                    return JsonValue.Create(",
     "                                        File.ReadAllText(Path.Combine(dir, raw)));",
@@ -891,7 +897,7 @@ function emitCSharpVectorRunner(
     "                return await valueTask.ConfigureAwait(false);",
     "            case Task task:",
     "                await task.ConfigureAwait(false);",
-    "                return task.GetType().GetProperty(\"Result\")?.GetValue(task) as JsonNode;",
+    '                return task.GetType().GetProperty("Result")?.GetValue(task) as JsonNode;',
     "            default:",
     "                return result as JsonNode;",
     "        }",
@@ -911,7 +917,7 @@ function emitCSharpVectorRunner(
     "        {",
     "            Assert.Fail(",
     '                $"{vectorId}: operation is @sync but its adapter returned an " +',
-    "                \"awaitable. A @sync operation must resolve synchronously — drop @sync \" +",
+    '                "awaitable. A @sync operation must resolve synchronously — drop @sync " +',
     '                "to make it async-capable, or make the adapter synchronous.");',
     "        }",
     "        return await AwaitIfAwaitable(raw);",
@@ -971,12 +977,12 @@ function emitCSharpVectorRunner(
     "        }",
     "",
     "        // Requirement guard: a vector may declare abstract capability tokens in",
-    "        // \"requires\". Each is resolved against the seam-supplied capability table",
+    '        // "requires". Each is resolved against the seam-supplied capability table',
     "        // BEFORE the adapter runs. An unregistered token is a hard failure (never",
     "        // skip silently); an unavailable one yields a clean skip so an absent",
     "        // credential never reaches Invoke as an empty value. A requires-free",
     "        // harness injects no capability table and this guard stays inert.",
-    "        var requires = (vector[\"requires\"] as JsonArray)?",
+    '        var requires = (vector["requires"] as JsonArray)?',
     "            .Select(node => (string?)node)",
     "            .Where(token => token is not null)",
     "            .Select(token => token!)",
@@ -1017,13 +1023,13 @@ function emitCSharpVectorRunner(
     "        }",
     "",
     "        // Per-vector waiver, consulted even when an adapter IS registered. Keyed",
-    "        // by the vector id (\"Contract.operation:name\") or \"operation:name\" so it",
+    '        // by the vector id ("Contract.operation:name") or "operation:name" so it',
     "        // never collides with an operation-level waiver. xfail: a waived vector",
     "        // that fails is an expected failure (green); xpass: a waived vector that",
     "        // passes is surfaced as a hard failure so stale waivers get removed.",
     "        var vectorWaivers = seam.Waivers;",
     "        if (!vectorWaivers.TryGetValue(vectorId, out var vectorWaiver))",
-    "            vectorWaivers.TryGetValue($\"{operation}:{vectorName}\", out vectorWaiver);",
+    '            vectorWaivers.TryGetValue($"{operation}:{vectorName}", out vectorWaiver);',
     "        var waived = !string.IsNullOrEmpty(vectorWaiver);",
     "",
     "        Exception? vectorFailure = null;",
@@ -1056,7 +1062,7 @@ function emitCSharpVectorRunner(
     "            catch (VectorException err)",
     "            {",
     "                var observed = err.Payload ??",
-    "                    new JsonObject { [\"message\"] = err.Message };",
+    '                    new JsonObject { ["message"] = err.Message };',
     '                Assert.Equal(Canonical(vector["expectedError"]), Canonical(Normalize(observed)));',
     "            }",
     "        }",
@@ -1074,12 +1080,12 @@ function emitCSharpVectorRunner(
     "        {",
     "            if (vectorFailure != null)",
     "            {",
-    "                Console.WriteLine($\"XFAIL {vectorId} (waived: {vectorWaiver})\");",
+    '                Console.WriteLine($"XFAIL {vectorId} (waived: {vectorWaiver})");',
     "                return;",
     "            }",
     "            Assert.Fail(",
-    "                $\"XPASS {vectorId}: waived vector unexpectedly passed; \" +",
-    "                $\"remove the waiver ({vectorWaiver}).\");",
+    '                $"XPASS {vectorId}: waived vector unexpectedly passed; " +',
+    '                $"remove the waiver ({vectorWaiver}).");',
     "        }",
     "        if (vectorFailure != null)",
     "            ExceptionDispatchInfo.Capture(vectorFailure).Throw();",
@@ -1143,7 +1149,9 @@ function emitCSharpVectorConformanceTest(
     "        {",
     "            Adapters = VectorAdapters.Adapters(),",
     "            Waivers = VectorAdapters.Waivers(),",
-    ...(hasRequires ? ["            Capabilities = VectorAdapters.Capabilities(),"] : []),
+    ...(hasRequires
+      ? ["            Capabilities = VectorAdapters.Capabilities(),"]
+      : []),
     "            Doubles = VectorAdapters.Doubles(),",
     "            BaseDir = BaseDir(),",
     "        };",
@@ -1183,7 +1191,10 @@ function emitCSharpVectorConformanceTest(
  * conversion-test method names. Falls back to a positional slug when a name is
  * absent or reduces to nothing, so emission stays total and deterministic.
  */
-function csharpConformanceMethodName(name: string | undefined, index: number): string {
+function csharpConformanceMethodName(
+  name: string | undefined,
+  index: number,
+): string {
   const slug = (name ?? "")
     .split(/[^A-Za-z0-9]+/)
     .filter((part) => part.length > 0)
@@ -1367,12 +1378,8 @@ function emitCSharpInterfaceConformanceTest(
       }
     }
     lines.push(`        var ${field} = ${accessor};`);
-    lines.push(
-      `        var impl = ${resolver}.Resolve(${field}, Provider());`,
-    );
-    lines.push(
-      `        Assert.NotNull(impl);`,
-    );
+    lines.push(`        var impl = ${resolver}.Resolve(${field}, Provider());`);
+    lines.push(`        Assert.NotNull(impl);`);
     const callArgs = paramNames.map((paramName) => {
       const local = csharpIdentifier(paramName);
       return classifyCallableParam(entry.params[paramName]).optional
@@ -1505,7 +1512,7 @@ function emitCSharpVectorConformanceEntrypoint(
     "    // Canonicalize JSON text so structural compares ignore incidental",
     "    // formatting (whitespace, member order is irrelevant for scalars).",
     "    private static string Canonical(string json) =>",
-    "        JsonNode.Parse(json)?.ToJsonString() ?? \"null\";",
+    '        JsonNode.Parse(json)?.ToJsonString() ?? "null";',
     "",
   ];
 
@@ -1671,7 +1678,6 @@ function emitCSharpVectorConformanceEntrypoint(
   return lines.join("\n");
 }
 
-
 /**
  * Emit the Part III C# dispatch resolver for one seam interface — the behavioral
  * twin of the shape `Load` switch (`emitter.ts:1081`). Where `Load` maps a
@@ -1717,9 +1723,7 @@ function emitCSharpDispatchResolver(
   // "*" }`) gains a default provider slot; an unknown discriminator routes to it
   // instead of yielding null — the behavioral twin of the shape loader's
   // `*`-tolerant fallback. Closed / open-self-reference keeps its throw/null arm.
-  const defaultSlot = entry.wildcard
-    ? toPascalCase(entry.wildcard.name)
-    : null;
+  const defaultSlot = entry.wildcard ? toPascalCase(entry.wildcard.name) : null;
 
   const lines: string[] = [
     "// <auto-generated by typra-emitter>",
@@ -1749,9 +1753,7 @@ function emitCSharpDispatchResolver(
   // values (leading digit, C# keyword, punctuation) would need a sanitizer +
   // collision guard. Deferred until a fixture exercises one (reproduce-before-fix).
   for (const variant of variants) {
-    lines.push(
-      `    ${seam}? ${toPascalCase(variant.value)} { get; }`,
-    );
+    lines.push(`    ${seam}? ${toPascalCase(variant.value)} { get; }`);
   }
   if (defaultSlot) {
     lines.push(

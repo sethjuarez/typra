@@ -1,0 +1,13 @@
+emit:
+  - "@typra/emitter"
+options:
+  "@typra/emitter":
+    emitter-output-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\generated"
+    root-object: "Typra.Proof.Root"
+    root-namespace: "Typra.Proof"
+    emit-targets:
+      - type: Swift
+        output-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\generated\\swift"
+        test-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\generated\\swift\\Tests\\TypraProofTests"
+        package-name: "TypraProof"
+        format: false

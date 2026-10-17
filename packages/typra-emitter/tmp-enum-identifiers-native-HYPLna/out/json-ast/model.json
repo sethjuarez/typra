@@ -1,0 +1,125 @@
+{
+  "typeName": {
+    "namespace": "Typra.Fixtures.Features.StringEnumIdentifiers",
+    "name": "Root"
+  },
+  "description": "",
+  "base": {},
+  "isAbstract": false,
+  "isProtocol": false,
+  "entryShorthand": null,
+  "coercions": [],
+  "factories": [],
+  "methods": [],
+  "childTypes": [],
+  "properties": [
+    {
+      "name": "odd",
+      "typeName": {
+        "namespace": "",
+        "name": "string"
+      },
+      "description": "",
+      "samples": [
+        {
+          "sample": {
+            "odd": "dot ted"
+          },
+          "title": "",
+          "description": ""
+        }
+      ],
+      "knownAs": [],
+      "defaultFor": [],
+      "isScalar": true,
+      "isOptional": false,
+      "isCollection": false,
+      "isAny": false,
+      "isDict": false,
+      "dictValueType": null,
+      "defaultValue": "null",
+      "hasExplicitDefault": false,
+      "allowedValues": [
+        "kebab-case",
+        "with space",
+        "1x",
+        "dot.ted",
+        "dot ted"
+      ],
+      "parseAliases": {},
+      "enumName": "Odd",
+      "isOpenEnum": false,
+      "isNamedCollection": false
+    },
+    {
+      "name": "pair",
+      "typeName": {
+        "namespace": "",
+        "name": "string"
+      },
+      "description": "",
+      "samples": [
+        {
+          "sample": {
+            "pair": "upper"
+          },
+          "title": "",
+          "description": ""
+        }
+      ],
+      "knownAs": [],
+      "defaultFor": [],
+      "isScalar": true,
+      "isOptional": false,
+      "isCollection": false,
+      "isAny": false,
+      "isDict": false,
+      "dictValueType": null,
+      "defaultValue": "null",
+      "hasExplicitDefault": false,
+      "allowedValues": [
+        "UPPER",
+        "upper"
+      ],
+      "parseAliases": {},
+      "enumName": "CasePair",
+      "isOpenEnum": false,
+      "isNamedCollection": false
+    },
+    {
+      "name": "empty",
+      "typeName": {
+        "namespace": "",
+        "name": "string"
+      },
+      "description": "",
+      "samples": [
+        {
+          "sample": {
+            "empty": ""
+          },
+          "title": "",
+          "description": ""
+        }
+      ],
+      "knownAs": [],
+      "defaultFor": [],
+      "isScalar": true,
+      "isOptional": false,
+      "isCollection": false,
+      "isAny": false,
+      "isDict": false,
+      "dictValueType": null,
+      "defaultValue": "null",
+      "hasExplicitDefault": false,
+      "allowedValues": [
+        "",
+        "a"
+      ],
+      "parseAliases": {},
+      "enumName": "Empty",
+      "isOpenEnum": false,
+      "isNamedCollection": false
+    }
+  ]
+}

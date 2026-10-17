@@ -87,4 +87,10 @@ model Row {
 
   // Optional + nullable: same as optional (absent or null → unset, omitted on save).
   hint?: string | null;
+
+  // Nullable unknown values normalize explicit null to the same unset state as absence.
+  unknownNullable: unknown | null = null;
+  optionalUnknownNullable?: unknown | null;
+  // Plain optional unknown retains explicit JSON null as a present value.
+  plainUnknown?: unknown;
 }

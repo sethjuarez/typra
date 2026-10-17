@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.build\\primary.swiftdeps"
+  },
+  "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.derived\\ProofTests.swift": {
+    "dependencies": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.build\\ProofTests.d",
+    "object": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.build\\ProofTests.swift.o",
+    "swiftmodule": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.build\\ProofTests~partial.swiftmodule",
+    "swift-dependencies": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.build\\ProofTests.swiftdeps",
+    "diagnostics": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.build\\ProofTests.dia"
+  },
+  "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.derived\\all-discovered-tests.swift": {
+    "dependencies": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.build\\all-discovered-tests.d",
+    "object": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.build\\all-discovered-tests.swift.o",
+    "swiftmodule": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.build\\all-discovered-tests~partial.swiftmodule",
+    "swift-dependencies": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.build\\all-discovered-tests.swiftdeps",
+    "diagnostics": "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-swift-loop-k9A0eM\\pkg\\.build\\x86_64-unknown-windows-msvc\\debug\\ProofPackageDiscoveredTests.build\\all-discovered-tests.dia"
+  }
+}

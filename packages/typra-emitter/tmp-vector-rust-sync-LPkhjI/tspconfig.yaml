@@ -1,0 +1,13 @@
+emit:
+  - "@typra/emitter"
+options:
+  "@typra/emitter":
+    emitter-output-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-rust-sync-LPkhjI\\generated"
+    root-object: "Typra.SyncProof.Root"
+    root-namespace: "Typra.SyncProof"
+    emit-targets:
+      - type: Rust
+        output-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-rust-sync-LPkhjI\\generated\\rust"
+        test-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-rust-sync-LPkhjI\\generated\\rust-tests"
+        vector-adapter-path: "vector_adapters.rs"
+        format: false

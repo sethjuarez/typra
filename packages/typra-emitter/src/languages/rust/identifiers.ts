@@ -1,3 +1,75 @@
+import { toSnakeCase } from "../../ir/utilities.js";
+
+/** Strict and reserved Rust keywords (2015–2024 editions); each needs `r#` as a field name. */
+const RUST_KEYWORDS = new Set([
+  "as",
+  "break",
+  "const",
+  "continue",
+  "crate",
+  "else",
+  "enum",
+  "extern",
+  "false",
+  "fn",
+  "for",
+  "if",
+  "impl",
+  "in",
+  "let",
+  "loop",
+  "match",
+  "mod",
+  "move",
+  "mut",
+  "pub",
+  "ref",
+  "return",
+  "self",
+  "Self",
+  "static",
+  "struct",
+  "super",
+  "trait",
+  "true",
+  "type",
+  "unsafe",
+  "use",
+  "where",
+  "while",
+  "async",
+  "await",
+  "dyn",
+  "abstract",
+  "become",
+  "box",
+  "do",
+  "final",
+  "gen",
+  "macro",
+  "override",
+  "priv",
+  "try",
+  "typeof",
+  "unsized",
+  "virtual",
+  "yield",
+]);
+
+/**
+ * Rust field identifier for a source property. Model, loaders, the expression visitor,
+ * operation bindings, and generated tests must agree, so every site calls this rule.
+ * `self`/`super`/`crate` cannot be raw identifiers, so they gain a trailing `_`.
+ */
+export function rustFieldName(name: string): string {
+  const snake = toSnakeCase(name);
+  if (snake === "_") return "value_";
+  if (snake === "self" || snake === "super" || snake === "crate") {
+    return `${snake}_`;
+  }
+  return RUST_KEYWORDS.has(snake) ? `r#${snake}` : snake;
+}
+
 /**
  * Rust variant name for a string-enum wire value. The model, load defaults, the expression
  * visitor, and generated tests must all agree, so every site calls this one rule:

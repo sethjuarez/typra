@@ -64,6 +64,7 @@ import {
   shouldEmitCompileOnlyProtocolScaffolds,
 } from "../../protocol-scaffolds.js";
 import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
+import { rustFieldName } from "./identifiers.js";
 
 /**
  * Type mapping from TypeSpec scalar types to Rust types.
@@ -92,52 +93,6 @@ export const rustTypeMapper: Record<string, string> = {
   any: "serde_json::Value",
   dictionary: "serde_json::Value",
 };
-
-const RUST_KEYWORDS = new Set([
-  "as",
-  "break",
-  "const",
-  "continue",
-  "crate",
-  "else",
-  "enum",
-  "extern",
-  "false",
-  "fn",
-  "for",
-  "if",
-  "impl",
-  "in",
-  "let",
-  "loop",
-  "match",
-  "mod",
-  "move",
-  "mut",
-  "pub",
-  "ref",
-  "return",
-  "self",
-  "Self",
-  "static",
-  "struct",
-  "super",
-  "trait",
-  "true",
-  "type",
-  "unsafe",
-  "use",
-  "where",
-  "while",
-  "async",
-  "await",
-  "dyn",
-]);
-
-function rustFieldName(name: string): string {
-  const snake = toSnakeCase(name);
-  return RUST_KEYWORDS.has(snake) ? `r#${snake}` : snake;
-}
 
 /**
  * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the
@@ -178,13 +133,14 @@ export const generateRust = async (
   const registry = TypeRegistry.fromTypeGraph(allTypes);
   const visitor = new RustExprVisitor(registry);
 
-  // Collect all polymorphic type names across all nodes
   const polymorphicTypeNames = new Set<string>();
   for (const n of nodes) {
     for (const name of collectPolymorphicTypeNames(n, registry)) {
       polymorphicTypeNames.add(name);
     }
   }
+  const rustValueBackedTypeNames =
+    collectRustValueBackedPolymorphicTypeNames(allTypes);
   // Build a map from polymorphic child type names to their parent type names.
   // In Rust, child types become enum variants, not standalone structs.
   // When importing a child type, we need to import ParentKind instead.
@@ -216,7 +172,12 @@ export const generateRust = async (
       .filter((n) => !n.base)
       .flatMap(
         (n) =>
-          lowerFile(n, registry, polymorphicTypeNames, serializationClosure)
+          lowerFile(
+            n,
+            registry,
+            rustValueBackedTypeNames,
+            serializationClosure,
+          )
             .types,
       )
       .map((decl) => [decl.typeName.name, decl]),
@@ -247,7 +208,12 @@ export const generateRust = async (
   const fileDecls = new Map(
     hoistSharedEnums(
       rootNodes.map((n) =>
-        lowerFile(n, registry, polymorphicTypeNames, serializationClosure),
+        lowerFile(
+          n,
+          registry,
+          rustValueBackedTypeNames,
+          serializationClosure,
+        ),
       ),
     ).map((fileDecl, index) => [rootNodes[index], fileDecl]),
   );
@@ -262,7 +228,7 @@ export const generateRust = async (
       const fileContent = emitRustFileDecl(
         fileDecl,
         visitor,
-        polymorphicTypeNames,
+        rustValueBackedTypeNames,
         childToParent,
         {
           enumParsing: emitTarget["enum-parsing"] ?? "case-sensitive",
@@ -448,6 +414,7 @@ export const generateRust = async (
           emitTarget["import-path"] ?? "crate::model",
           emitTarget["vector-adapter-path"] ?? "vector_adapters.rs",
           rustDeclsByName,
+          rustValueBackedTypeNames,
           polymorphicTypeNames,
         ),
         `${emitTarget["test-dir"]}/${dispatched.group}`,
@@ -595,6 +562,62 @@ export const generateRust = async (
   }
   restoreNamespaceGroups(namespaceGroupSnapshots);
 };
+
+/**
+ * Rust stores recursive polymorphic references and coercible polymorphic
+ * references as JSON values. Other references can use the typed loader, matching
+ * the behavior of Rust's collection helpers without creating recursive structs.
+ */
+function collectRustValueBackedPolymorphicTypeNames(
+  nodes: TypeNode[],
+): Set<string> {
+  const nodesByName = new Map(nodes.map((node) => [node.typeName.name, node]));
+  const polymorphicNodes = nodes.filter(
+    (node) => node.discriminator && node.childTypes.length > 0,
+  );
+  const childToParent = new Map<string, string>();
+  for (const parent of polymorphicNodes) {
+    for (const child of parent.childTypes) {
+      childToParent.set(child.typeName.name, parent.typeName.name);
+    }
+  }
+  const ownerName = (name: string): string => childToParent.get(name) ?? name;
+  const edges = new Map<string, Set<string>>();
+
+  for (const node of nodes) {
+    const source = ownerName(node.typeName.name);
+    const targets = edges.get(source) ?? new Set<string>();
+    for (const property of node.properties) {
+      if (nodesByName.has(property.typeName.name)) {
+        targets.add(ownerName(property.typeName.name));
+      }
+    }
+    edges.set(source, targets);
+  }
+
+  function reaches(start: string, target: string): boolean {
+    const pending = [...(edges.get(start) ?? [])];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (current === target) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      pending.push(...(edges.get(current) ?? []));
+    }
+    return false;
+  }
+
+  return new Set(
+    polymorphicNodes
+      .filter(
+        (node) =>
+          node.coercions.length > 0 ||
+          reaches(node.typeName.name, node.typeName.name),
+      )
+      .map((node) => node.typeName.name),
+  );
+}
 
 /**
  * Format Rust files using cargo fmt.
@@ -2541,6 +2564,7 @@ function emitRustInterfaceConformanceTest(
   importPath: string,
   adapterPath: string,
   declsByName: Map<string, TypeDecl>,
+  valueBackedTypeNames: Set<string>,
   polymorphicTypeNames: Set<string>,
 ): string {
   const seam = dispatched.contract;
@@ -2605,6 +2629,7 @@ function emitRustInterfaceConformanceTest(
       declsByName,
       rootShape.base,
       rootShape.optional,
+      valueBackedTypeNames,
       polymorphicTypeNames,
       discriminatorWireKey(entry.dispatch!.decl!),
     );
@@ -2766,6 +2791,7 @@ function rustDiscriminatorAccessor(
   declsByName: Map<string, TypeDecl>,
   rootTypeName: string | undefined,
   rootOptional: boolean,
+  valueBackedTypeNames: Set<string>,
   polymorphicTypeNames: Set<string>,
   discriminatorKey: string,
 ): string {
@@ -2787,7 +2813,7 @@ function rustDiscriminatorAccessor(
     const lowering = field
       ? resolveFieldLowering(
           field,
-          loweringCapabilitiesForTarget("rust", polymorphicTypeNames),
+          loweringCapabilitiesForTarget("rust", valueBackedTypeNames),
         )
       : undefined;
     const nextRef = `__dispatch_${index}`;

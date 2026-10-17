@@ -21,53 +21,10 @@ import {
   swiftTypeName,
 } from "../languages/swift/identifiers.js";
 import { goFieldName } from "../languages/go/identifiers.js";
+import { csharpEnumMemberNames } from "../languages/csharp/identifiers.js";
 import * as YAML from "yaml";
-
-const RUST_KEYWORDS = new Set([
-  "as",
-  "break",
-  "const",
-  "continue",
-  "crate",
-  "else",
-  "enum",
-  "extern",
-  "false",
-  "fn",
-  "for",
-  "if",
-  "impl",
-  "in",
-  "let",
-  "loop",
-  "match",
-  "mod",
-  "move",
-  "mut",
-  "pub",
-  "ref",
-  "return",
-  "self",
-  "Self",
-  "static",
-  "struct",
-  "super",
-  "trait",
-  "true",
-  "type",
-  "unsafe",
-  "use",
-  "where",
-  "while",
-  "async",
-  "await",
-  "dyn",
-]);
-
-function rustFieldName(name: string): string {
-  const snake = toSnakeCase(name);
-  return RUST_KEYWORDS.has(snake) ? `r#${snake}` : snake;
-}
+import { rustFieldName } from "../languages/rust/identifiers.js";
+import { pythonFieldName } from "../languages/python/identifiers.js";
 
 /**
  * Options for building test context - language-specific transformations.
@@ -105,7 +62,7 @@ export interface TestContextOptions {
 
   /**
    * Render an enum assertion value for a closed enum field.
-   * Called with (enumName, rawStringValue, fieldName).
+   * Called with (enumName, rawStringValue, fieldName, isOpenEnum, allowedValues).
    * If provided and returns non-null, overrides default string/bool/number rendering.
    * The returned value+delimiter replace the default.
    */
@@ -114,6 +71,7 @@ export interface TestContextOptions {
     rawValue: string,
     fieldName: string,
     isOpenEnum?: boolean,
+    allowedValues?: readonly string[],
   ) => { value: string; delimiter: string } | null;
 
   /** Include scalar samples for complex properties that support scalar coercion. */
@@ -607,6 +565,7 @@ function buildValidations(
           rawValue,
           key,
           prop.isOpenEnum,
+          prop.allowedValues,
         );
         if (enumResult) {
           return {
@@ -778,6 +737,7 @@ function buildCoercions(
             strValue,
             key,
             prop.isOpenEnum,
+            prop.allowedValues,
           );
           if (enumResult) {
             return {
@@ -835,11 +795,17 @@ export const csharpTestOptions: TestContextOptions = {
   getDelimiter: (str: string) => (str.includes("\n") ? '@"' : '"'),
   // Closed enums assert against `EnumName.MemberName`; open enums fall through to plain
   // string rendering (return null) exactly as the C# driver's own enum branch did.
-  renderEnumValue: (enumName, rawValue, _fieldName, isOpenEnum) =>
+  renderEnumValue: (
+    enumName,
+    rawValue,
+    _fieldName,
+    isOpenEnum,
+    allowedValues,
+  ) =>
     isOpenEnum
       ? null
       : {
-          value: `${toPascalCase(enumName)}.${toPascalCase(rawValue)}`,
+          value: `${toPascalCase(enumName)}.${csharpEnumMemberNames(allowedValues?.length ? allowedValues : [rawValue]).get(rawValue)}`,
           delimiter: "",
         },
   // yaml's default (40) folds a long double-quoted scalar across lines using `\`
@@ -886,7 +852,7 @@ export const csharpTestOptions: TestContextOptions = {
  * Python test context options.
  */
 export const pythonTestOptions: TestContextOptions = {
-  renderKey: (key: string) => toSnakeCase(key), // camelCase from TypeSpec → snake_case for Python
+  renderKey: (key: string) => pythonFieldName(key), // camelCase from TypeSpec → snake_case for Python
   renderBoolean: (val: boolean) => (val ? "True" : "False"),
   escapeString: (str: string) =>
     str.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),

@@ -1,0 +1,14 @@
+emit:
+  - "@typra/emitter"
+options:
+  "@typra/emitter":
+    emitter-output-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-go-loop-7ZtO9A\\generated"
+    root-object: "Typra.Proof.Root"
+    root-namespace: "Typra.Proof"
+    emit-targets:
+      - type: Go
+        output-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-go-loop-7ZtO9A\\generated\\go"
+        test-dir: "C:\\Users\\sejuare\\.copilot\\copilot-worktrees\\typra\\sethjuarez-congenial-telegram\\packages\\typra-emitter\\tmp-vector-go-loop-7ZtO9A\\generated\\go-tests"
+        import-path: "typraproof"
+        vector-adapter-path: "typraproof/vectoradapters"
+        format: false

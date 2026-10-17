@@ -61,7 +61,11 @@ import {
 } from "../../ir/scalar-kinds.js";
 import { ExprVisitor, toPascalCase } from "../../ir/visitor.js";
 import { flattenInheritance } from "../../ir/inheritance.js";
-import { buildGoFieldNames, goFieldName } from "./identifiers.js";
+import {
+  buildGoFieldNames,
+  goEnumMemberNames,
+  goFieldName,
+} from "./identifiers.js";
 
 // ============================================================================
 // Type maps
@@ -328,9 +332,10 @@ function emitGoEnum(enumDef: EnumDef, lines: string[]): void {
   lines.push(`type ${enumDef.name} string`);
   lines.push("");
   lines.push("const (");
+  const memberNames = goEnumMemberNames(enumDef.values);
   for (const value of enumDef.values) {
-    const constName = `${enumDef.name}${toPascalCase(value)}`;
-    lines.push(`\t${constName} ${enumDef.name} = "${value}"`);
+    const constName = `${enumDef.name}${memberNames.get(value)}`;
+    lines.push(`\t${constName} ${enumDef.name} = ${JSON.stringify(value)}`);
   }
   lines.push(")");
   lines.push("");
@@ -346,7 +351,7 @@ function emitGoEnum(enumDef: EnumDef, lines: string[]): void {
     for (const value of enumDef.values) {
       lines.push(`\tcase ${JSON.stringify(value)}:`);
       lines.push(
-        `\t\treturn ${enumDef.name}${toPascalCase(value)}${enumDef.isOpen ? "" : ", nil"}`,
+        `\t\treturn ${enumDef.name}${memberNames.get(value)}${enumDef.isOpen ? "" : ", nil"}`,
       );
     }
     for (const [canonical, aliases] of Object.entries(enumDef.parseAliases)) {
@@ -356,7 +361,7 @@ function emitGoEnum(enumDef: EnumDef, lines: string[]): void {
         `\tcase ${aliases.map((alias) => JSON.stringify(alias)).join(", ")}:`,
       );
       lines.push(
-        `\t\treturn ${enumDef.name}${toPascalCase(canonical)}${enumDef.isOpen ? "" : ", nil"}`,
+        `\t\treturn ${enumDef.name}${memberNames.get(canonical)}${enumDef.isOpen ? "" : ", nil"}`,
       );
     }
     lines.push("\tdefault:");
@@ -712,10 +717,15 @@ function emitLoadFunction(
       }
     }
     if (type.additionalProperties) {
-      body.push("\t\tresult.AdditionalProperties = make(map[string]interface{})");
+      body.push(
+        "\t\tresult.AdditionalProperties = make(map[string]interface{})",
+      );
       body.push("\t\tfor key, value := range m {");
       body.push(
-        ...goKnownWireKeyGuard(type.additionalProperties.knownWireKeys, "\t\t\t"),
+        ...goKnownWireKeyGuard(
+          type.additionalProperties.knownWireKeys,
+          "\t\t\t",
+        ),
       );
       body.push("\t\t\tresult.AdditionalProperties[key] = value");
       body.push("\t\t}");
@@ -1468,7 +1478,10 @@ function emitSaveMethod(
 }
 
 /** `continue`s the enclosing `for key, value := range ...` loop for declared wire keys. */
-function goKnownWireKeyGuard(knownWireKeys: string[], indent: string): string[] {
+function goKnownWireKeyGuard(
+  knownWireKeys: string[],
+  indent: string,
+): string[] {
   const keys = [...new Set(knownWireKeys)];
   if (keys.length === 0) return [];
   return [

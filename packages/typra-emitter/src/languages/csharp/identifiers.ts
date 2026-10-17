@@ -1,3 +1,15 @@
+import { toPascalCase } from "../../ir/visitor.js";
+import { createUniqueEnumMemberNames } from "../enum-identifiers.js";
+
+export function csharpEnumMemberNames(
+  values: readonly string[],
+): Map<string, string> {
+  return createUniqueEnumMemberNames(values, (value) => {
+    const normalized = toPascalCase(value).replace(/[^A-Za-z0-9_]/g, "_");
+    return /^[A-Za-z_]/.test(normalized) ? normalized : `Value${normalized}`;
+  });
+}
+
 const CSHARP_KEYWORDS = new Set([
   "abstract",
   "as",

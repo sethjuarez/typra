@@ -1,0 +1,9 @@
+{
+  "emitter": "typra-emitter",
+  "version": 1,
+  "vectors": [],
+  "serializedTypes": [
+    "Root"
+  ],
+  "dispatchedConformance": false
+}

@@ -1,0 +1,97 @@
+{
+  "emitter": "typra-emitter",
+  "version": 1,
+  "generatedAt": "1970-01-01T00:00:00.000Z",
+  "files": [
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Context.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Fixtures/Features/StringEnumIdentifiers/CasePair.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Fixtures/Features/StringEnumIdentifiers/Empty.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Fixtures/Features/StringEnumIdentifiers/Odd.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Fixtures/Features/StringEnumIdentifiers/Root.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Utils.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "go",
+      "path": "go/context.go",
+      "marker": true
+    },
+    {
+      "outputRoot": "go",
+      "path": "go/root.go",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/CasePair.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/Empty.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/LoadContext.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/Odd.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/Root.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/SaveContext.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/TypraJson.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/TypraMaps.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/TypraYaml.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "json-ast",
+      "path": "json-ast/model.json",
+      "marker": false
+    }
+  ]
+}

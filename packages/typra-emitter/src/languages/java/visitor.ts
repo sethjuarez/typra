@@ -9,7 +9,7 @@ import {
 import { assertNever, ExprVisitor } from "../../ir/visitor.js";
 import {
   javaEnumTypeName,
-  javaIntegralScalar,
+  javaNumericLiteral,
   javaPropertyName,
   javaTypeName,
 } from "./identifiers.js";
@@ -90,17 +90,16 @@ export class JavaExprVisitor implements ExprVisitor {
   }
 
   private numberLiteral(value: number, typeName: string): string {
-    if (javaIntegralScalar(typeName) === "int64") return `${value}L`;
-    if (typeName === "float32")
-      return `${Number.isInteger(value) ? `${value}.0` : value}f`;
-    if (["number", "float", "numeric", "float64"].includes(typeName)) {
-      return `${Number.isInteger(value) ? `${value}.0` : value}d`;
-    }
-    return String(value);
+    return javaNumericLiteral(value, typeName);
   }
 
   private visitArray(expr: ArrayLiteral): string {
-    return `new java.util.ArrayList<>(java.util.Arrays.asList(${expr.items.map((i) => this.visitExpr(i)).join(", ")}))`;
+    const items = expr.items.map((item) =>
+      item.kind === "number"
+        ? this.numberLiteral(item.value, expr.elementTypeName.name)
+        : this.visitExpr(item),
+    );
+    return `new java.util.ArrayList<>(java.util.Arrays.asList(${items.join(", ")}))`;
   }
 
   private escapeString(s: string): string {

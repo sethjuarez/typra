@@ -975,10 +975,11 @@ function resolveImports(
       }
     }
 
-    // Factory-referenced imports (may include child types like TextPart)
+    // Factory-referenced imports (may include child types like TextPart). Scalar array
+    // element types (e.g. `float32` in `#[0.5]`) are not declared types to import.
     for (const factory of type.factories) {
       for (const ref of collectExprTypeRefs(factory.body)) {
-        if (definedInFile.has(ref.name)) continue;
+        if (definedInFile.has(ref.name) || !registry.get(ref.name)) continue;
         addImport(ref.name);
       }
     }

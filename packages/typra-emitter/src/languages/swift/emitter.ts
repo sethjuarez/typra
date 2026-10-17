@@ -540,15 +540,17 @@ function emitStruct(
           polymorphicTypeNames,
           polymorphicDefaultCases,
         );
-        return `${swiftPropertyName(field.name)}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`;
+        const name = swiftPropertyName(field.name);
+        return `${name === "`self`" ? "`self` _self" : name}: ${swiftFieldType(field, polymorphicTypeNames)} = ${defaultValue}`;
       }),
       ...(passthrough ? ["additionalProperties: [String: Any] = [:]"] : []),
     ].join(", ")}) {`,
   );
+  // A parameter named `self` would shadow the instance inside the initializer, so it keeps
+  // the `self` argument label but binds to `_self` (property names never start with `_`).
   for (const field of type.fields) {
-    lines.push(
-      `    self.${swiftPropertyName(field.name)} = ${swiftPropertyName(field.name)}`,
-    );
+    const name = swiftPropertyName(field.name);
+    lines.push(`    self.${name} = ${name === "`self`" ? "_self" : name}`);
   }
   if (passthrough) {
     lines.push("    self.additionalProperties = additionalProperties");

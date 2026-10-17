@@ -1,4 +1,14 @@
 import { toPascalCase } from "../../ir/visitor.js";
+import { createUniqueEnumMemberNames } from "../enum-identifiers.js";
+
+export function goEnumMemberNames(
+  values: readonly string[],
+): Map<string, string> {
+  return createUniqueEnumMemberNames(
+    values,
+    (value) => toPascalCase(value).replace(/[^A-Za-z0-9_]/g, "_") || "Value",
+  );
+}
 
 interface FieldNameCandidate {
   name: string;

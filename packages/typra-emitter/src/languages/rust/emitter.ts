@@ -10,7 +10,7 @@
  * Key Rust-specific patterns:
  *   - Polymorphic types use struct + XxxKind enum (not inheritance)
  *   - Variant-specific fields live on enum variants, not child classes
- *   - Polymorphic single-ref fields → serde_json::Value
+ *   - Recursive polymorphic single-ref fields → serde_json::Value
  *   - Ownership: String, Option<T>, Vec<T>
  *   - Pattern matching for load/save of variant fields
  *
@@ -78,6 +78,7 @@ import {
 } from "../../ir/scalar-kinds.js";
 import { ExprVisitor } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
+import { rustFieldName } from "./identifiers.js";
 
 /**
  * Crate-level lint allowances applied to the top of every generated Rust file.
@@ -123,50 +124,18 @@ function renderLines(lines: string[]): string {
   return `${lines.join("\n")}\n`;
 }
 
-const RUST_KEYWORDS = new Set([
-  "as",
-  "break",
-  "const",
-  "continue",
-  "crate",
-  "else",
-  "enum",
-  "extern",
-  "false",
-  "fn",
-  "for",
-  "if",
-  "impl",
-  "in",
-  "let",
-  "loop",
-  "match",
-  "mod",
-  "move",
-  "mut",
-  "pub",
-  "ref",
-  "return",
-  "self",
-  "Self",
-  "static",
-  "struct",
-  "super",
-  "trait",
-  "true",
-  "type",
-  "unsafe",
-  "use",
-  "where",
-  "while",
-  "async",
-  "await",
-  "dyn",
-]);
-
-function rustFieldName(name: string): string {
-  const snake = toSnakeCase(name);
-  return RUST_KEYWORDS.has(snake) ? `r#${snake}` : snake;
+function assertDistinctRustFields(type: TypeDecl): void {
+  const names = new Map<string, string>();
+  for (const field of type.fields) {
+    const rustName = rustFieldName(field.name);
+    const prior = names.get(rustName);
+    if (prior !== undefined) {
+      throw new Error(
+        `Rust type ${type.typeName.name}: fields "${prior}" and "${field.name}" both map to the identifier "${rustName}". Rename one of the fields to generate Rust.`,
+      );
+    }
+    names.set(rustName, field.name);
+  }
 }
 
 /**
@@ -367,6 +336,8 @@ export function emitRustFile(
   options: RustEmitterOptions = {},
   declsByName: Map<string, TypeDecl> = new Map(),
 ): string {
+  for (const type of file.types) assertDistinctRustFields(type);
+
   const lines: string[] = [];
   const hasNonProtocol = file.types.some((t) => !t.isProtocol);
   const hasRuntimeCancellation = file.types.some((type) =>
@@ -2974,8 +2945,9 @@ function fieldType(
       return field.isOptional ? `Option<${rustType}>` : rustType;
     }
     case "complex": {
-      // Polymorphic references and "unknown" have no generated Rust type of their
-      // own, so they are carried as serde_json::Value.
+      // Recursive polymorphic references and "unknown" are carried as
+      // serde_json::Value; non-recursive polymorphic references have a generated
+      // struct type and can use the canonical typed loader.
       //
       // Struct fields keep Value::Null as the "absent" sentinel, which is a stable
       // part of the generated API. Enum variant fields cannot: their load and save
@@ -3125,7 +3097,14 @@ function loadExpr(
 
   switch (cat.kind) {
     case "scalar":
-      return scalarLoadExpr(key, cat.scalarType, a.isOptional);
+      return scalarLoadExpr(
+        key,
+        cat.scalarType,
+        a.isOptional,
+        a.isNullable || a.isOptionalNullable,
+        a.defaultValue,
+        a.hasExplicitDefault ?? false,
+      );
     case "complex": {
       const lowering = resolveFieldLowering(
         {
@@ -3219,35 +3198,71 @@ function scalarLoadExpr(
   key: string,
   scalarType: string,
   isOptional: boolean,
+  isNullable: boolean = false,
+  defaultValue: string | number | boolean | null = null,
+  hasExplicitDefault: boolean = false,
 ): string {
   if (isValueType(scalarType)) {
     // dictionary is never optional; any/object/unknown may be optional
     if (scalarType === "dictionary") {
       return `value.get(${rustStringLiteral(key)}).cloned().unwrap_or(serde_json::Value::Null)`;
     }
+    const nullableFilter = isNullable
+      ? ".filter(|v| !v.is_null())"
+      : "";
     return isOptional
-      ? `value.get(${rustStringLiteral(key)}).cloned()`
+      ? `value.get(${rustStringLiteral(key)})${nullableFilter}.cloned()`
       : `value.get(${rustStringLiteral(key)}).cloned().unwrap_or(serde_json::Value::Null)`;
   }
 
+  const explicitDefault = hasExplicitDefault
+    ? rustScalarDefaultLiteral(scalarType, defaultValue)
+    : null;
+  const withFallback = (loaded: string, ordinary: string): string =>
+    explicitDefault
+      ? isOptional
+        ? `${loaded}.or(Some(${explicitDefault}))`
+        : `${loaded}.unwrap_or(${explicitDefault})`
+      : ordinary;
+
   switch (scalarType) {
-    case "string":
-      return isOptional
-        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_str()).map(|s| s.to_string())`
-        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_str()).unwrap_or_default().to_string()`;
-    case "boolean":
-      return isOptional
-        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_bool())`
-        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_bool()).unwrap_or(false)`;
-    case "int32":
-      return isOptional
-        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64()).map(|v| v as i32)`
-        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64()).unwrap_or(0) as i32`;
+    case "string": {
+      const loaded = `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_str()).map(|s| s.to_string())`;
+      return withFallback(
+        loaded,
+        isOptional
+          ? loaded
+          : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_str()).unwrap_or_default().to_string()`,
+      );
+    }
+    case "boolean": {
+      const loaded = `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_bool())`;
+      return withFallback(
+        loaded,
+        isOptional
+          ? loaded
+          : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_bool()).unwrap_or(false)`,
+      );
+    }
+    case "int32": {
+      const loaded = `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64()).map(|v| v as i32)`;
+      return withFallback(
+        loaded,
+        isOptional
+          ? loaded
+          : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64()).unwrap_or(0) as i32`,
+      );
+    }
     case "int64":
-    case "integer":
-      return isOptional
-        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64())`
-        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64()).unwrap_or(0)`;
+    case "integer": {
+      const loaded = `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64())`;
+      return withFallback(
+        loaded,
+        isOptional
+          ? loaded
+          : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_i64()).unwrap_or(0)`,
+      );
+    }
     case "int8":
     case "int16":
     case "safeint":
@@ -3256,22 +3271,59 @@ function scalarLoadExpr(
     case "uint32":
     case "uint64": {
       const loaded = `value.get(${rustStringLiteral(key)}).and_then(|v| ${rustSizedIntFromValue("v", RUST_TYPE_MAP[scalarType])})`;
-      return isOptional ? loaded : `${loaded}.unwrap_or(0)`;
+      return withFallback(
+        loaded,
+        isOptional ? loaded : `${loaded}.unwrap_or(0)`,
+      );
     }
     case "float64":
     case "float":
     case "number":
-    case "numeric":
-      return isOptional
-        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64())`
-        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64()).unwrap_or(0.0)`;
-    case "float32":
-      return isOptional
-        ? `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64()).map(|v| v as f32)`
-        : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32`;
+    case "numeric": {
+      const loaded = `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64())`;
+      return withFallback(
+        loaded,
+        isOptional
+          ? loaded
+          : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64()).unwrap_or(0.0)`,
+      );
+    }
+    case "float32": {
+      const loaded = `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64()).map(|v| v as f32)`;
+      return withFallback(
+        loaded,
+        isOptional
+          ? loaded
+          : `value.get(${rustStringLiteral(key)}).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32`,
+      );
+    }
     default:
       return `value.get(${rustStringLiteral(key)}).cloned().unwrap_or(serde_json::Value::Null)`;
   }
+}
+
+function rustScalarDefaultLiteral(
+  scalarType: string,
+  value: string | number | boolean | null,
+): string | null {
+  if (value === null) return null;
+  if (scalarType === "string") {
+    return `String::from(${rustStringLiteral(String(value))})`;
+  }
+  if (scalarType === "boolean") return value ? "true" : "false";
+  if (typeof value !== "number") return null;
+  const isFloat = [
+    "float",
+    "float32",
+    "float64",
+    "number",
+    "numeric",
+  ].includes(scalarType);
+  const numeric =
+    isFloat && Number.isInteger(value) && !/[eE]/.test(String(value))
+      ? `${value}.0`
+      : String(value);
+  return scalarType === "float32" ? `(${numeric} as f32)` : numeric;
 }
 
 function collectionScalarLoadExpr(
@@ -3361,7 +3413,14 @@ function variantLoadExpr(
 
   switch (cat.kind) {
     case "scalar":
-      return scalarLoadExpr(key, cat.scalarType, field.isOptional);
+      return scalarLoadExpr(
+        key,
+        cat.scalarType,
+        field.isOptional,
+        field.isNullable || field.isOptionalNullable,
+        field.defaultValue,
+        field.hasExplicitDefault ?? false,
+      );
     case "complex": {
       const lowering = resolveFieldLowering(
         field,

@@ -299,9 +299,10 @@ export interface FieldLoweringDescriptor {
 }
 
 /**
- * Build the capability set for a supported runtime. Go and Rust use generic
- * value representations for polymorphic/coerce-union fields; Rust additionally
- * uses `Value::Null` as the absence sentinel and therefore absorbs the schema's
+ * Build the capability set for a supported runtime. Go uses generic value
+ * representations for polymorphic/coerce-union fields; Rust does so for
+ * recursive polymorphic references and coerce unions. Rust additionally uses
+ * `Value::Null` as the absence sentinel and therefore absorbs the schema's
  * optional wrapper. Swift keeps a typed enum but reads its discriminator from
  * the enum's canonical serialized representation.
  */
@@ -316,8 +317,7 @@ export function loweringCapabilitiesForTarget(
       ? polymorphicTypeNames
       : new Set<string>(),
     // Go stores polymorphic collection elements as wire values. Rust's
-    // collection helpers hydrate generated model structs, even though scalar
-    // polymorphic fields remain value-backed.
+    // collection helpers hydrate generated model structs.
     valueBackedCollectionElementTypes:
       target === "go" ? polymorphicTypeNames : new Set<string>(),
     valueBackedUnknown: valueBacked,

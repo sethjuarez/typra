@@ -82,6 +82,7 @@ import {
   emitPythonProtocolScaffolds,
   shouldEmitCompileOnlyProtocolScaffolds,
 } from "../../protocol-scaffolds.js";
+import { pythonDispatchIdentifier, pythonFieldName } from "./identifiers.js";
 
 /**
  * Type mapping from TypeSpec scalar types to Python types.
@@ -1280,7 +1281,7 @@ function pythonDiscriminatorAccessor(path: string): string {
   const [head, ...rest] = path.split(".");
   const access = rest.reduce(
     (container, segment) =>
-      `getattr(${container}, ${JSON.stringify(toSnakeCase(segment))}, None)`,
+      `getattr(${container}, ${JSON.stringify(pythonFieldName(segment))}, None)`,
     head,
   );
   return `(${access} or "")`;
@@ -2178,7 +2179,7 @@ function buildClassContext(
   visitor?: ExprVisitor,
 ): PythonClassContext {
   // Pre-compute safe factory method names to avoid field/classmethod collisions.
-  const fieldNames = new Set(node.properties.map((p) => toSnakeCase(p.name)));
+  const fieldNames = new Set(node.properties.map((p) => pythonFieldName(p.name)));
   const factoryNameMap: Record<string, string> = {};
   for (const factory of node.factories) {
     const snakeName = toSnakeCase(factory.name);
@@ -2194,7 +2195,7 @@ function buildClassContext(
       ? (node.factories || []).map((f) => {
           const expr = resolveFactoryExpr(f.sets, f.params, node, registry);
           for (const ref of collectExprTypeRefs(expr)) {
-            factoryTypeRefs.push(ref.name);
+            if (registry.get(ref.name)) factoryTypeRefs.push(ref.name);
           }
           return {
             name: f.name,
@@ -2608,50 +2609,7 @@ function emitPythonDispatchResolver(entry: DispatchedContract): string {
 // trailing underscore to sidestep the clash (e.g. ``class_``). The raw variant
 // value is still used verbatim as the mapping key and switch literal — only the
 // emitted Python identifier is adjusted, keeping the resolver a faithful twin.
-function pyDispatchIdentifier(candidate: string): string {
-  return PY_KEYWORDS.has(candidate) ? `${candidate}_` : candidate;
-}
-
-// Python 3 hard keywords (keyword.kwlist). ``toSnakeCase`` lowercases its input,
-// so only the lowercase spellings can ever collide, but the full set is listed
-// for clarity.
-const PY_KEYWORDS = new Set<string>([
-  "false",
-  "none",
-  "true",
-  "and",
-  "as",
-  "assert",
-  "async",
-  "await",
-  "break",
-  "class",
-  "continue",
-  "def",
-  "del",
-  "elif",
-  "else",
-  "except",
-  "finally",
-  "for",
-  "from",
-  "global",
-  "if",
-  "import",
-  "in",
-  "is",
-  "lambda",
-  "nonlocal",
-  "not",
-  "or",
-  "pass",
-  "raise",
-  "return",
-  "try",
-  "while",
-  "with",
-  "yield",
-]);
+const pyDispatchIdentifier = pythonDispatchIdentifier;
 
 /**
  * Write generated Python content to file using TypeSpec's emitFile API.

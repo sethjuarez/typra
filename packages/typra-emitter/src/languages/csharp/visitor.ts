@@ -10,7 +10,8 @@ import {
   TypeRegistry,
 } from "../../ir/expansion.js";
 import { ExprVisitor, toPascalCase, assertNever } from "../../ir/visitor.js";
-import { csharpIdentifier } from "./identifiers.js";
+import { csharpEnumMemberNames, csharpIdentifier } from "./identifiers.js";
+import { csNumericLiteral, csharpScalarType } from "./emitter.js";
 
 export class CSharpExprVisitor implements ExprVisitor {
   registry?: TypeRegistry;
@@ -54,18 +55,16 @@ export class CSharpExprVisitor implements ExprVisitor {
     // C# uses object initializer syntax: new Type { Prop = value }
     const fields = expr.fields
       .map((f) => {
-        let val = this.visitExpr(f.value);
+        const prop = this.registry
+          ?.get(typeName)
+          ?.properties.find((p) => p.name === f.propertyName);
+        let val = this.visitFieldValue(f.value, prop?.typeName.name);
         // For enum fields, convert string literals to EnumName.MemberName
-        if (f.value.kind === "string" && this.registry) {
-          const typeNode = this.registry.get(typeName);
-          if (typeNode) {
-            const prop = typeNode.properties.find(
-              (p) => p.name === f.propertyName,
-            );
-            if (prop?.enumName) {
-              val = `${prop.enumName}.${toPascalCase(f.value.value)}`;
-            }
-          }
+        if (f.value.kind === "string" && prop?.enumName) {
+          const memberName = csharpEnumMemberNames(prop.allowedValues).get(
+            f.value.value,
+          )!;
+          val = `${prop.enumName}.${memberName}`;
         }
         return `${toPascalCase(f.propertyName)} = ${val}`;
       })
@@ -79,21 +78,40 @@ export class CSharpExprVisitor implements ExprVisitor {
     if (expr.fields.length === 0) {
       return `new ${variantName}()`;
     }
+    const owners = [
+      this.registry?.get(variantName),
+      this.registry?.get(expr.baseTypeName.name),
+    ];
     const fields = expr.fields
-      .map(
-        (f) => `${toPascalCase(f.propertyName)} = ${this.visitExpr(f.value)}`,
-      )
+      .map((f) => {
+        const prop = owners
+          .flatMap((o) => o?.properties ?? [])
+          .find((p) => p.name === f.propertyName);
+        return `${toPascalCase(f.propertyName)} = ${this.visitFieldValue(f.value, prop?.typeName.name)}`;
+      })
       .join(", ");
     return `new ${variantName} { ${fields} }`;
   }
 
   private visitArray(expr: ArrayLiteral): string {
-    const elementType = expr.elementTypeName.name;
+    const scalarName = expr.elementTypeName.name;
+    const elementType = csharpScalarType(scalarName) ?? scalarName;
     if (expr.items.length === 0) {
       return `new List<${elementType}>()`;
     }
-    const items = expr.items.map((i) => this.visitExpr(i)).join(", ");
+    const items = expr.items
+      .map((i) => this.visitFieldValue(i, scalarName))
+      .join(", ");
     return `new List<${elementType}> { ${items} }`;
+  }
+
+  /** Numeric literals are suffixed for their destination scalar (e.g. `0.5F` for `float`). */
+  private visitFieldValue(value: Expr, scalarType: string | undefined): string {
+    if (value.kind === "number" && scalarType) {
+      const csType = csharpScalarType(scalarType);
+      if (csType) return csNumericLiteral(value.value, csType);
+    }
+    return this.visitExpr(value);
   }
 
   private escapeString(s: string): string {

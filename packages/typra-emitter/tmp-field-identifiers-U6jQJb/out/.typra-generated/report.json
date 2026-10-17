@@ -1,0 +1,279 @@
+{
+  "emitter": "typra-emitter",
+  "version": 1,
+  "generatedAt": "1970-01-01T00:00:00.000Z",
+  "summary": {
+    "emittedFiles": 33,
+    "skippedFiles": 0,
+    "staleMarkerOwnedRemovals": 0,
+    "preservedUnmarkedSkippedFiles": 0,
+    "preservedEditableSeamFiles": 0,
+    "warnings": 0,
+    "protectedPathTouches": 0,
+    "hygiene": "clean"
+  },
+  "generation": {
+    "deterministicOutput": true,
+    "rootObject": "Typra.Fixtures.Features.FieldIdentifiers.Root",
+    "rootNamespace": "Typra",
+    "emitTargets": [
+      {
+        "type": "csharp",
+        "outputDir": "csharp",
+        "format": false
+      },
+      {
+        "type": "go",
+        "outputDir": "go",
+        "format": false
+      },
+      {
+        "type": "java",
+        "outputDir": "java",
+        "format": false
+      },
+      {
+        "type": "python",
+        "outputDir": "python",
+        "format": false
+      },
+      {
+        "type": "rust",
+        "outputDir": "rust",
+        "format": false
+      },
+      {
+        "type": "swift",
+        "outputDir": "swift",
+        "format": false
+      },
+      {
+        "type": "typescript",
+        "outputDir": "typescript",
+        "format": false
+      }
+    ],
+    "protectedPaths": [],
+    "hydrationZones": []
+  },
+  "emittedFiles": [
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Context.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Fixtures/Features/FieldIdentifiers/Root.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "csharp",
+      "path": "csharp/Utils.cs",
+      "marker": true
+    },
+    {
+      "outputRoot": "",
+      "path": "eslint.config.js",
+      "marker": true
+    },
+    {
+      "outputRoot": "go",
+      "path": "go/context.go",
+      "marker": true
+    },
+    {
+      "outputRoot": "go",
+      "path": "go/root.go",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/LoadContext.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/Root.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/SaveContext.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/TypraJson.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/TypraMaps.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "java",
+      "path": "java/TypraYaml.java",
+      "marker": true
+    },
+    {
+      "outputRoot": "json-ast",
+      "path": "json-ast/model.json",
+      "marker": false
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/__init__.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/_context.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/fixtures/__init__.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/fixtures/features/__init__.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/fixtures/features/fieldidentifiers/__init__.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/fixtures/features/fieldidentifiers/_Root.py",
+      "marker": true
+    },
+    {
+      "outputRoot": "python",
+      "path": "python/py.typed",
+      "marker": false
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/context.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/fixtures/features/field_identifiers/mod.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/fixtures/features/field_identifiers/root.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/fixtures/features/mod.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/fixtures/mod.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "rust",
+      "path": "rust/mod.rs",
+      "marker": true
+    },
+    {
+      "outputRoot": "swift",
+      "path": "swift/Package.swift",
+      "marker": false
+    },
+    {
+      "outputRoot": "swift",
+      "path": "swift/Sources/TypraFixturesFeaturesFieldIdentifiers/Fixtures/Features/FieldIdentifiers/root.swift",
+      "marker": true
+    },
+    {
+      "outputRoot": "swift",
+      "path": "swift/Sources/TypraFixturesFeaturesFieldIdentifiers/TypraRuntime.swift",
+      "marker": true
+    },
+    {
+      "outputRoot": "typescript",
+      "path": "typescript/context.ts",
+      "marker": true
+    },
+    {
+      "outputRoot": "typescript",
+      "path": "typescript/fixtures/features/field-identifiers/index.ts",
+      "marker": true
+    },
+    {
+      "outputRoot": "typescript",
+      "path": "typescript/fixtures/features/field-identifiers/root.ts",
+      "marker": true
+    },
+    {
+      "outputRoot": "typescript",
+      "path": "typescript/index.ts",
+      "marker": true
+    }
+  ],
+  "skippedFiles": [],
+  "staleMarkerOwnedRemovals": [],
+  "preservedUnmarkedSkippedFiles": [],
+  "preservedEditableSeamFiles": [],
+  "warnings": [],
+  "hygiene": {
+    "lineEndings": "lf",
+    "finalNewline": true,
+    "trailingWhitespace": "trimmed",
+    "emptyArtifacts": "skipped-unless-allowed",
+    "marker": "typra-emitter"
+  },
+  "protectedPathTouches": {
+    "status": "requires-verifier-baseline",
+    "configuredPatterns": [],
+    "matchedFiles": [],
+    "guidance": "No emitted files matched configured protected paths in this generation."
+  },
+  "formatter": {
+    "status": "not-recorded",
+    "note": "Target formatters run in language drivers; per-file formatter status is not recorded in generated metadata yet."
+  },
+  "cleanup": {
+    "status": "safe-noop",
+    "suggestions": []
+  },
+  "driftGuidance": {
+    "updateBaselineWhen": "Generated runtime output and metadata drift are expected and reviewed.",
+    "fixGenerationWhen": "Verifier reports blocking failures, protected-path touches are unexpected, or preserved unmarked skipped files should remain hand-authored.",
+    "metadataToCompare": [
+      ".typra-generated/manifest.json",
+      ".typra-generated/export-surfaces.json",
+      ".typra-generated/hydration-seams.json",
+      ".typra-generated/vectors.json",
+      ".typra-generated/report.json",
+      "json-ast/model.json"
+    ],
+    "optionDriftSignals": [
+      "root-object",
+      "root-namespace",
+      "root-alias",
+      "emit-targets",
+      "protected-paths",
+      "hydration-zones",
+      "deterministic-output",
+      "native-serialization"
+    ],
+    "versionDriftSignals": [
+      "@typra/emitter",
+      "@typespec/compiler",
+      "@typespec/json-schema"
+    ]
+  }
+}

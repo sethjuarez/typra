@@ -20,10 +20,9 @@
 // render also exercises §5 control 1 (correct route reproduces `expected`)
 // through idiomatic, statically-typed call sites rather than a JSON interpreter.
 //
-// NOTE on the Rust typed route: the emitter types `Template.format` as a raw
-// `serde_json::Value` (unlike C#, which surfaces a typed `TemplateFormat`), so
-// the discriminator is read from that typed field. The resolver still rides the
-// exact `kind` the shape's own discriminator match keys on.
+// NOTE on the Rust typed route: non-recursive polymorphic references hydrate to
+// their generated model type, so the discriminator comes from the shape's
+// `kind_str()` accessor, preserving the same key the load switch dispatches on.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -222,12 +221,7 @@ function fullProviderAndTest(
     "        let inputs = Inputs::from_json(inputs_json, &ctx).expect(\"inputs parse\");",
     "        // Route via the discriminator on the TYPED Agent graph, the same",
     "        // `kind` the shape's own discriminator match keys on.",
-    "        let kind = agent",
-    "            .template",
-    "            .format",
-    '            .get("kind")',
-    "            .and_then(|v| v.as_str())",
-    '            .expect("discriminator present");',
+    "        let kind = agent.template.format.kind_str();",
     "        let renderer = renderer_resolver::resolve(kind, &provider)",
     "            .unwrap_or_else(|| panic!(\"{name}: no impl attached for {kind}\"));",
     "        let got = renderer.render(&agent, &inputs).await.expect(\"render\");",
