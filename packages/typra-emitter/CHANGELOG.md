@@ -6,6 +6,19 @@ Versions `0.4.3` through `0.4.18` were published from the unmerged branch of PR 
 rather than from `main`, so `main` declared `0.4.2` while npm `latest` was `0.4.18`.
 PR #36 has since been merged and `main` is once again the source of truth for releases.
 
+## [4.0.1](https://github.com/sethjuarez/typra/compare/v4.0.0...v4.0.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **emitter:** emit valid numeric literals for defaults and factories in Java, C#, and Rust ([#360](https://github.com/sethjuarez/typra/issues/360)) ([d98518f](https://github.com/sethjuarez/typra/commit/d98518f751ef0b14b561b597335a3520eeb2e699))
+* **emitter:** escape keyword field identifiers in every target ([#356](https://github.com/sethjuarez/typra/issues/356)) ([d98518f](https://github.com/sethjuarez/typra/commit/d98518f751ef0b14b561b597335a3520eeb2e699))
+* **emitter:** generate safe unique enum members ([#357](https://github.com/sethjuarez/typra/issues/357)) ([d98518f](https://github.com/sethjuarez/typra/commit/d98518f751ef0b14b561b597335a3520eeb2e699))
+* **emitter:** report numeric literal union diagnostics ([#361](https://github.com/sethjuarez/typra/issues/361)) ([d98518f](https://github.com/sethjuarez/typra/commit/d98518f751ef0b14b561b597335a3520eeb2e699))
+* **emitter:** resolve numeric, enum, identifier, and Rust loading codegen issues ([#363](https://github.com/sethjuarez/typra/issues/363)) ([d98518f](https://github.com/sethjuarez/typra/commit/d98518f751ef0b14b561b597335a3520eeb2e699))
+* **rust:** hydrate single polymorphic references ([#345](https://github.com/sethjuarez/typra/issues/345)) ([d98518f](https://github.com/sethjuarez/typra/commit/d98518f751ef0b14b561b597335a3520eeb2e699))
+* **rust:** normalize null for nullable unknown values ([#349](https://github.com/sethjuarez/typra/issues/349)) ([d98518f](https://github.com/sethjuarez/typra/commit/d98518f751ef0b14b561b597335a3520eeb2e699))
+
 ## [4.0.0](https://github.com/sethjuarez/typra/compare/v3.0.0...v4.0.0) (2026-10-16)
 
 
