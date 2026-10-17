@@ -23,52 +23,8 @@ import {
 import { goFieldName } from "../languages/go/identifiers.js";
 import { csharpEnumMemberNames } from "../languages/csharp/identifiers.js";
 import * as YAML from "yaml";
-
-const RUST_KEYWORDS = new Set([
-  "as",
-  "break",
-  "const",
-  "continue",
-  "crate",
-  "else",
-  "enum",
-  "extern",
-  "false",
-  "fn",
-  "for",
-  "if",
-  "impl",
-  "in",
-  "let",
-  "loop",
-  "match",
-  "mod",
-  "move",
-  "mut",
-  "pub",
-  "ref",
-  "return",
-  "self",
-  "Self",
-  "static",
-  "struct",
-  "super",
-  "trait",
-  "true",
-  "type",
-  "unsafe",
-  "use",
-  "where",
-  "while",
-  "async",
-  "await",
-  "dyn",
-]);
-
-function rustFieldName(name: string): string {
-  const snake = toSnakeCase(name);
-  return RUST_KEYWORDS.has(snake) ? `r#${snake}` : snake;
-}
+import { rustFieldName } from "../languages/rust/identifiers.js";
+import { pythonFieldName } from "../languages/python/identifiers.js";
 
 /**
  * Options for building test context - language-specific transformations.
@@ -896,7 +852,7 @@ export const csharpTestOptions: TestContextOptions = {
  * Python test context options.
  */
 export const pythonTestOptions: TestContextOptions = {
-  renderKey: (key: string) => toSnakeCase(key), // camelCase from TypeSpec → snake_case for Python
+  renderKey: (key: string) => pythonFieldName(key), // camelCase from TypeSpec → snake_case for Python
   renderBoolean: (val: boolean) => (val ? "True" : "False"),
   escapeString: (str: string) =>
     str.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),

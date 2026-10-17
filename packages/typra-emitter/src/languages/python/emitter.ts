@@ -58,6 +58,7 @@ import {
 import { ExprVisitor } from "../../ir/visitor.js";
 import { inheritedRequiredNullableAssignments } from "../../ir/inheritance.js";
 import { toSnakeCase } from "../../ir/utilities.js";
+import { assertDistinctPythonFields, pythonFieldName } from "./identifiers.js";
 
 /**
  * Type mapping from TypeSpec scalar types to Python types.
@@ -406,7 +407,7 @@ const PYDANTIC_RESERVED_FIELD_NAMES = new Set([
 
 function assertNoPydanticReservedFieldNames(type: TypeDecl): void {
   for (const field of type.fields) {
-    const attributeName = toSnakeCase(field.name);
+    const attributeName = pythonFieldName(field.name);
     if (PYDANTIC_RESERVED_FIELD_NAMES.has(attributeName)) {
       throw new Error(
         `Python native-serialization 'pydantic' cannot emit ${type.typeName.name}.${field.name}: ` +
@@ -458,6 +459,7 @@ function emitType(
     emitProtocolClass(type, lines);
     return;
   }
+  assertDistinctPythonFields(type);
   if (usePydantic) {
     assertNoPydanticReservedFieldNames(type);
     assertNoPydanticReservedFactoryNames(type, fieldNames);
@@ -497,7 +499,7 @@ function emitType(
   for (const field of type.fields) {
     const wireName = saveTargets.get(field.name) ?? field.name;
     lines.push(
-      `    ${toSnakeCase(field.name)}: ${pythonTypeAnnotation(field)}${pythonDefaultValue(field, options, wireName)}`,
+      `    ${pythonFieldName(field.name)}: ${pythonTypeAnnotation(field)}${pythonDefaultValue(field, options, wireName)}`,
     );
   }
   if (absorbsUnknownValues(type.polymorphicDispatch)) {
@@ -621,7 +623,7 @@ function emitUnknownCarrier(
   );
   lines.push("");
   lines.push(
-    `    The unrecognized value stays on \`${toSnakeCase(type.polymorphicDispatch!.discriminatorField)}\` and every key the`,
+    `    The unrecognized value stays on \`${pythonFieldName(type.polymorphicDispatch!.discriminatorField)}\` and every key the`,
   );
   lines.push(
     `    schema does not declare is preserved verbatim, so an unknown ${parentName}`,
@@ -905,7 +907,7 @@ function emitDocstring(type: TypeDecl, lines: string[]): void {
     lines.push("    Attributes");
     lines.push("    ----------");
     for (const f of type.fields) {
-      lines.push(`    ${toSnakeCase(f.name)} : ${pythonDocstringType(f)}`);
+      lines.push(`    ${pythonFieldName(f.name)} : ${pythonDocstringType(f)}`);
       lines.push(`        ${f.description}`);
     }
   }
@@ -1174,7 +1176,7 @@ function emitLoadMethod(
 
   // Create instance (polymorphic dispatch or direct)
   if (type.load.hasPolymorphicDispatch && type.polymorphicDispatch) {
-    const discSnake = toSnakeCase(type.polymorphicDispatch.discriminatorField);
+    const discSnake = pythonFieldName(type.polymorphicDispatch.discriminatorField);
     lines.push("");
     lines.push(`        # load polymorphic ${name} instance`);
     lines.push(`        instance = ${name}.load_${discSnake}(data, context)`);
@@ -1223,7 +1225,7 @@ function emitLoadMethod(
 }
 
 function emitLoadAssignment(a: LoadAssignment): string {
-  const snake = toSnakeCase(a.fieldName);
+  const snake = pythonFieldName(a.fieldName);
   const cat = a.category;
   if (
     a.enumName &&
@@ -1299,7 +1301,7 @@ function emitCoercionBranch(
 
   if (c.needsDispatch && type.polymorphicDispatch) {
     // Dynamic discriminator — must go through dispatch
-    const discSnake = toSnakeCase(type.polymorphicDispatch.discriminatorField);
+    const discSnake = pythonFieldName(type.polymorphicDispatch.discriminatorField);
     // Build a minimal dict for the dispatch method
     const dictFields = c.assignments.map((a) => {
       const val = a.isInput ? "data" : `"${a.literalValue}"`;
@@ -1312,7 +1314,7 @@ function emitCoercionBranch(
     // Direct property setting — no intermediate dict
     lines.push(`            instance = ${typeName}()`);
     for (const a of c.assignments) {
-      const snake = toSnakeCase(a.fieldName);
+      const snake = pythonFieldName(a.fieldName);
       if (a.isInput) {
         lines.push(`            instance.${snake} = data`);
       } else {
@@ -1334,7 +1336,7 @@ function emitCollectionLoadHelper(
   helper: CollectionHelperDecl,
   lines: string[],
 ): void {
-  const snake = toSnakeCase(helper.propertyName);
+  const snake = pythonFieldName(helper.propertyName);
   const elemName = helper.elementTypeName.name;
   const shorthandField = entryShorthandTarget(helper, "kind");
 
@@ -1456,7 +1458,7 @@ function emitCollectionSaveHelper(
   helper: CollectionHelperDecl,
   lines: string[],
 ): void {
-  const snake = toSnakeCase(helper.propertyName);
+  const snake = pythonFieldName(helper.propertyName);
   const elemName = helper.elementTypeName.name;
 
   lines.push("    @staticmethod");
@@ -1559,7 +1561,7 @@ function emitPolymorphicDispatch(
   lines: string[],
   carrier?: string,
 ): void {
-  const discSnake = toSnakeCase(dispatch.discriminatorField);
+  const discSnake = pythonFieldName(dispatch.discriminatorField);
   const isClosed = isClosedPolymorphicDispatch(dispatch);
   // Only a DECLARED wildcard `*` subtype (a default variant that is NOT a base
   // self-reference) makes an absent/blank/non-string discriminator route to that
@@ -1684,7 +1686,7 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
   // Per-property save assignments
   lines.push("");
   for (const a of type.save.assignments) {
-    const snake = toSnakeCase(a.fieldName);
+    const snake = pythonFieldName(a.fieldName);
     if (shouldOmitAbsentOnSave(a, "always-check")) {
       lines.push(`        if obj.${snake} is not None:`);
       lines.push(`            ${emitSaveAssignment(a)}`);
@@ -1715,7 +1717,7 @@ function emitSaveMethod(type: TypeDecl, lines: string[]): void {
 }
 
 function emitSaveAssignment(a: SaveAssignment): string {
-  const snake = toSnakeCase(a.fieldName);
+  const snake = pythonFieldName(a.fieldName);
   const cat = a.category;
   switch (cat.kind) {
     case "scalar":

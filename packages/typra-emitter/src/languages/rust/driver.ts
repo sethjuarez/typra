@@ -64,6 +64,7 @@ import {
   shouldEmitCompileOnlyProtocolScaffolds,
 } from "../../protocol-scaffolds.js";
 import { buildVectorConformanceCodeModel } from "../../ir/code-model.js";
+import { rustFieldName } from "./identifiers.js";
 
 /**
  * Type mapping from TypeSpec scalar types to Rust types.
@@ -92,56 +93,6 @@ export const rustTypeMapper: Record<string, string> = {
   any: "serde_json::Value",
   dictionary: "serde_json::Value",
 };
-
-const RUST_KEYWORDS = new Set([
-  "as",
-  "break",
-  "const",
-  "continue",
-  "crate",
-  "else",
-  "enum",
-  "extern",
-  "false",
-  "fn",
-  "for",
-  "if",
-  "impl",
-  "in",
-  "let",
-  "loop",
-  "match",
-  "mod",
-  "move",
-  "mut",
-  "pub",
-  "ref",
-  "return",
-  "self",
-  "Self",
-  "static",
-  "struct",
-  "super",
-  "trait",
-  "true",
-  "type",
-  "unsafe",
-  "use",
-  "where",
-  "while",
-  "async",
-  "await",
-  "dyn",
-]);
-
-function rustFieldName(name: string): string {
-  const snake = toSnakeCase(name);
-  if (snake === "_") return "value_";
-  if (snake === "self" || snake === "super" || snake === "crate") {
-    return `${snake}_`;
-  }
-  return RUST_KEYWORDS.has(snake) ? `r#${snake}` : snake;
-}
 
 /**
  * Stale generated files are removed centrally by `pruneStaleGeneratedFiles`, which uses the

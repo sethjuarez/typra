@@ -11,6 +11,7 @@ import {
 } from "../../ir/expansion.js";
 import { ExprVisitor, assertNever } from "../../ir/visitor.js";
 import { toSnakeCase } from "../../ir/utilities.js";
+import { pythonFieldName } from "./identifiers.js";
 
 export class PythonExprVisitor implements ExprVisitor {
   registry?: TypeRegistry;
@@ -40,7 +41,7 @@ export class PythonExprVisitor implements ExprVisitor {
       case "dict":
         return `{${expr.entries.map((e) => `"${e.key}": ${this.visitExpr(e.value)}`).join(", ")}}`;
       case "field_read":
-        return `${toSnakeCase(expr.objectName)}.${toSnakeCase(expr.fieldName)}`;
+        return `${toSnakeCase(expr.objectName)}.${pythonFieldName(expr.fieldName)}`;
       default:
         return assertNever(expr);
     }
@@ -52,7 +53,7 @@ export class PythonExprVisitor implements ExprVisitor {
       return `${typeName}()`;
     }
     const fields = expr.fields
-      .map((f) => `${toSnakeCase(f.propertyName)}=${this.visitExpr(f.value)}`)
+      .map((f) => `${pythonFieldName(f.propertyName)}=${this.visitExpr(f.value)}`)
       .join(", ");
     return `${typeName}(${fields})`;
   }
@@ -64,7 +65,7 @@ export class PythonExprVisitor implements ExprVisitor {
       return `${variantName}()`;
     }
     const fields = expr.fields
-      .map((f) => `${toSnakeCase(f.propertyName)}=${this.visitExpr(f.value)}`)
+      .map((f) => `${pythonFieldName(f.propertyName)}=${this.visitExpr(f.value)}`)
       .join(", ");
     return `${variantName}(${fields})`;
   }

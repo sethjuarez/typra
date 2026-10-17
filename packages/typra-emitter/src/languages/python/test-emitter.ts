@@ -27,6 +27,7 @@ import {
   wireTestMappings,
   wireTestProviders,
 } from "../../testing/test-context.js";
+import { pythonFieldName } from "./identifiers.js";
 
 // ============================================================================
 // Macro replacements
@@ -578,7 +579,7 @@ export function emitPythonTest(
       lines.push(`    assert isinstance(instance, ${typeName})`);
 
       for (const [propName, rawValue] of Object.entries(factory.sets)) {
-        const snakeProp = toSnakeCase(propName);
+        const snakeProp = pythonFieldName(propName);
         const value =
           typeof rawValue === "string" ? substituteParams(rawValue) : rawValue;
         if (value === true) {

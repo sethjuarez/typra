@@ -5,6 +5,7 @@
 
 import { execFileSync } from "node:child_process";
 import {
+  cpSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -12,6 +13,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -188,6 +190,116 @@ export function buildGo(sourceDir: string, testSource?: string): string {
   let output = run("go", ["vet", "."], sourceDir, env);
   if (testSource) output += run("go", ["test", "-count=1", "."], sourceDir, env);
   return output;
+}
+
+/**
+ * Type-checks the emitted TypeScript under `strict` as CommonJS into `<sourceDir>/.js`;
+ * `probe` (CommonJS, requiring `./index.js`) then runs against the compiled output.
+ */
+export function buildTypeScript(sourceDir: string, probe?: string): string {
+  const outDir = path.join(sourceDir, ".js");
+  writeFileSync(
+    path.join(sourceDir, "tsconfig.probe.json"),
+    JSON.stringify({
+      include: ["**/*.ts"],
+      exclude: [".js", "tests"],
+      compilerOptions: {
+        target: "ES2022",
+        lib: ["ES2022"],
+        module: "commonjs",
+        moduleResolution: "node",
+        strict: true,
+        skipLibCheck: true,
+        rootDir: ".",
+        outDir,
+      },
+    }),
+  );
+  const tsc = createRequire(import.meta.url).resolve("typescript/bin/tsc");
+  let output = run(
+    process.execPath,
+    [tsc, "-p", "tsconfig.probe.json"],
+    sourceDir,
+  );
+  if (probe) {
+    writeFileSync(path.join(outDir, "package.json"), '{"type":"commonjs"}\n');
+    writeFileSync(path.join(outDir, "probe.cjs"), probe);
+    output += run(process.execPath, ["probe.cjs"], outDir);
+  }
+  return output;
+}
+
+/** Runs `script` with the emitted Python package importable as `packageName`. */
+export function buildPython(
+  sourceDir: string,
+  script: string,
+  packageName = "probe_model",
+): string {
+  const root = `${sourceDir}-pyroot`;
+  cpSync(sourceDir, path.join(root, packageName), { recursive: true });
+  writeFileSync(path.join(root, "probe.py"), script);
+  return run(
+    "uv",
+    [
+      "run",
+      "--python",
+      "3.12",
+      "--with",
+      "pydantic",
+      "--with",
+      "pytest",
+      "--with",
+      "PyYAML",
+      "python",
+      "probe.py",
+    ],
+    root,
+  );
+}
+
+/**
+ * Builds the emitted Swift package and runs `main` as an executable `Probe` target that
+ * depends on the package's library module (import it by the returned name; `main` may use
+ * the `MODULE` placeholder). Yams is swapped for a local stub so the build needs no network.
+ */
+export function buildSwift(sourceDir: string, main: string): string {
+  const manifestPath = path.join(sourceDir, "Package.swift");
+  const original = readFileSync(manifestPath, "utf8");
+  const module = /\.target\(name: "([^"]+)"/.exec(original)?.[1];
+  if (!module) throw new Error(`no Swift library target in:\n${original}`);
+  const manifest = original
+    .replace(/\.package\(url: "[^"]*Yams[^"]*"[^)]*\)/, '.package(path: "Yams")')
+    .replace(
+      /(\.target\(name: "[^"]+"[^\n]*\))/,
+      `$1,\n    .executableTarget(name: "Probe", dependencies: ["${module}"], path: "Sources/Probe")`,
+    );
+  if (!manifest.includes('.package(path: "Yams")') || !manifest.includes('"Probe"')) {
+    throw new Error(`unexpected Swift manifest:\n${manifest}`);
+  }
+  writeFileSync(manifestPath, manifest);
+  const yams = path.join(sourceDir, "Yams", "Sources", "Yams");
+  mkdirSync(yams, { recursive: true });
+  writeFileSync(
+    path.join(sourceDir, "Yams", "Package.swift"),
+    [
+      "// swift-tools-version: 5.9",
+      "import PackageDescription",
+      'let package = Package(name: "Yams", products: [.library(name: "Yams", targets: ["Yams"])], targets: [.target(name: "Yams")])',
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    path.join(yams, "Yams.swift"),
+    [
+      "public func load(yaml: String) throws -> Any? { nil }",
+      'public func dump(object: Any) throws -> String { "" }',
+      "",
+    ].join("\n"),
+  );
+  const probe = path.join(sourceDir, "Sources", "Probe");
+  mkdirSync(probe, { recursive: true });
+  writeFileSync(path.join(probe, "main.swift"), main.replaceAll("MODULE", module));
+  return run("swift", ["run", "Probe"], sourceDir);
 }
 
 const cargoTargetDir = path.join(tmpdir(), "typra-native-probe-cargo-target");

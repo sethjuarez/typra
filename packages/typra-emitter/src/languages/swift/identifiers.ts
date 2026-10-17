@@ -81,6 +81,13 @@ const SWIFT_KEYWORDS = new Set([
   "where",
   "while",
   "willSet",
+  // Contextual keywords that start an expression (`x = await` parses as an await).
+  "any",
+  "await",
+  "consume",
+  "copy",
+  "discard",
+  "each",
 ]);
 
 export function swiftTypeName(name: string): string {
