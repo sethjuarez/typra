@@ -18,4 +18,19 @@ model Root {
   singleRatio: float32;
   ratio: float64;
   anything: unknown;
+
+  // Built-in scalars whose JSON wire form is a string (ISO 8601 text, base64, ...)
+  // render as the target's string; decimals arrive as JSON numbers and render as
+  // float64 (issue #359).
+  createdAt: utcDateTime;
+  birthday?: plainDate;
+  alarm?: plainTime;
+  localStamp?: offsetDateTime;
+  payload?: bytes;
+  timeout?: duration;
+  homepage?: url;
+  price: decimal;
+  bigPrice?: decimal128;
+  history?: utcDateTime[];
+  stamps?: Record<utcDateTime>;
 }

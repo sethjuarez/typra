@@ -23,6 +23,7 @@ import {
   collectNamespaceCallableInterfaces,
   lowerTypeSpecCallableContract,
 } from "./callable.js";
+import { wireTypeName } from "./ast.js";
 
 export type TransportBindingKind =
   | "path"
@@ -379,5 +380,5 @@ function formatStatusCodes(
 
 function typeName(type: Type): string {
   if (type.kind === "Intrinsic" && type.name === "void") return "void";
-  return getTypeName(type, { nameOnly: true, printable: true });
+  return wireTypeName(type, { nameOnly: true, printable: true });
 }

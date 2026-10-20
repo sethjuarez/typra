@@ -18,7 +18,7 @@ import {
   OperationEffectEntry,
 } from "../decorators.js";
 import { StateKeys } from "../lib.js";
-import { Coercion, resolveModel, TypeNode } from "./ast.js";
+import { Coercion, resolveModel, TypeNode, wireTypeName } from "./ast.js";
 import type { PolymorphicDispatchDecl } from "./declarations.js";
 import { lowerPolymorphicDispatch } from "./lower.js";
 import { CallableVector, lowerOperationVectors } from "./vector.js";
@@ -529,7 +529,7 @@ function typeToCallableName(type: Type): string {
     }
   }
 
-  return getTypeName(type, { nameOnly: true, printable: true });
+  return wireTypeName(type, { nameOnly: true, printable: true });
 }
 
 function getCallableNamespace(

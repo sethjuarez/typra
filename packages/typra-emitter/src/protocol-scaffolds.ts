@@ -498,7 +498,7 @@ function typescriptType(typeName: string): string {
   const map: Record<string, string> = {
     any: "unknown",
     boolean: "boolean",
-    bytes: "Uint8Array",
+    bytes: "string",
     dictionary: "Record<string, unknown>",
     float: "number",
     float32: "number",
@@ -515,12 +515,12 @@ function typescriptType(typeName: string): string {
     integer: "number",
     number: "number",
     numeric: "number",
-    plainDate: "Date",
-    plainTime: "Date",
+    plainDate: "string",
+    plainTime: "string",
     string: "string",
     unknown: "unknown",
     url: "string",
-    utcDateTime: "Date",
+    utcDateTime: "string",
   };
   return map[typeName] || typeName;
 }

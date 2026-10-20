@@ -807,6 +807,38 @@ function assertFocusedFeatureFixtures() {
       }
     }
 
+    if (featureName === "scalars") {
+      // Issue #359: built-in date/time/bytes/duration/url scalars fold to
+      // their `string` wire form and decimals to `float64`, so every backend
+      // renders a concrete type instead of a raw name or an `any` fallback.
+      const fields = Object.fromEntries(
+        (model.properties ?? []).map((field) => [
+          field.name,
+          field.isDict ? `dict:${field.dictValueType}` : field.typeName?.name,
+        ]),
+      );
+      const expected = {
+        createdAt: "string",
+        birthday: "string",
+        alarm: "string",
+        localStamp: "string",
+        payload: "string",
+        timeout: "string",
+        homepage: "string",
+        price: "float64",
+        bigPrice: "float64",
+        history: "string",
+        stamps: "dict:string",
+      };
+      for (const [name, typeName] of Object.entries(expected)) {
+        if (fields[name] !== typeName) {
+          fail(
+            `Focused scalars fixture: '${name}' should lower to '${typeName}', got '${fields[name]}'.`,
+          );
+        }
+      }
+    }
+
     if (featureName === "vectors") {
       const vectorPath = path.join(
         outputRoot,

@@ -28,7 +28,7 @@ import {
   overriddenBaseProperty,
 } from "../decorators.js";
 import { StateKeys } from "../lib.js";
-import { scalarRuntimeKind } from "./scalar-kinds.js";
+import { scalarRuntimeKind, wireScalarName } from "./scalar-kinds.js";
 import { detectWireCollisions } from "./lower.js";
 import type { CallableDispatch } from "./callable.js";
 
@@ -1123,6 +1123,25 @@ export const resolveProperty = (
   return prop;
 };
 
+/**
+ * A type's printed name with built-in scalars folded to their wire scalar, recursing
+ * through `T[]` and `Record<T>` so nested containers never leak a raw built-in (#359).
+ */
+export function wireTypeName(
+  type: Type,
+  options?: { nameOnly?: boolean; printable?: boolean },
+): string {
+  if (type.kind === "Scalar") return wireScalarName(getTypeName(type, options));
+  if (type.kind === "Model" && (type.name === "Array" || type.name === "Record")) {
+    const element = type.indexer?.value;
+    if (element) {
+      const inner = wireTypeName(element, options);
+      return type.name === "Array" ? `${inner}[]` : `Record<${inner}>`;
+    }
+  }
+  return getTypeName(type, options);
+}
+
 export const resolveScalarProperty = (
   program: Program,
   property: ModelProperty,
@@ -1132,7 +1151,7 @@ export const resolveScalarProperty = (
 
   prop.typeName = {
     namespace: "",
-    name: getTypeName(scalar, { nameOnly: true }),
+    name: wireScalarName(getTypeName(scalar, { nameOnly: true })),
   };
 
   prop.isScalar = true;
@@ -1229,7 +1248,7 @@ export const resolveModelProperty = (
           recordValueType?.kind === "Model"
             ? getModelType(recordValueType, rootNamespace, rootAlias).name
             : recordValueType
-              ? getTypeName(recordValueType)
+              ? wireTypeName(recordValueType)
               : "unknown";
         prop.typeName = {
           namespace: "",
@@ -1261,7 +1280,7 @@ export const resolveModelProperty = (
         prop.isCollection = true;
         prop.typeName = {
           namespace: "",
-          name: getTypeName(innerType, { nameOnly: true }),
+          name: wireScalarName(getTypeName(innerType, { nameOnly: true })),
         };
       } else if (innerType && innerType.kind === "Intrinsic") {
         prop.isScalar = true;
@@ -1296,7 +1315,7 @@ export const resolveModelProperty = (
         recordValueType?.kind === "Model"
           ? getModelType(recordValueType, rootNamespace, rootAlias).name
           : recordValueType
-            ? getTypeName(recordValueType, { nameOnly: true })
+            ? wireTypeName(recordValueType, { nameOnly: true })
             : "unknown";
       prop.typeName = {
         namespace: "",

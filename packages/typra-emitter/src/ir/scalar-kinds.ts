@@ -91,6 +91,24 @@ export function isBooleanScalar(scalarType: string): boolean {
 }
 
 /**
+ * The scalar a backend renders for a TypeSpec built-in, keyed by its JSON wire form.
+ *
+ * Dates, times, durations, bytes, urls and uuids all travel as JSON strings
+ * (ISO 8601 text, base64, ...), so they render as the target's `string` and load/save
+ * as one — the same `string` runtime kind validation already uses. `decimal` and
+ * `decimal128` arrive as JSON numbers and render as `float64`. Without this every
+ * backend fell through its type map: raw names in Rust/Java/Swift, `any`/`object`
+ * elsewhere, and a TypeScript `Date` that actually held a string (issue #359).
+ */
+export function wireScalarName(scalarType: string): string {
+  if (scalarType === "decimal" || scalarType === "decimal128") return "float64";
+  if (scalarType !== "string" && isStringEncodedScalar(scalarType)) {
+    return "string";
+  }
+  return scalarType;
+}
+
+/**
  * The four runtime shapes a decoded JSON scalar can take.
  *
  * Backends map this, rather than the raw TypeSpec scalar name, onto their own
