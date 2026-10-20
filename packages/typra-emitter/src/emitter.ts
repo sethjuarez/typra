@@ -41,6 +41,7 @@ import {
 } from "./hydration-seams.js";
 import { validateNativeSerializationTargets } from "./native-serialization.js";
 import { validateTargetOptionScopes } from "./target-option-scopes.js";
+import { validateReservedTypeNames } from "./reserved-type-names.js";
 import {
   callableContractToProtocolNode,
   lowerTypeSpecCallableContracts,
@@ -391,6 +392,16 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     omitModels: generatorOptions.omitModels,
     additionalModels: [...additionalModels],
   });
+  if (
+    !validateReservedTypeNames(context.program, {
+      targets,
+      nodes: exportSurfaceNodes,
+      rootNamespace,
+      namespaceOutput,
+    })
+  ) {
+    return;
+  }
 
   // Dispatch to registered generators
   const generators = getGenerators();
