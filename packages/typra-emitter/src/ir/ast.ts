@@ -7,6 +7,7 @@ import {
   getDoc,
   getTypeName,
   ModelProperty,
+  Operation,
   isTemplateInstance,
   getNamespaceFullName,
   getDiscriminator,
@@ -1222,6 +1223,79 @@ export const resolveIntrinsicProperty = (
   return prop;
 };
 
+interface CollectionShape {
+  kind: "array" | "record";
+  element: Type;
+}
+
+/**
+ * The single collection level a type expresses: `T[]`, `Record<T>`, a `T | null`
+ * wrapper around one, or a property-less `model X is T[]` / `is Record<T>` alias.
+ * Models that merely spread `...Record<T>` keep their own properties and are not
+ * collections here.
+ */
+function collectionShape(type: Type | undefined): CollectionShape | undefined {
+  if (type?.kind === "Union") {
+    const variants = [...type.variants.values()]
+      .map((variant) => variant.type)
+      .filter((v) => !(v.kind === "Intrinsic" && v.name === "null"));
+    return variants.length === 1 && variants.length < type.variants.size
+      ? collectionShape(variants[0])
+      : undefined;
+  }
+  if (type?.kind !== "Model") return undefined;
+  if (type.name === "Array" || type.name === "Record") {
+    const element = type.indexer?.value;
+    return element
+      ? { kind: type.name === "Array" ? "array" : "record", element }
+      : undefined;
+  }
+  return type.sourceModel && type.properties.size === 0
+    ? collectionShape(type.sourceModel)
+    : undefined;
+}
+
+/**
+ * A collection whose element (or record value) is itself a collection, e.g.
+ * `string[][]`, `Record<string[]>`, `Record<int32>[][]` (#355). The IR carries
+ * one collection level (plus `Record<T>[]`), so these would otherwise lower to
+ * phantom `string[]` models and literal `Record<...>` type names.
+ */
+export function isNestedCollection(type: Type): boolean {
+  const outer = collectionShape(type);
+  const inner = outer && collectionShape(outer.element);
+  if (!outer || !inner) return false;
+  // `Record<T>[]` is a supported list of dictionaries unless `T` nests again.
+  if (outer.kind === "array" && inner.kind === "record") {
+    return collectionShape(inner.element) !== undefined;
+  }
+  return true;
+}
+
+const reportedNestedCollections = new WeakMap<Program, WeakSet<object>>();
+
+/** Reports `typra-emitter-unsupported-nested-collection` once per target. */
+export function reportNestedCollection(
+  program: Program,
+  target: ModelProperty | Operation,
+  label: string,
+  type: Type,
+): void {
+  let reported = reportedNestedCollections.get(program);
+  if (!reported) {
+    reported = new WeakSet();
+    reportedNestedCollections.set(program, reported);
+  }
+  if (reported.has(target)) return;
+  reported.add(target);
+  program.reportDiagnostic({
+    code: "typra-emitter-unsupported-nested-collection",
+    message: `${label} has a nested collection type '${getTypeName(type)}'. Typra models one collection level (T[], Record<T>, Record<T>[]); wrap the inner collection in a model, e.g. 'model Row { items: string[] }' and 'rows: Row[]'.`,
+    severity: "error",
+    target,
+  });
+}
+
 export const resolveModelProperty = (
   program: Program,
   property: ModelProperty,
@@ -1231,6 +1305,20 @@ export const resolveModelProperty = (
   rootAlias: string,
 ): PropertyNode => {
   const prop = new PropertyNode(property, getDoc(program, property) || "");
+  if (isNestedCollection(model)) {
+    reportNestedCollection(
+      program,
+      property,
+      `Property '${property.name}'`,
+      model,
+    );
+    // Lower to an opaque value so no phantom `string[]` model is emitted.
+    prop.isScalar = true;
+    prop.isAny = true;
+    prop.isOptional = property.optional;
+    prop.typeName = { namespace: "", name: "unknown" };
+    return prop;
+  }
   if (model.name === "Array") {
     const innerModel = getTemplateModel(model);
     if (innerModel) {

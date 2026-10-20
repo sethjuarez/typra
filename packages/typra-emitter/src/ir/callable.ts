@@ -18,7 +18,14 @@ import {
   OperationEffectEntry,
 } from "../decorators.js";
 import { StateKeys } from "../lib.js";
-import { Coercion, resolveModel, TypeNode, wireTypeName } from "./ast.js";
+import {
+  Coercion,
+  isNestedCollection,
+  reportNestedCollection,
+  resolveModel,
+  TypeNode,
+  wireTypeName,
+} from "./ast.js";
 import type { PolymorphicDispatchDecl } from "./declarations.js";
 import { lowerPolymorphicDispatch } from "./lower.js";
 import { CallableVector, lowerOperationVectors } from "./vector.js";
@@ -467,9 +474,14 @@ function lowerTypeSpecCallableOperation(
     ) ?? {};
   return {
     name: operation.name,
-    returns: typeToCallableName(operation.returnType),
+    returns: seamTypeName(
+      program,
+      operation,
+      `Operation '${operation.name}' return`,
+      operation.returnType,
+    ),
     description: getDoc(program, operation) || "",
-    params: lowerOperationParameters(operation),
+    params: lowerOperationParameters(program, operation),
     optional: effects.optional === true,
     sync: effects.sync === true,
     runtimeCancellable: effects.runtimeCancellable === true,
@@ -480,10 +492,35 @@ function lowerTypeSpecCallableOperation(
   };
 }
 
-function lowerOperationParameters(operation: Operation): Record<string, string> {
+/**
+ * Callable name for a seam parameter or return; a nested collection (#355) is
+ * diagnosed and lowered opaque so no phantom `Leaf[]` model is referenced.
+ */
+function seamTypeName(
+  program: Program,
+  target: ModelProperty | Operation,
+  label: string,
+  type: Type,
+): string {
+  if (isNestedCollection(type)) {
+    reportNestedCollection(program, target, label, type);
+    return "unknown";
+  }
+  return typeToCallableName(type);
+}
+
+function lowerOperationParameters(
+  program: Program,
+  operation: Operation,
+): Record<string, string> {
   const params: Record<string, string> = {};
   for (const [name, property] of operation.parameters.properties) {
-    const typeName = typeToCallableName(property.type);
+    const typeName = seamTypeName(
+      program,
+      property,
+      `Parameter '${name}' of operation '${operation.name}'`,
+      property.type,
+    );
     // Encode optionality with the trailing "?" the callable seam already uses for
     // nullability across every backend (Rust Option<T>, Go *T, C# T?, Python T | None,
     // TS T | undefined). Guard against double-suffixing when the type is already
