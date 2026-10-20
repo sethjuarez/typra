@@ -155,8 +155,15 @@ const TS_RUNNER = [
   "async function main() {",
   "  require('./vector-conformance.test.js');",
   "  for (const t of tests) {",
-  "    try { await t.fn(); console.log('PASS ' + t.full); }",
-  "    catch (error) { failures.push(t.full); console.error('FAIL ' + t.full); console.error(error && error.message ? error.message : String(error)); }",
+  "    // Mimic Vitest's test context: ctx.skip(note) aborts the test as skipped.",
+  "    const SKIPPED = Symbol('skipped');",
+  "    let note;",
+  "    const ctx = { skip(n) { note = n; throw SKIPPED; } };",
+  "    try { await t.fn(ctx); console.log('PASS ' + t.full); }",
+  "    catch (error) {",
+  "      if (error === SKIPPED) { console.log('SKIPPED ' + t.full + ' (' + note + ')'); continue; }",
+  "      failures.push(t.full); console.error('FAIL ' + t.full); console.error(error && error.message ? error.message : String(error));",
+  "    }",
   "  }",
   "  if (failures.length > 0) process.exit(1);",
   "}",
@@ -221,6 +228,12 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (TypeScrip
       const xfail = runNode(tsDir);
       assert.equal(xfail.status, 0, `waived divergence should xfail green:\n${xfail.output}`);
       assert.match(xfail.output, /XFAIL Echo\.echo:shout \(waived: known divergence\)/);
+      // #362: the xfail is reported through the framework's native skip, not PASS.
+      assert.match(
+        xfail.output,
+        /SKIPPED callable vector conformance > Echo\.echo:shout \(XFAIL waived: known divergence\)/,
+      );
+      assert.doesNotMatch(xfail.output, /PASS callable vector conformance > Echo\.echo:shout/);
       assert.match(xfail.output, /PASS callable vector conformance > Echo\.echo:loud/);
       assert.doesNotMatch(xfail.output, /FAIL callable vector conformance/);
 
@@ -237,6 +250,22 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (TypeScrip
       assert.equal(red.status, 1, `unwaived divergence must fail:\n${red.output}`);
       assert.match(red.output, /FAIL callable vector conformance > Echo\.echo:shout/);
       assert.doesNotMatch(red.output, /XFAIL Echo\.echo:shout/);
+
+      // 4 (#362): no adapter, operation-level waiver => every vector SKIPPED, none PASS.
+      writeAdapter(
+        'export const vectorAdapters = {};\nexport const vectorWaivers = { "Echo.echo": "not implemented" };\n',
+      );
+      const skipped = runNode(tsDir);
+      assert.equal(skipped.status, 0, `operation waiver should skip green:\n${skipped.output}`);
+      assert.match(
+        skipped.output,
+        /SKIPPED callable vector conformance > Echo\.echo:shout \(waived: not implemented\)/,
+      );
+      assert.match(
+        skipped.output,
+        /SKIPPED callable vector conformance > Echo\.echo:loud \(waived: not implemented\)/,
+      );
+      assert.doesNotMatch(skipped.output, /PASS callable vector conformance/);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }
@@ -319,7 +348,8 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Python)",
       const xfail = runPytest(pyDir);
       assert.equal(xfail.status, 0, `waived divergence should xfail green:\n${xfail.output}`);
       assert.match(xfail.output, /XFAIL Echo\.echo:shout \(waived: known divergence\)/);
-      assert.match(xfail.output, /2 passed/);
+      // #362: native pytest xfail, not a pass.
+      assert.match(xfail.output, /1 passed, 1 xfailed/);
 
       // 2: adapter correct, waiver stale => RED with XPASS.
       writeAdapter(pyEchoAdapter(false, "known divergence"));
@@ -334,6 +364,14 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Python)",
       assert.notEqual(red.status, 0, `unwaived divergence must fail:\n${red.output}`);
       assert.match(red.output, /1 failed/);
       assert.doesNotMatch(red.output, /XFAIL Echo\.echo:shout/);
+
+      // 4 (#362): no adapter, operation-level waiver => native pytest skips.
+      writeAdapter('VECTOR_ADAPTERS = {}\nVECTOR_WAIVERS = {"Echo.echo": "not implemented"}\n');
+      const skipped = runPytest(pyDir);
+      assert.equal(skipped.status, 0, `operation waiver should skip green:\n${skipped.output}`);
+      assert.match(skipped.output, /2 skipped/);
+      assert.match(skipped.output, /SKIP Echo\.echo:shout \(waived: not implemented\)/);
+      assert.doesNotMatch(skipped.output, /passed/);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }
@@ -461,6 +499,8 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Go)", () 
       const xfail = runGoTest(moduleDir);
       assert.equal(xfail.status, 0, `waived divergence should xfail green:\n${xfail.output}`);
       assert.match(xfail.output, /XFAIL Echo\.echo:shout \(waived: known divergence\)/);
+      // #362: the xfail is reported as a native Go skip, not a pass.
+      assert.match(xfail.output, /--- SKIP: TestVector\d+EchoEchoShout/);
       assert.match(xfail.output, /--- PASS: TestVector\d+EchoEchoLoud/);
       assert.doesNotMatch(xfail.output, /--- FAIL/);
 
@@ -477,6 +517,21 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Go)", () 
       assert.equal(red.status, 1, `unwaived divergence must fail:\n${red.output}`);
       assert.match(red.output, /--- FAIL: TestVector\d+EchoEchoShout/);
       assert.doesNotMatch(red.output, /XFAIL Echo\.echo:shout/);
+
+      // 4 (#362): no adapter, operation-level waiver => native Go skips.
+      writeAdapter(
+        goEchoAdapter(false, "")
+          .replace('\t"Echo.echo": {Invoke: echoInvoke},\n', "")
+          .replace(
+            "var VectorWaivers = map[string]string{}",
+            'var VectorWaivers = map[string]string{"Echo.echo": "not implemented"}',
+          ),
+      );
+      const skipped = runGoTest(moduleDir);
+      assert.equal(skipped.status, 0, `operation waiver should skip green:\n${skipped.output}`);
+      assert.match(skipped.output, /--- SKIP: TestVector\d+EchoEchoShout/);
+      assert.match(skipped.output, /--- SKIP: TestVector\d+EchoEchoLoud/);
+      assert.doesNotMatch(skipped.output, /--- PASS: TestVector/);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }
@@ -784,6 +839,8 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Swift)", 
       assert.equal(xfail.status, 0, `waived divergence should xfail green:\n${xfail.output}`);
       assert.match(xfail.output, /XFAIL Echo\.echo:shout \(waived: known divergence\)/);
       assert.match(xfail.output, /PASS Echo\.echo:loud/);
+      // #362: XCTest reports the xfail as a native skip (XCTSkip), not a pass.
+      assert.match(xfail.output, /with 1 test skipped/);
       // XFAIL contains the substring "FAIL ", so match a FAIL only at line start.
       assert.doesNotMatch(xfail.output, /^FAIL /m);
 
@@ -797,6 +854,17 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Swift)", 
       assert.notEqual(red.status, 0, `unwaived divergence must fail:\n${red.output}`);
       assert.match(red.output, /^FAIL Echo\.echo:shout:/m);
       assert.doesNotMatch(red.output, /XFAIL Echo\.echo:shout/);
+
+      // 4 (#362): no adapter, operation-level waiver => both tests natively skipped.
+      const skipped = run(
+        swiftEchoAdapter(false, '["Echo.echo": "not implemented"]').replace(
+          '    m["Echo.echo"] = VectorAdapter(sync: echoInvoke)\n',
+          "",
+        ),
+      );
+      assert.equal(skipped.status, 0, `operation waiver should skip green:\n${skipped.output}`);
+      assert.match(skipped.output, /SKIP Echo\.echo:shout \(waived: not implemented\)/);
+      assert.match(skipped.output, /with 2 tests skipped/);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }
@@ -942,6 +1010,9 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Java)", (
       assert.match(xfail.output, /SUITE OK/);
       assert.match(xfail.output, /XFAIL Echo\.echo:shout \(waived: known divergence\)/);
       assert.match(xfail.output, /PASS Echo\.echo:loud/);
+      // #362: the harness reports the xfail as skipped, never PASS.
+      assert.match(xfail.output, /1 @vector case\(s\) skipped/);
+      assert.doesNotMatch(xfail.output, /PASS Echo\.echo:shout/);
       // XFAIL contains the substring "FAIL ", so match a FAIL only at line start.
       assert.doesNotMatch(xfail.output, /^FAIL /m);
 
@@ -957,6 +1028,19 @@ describe("per-vector @vector waivers are an enforced xfail/xpass gate (Java)", (
       assert.match(red.output, /^FAIL Echo\.echo:shout:/m);
       assert.doesNotMatch(red.output, /XFAIL Echo\.echo:shout/);
       assert.match(red.output, /SUITE FAILED/);
+
+      // 4 (#362): no adapter, operation-level waiver => every case SKIP, none PASS.
+      const skipped = run(
+        javaEchoAdapter(false, ['    w.put("Echo.echo", "not implemented");']).replace(
+          '    m.put("Echo.echo", new VectorAdapter(VectorAdapters::echoInvoke));\n',
+          "",
+        ),
+      );
+      assert.equal(skipped.status, 0, `operation waiver should skip green:\n${skipped.output}`);
+      assert.match(skipped.output, /SKIP Echo\.echo:shout \(waived: not implemented\)/);
+      assert.match(skipped.output, /SKIP Echo\.echo:loud \(waived: not implemented\)/);
+      assert.match(skipped.output, /2 @vector case\(s\) skipped/);
+      assert.doesNotMatch(skipped.output, /^PASS /m);
     } finally {
       rmSync(output, { recursive: true, force: true });
     }

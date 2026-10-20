@@ -1423,7 +1423,7 @@ function emitGoVectorRunner(adapterImportPath: string): string {
     "",
     "\tif vectorWaived {",
     '\t\tif mismatch != "" {',
-    '\t\t\tt.Logf("XFAIL %s (waived: %s)", vectorID, vectorWaiver)',
+    '\t\t\tt.Skipf("XFAIL %s (waived: %s)", vectorID, vectorWaiver)',
     "\t\t\treturn",
     "\t\t}",
     '\t\tt.Fatalf("XPASS %s: waived vector unexpectedly passed; remove the waiver (%s)", vectorID, vectorWaiver)',

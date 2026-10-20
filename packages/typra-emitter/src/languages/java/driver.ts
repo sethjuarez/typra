@@ -569,8 +569,8 @@ function javaPayloadLiteralChunks(text: string, maxLen = 40000): string[] {
  * ZERO authored values: the adapter/waiver/capability/doubles tables and the
  * harness base directory all arrive through the injected `VectorSeam`, so it is
  * value-independent. A vector with no adapter and no explicit waiver is a hard
- * `AssertionError` — this suite never skips silently; a non-empty waiver prints a
- * visible `SKIP` marker and passes. Serialization-agnostic: it drives the built-in
+ * `AssertionError` — this suite never skips silently; a non-empty waiver throws
+ * `VectorSkipped`, which the harness reports as a visible `SKIP` (never PASS). Serialization-agnostic: it drives the built-in
  * JSON value model (`TypraJson`/`TypraMaps` — `Map`/`List`/`String`/`Number`/
  * `Boolean`/`null`), so it is emitted for every serialization backend.
  */
@@ -632,6 +632,20 @@ function emitJavaVectorRunner(packageName: string): string {
     "  @FunctionalInterface",
     "  public interface Capability {",
     "    boolean test(VectorContext ctx);",
+    "  }",
+    "",
+    "  // Thrown instead of returning so the harness reports the case as skipped",
+    "  // (never PASS): status is \"SKIP\" (waived/requirement unavailable) or",
+    "  // \"XFAIL\" (per-vector waiver that failed as expected).",
+    "  public static final class VectorSkipped extends RuntimeException {",
+    "    private static final long serialVersionUID = 1L;",
+    "    public final String status;",
+    "    public final String reason;",
+    "    public VectorSkipped(String status, String reason) {",
+    '      super(status + ": " + reason);',
+    "      this.status = status;",
+    "      this.reason = reason;",
+    "    }",
     "  }",
     "",
     "  public static final class VectorAdapter {",
@@ -878,8 +892,7 @@ function emitJavaVectorRunner(packageName: string): string {
     '      adapter = adapters.get(operationKey + "#" + dispatchKey);',
     '      if (adapter == null) { adapter = adapters.get(operation + "#" + dispatchKey); }',
     "      if (adapter == null) {",
-    '        System.out.println("SKIP " + vectorId + " (requirement unavailable: " + dispatchKey + ")");',
-    "        return;",
+    '        throw new VectorSkipped("SKIP", "requirement unavailable: " + dispatchKey);',
     "      }",
     "    } else {",
     "      adapter = adapters.get(operationKey);",
@@ -889,8 +902,7 @@ function emitJavaVectorRunner(packageName: string): string {
     "        String reason = waivers.get(operationKey);",
     "        if (reason == null) { reason = waivers.get(operation); }",
     "        if (reason != null && !reason.isEmpty()) {",
-    '          System.out.println("SKIP " + vectorId + " (waived: " + reason + ")");',
-    "          return;",
+    '          throw new VectorSkipped("SKIP", "waived: " + reason);',
     "        }",
     '        throw new AssertionError("No vector adapter registered for " + operationKey',
     "            + \". Register it in the class referenced by 'vector-adapter-path', or add \"",
@@ -924,8 +936,7 @@ function emitJavaVectorRunner(packageName: string): string {
     `          seam.doubles, capDir);`,
     "      for (Object item : requiresList) {",
     "        if (item instanceof String token && !capabilities.get(token).test(capCtx)) {",
-    '          System.out.println("SKIP " + vectorId + " (requirement unavailable: " + token + ")");',
-    "          return;",
+    '          throw new VectorSkipped("SKIP", "requirement unavailable: " + token);',
     "        }",
     "      }",
     "    }",
@@ -979,8 +990,7 @@ function emitJavaVectorRunner(packageName: string): string {
     "    }",
     "    if (waived) {",
     "      if (vectorFailure != null) {",
-    '        System.out.println("XFAIL " + vectorId + " (waived: " + vectorWaiver + ")");',
-    "        return;",
+    '        throw new VectorSkipped("XFAIL", "waived: " + vectorWaiver);',
     "      }",
     '      throw new AssertionError("XPASS " + vectorId + ": waived vector unexpectedly "',
     '          + "passed; remove the waiver (" + vectorWaiver + ").");',
@@ -1190,11 +1200,18 @@ function emitJavaVectorConformanceTest(
     "",
     "  // Run one vector, mirroring the pass/fail stdout protocol the runners expect:",
     "  // a clean return prints PASS; any throwable prints FAIL and counts one failure.",
-    "  // SKIP/XFAIL markers are printed by VectorRunner.runVector itself before it returns.",
+    "  // A VectorRunner.VectorSkipped (waived/unavailable SKIP, or per-vector XFAIL)",
+    "  // is reported as skipped with its reason — never as PASS.",
+    "  private static int skipped = 0;",
+    "",
     "  private static int runCase(String vectorId, VectorCase test) {",
     "    try {",
     "      test.run();",
     '      System.out.println("PASS " + vectorId);',
+    "      return 0;",
+    "    } catch (VectorRunner.VectorSkipped skip) {",
+    '      System.out.println(skip.status + " " + vectorId + " (" + skip.reason + ")");',
+    "      skipped++;",
     "      return 0;",
     "    } catch (Throwable error) {",
     '      System.out.println("FAIL " + vectorId + ": " + error.getMessage());',
@@ -1221,6 +1238,7 @@ function emitJavaVectorConformanceTest(
     "",
     "  public static void run() {",
     "    int failed = 0;",
+    "    skipped = 0;",
     ...model.vectors.map((entry, index) => {
       const vectorName = entry.vector.name ?? "unnamed";
       const vectorId = `${entry.contract}.${entry.operation}:${vectorName}`;
@@ -1228,6 +1246,9 @@ function emitJavaVectorConformanceTest(
         vectorId,
       )}, VectorConformanceTests::${javaVectorSlug(index, entry)});`;
     }),
+    "    if (skipped > 0) {",
+    '      System.out.println(skipped + " @vector case(s) skipped");',
+    "    }",
     "    if (failed > 0) {",
     '      throw new AssertionError(failed + " @vector conformance failure(s)");',
     "    }",

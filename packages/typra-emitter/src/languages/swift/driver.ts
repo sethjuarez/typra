@@ -462,7 +462,7 @@ function swiftPayloadLiteral(text: string): string {
  * capability/doubles tables and the harness base directory all arrive through the
  * injected `VectorSeam`, so it is value-independent. A vector with no adapter and
  * no explicit waiver is a hard `XCTFail` — this suite never skips silently; a
- * non-empty waiver prints a visible `SKIP` marker and passes.
+ * non-empty waiver prints a visible `SKIP` marker and throws `XCTSkip`.
  */
 function emitSwiftVectorRunner(): string {
   const lines: string[] = [
@@ -562,7 +562,7 @@ function emitSwiftVectorRunner(): string {
     "}",
     "",
     "enum VectorRunner {",
-    "  static func runVector(contract: String, operation: String, vector: [String: Any], sync: Bool, seam: VectorSeam, dispatchPath: String? = nil) async -> Bool {",
+    "  static func runVector(contract: String, operation: String, vector: [String: Any], sync: Bool, seam: VectorSeam, dispatchPath: String? = nil) async throws -> Bool {",
     '    let operationKey = "\\(contract).\\(operation)"',
     '    let vectorName = vector["name"] as? String ?? "unnamed"',
     '    let vectorId = "\\(operationKey):\\(vectorName)"',
@@ -587,7 +587,7 @@ function emitSwiftVectorRunner(): string {
     "      }",
     '      guard let dispatched = adapters["\\(operationKey)#\\(dispatchKey)"] ?? adapters["\\(operation)#\\(dispatchKey)"] else {',
     '        print("SKIP \\(vectorId) (requirement unavailable: \\(dispatchKey))")',
-    "        return true",
+    '        throw XCTSkip("requirement unavailable: \\(dispatchKey)")',
     "      }",
     "      adapter = dispatched",
     "    } else {",
@@ -595,7 +595,7 @@ function emitSwiftVectorRunner(): string {
     "        let waivers = seam.waivers",
     "        if let reason = waivers[operationKey] ?? waivers[operation], !reason.isEmpty {",
     '          print("SKIP \\(vectorId) (waived: \\(reason))")',
-    "          return true",
+    '          throw XCTSkip("waived: \\(reason)")',
     "        }",
     '        let message = "No vector adapter registered for \\(operationKey). "',
     `          + "Register it in the type referenced by 'vector-adapter-path', or add "`,
@@ -640,7 +640,7 @@ function emitSwiftVectorRunner(): string {
     "      for case let token as String in requires {",
     "        if let predicate = capabilities[token], !predicate(ctx) {",
     '          print("SKIP \\(vectorId) (requirement unavailable: \\(token))")',
-    "          return true",
+    '          throw XCTSkip("requirement unavailable: \\(token)")',
     "        }",
     "      }",
     "    }",
@@ -661,7 +661,8 @@ function emitSwiftVectorRunner(): string {
     "    if let reason = vectorWaiver {",
     "      if mismatch != nil {",
     '        print("XFAIL \\(vectorId) (waived: \\(reason))")',
-    "        return true",
+    "        // XCTest has no expected-failure status; report the xfail as a skip.",
+    '        throw XCTSkip("XFAIL waived: \\(reason)")',
     "      }",
     '      let message = "XPASS \\(vectorId): waived vector unexpectedly passed; "',
     '        + "remove the waiver (\\(reason))"',
@@ -1013,7 +1014,7 @@ function emitSwiftVectorConformanceTest(
       '      XCTFail("failed to parse embedded vector")',
       "      return",
       "    }",
-      `    _ = await VectorRunner.runVector(contract: ${JSON.stringify(
+      `    _ = try await VectorRunner.runVector(contract: ${JSON.stringify(
         entry.contract,
       )}, operation: ${JSON.stringify(
         entry.operation,

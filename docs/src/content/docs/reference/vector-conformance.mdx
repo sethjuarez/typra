@@ -506,10 +506,33 @@ waiver. There is no blanket "skip all."
 - An operation with **no** adapter and **no** waiver makes the generated suite
   hard-fail (or fail to compile/collect).
 - An operation whose key appears in the runtime's `vectorWaivers` /
-  `VECTOR_WAIVERS` map emits as a **visible tracked-skip** — a `SKIP` line in the
-  TypeScript suite and a real `pytest.skip` (an `s`) in the Python suite. Each
-  waiver maps a concrete `Contract.operation` to a reason string; wildcards are
-  rejected.
+  `VECTOR_WAIVERS` map is reported as a **skip** with the reason `waived: …`
+  (see the table below). Each waiver maps a concrete `Contract.operation` to a
+  reason string; wildcards are rejected.
+- A per-vector waiver (`Contract.operation:name`) still runs the vector: a failure
+  is an **xfail** (green, reported as below), a pass is an **XPASS** hard failure
+  so stale waivers get removed.
+
+### How skips and xfails are reported
+
+A waived, requirement-unavailable, or xfail vector is never counted as passed
+where the framework offers a native status:
+
+| Target | Skip (`waived:` / `requirement unavailable:`) | Per-vector xfail |
+| --- | --- | --- |
+| TypeScript | `ctx.skip(reason)` on frameworks that pass a test context (Vitest) | skip, note `XFAIL waived: …` |
+| Python | `pytest.skip(reason)` | `pytest.xfail(reason)` |
+| Go | `t.Skipf` | `t.Skipf("XFAIL …")` |
+| Swift | `throw XCTSkip(reason)` | `XCTSkip("XFAIL waived: …")` |
+| Java | harness prints `SKIP <id> (reason)` and counts it skipped, never `PASS` | printed `XFAIL`, counted skipped |
+| C# | `SKIP` stdout line; the test passes | `XFAIL` stdout line |
+| Rust | `SKIP` stdout line; the test passes | `XFAIL` stdout line |
+
+Every target also prints the `SKIP <id> (reason)` / `XFAIL <id> (reason)` marker.
+C# and Rust stay best-effort: xUnit v2 has no dynamic skip (`Assert.Skip` is
+xUnit v3), and Rust's `#[ignore]` is compile-time while waivers are loaded at run
+time. Under Jest (no dynamic skip) the TypeScript marker is likewise the only
+signal.
 
 Waivers keep CI green during migration while the map visibly shrinks toward zero.
 The same invariant is available as a static gate: `evaluateVectorAdapterCoverage`
@@ -621,9 +644,8 @@ still hard-fails) and **before** the per-vector waiver check and the adapter
    typo always fails even when a later token is also absent.
 2. **Availability pass** — predicates evaluate in order; on the first falsy result
    the harness emits its language's skip with the canonical, **byte-identical**
-   reason `requirement unavailable: <token>` (a `pytest.skip`/`t.Skip` where the
-   framework supports it, a `SKIP … (requirement unavailable: <token>)` recorded
-   line otherwise).
+   reason `requirement unavailable: <token>` (reported per
+   [How skips and xfails are reported](#how-skips-and-xfails-are-reported)).
 
 ### Unknown tokens fail hard
 

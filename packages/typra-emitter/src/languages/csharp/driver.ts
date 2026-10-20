@@ -966,6 +966,8 @@ function emitCSharpVectorRunner(
     "                 waivers.TryGetValue(operation, out reason)) &&",
     "                !string.IsNullOrEmpty(reason))",
     "            {",
+    "                // Best-effort skip: xUnit v2 has no dynamic skip (Assert.Skip is",
+    "                // v3-only), so the SKIP/XFAIL markers are the recorded signal.",
     '                Console.WriteLine($"SKIP {vectorId} (waived: {reason})");',
     "                return;",
     "            }",
