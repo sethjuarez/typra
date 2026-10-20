@@ -93,3 +93,24 @@ const CSHARP_KEYWORDS = new Set([
 export function csharpIdentifier(name: string): string {
   return CSHARP_KEYWORDS.has(name) ? `@${name}` : name;
 }
+
+/**
+ * C# types the generated code references unqualified; a same-named model,
+ * interface, or enum shadows or redeclares them (#358). Calibrated by native compiles.
+ */
+const RESERVED_TYPE_NAMES = new Set<string>([
+  "Convert",
+  "Enumerable",
+  "JsonElement",
+  "JsonSerializer",
+  "LoadContext",
+  "SaveContext",
+]);
+
+/** Why a model, interface, or enum named `name` cannot be emitted, or undefined. */
+export function csharpReservedTypeName(name: string): string | undefined {
+  if (RESERVED_TYPE_NAMES.has(name)) {
+    return `shadows or redeclares the '${name}' type`;
+  }
+  return undefined;
+}

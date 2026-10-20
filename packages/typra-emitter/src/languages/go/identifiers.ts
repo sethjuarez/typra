@@ -1,3 +1,4 @@
+import { toSnakeCase } from "../../ir/utilities.js";
 import { toPascalCase } from "../../ir/visitor.js";
 import { createUniqueEnumMemberNames } from "../enum-identifiers.js";
 
@@ -67,4 +68,71 @@ export function buildGoFieldNames(
   }
 
   return result;
+}
+
+// Go compiles `<name>_<GOOS>.go`, `<name>_<GOARCH>.go`, and `<name>_test.go` only
+// under that OS/arch or `go test`, so a declaration whose snake_case file name
+// ends in one of these segments silently drops out of ordinary builds.
+const GO_FILE_SUFFIXES = new Set([
+  "test",
+  // GOOS
+  "aix",
+  "android",
+  "darwin",
+  "dragonfly",
+  "freebsd",
+  "hurd",
+  "illumos",
+  "ios",
+  "js",
+  "linux",
+  "nacl",
+  "netbsd",
+  "openbsd",
+  "plan9",
+  "solaris",
+  "wasip1",
+  "windows",
+  "zos",
+  // GOARCH
+  "386",
+  "amd64",
+  "amd64p32",
+  "arm",
+  "armbe",
+  "arm64",
+  "arm64be",
+  "loong64",
+  "mips",
+  "mipsle",
+  "mips64",
+  "mips64le",
+  "mips64p32",
+  "mips64p32le",
+  "ppc",
+  "ppc64",
+  "ppc64le",
+  "riscv",
+  "riscv64",
+  "s390",
+  "s390x",
+  "sparc",
+  "sparc64",
+  "wasm",
+]);
+
+
+const RESERVED_TYPE_NAMES = new Set<string>(["LoadContext", "SaveContext"]);
+
+/** Why a model, interface, or enum named `name` cannot be emitted, or undefined. */
+export function goReservedTypeName(name: string): string | undefined {
+  if (RESERVED_TYPE_NAMES.has(name)) {
+    return `shadows or redeclares the '${name}' type`;
+  }
+  const segments = toSnakeCase(name).split("_");
+  const last = segments[segments.length - 1];
+  if (segments.length > 1 && GO_FILE_SUFFIXES.has(last)) {
+    return `its file '${segments.join("_")}.go' is build-constrained by the '_${last}' suffix`;
+  }
+  return undefined;
 }

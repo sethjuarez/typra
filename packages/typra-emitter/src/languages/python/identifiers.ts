@@ -86,3 +86,25 @@ export function assertDistinctPythonFields(type: {
     seen.set(attribute, field.name);
   }
 }
+
+/**
+ * Python types the generated code references unqualified; a same-named model,
+ * interface, or enum shadows or redeclares them (#358). Calibrated by native compiles.
+ */
+const RESERVED_TYPE_NAMES = new Set<string>([
+  "ClassVar",
+  "LoadContext",
+  "SaveContext",
+]);
+
+/** Why a model, interface, or enum named `name` cannot be emitted, or undefined. */
+export function pythonReservedTypeName(name: string): string | undefined {
+  if (RESERVED_TYPE_NAMES.has(name)) {
+    return `shadows or redeclares the '${name}' type`;
+  }
+  // Class names keep their casing, and these three are hard keywords.
+  if (name === "None" || name === "True" || name === "False") {
+    return `'${name}' is a Python keyword`;
+  }
+  return undefined;
+}

@@ -159,3 +159,37 @@ export function javaEnumMemberNames(
     return javaIdentifier(normalized || "VALUE", "VALUE");
   });
 }
+
+/**
+ * Java types the generated code references unqualified; a same-named model,
+ * interface, or enum shadows or redeclares them (#358). Calibrated by native compiles.
+ */
+const RESERVED_TYPE_NAMES = new Set<string>([
+  "ArrayList",
+  "Boolean",
+  "Character",
+  "Double",
+  "IllegalArgumentException",
+  "Integer",
+  "LinkedHashMap",
+  "List",
+  "Long",
+  "Map",
+  "Number",
+  "Object",
+  "String",
+  "System",
+  "TypraJson",
+  "TypraMaps",
+  "TypraYaml",
+  "LoadContext",
+  "SaveContext",
+]);
+
+/** Why a model, interface, or enum named `name` cannot be emitted, or undefined. */
+export function javaReservedTypeName(name: string): string | undefined {
+  if (RESERVED_TYPE_NAMES.has(name)) {
+    return `shadows or redeclares the '${name}' type`;
+  }
+  return undefined;
+}

@@ -2,7 +2,10 @@ import { execFileSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { emitFile, EmitContext, resolvePath } from "@typespec/compiler";
-import { emitGeneratedFile } from "../../cleanup/generated-file.js";
+import {
+  claimGeneratedPath,
+  emitGeneratedFile,
+} from "../../cleanup/generated-file.js";
 import { warnFormatterUnavailable } from "../formatter-warning.js";
 import {
   resolveCustomFormatters,
@@ -470,6 +473,8 @@ async function emitJavaMethodHelperIfMissing(
     outputDir || `${context.emitterOutputDir}/java`,
     filename,
   );
+  // Editable helpers bypass emitGeneratedFile but still own their path this run.
+  if (!claimGeneratedPath(context.program, filePath, content)) return;
   if (!existsSync(filePath)) {
     await emitFile(context.program, { path: filePath, content });
     return;

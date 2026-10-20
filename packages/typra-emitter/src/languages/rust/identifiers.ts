@@ -145,3 +145,29 @@ export function rustStringLiteralBody(text: string): string {
 export function rustStringLiteral(text: string): string {
   return `"${rustStringLiteralBody(text)}"`;
 }
+
+/**
+ * Rust types the generated code references unqualified; a same-named model,
+ * interface, or enum shadows or redeclares them (#358). Calibrated by native compiles.
+ */
+const RESERVED_TYPE_NAMES = new Set<string>([
+  "Box",
+  "Result",
+  "String",
+  "LoadContext",
+  "SaveContext",
+]);
+
+/** Why a model, interface, or enum named `name` cannot be emitted, or undefined. */
+export function rustReservedTypeName(name: string): string | undefined {
+  if (RESERVED_TYPE_NAMES.has(name)) {
+    return `shadows or redeclares the '${name}' type`;
+  }
+  // Each type lives in a module named by its snake_case, and module paths
+  // (`mod type;`, `use super::self::...`) cannot carry keywords.
+  const module = toSnakeCase(name);
+  if (RUST_KEYWORDS.has(module)) {
+    return `its module name '${module}' is a Rust keyword`;
+  }
+  return undefined;
+}

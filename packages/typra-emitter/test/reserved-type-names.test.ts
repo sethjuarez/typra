@@ -1,6 +1,7 @@
 // Issue #358: a model, interface, or enum name that a target's generated code
-// cannot carry (it overwrites a runtime support file or shadows a built-in
-// type) must be diagnosed instead of emitting code that does not compile.
+// cannot carry (it shadows a built-in type, is a keyword, or overwrites a
+// generated support file) must be diagnosed instead of emitting code that does
+// not compile.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -9,6 +10,8 @@ import { createRequire } from "node:module";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { reservedTypeNameReason } from "../src/reserved-type-names.js";
+import { claimGeneratedPath } from "../src/cleanup/generated-file.js";
+import type { Program } from "@typespec/compiler";
 
 const require = createRequire(import.meta.url);
 
@@ -75,18 +78,43 @@ const withModel = (name: string) => [
   "}",
 ];
 
+const COLLISION = /typra-emitter-generated-file-collision/;
+
+const inSubNamespace = [
+  "model Root {",
+  "  item: Sub.Context;",
+  "}",
+  "",
+  "namespace Sub {",
+  "  model Context {",
+  "    value: string;",
+  "  }",
+  "}",
+];
+
 describe("reserved type names (#358)", () => {
-  it("names only the targets whose runtime support a model would overwrite", () => {
-    const { output, emitted } = compile(withModel("Context"));
-    assert.match(output, /typra-emitter-reserved-type-name/, output);
+  it("reports a support-file collision only for targets that emit that file", () => {
+    const { output } = compile(withModel("Context"));
+    assert.match(output, COLLISION, output);
     for (const target of ["typescript", "python", "go", "csharp", "rust"]) {
-      assert.match(output, new RegExp(`\\b${target} \\(`), output);
+      assert.match(output, new RegExp(`generated/${target}/`, "i"), output);
     }
     // Java and Swift keep their context types in LoadContext/SaveContext and
     // TypraRuntime, so a plain `Context` model is fine there.
-    assert.doesNotMatch(output, /\bjava \(|\bswift \(/, output);
-    assert.equal(emitted, false, "no target output on a reserved name");
+    assert.doesNotMatch(output, /generated\/(java|swift)\//i, output);
   });
+
+  for (const [name, target] of [
+    ["Index", "TypeScript"],
+    ["CONTEXT", "Python"],
+    ["Utils", "CSharp"],
+    ["CONTEXT", "Rust"],
+  ]) {
+    it(`reports '${name}' colliding with a ${target} support file, ignoring case`, () => {
+      const { output } = compile(withModel(name), [target]);
+      assert.match(output, COLLISION, output);
+    });
+  }
 
   for (const [name, target] of [
     ["String", "TypeScript"],
@@ -96,11 +124,14 @@ describe("reserved type names (#358)", () => {
     ["ClassVar", "Python"],
     ["JsonElement", "CSharp"],
     ["LoadContext", "Go"],
+    ["None", "Python"],
+    ["Match", "Rust"],
   ]) {
     it(`errors when '${name}' is emitted for ${target}`, () => {
-      const { output } = compile(withModel(name), [target]);
+      const { output, emitted } = compile(withModel(name), [target]);
       assert.match(output, /typra-emitter-reserved-type-name/, output);
       assert.match(output, new RegExp(`'${name}'`), output);
+      assert.equal(emitted, false, "no target output on a reserved name");
     });
   }
 
@@ -110,7 +141,7 @@ describe("reserved type names (#358)", () => {
       "Python",
       "Swift",
     ]);
-    assert.doesNotMatch(output, /reserved-type-name/, output);
+    assert.doesNotMatch(output, /reserved-type-name|collision/, output);
     assert.equal(emitted, true, output);
   });
 
@@ -165,70 +196,62 @@ describe("reserved type names (#358)", () => {
       "  value: string;",
       "}",
     ]);
-    assert.doesNotMatch(output, /reserved-type-name/, output);
+    assert.doesNotMatch(output, /reserved-type-name|collision/, output);
     assert.equal(emitted, true, output);
   });
 
-  it("matches support files ignoring case, only at the output root", () => {
-    assert.ok(reservedTypeNameReason("python", "CONTEXT"));
-    assert.ok(reservedTypeNameReason("typescript", "Index"));
-    assert.ok(reservedTypeNameReason("csharp", "Utils"));
-    assert.ok(reservedTypeNameReason("rust", "Mod"));
-    assert.equal(
-      reservedTypeNameReason("typescript", "Context", { atRoot: false }),
-      undefined,
-    );
-    // Type shadowing is exact, so near-misses stay allowed.
+  it("keeps type shadowing exact and leaves file clashes to write time", () => {
     assert.equal(reservedTypeNameReason("java", "Strings"), undefined);
     for (const target of ["typescript", "python", "csharp", "java", "rust", "swift"]) {
       assert.equal(reservedTypeNameReason(target, "Load_Context"), undefined);
+      assert.equal(reservedTypeNameReason(target, "Context"), undefined);
     }
   });
 
-  it("does not reserve names that only conditionally emitted support uses", () => {
-    // Vector-conformance, transport, and @dispatch artifacts are emitted only for
-    // some specs and targets; reserving them unconditionally would reject valid
-    // models, so they are left to a follow-up.
-    assert.equal(reservedTypeNameReason("typescript", "TypraClientOptions"), undefined);
-    assert.equal(reservedTypeNameReason("csharp", "VectorConformance"), undefined);
-    assert.equal(reservedTypeNameReason("java", "RendererProvider"), undefined);
+  it("reserves names that are keywords where the runtime cannot escape them", () => {
+    for (const name of ["None", "True", "False"]) {
+      assert.match(reservedTypeNameReason("python", name) ?? "", /keyword/);
+    }
+    assert.equal(reservedTypeNameReason("python", "Self"), undefined);
+    for (const name of ["Self", "Type", "Crate", "Super", "Match", "Struct", "Mod"]) {
+      assert.match(reservedTypeNameReason("rust", name) ?? "", /Rust keyword/);
+    }
+    // Swift escapes keyword type names with backticks.
+    for (const name of ["Self", "Type", "Protocol"]) {
+      assert.equal(reservedTypeNameReason("swift", name), undefined);
+    }
   });
 
   it("allows a support-file name in a structural sub-namespace", () => {
-    const { output, emitted } = compile(
-      [
-        "model Root {",
-        "  item: Sub.Context;",
-        "}",
-        "",
-        "namespace Sub {",
-        "  model Context {",
-        "    value: string;",
-        "  }",
-        "}",
-      ],
-      ["TypeScript", "Python", "Rust"],
-    );
-    assert.doesNotMatch(output, /reserved-type-name/, output);
+    const { output, emitted } = compile(inSubNamespace, [
+      "TypeScript",
+      "Python",
+      "Rust",
+    ]);
+    assert.doesNotMatch(output, /reserved-type-name|collision/, output);
     assert.equal(emitted, true, output);
   });
 
-  it("still flags a sub-namespace support-file name for flat Go output", () => {
-    const { output } = compile(
-      [
-        "model Root {",
-        "  item: Sub.Context;",
-        "}",
-        "",
-        "namespace Sub {",
-        "  model Context {",
-        "    value: string;",
-        "  }",
-        "}",
-      ],
-      ["Go"],
+  it("still reports a sub-namespace support-file name for flat Go output", () => {
+    const { output } = compile(inSubNamespace, ["Go"]);
+    assert.match(output, COLLISION, output);
+    assert.match(output, /context\.go/i, output);
+  });
+
+  it("claims each generated path once per program, ignoring case", () => {
+    const diagnostics: string[] = [];
+    const program = {
+      reportDiagnostic: (d: { code: string }) => diagnostics.push(d.code),
+    } as unknown as Program;
+    const file = path.join(process.cwd(), "out", "context.go");
+    assert.equal(claimGeneratedPath(program, file, "a"), true);
+    assert.equal(claimGeneratedPath(program, file, "a"), true, "identical rewrite");
+    assert.equal(diagnostics.length, 0);
+    assert.equal(
+      claimGeneratedPath(program, file.replace("context", "Context"), "b"),
+      false,
     );
-    assert.match(output, /Type name 'Context' cannot be emitted: in go/, output);
+    assert.deepEqual(diagnostics, ["typra-emitter-generated-file-collision"]);
   });
 
   it("reserves Go names that map to build-constrained file names", () => {

@@ -141,3 +141,34 @@ export function swiftStringLiteral(value: string): string {
     .replace(/\u2028/g, "\\u{2028}")
     .replace(/\u2029/g, "\\u{2029}");
 }
+
+/**
+ * Swift types the generated code references unqualified; a same-named model,
+ * interface, or enum shadows or redeclares them (#358). Calibrated by native compiles.
+ */
+const RESERVED_TYPE_NAMES = new Set<string>([
+  "Bool",
+  "Decimal",
+  "Double",
+  "Error",
+  "Float",
+  "Int",
+  "Int64",
+  "NSNumber",
+  "String",
+  "TypraCodableValue",
+  "TypraCodingKey",
+  "TypraModel",
+  "TypraRuntime",
+  "TypraRuntimeError",
+  "LoadContext",
+  "SaveContext",
+]);
+
+/** Why a model, interface, or enum named `name` cannot be emitted, or undefined. */
+export function swiftReservedTypeName(name: string): string | undefined {
+  if (RESERVED_TYPE_NAMES.has(name)) {
+    return `shadows or redeclares the '${name}' type`;
+  }
+  return undefined;
+}

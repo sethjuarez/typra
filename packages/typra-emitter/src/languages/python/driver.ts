@@ -222,6 +222,8 @@ export const generatePython = async (
   }
 
   for (const parentGroup of collectParentGroups(groupMap.keys())) {
+    // A parent that is itself a group gets its real group __init__.py below.
+    if (groupMap.has(parentGroup)) continue;
     await emitPythonFile(
       context,
       "__init__.py",

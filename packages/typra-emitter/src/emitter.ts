@@ -396,8 +396,6 @@ export async function $onEmit(context: EmitContext<TypraEmitterOptions>) {
     !validateReservedTypeNames(context.program, {
       targets,
       nodes: exportSurfaceNodes,
-      rootNamespace,
-      namespaceOutput,
     })
   ) {
     return;

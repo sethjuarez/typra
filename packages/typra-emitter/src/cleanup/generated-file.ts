@@ -1,5 +1,6 @@
 import {
   EmitContext,
+  NoTarget,
   Program,
   emitFile,
   resolvePath,
@@ -161,9 +162,48 @@ export async function emitGeneratedFile(
   const finalContent = marker
     ? addMarker(filePath, normalizedContent)
     : normalizedContent;
+  if (!claimGeneratedPath(context.program, filePath, finalContent)) return;
   recordGeneratedFile(context.program, filePath, marker, options.outputRoot);
 
   await writeGeneratedFileWithRetry(context, filePath, finalContent);
+}
+
+const claimedPathsByProgram = new WeakMap<
+  Program,
+  Map<string, { path: string; content: string }>
+>();
+
+/**
+ * Two different generated files landing on the same path (ignoring case, so the
+ * output stays portable to Windows/macOS filesystems) means one would silently
+ * overwrite the other — typically a declaration named after a runtime support
+ * file, e.g. a model `Context` vs `context.go` (#358). Reports an error and keeps
+ * the first file; identical rewrites are harmless and allowed.
+ */
+export function claimGeneratedPath(
+  program: Program,
+  filePath: string,
+  content: string,
+): boolean {
+  let claimed = claimedPathsByProgram.get(program);
+  if (!claimed) {
+    claimed = new Map();
+    claimedPathsByProgram.set(program, claimed);
+  }
+  const key = normalizePath(resolve(filePath)).toLowerCase();
+  const previous = claimed.get(key);
+  if (!previous) {
+    claimed.set(key, { path: filePath, content });
+    return true;
+  }
+  if (previous.content === content) return true;
+  program.reportDiagnostic({
+    code: "typra-emitter-generated-file-collision",
+    message: `Generated file '${normalizePath(filePath)}' collides with '${normalizePath(previous.path)}' (paths compared ignoring case); one would overwrite the other. A model, interface, or enum is likely named after a generated support file — rename it.`,
+    severity: "error",
+    target: NoTarget,
+  });
+  return false;
 }
 
 /**
